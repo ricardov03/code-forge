@@ -75,7 +75,14 @@ func LoadFileOrdered(path string) (map[string]any, Ordered, error) {
 		}
 		return nil, none, failure("read-error", "could not read "+path+": "+errno(err), path)
 	}
-	value, order, err := parseYAMLOrdered(string(raw))
+	return ParseTextOrdered(string(raw), path)
+}
+
+// ParseTextOrdered is LoadFileOrdered on text already read (path only names
+// the file in errors): parse and migrate, plus the YAML key order (B527).
+func ParseTextOrdered(source, path string) (map[string]any, Ordered, error) {
+	none := Ordered{}
+	value, order, err := parseYAMLOrdered(source)
 	if err != nil {
 		return nil, none, failure("parse-error", err.Error(), path)
 	}

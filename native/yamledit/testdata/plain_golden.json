@@ -1,0 +1,5181 @@
+[
+ {
+  "name": "empty root",
+  "value": {},
+  "out": "{}\n"
+ },
+ {
+  "name": "config shape",
+  "value": {
+   "version": 1,
+   "project": {
+    "name": "demo",
+    "slug": "demo"
+   },
+   "provider": "anthropic",
+   "levels": {
+    "L0": {
+     "model": "claude-haiku-4-5-20251001"
+    },
+    "L3": {
+     "model": "gpt-6-astra",
+     "effort": "high",
+     "provider": "openai"
+    }
+   },
+   "caps": {
+    "coders": 1
+   },
+   "review": {
+    "multimodel": false
+   },
+   "engine": "auto",
+   "harnesses": [],
+   "system1": {
+    "fallback": "rules"
+   },
+   "gates": {
+    "test": [
+     "npm",
+     "test"
+    ],
+    "lint": null,
+    "types": [
+     "npx",
+     "tsc",
+     "--noEmit"
+    ],
+    "format": null
+   },
+   "proof": {
+    "tiers": {
+     "high": {
+      "paths": []
+     }
+    },
+    "isolation": "export",
+    "export": {
+     "link_dirs": [
+      "node_modules"
+     ],
+     "copy_untracked": [
+      ".env"
+     ]
+    }
+   },
+   "autonomy": {
+    "coder_may_push": false,
+    "coder_may_open_draft_pr": false
+   }
+  },
+  "out": "version: 1\nproject:\n  name: demo\n  slug: demo\nprovider: anthropic\nlevels:\n  L0:\n    model: claude-haiku-4-5-20251001\n  L3:\n    model: gpt-6-astra\n    effort: high\n    provider: openai\ncaps:\n  coders: 1\nreview:\n  multimodel: false\nengine: auto\nharnesses: []\nsystem1:\n  fallback: rules\ngates:\n  test:\n    - npm\n    - test\n  lint: null\n  types:\n    - npx\n    - tsc\n    - --noEmit\n  format: null\nproof:\n  tiers:\n    high:\n      paths: []\n  isolation: export\n  export:\n    link_dirs:\n      - node_modules\n    copy_untracked:\n      - .env\nautonomy:\n  coder_may_push: false\n  coder_may_open_draft_pr: false\n"
+ },
+ {
+  "name": "gate words",
+  "value": {
+   "gates": {
+    "test": [
+     "sh",
+     "-c",
+     "npm test && echo \"ok\"",
+     "",
+     "it's",
+     "a:b",
+     "a: b",
+     "#x",
+     "x #y",
+     "- x",
+     "-x"
+    ]
+   }
+  },
+  "out": "gates:\n  test:\n    - sh\n    - -c\n    - npm test && echo \"ok\"\n    - \"\"\n    - it's\n    - a:b\n    - \"a: b\"\n    - \"#x\"\n    - \"x #y\"\n    - \"- x\"\n    - -x\n"
+ },
+ {
+  "name": "long string",
+  "value": {
+   "a": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+   "b": [
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   ]
+  },
+  "out": "a: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word\nb:\n  - xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+ },
+ {
+  "name": "nested empty",
+  "value": {
+   "a": {
+    "b": {}
+   },
+   "c": [],
+   "d": {
+    "e": []
+   }
+  },
+  "out": "a:\n  b: {}\nc: []\nd:\n  e: []\n"
+ },
+ {
+  "name": "random 0",
+  "value": {
+   "x-y": "1e3/."
+  },
+  "out": "x-y: 1e3/.\n"
+ },
+ {
+  "name": "random 1",
+  "value": {
+   "b_c": true,
+   "L0": true,
+   "gates": "|\\]>",
+   "a": 0.25
+  },
+  "out": "b_c: true\nL0: true\ngates: \"|\\\\]>\"\na: 0.25\n"
+ },
+ {
+  "name": "random 2",
+  "value": {
+   "x-y": true
+  },
+  "out": "x-y: true\n"
+ },
+ {
+  "name": "random 3",
+  "value": {
+   "b_c": -3,
+   "x-y": ";",
+   "model": -3,
+   "gates": true
+  },
+  "out": "b_c: -3\nx-y: ;\nmodel: -3\ngates: true\n"
+ },
+ {
+  "name": "random 4",
+  "value": {
+   "L0": 0.25,
+   "b_c": "&$"
+  },
+  "out": "L0: 0.25\nb_c: \"&$\"\n"
+ },
+ {
+  "name": "random 5",
+  "value": {
+   "L0": 0.25,
+   "gates": true,
+   "x-y": true,
+   "a": -3
+  },
+  "out": "L0: 0.25\ngates: true\nx-y: true\na: -3\n"
+ },
+ {
+  "name": "random 6",
+  "value": {
+   "L0": -3,
+   "b_c": "!$.NaN[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "model": true,
+   "a": true
+  },
+  "out": "L0: -3\nb_c: \"!$.NaN[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\nmodel: true\na: true\n"
+ },
+ {
+  "name": "random 7",
+  "value": {
+   "a": 2,
+   "b_c": 0.25,
+   "L0": 2
+  },
+  "out": "a: 2\nb_c: 0.25\nL0: 2\n"
+ },
+ {
+  "name": "random 8",
+  "value": {
+   "gates": ">"
+  },
+  "out": "gates: \">\"\n"
+ },
+ {
+  "name": "random 9",
+  "value": {
+   "K9": 2,
+   "L0": "\"False",
+   "model": true,
+   "x-y": true
+  },
+  "out": "K9: 2\nL0: '\"False'\nmodel: true\nx-y: true\n"
+ },
+ {
+  "name": "random 10",
+  "value": {
+   "model": 0.25,
+   "L0": 2,
+   "a": -3
+  },
+  "out": "model: 0.25\nL0: 2\na: -3\n"
+ },
+ {
+  "name": "random 11",
+  "value": {
+   "b_c": "~",
+   "x-y": true,
+   "gates": "%"
+  },
+  "out": "b_c: \"~\"\nx-y: true\ngates: \"%\"\n"
+ },
+ {
+  "name": "random 12",
+  "value": {
+   "model": "]: |:null"
+  },
+  "out": "model: \"]: |:null\"\n"
+ },
+ {
+  "name": "random 13",
+  "value": {
+   "x-y": true,
+   "K9": 0.25,
+   "b_c": true
+  },
+  "out": "x-y: true\nK9: 0.25\nb_c: true\n"
+ },
+ {
+  "name": "random 14",
+  "value": {
+   "L0": " ",
+   "x-y": true
+  },
+  "out": "L0: \" \"\nx-y: true\n"
+ },
+ {
+  "name": "random 15",
+  "value": {
+   "K9": ".inf$;(0"
+  },
+  "out": "K9: .inf$;(0\n"
+ },
+ {
+  "name": "random 16",
+  "value": {
+   "x-y": "no$"
+  },
+  "out": "x-y: no$\n"
+ },
+ {
+  "name": "random 17",
+  "value": {
+   "a": 0,
+   "L0": 123456789,
+   "model": 2,
+   "x-y": true,
+   "K9": "*.("
+  },
+  "out": "a: 0\nL0: 123456789\nmodel: 2\nx-y: true\nK9: \"*.(\"\n"
+ },
+ {
+  "name": "random 18",
+  "value": {
+   "L0": ": ! #",
+   "model": true,
+   "b_c": ".5"
+  },
+  "out": "L0: \": ! #\"\nmodel: true\nb_c: \".5\"\n"
+ },
+ {
+  "name": "random 19",
+  "value": {
+   "b_c": 0,
+   "K9": "truetrue[ ",
+   "gates": 0.25,
+   "x-y": "'"
+  },
+  "out": "b_c: 0\nK9: \"truetrue[ \"\ngates: 0.25\nx-y: \"'\"\n"
+ },
+ {
+  "name": "random 20",
+  "value": {
+   "model": "null",
+   "x-y": 2
+  },
+  "out": "model: \"null\"\nx-y: 2\n"
+ },
+ {
+  "name": "random 21",
+  "value": {
+   "b_c": true,
+   "L0": true,
+   "gates": true,
+   "a": true
+  },
+  "out": "b_c: true\nL0: true\ngates: true\na: true\n"
+ },
+ {
+  "name": "random 22",
+  "value": {
+   "b_c": ".{npm",
+   "L0": -3,
+   "a": 0,
+   "model": "{\\@{\"",
+   "gates": -3
+  },
+  "out": "b_c: .{npm\nL0: -3\na: 0\nmodel: '{\\@{\"'\ngates: -3\n"
+ },
+ {
+  "name": "random 23",
+  "value": {
+   "x-y": 123456789,
+   "model": -3,
+   "b_c": "}"
+  },
+  "out": "x-y: 123456789\nmodel: -3\nb_c: \"}\"\n"
+ },
+ {
+  "name": "random 24",
+  "value": {
+   "gates": ": \\]]no",
+   "L0": "yes,$"
+  },
+  "out": "gates: \": \\\\]]no\"\nL0: yes,$\n"
+ },
+ {
+  "name": "random 25",
+  "value": {
+   "K9": 2,
+   "gates": true
+  },
+  "out": "K9: 2\ngates: true\n"
+ },
+ {
+  "name": "random 26",
+  "value": {
+   "gates": true
+  },
+  "out": "gates: true\n"
+ },
+ {
+  "name": "random 27",
+  "value": {
+   "gates": true,
+   "b_c": 123456789,
+   "a": 0.25
+  },
+  "out": "gates: true\nb_c: 123456789\na: 0.25\n"
+ },
+ {
+  "name": "random 28",
+  "value": {
+   "a": true,
+   "b_c": 0.25
+  },
+  "out": "a: true\nb_c: 0.25\n"
+ },
+ {
+  "name": "random 29",
+  "value": {
+   "L0": true
+  },
+  "out": "L0: true\n"
+ },
+ {
+  "name": "random 30",
+  "value": {
+   "L0": 0.25,
+   "model": 0.25,
+   "a": 2
+  },
+  "out": "L0: 0.25\nmodel: 0.25\na: 2\n"
+ },
+ {
+  "name": "random 31",
+  "value": {
+   "K9": true,
+   "x-y": true,
+   "a": true,
+   "gates": "NULL)]xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  "out": "K9: true\nx-y: true\na: true\ngates: NULL)]xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+ },
+ {
+  "name": "random 32",
+  "value": {
+   "model": "null'9",
+   "gates": " #@no"
+  },
+  "out": "model: null'9\ngates: \" #@no\"\n"
+ },
+ {
+  "name": "random 33",
+  "value": {
+   "x-y": -3
+  },
+  "out": "x-y: -3\n"
+ },
+ {
+  "name": "random 34",
+  "value": {
+   "model": true,
+   "K9": true,
+   "b_c": " ;no="
+  },
+  "out": "model: true\nK9: true\nb_c: \" ;no=\"\n"
+ },
+ {
+  "name": "random 35",
+  "value": {
+   "x-y": true,
+   "b_c": "yes"
+  },
+  "out": "x-y: true\nb_c: yes\n"
+ },
+ {
+  "name": "random 36",
+  "value": {
+   "L0": true
+  },
+  "out": "L0: true\n"
+ },
+ {
+  "name": "random 37",
+  "value": {
+   "b_c": 0.25,
+   "a": 123456789,
+   "L0": 2
+  },
+  "out": "b_c: 0.25\na: 123456789\nL0: 2\n"
+ },
+ {
+  "name": "random 38",
+  "value": {
+   "b_c": true
+  },
+  "out": "b_c: true\n"
+ },
+ {
+  "name": "random 39",
+  "value": {
+   "a": 0.25,
+   "L0": 0.25,
+   "b_c": true
+  },
+  "out": "a: 0.25\nL0: 0.25\nb_c: true\n"
+ },
+ {
+  "name": "random 40",
+  "value": {
+   "gates": true,
+   "x-y": true,
+   "model": 0
+  },
+  "out": "gates: true\nx-y: true\nmodel: 0\n"
+ },
+ {
+  "name": "random 41",
+  "value": {
+   "gates": 2
+  },
+  "out": "gates: 2\n"
+ },
+ {
+  "name": "random 42",
+  "value": {
+   "gates": "test.",
+   "x-y": true
+  },
+  "out": "gates: test.\nx-y: true\n"
+ },
+ {
+  "name": "random 43",
+  "value": {
+   "b_c": true,
+   "x-y": true
+  },
+  "out": "b_c: true\nx-y: true\n"
+ },
+ {
+  "name": "random 44",
+  "value": {
+   "L0": ",[*",
+   "gates": "9\"$ #",
+   "b_c": true,
+   "a": 123456789
+  },
+  "out": "L0: \",[*\"\ngates: '9\"$ #'\nb_c: true\na: 123456789\n"
+ },
+ {
+  "name": "random 45",
+  "value": {
+   "b_c": "|9true+2"
+  },
+  "out": "b_c: \"|9true+2\"\n"
+ },
+ {
+  "name": "random 46",
+  "value": {
+   "gates": "0a",
+   "K9": true,
+   "x-y": "{NULL=test(",
+   "b_c": 0
+  },
+  "out": "gates: 0a\nK9: true\nx-y: \"{NULL=test(\"\nb_c: 0\n"
+ },
+ {
+  "name": "random 47",
+  "value": {
+   "x-y": -3,
+   "a": -3,
+   "b_c": true
+  },
+  "out": "x-y: -3\na: -3\nb_c: true\n"
+ },
+ {
+  "name": "random 48",
+  "value": {
+   "b_c": -3,
+   "gates": 123456789,
+   "L0": "} #",
+   "model": true
+  },
+  "out": "b_c: -3\ngates: 123456789\nL0: \"} #\"\nmodel: true\n"
+ },
+ {
+  "name": "random 49",
+  "value": {
+   "L0": 0.25
+  },
+  "out": "L0: 0.25\n"
+ },
+ {
+  "name": "random 50",
+  "value": {
+   "K9": true,
+   "model": "&$>\\>"
+  },
+  "out": "K9: true\nmodel: \"&$>\\\\>\"\n"
+ },
+ {
+  "name": "random 51",
+  "value": {
+   "gates": "0\"1e3",
+   "model": true
+  },
+  "out": "gates: 0\"1e3\nmodel: true\n"
+ },
+ {
+  "name": "random 52",
+  "value": {
+   "model": "&"
+  },
+  "out": "model: \"&\"\n"
+ },
+ {
+  "name": "random 53",
+  "value": {
+   "a": "Z,@: ?",
+   "L0": 123456789,
+   "x-y": 123456789,
+   "K9": "NULL1?_a"
+  },
+  "out": "a: \"Z,@: ?\"\nL0: 123456789\nx-y: 123456789\nK9: NULL1?_a\n"
+ },
+ {
+  "name": "random 54",
+  "value": {
+   "b_c": true,
+   "x-y": 0,
+   "L0": true,
+   "K9": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxtest:npm|"
+  },
+  "out": "b_c: true\nx-y: 0\nL0: true\nK9: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxtest:npm|\n"
+ },
+ {
+  "name": "random 55",
+  "value": {
+   "model": true
+  },
+  "out": "model: true\n"
+ },
+ {
+  "name": "random 56",
+  "value": {
+   "b_c": -3
+  },
+  "out": "b_c: -3\n"
+ },
+ {
+  "name": "random 57",
+  "value": {
+   "b_c": "=0x1F(@(",
+   "L0": 123456789
+  },
+  "out": "b_c: =0x1F(@(\nL0: 123456789\n"
+ },
+ {
+  "name": "random 58",
+  "value": {
+   "b_c": true,
+   "x-y": true
+  },
+  "out": "b_c: true\nx-y: true\n"
+ },
+ {
+  "name": "random 59",
+  "value": {
+   "model": ":!: : ",
+   "x-y": "=0x1F1",
+   "L0": "1e3",
+   "gates": true
+  },
+  "out": "model: \":!: : \"\nx-y: =0x1F1\nL0: \"1e3\"\ngates: true\n"
+ },
+ {
+  "name": "random 60",
+  "value": {
+   "x-y": -0.5
+  },
+  "out": "x-y: -0.5\n"
+ },
+ {
+  "name": "random 61",
+  "value": {
+   "a": -3,
+   "x-y": true,
+   "b_c": 2,
+   "L0": "&$"
+  },
+  "out": "a: -3\nx-y: true\nb_c: 2\nL0: \"&$\"\n"
+ },
+ {
+  "name": "random 62",
+  "value": {
+   "K9": true
+  },
+  "out": "K9: true\n"
+ },
+ {
+  "name": "random 63",
+  "value": {
+   "x-y": 0.25,
+   "model": 123456789,
+   "gates": 0.25,
+   "a": true,
+   "K9": true
+  },
+  "out": "x-y: 0.25\nmodel: 123456789\ngates: 0.25\na: true\nK9: true\n"
+ },
+ {
+  "name": "random 64",
+  "value": {
+   "gates": true,
+   "K9": 2,
+   "model": 0.25,
+   "x-y": true
+  },
+  "out": "gates: true\nK9: 2\nmodel: 0.25\nx-y: true\n"
+ },
+ {
+  "name": "random 65",
+  "value": {
+   "b_c": 2,
+   "model": "'}",
+   "a": "@NULL,(,"
+  },
+  "out": "b_c: 2\nmodel: \"'}\"\na: \"@NULL,(,\"\n"
+ },
+ {
+  "name": "random 66",
+  "value": {
+   "b_c": 0.25,
+   "L0": ": ;&|",
+   "model": true,
+   "a": true
+  },
+  "out": "b_c: 0.25\nL0: \": ;&|\"\nmodel: true\na: true\n"
+ },
+ {
+  "name": "random 67",
+  "value": {
+   "b_c": true,
+   "model": true,
+   "L0": 0.25
+  },
+  "out": "b_c: true\nmodel: true\nL0: 0.25\n"
+ },
+ {
+  "name": "random 68",
+  "value": {
+   "K9": -3,
+   "a": true,
+   "b_c": 0,
+   "model": 2
+  },
+  "out": "K9: -3\na: true\nb_c: 0\nmodel: 2\n"
+ },
+ {
+  "name": "random 69",
+  "value": {
+   "b_c": "~\"[.5",
+   "model": 0,
+   "L0": true
+  },
+  "out": "b_c: ~\"[.5\nmodel: 0\nL0: true\n"
+ },
+ {
+  "name": "random 70",
+  "value": {
+   "b_c": "0x1F'&9",
+   "L0": -3,
+   "a": true,
+   "K9": true
+  },
+  "out": "b_c: 0x1F'&9\nL0: -3\na: true\nK9: true\n"
+ },
+ {
+  "name": "random 71",
+  "value": {
+   "model": true,
+   "L0": "1e3: ",
+   "b_c": -3
+  },
+  "out": "model: true\nL0: \"1e3: \"\nb_c: -3\n"
+ },
+ {
+  "name": "random 72",
+  "value": {
+   "L0": 123456789
+  },
+  "out": "L0: 123456789\n"
+ },
+ {
+  "name": "random 73",
+  "value": {
+   "L0": true,
+   "K9": 2,
+   "x-y": "1e3_",
+   "a": 123456789
+  },
+  "out": "L0: true\nK9: 2\nx-y: 1e3_\na: 123456789\n"
+ },
+ {
+  "name": "random 74",
+  "value": {
+   "b_c": true,
+   "x-y": 0
+  },
+  "out": "b_c: true\nx-y: 0\n"
+ },
+ {
+  "name": "random 75",
+  "value": {
+   "x-y": 2,
+   "model": 0.25
+  },
+  "out": "x-y: 2\nmodel: 0.25\n"
+ },
+ {
+  "name": "random 76",
+  "value": {
+   "b_c": true
+  },
+  "out": "b_c: true\n"
+ },
+ {
+  "name": "random 77",
+  "value": {
+   "L0": 0,
+   "x-y": true
+  },
+  "out": "L0: 0\nx-y: true\n"
+ },
+ {
+  "name": "random 78",
+  "value": {
+   "L0": ": ",
+   "model": 2,
+   "x-y": true
+  },
+  "out": "L0: \": \"\nmodel: 2\nx-y: true\n"
+ },
+ {
+  "name": "random 79",
+  "value": {
+   "gates": "NULL",
+   "x-y": "&.5"
+  },
+  "out": "gates: \"NULL\"\nx-y: \"&.5\"\n"
+ },
+ {
+  "name": "random 80",
+  "value": {
+   "gates": "|-1",
+   "K9": true,
+   "a": "$9"
+  },
+  "out": "gates: \"|-1\"\nK9: true\na: $9\n"
+ },
+ {
+  "name": "random 81",
+  "value": {
+   "x-y": ": #",
+   "L0": "/1e3*$Z",
+   "K9": "`@"
+  },
+  "out": "x-y: \": #\"\nL0: /1e3*$Z\nK9: \"`@\"\n"
+ },
+ {
+  "name": "random 82",
+  "value": {
+   "L0": "\"-1-1",
+   "gates": "{{|(",
+   "x-y": 0.25,
+   "model": "%!no"
+  },
+  "out": "L0: '\"-1-1'\ngates: \"{{|(\"\nx-y: 0.25\nmodel: \"%!no\"\n"
+ },
+ {
+  "name": "random 83",
+  "value": {
+   "model": "9nullno/"
+  },
+  "out": "model: 9nullno/\n"
+ },
+ {
+  "name": "random 84",
+  "value": {
+   "L0": 123456789,
+   "x-y": 0.25,
+   "K9": true
+  },
+  "out": "L0: 123456789\nx-y: 0.25\nK9: true\n"
+ },
+ {
+  "name": "random 85",
+  "value": {
+   "K9": "Z=,}}",
+   "b_c": 2,
+   "a": ":+2no}"
+  },
+  "out": "K9: Z=,}}\nb_c: 2\na: :+2no}\n"
+ },
+ {
+  "name": "random 86",
+  "value": {
+   "L0": true
+  },
+  "out": "L0: true\n"
+ },
+ {
+  "name": "random 87",
+  "value": {
+   "model": "''",
+   "gates": true
+  },
+  "out": "model: \"''\"\ngates: true\n"
+ },
+ {
+  "name": "random 88",
+  "value": {
+   "x-y": "`",
+   "K9": "Z0x1F>test'"
+  },
+  "out": "x-y: \"`\"\nK9: Z0x1F>test'\n"
+ },
+ {
+  "name": "random 89",
+  "value": {
+   "K9": 2
+  },
+  "out": "K9: 2\n"
+ },
+ {
+  "name": "random 90",
+  "value": {
+   "b_c": "?}.inftest$",
+   "a": true,
+   "model": true
+  },
+  "out": "b_c: ?}.inftest$\na: true\nmodel: true\n"
+ },
+ {
+  "name": "random 91",
+  "value": {
+   "b_c": 0.25
+  },
+  "out": "b_c: 0.25\n"
+ },
+ {
+  "name": "random 92",
+  "value": {
+   "K9": 0.25
+  },
+  "out": "K9: 0.25\n"
+ },
+ {
+  "name": "random 93",
+  "value": {
+   "gates": "{*",
+   "model": "!1$@=",
+   "x-y": ";"
+  },
+  "out": "gates: \"{*\"\nmodel: \"!1$@=\"\nx-y: ;\n"
+ },
+ {
+  "name": "random 94",
+  "value": {
+   "x-y": 0.25,
+   "gates": "9\\{[Z",
+   "a": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx:_.NaN_"
+  },
+  "out": "x-y: 0.25\ngates: 9\\{[Z\na: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx:_.NaN_\n"
+ },
+ {
+  "name": "random 95",
+  "value": {
+   "L0": 0,
+   "b_c": 2,
+   "x-y": true,
+   "gates": 0.25
+  },
+  "out": "L0: 0\nb_c: 2\nx-y: true\ngates: 0.25\n"
+ },
+ {
+  "name": "random 96",
+  "value": {
+   "L0": "yes>",
+   "x-y": 123456789,
+   "gates": "Z;"
+  },
+  "out": "L0: yes>\nx-y: 123456789\ngates: Z;\n"
+ },
+ {
+  "name": "random 97",
+  "value": {
+   "a": true,
+   "b_c": 123456789,
+   "gates": true
+  },
+  "out": "a: true\nb_c: 123456789\ngates: true\n"
+ },
+ {
+  "name": "random 98",
+  "value": {
+   "L0": 2,
+   "a": "~a*"
+  },
+  "out": "L0: 2\na: ~a*\n"
+ },
+ {
+  "name": "random 99",
+  "value": {
+   "x-y": "yesnpm{",
+   "L0": true
+  },
+  "out": "x-y: yesnpm{\nL0: true\n"
+ },
+ {
+  "name": "random 100",
+  "value": {
+   "x-y": 123456789,
+   "K9": 123456789,
+   "gates": "&1`npm0x1F",
+   "a": true
+  },
+  "out": "x-y: 123456789\nK9: 123456789\ngates: \"&1`npm0x1F\"\na: true\n"
+ },
+ {
+  "name": "random 101",
+  "value": {
+   "b_c": 0.25
+  },
+  "out": "b_c: 0.25\n"
+ },
+ {
+  "name": "random 102",
+  "value": {
+   "x-y": 0.25,
+   "a": "_]",
+   "b_c": true
+  },
+  "out": "x-y: 0.25\na: _]\nb_c: true\n"
+ },
+ {
+  "name": "random 103",
+  "value": {
+   "K9": "False\""
+  },
+  "out": "K9: False\"\n"
+ },
+ {
+  "name": "random 104",
+  "value": {
+   "a": "}",
+   "K9": 0.25,
+   "L0": true,
+   "b_c": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx #\"#;"
+  },
+  "out": "a: \"}\"\nK9: 0.25\nL0: true\nb_c: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx #\"#;'\n"
+ },
+ {
+  "name": "random 105",
+  "value": {
+   "model": -3,
+   "L0": 0,
+   "gates": true
+  },
+  "out": "model: -3\nL0: 0\ngates: true\n"
+ },
+ {
+  "name": "random 106",
+  "value": {
+   "L0": "`",
+   "a": "[",
+   "gates": -3
+  },
+  "out": "L0: \"`\"\na: \"[\"\ngates: -3\n"
+ },
+ {
+  "name": "random 107",
+  "value": {
+   "x-y": 123456789
+  },
+  "out": "x-y: 123456789\n"
+ },
+ {
+  "name": "random 108",
+  "value": {
+   "K9": null,
+   "x-y": -3,
+   "gates": 2
+  },
+  "out": "K9: null\nx-y: -3\ngates: 2\n"
+ },
+ {
+  "name": "random 109",
+  "value": {
+   "b_c": true,
+   "gates": true,
+   "L0": true,
+   "x-y": 0.25
+  },
+  "out": "b_c: true\ngates: true\nL0: true\nx-y: 0.25\n"
+ },
+ {
+  "name": "random 110",
+  "value": {
+   "K9": 0
+  },
+  "out": "K9: 0\n"
+ },
+ {
+  "name": "random 111",
+  "value": {
+   "L0": true
+  },
+  "out": "L0: true\n"
+ },
+ {
+  "name": "random 112",
+  "value": {
+   "L0": true,
+   "b_c": "a.NaN'False",
+   "a": true,
+   "model": 123456789
+  },
+  "out": "L0: true\nb_c: a.NaN'False\na: true\nmodel: 123456789\n"
+ },
+ {
+  "name": "random 113",
+  "value": {
+   "gates": 123456789,
+   "a": "]#"
+  },
+  "out": "gates: 123456789\na: \"]#\"\n"
+ },
+ {
+  "name": "random 114",
+  "value": {
+   "a": 0,
+   "b_c": -3
+  },
+  "out": "a: 0\nb_c: -3\n"
+ },
+ {
+  "name": "random 115",
+  "value": {
+   "gates": -3,
+   "L0": "test",
+   "a": 2,
+   "x-y": true
+  },
+  "out": "gates: -3\nL0: test\na: 2\nx-y: true\n"
+ },
+ {
+  "name": "random 116",
+  "value": {
+   "K9": true
+  },
+  "out": "K9: true\n"
+ },
+ {
+  "name": "random 117",
+  "value": {
+   "gates": ",",
+   "K9": "$_",
+   "a": 0.25
+  },
+  "out": "gates: \",\"\nK9: $_\na: 0.25\n"
+ },
+ {
+  "name": "random 118",
+  "value": {
+   "K9": ".inf?a'&",
+   "x-y": 123456789
+  },
+  "out": "K9: .inf?a'&\nx-y: 123456789\n"
+ },
+ {
+  "name": "random 119",
+  "value": {
+   "b_c": true,
+   "gates": "_"
+  },
+  "out": "b_c: true\ngates: _\n"
+ },
+ {
+  "name": "random 120",
+  "value": {
+   "gates": true
+  },
+  "out": "gates: true\n"
+ },
+ {
+  "name": "random 121",
+  "value": {
+   "gates": -3
+  },
+  "out": "gates: -3\n"
+ },
+ {
+  "name": "random 122",
+  "value": {
+   "a": ")/$Z",
+   "b_c": "a",
+   "x-y": true
+  },
+  "out": "a: )/$Z\nb_c: a\nx-y: true\n"
+ },
+ {
+  "name": "random 123",
+  "value": {
+   "b_c": -3,
+   "L0": ";a>_-1",
+   "x-y": " .NaN"
+  },
+  "out": "b_c: -3\nL0: ;a>_-1\nx-y: \" .NaN\"\n"
+ },
+ {
+  "name": "random 124",
+  "value": {
+   "gates": -3,
+   "K9": "\\0truetrue"
+  },
+  "out": "gates: -3\nK9: \\0truetrue\n"
+ },
+ {
+  "name": "random 125",
+  "value": {
+   "b_c": 2
+  },
+  "out": "b_c: 2\n"
+ },
+ {
+  "name": "random 126",
+  "value": {
+   "gates": " #+2;"
+  },
+  "out": "gates: \" #+2;\"\n"
+ },
+ {
+  "name": "random 127",
+  "value": {
+   "L0": true,
+   "gates": true,
+   "model": true
+  },
+  "out": "L0: true\ngates: true\nmodel: true\n"
+ },
+ {
+  "name": "random 128",
+  "value": {
+   "K9": true,
+   "a": true
+  },
+  "out": "K9: true\na: true\n"
+ },
+ {
+  "name": "random 129",
+  "value": {
+   "x-y": "* +2yes #",
+   "gates": -3,
+   "model": ":"
+  },
+  "out": "x-y: \"* +2yes #\"\ngates: -3\nmodel: \":\"\n"
+ },
+ {
+  "name": "random 130",
+  "value": {
+   "L0": "NULLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  "out": "L0: NULLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+ },
+ {
+  "name": "random 131",
+  "value": {
+   "gates": true,
+   "model": 2,
+   "x-y": "1e3"
+  },
+  "out": "gates: true\nmodel: 2\nx-y: \"1e3\"\n"
+ },
+ {
+  "name": "random 132",
+  "value": {
+   "b_c": 2
+  },
+  "out": "b_c: 2\n"
+ },
+ {
+  "name": "random 133",
+  "value": {
+   "b_c": true,
+   "x-y": 123456789
+  },
+  "out": "b_c: true\nx-y: 123456789\n"
+ },
+ {
+  "name": "random 134",
+  "value": {
+   "model": true,
+   "K9": true,
+   "b_c": "%xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "L0": ":"
+  },
+  "out": "model: true\nK9: true\nb_c: \"%xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\nL0: \":\"\n"
+ },
+ {
+  "name": "random 135",
+  "value": {
+   "b_c": true,
+   "L0": "$)_`",
+   "model": true,
+   "gates": true
+  },
+  "out": "b_c: true\nL0: $)_`\nmodel: true\ngates: true\n"
+ },
+ {
+  "name": "random 136",
+  "value": {
+   "a": "+2\""
+  },
+  "out": "a: +2\"\n"
+ },
+ {
+  "name": "random 137",
+  "value": {
+   "L0": 2,
+   "x-y": "~yes.5",
+   "b_c": -3
+  },
+  "out": "L0: 2\nx-y: ~yes.5\nb_c: -3\n"
+ },
+ {
+  "name": "random 138",
+  "value": {
+   "a": true,
+   "gates": 0
+  },
+  "out": "a: true\ngates: 0\n"
+ },
+ {
+  "name": "random 139",
+  "value": {
+   "b_c": 0,
+   "model": "Z[0x1F",
+   "gates": true
+  },
+  "out": "b_c: 0\nmodel: Z[0x1F\ngates: true\n"
+ },
+ {
+  "name": "random 140",
+  "value": {
+   "gates": "null]a",
+   "K9": true
+  },
+  "out": "gates: null]a\nK9: true\n"
+ },
+ {
+  "name": "random 141",
+  "value": {
+   "b_c": 2,
+   "x-y": true,
+   "K9": "('yes=,",
+   "model": ":true",
+   "a": -3
+  },
+  "out": "b_c: 2\nx-y: true\nK9: ('yes=,\nmodel: :true\na: -3\n"
+ },
+ {
+  "name": "random 142",
+  "value": {
+   "b_c": true
+  },
+  "out": "b_c: true\n"
+ },
+ {
+  "name": "random 143",
+  "value": {
+   "gates": true
+  },
+  "out": "gates: true\n"
+ },
+ {
+  "name": "random 144",
+  "value": {
+   "x-y": -3
+  },
+  "out": "x-y: -3\n"
+ },
+ {
+  "name": "random 145",
+  "value": {
+   "gates": true,
+   "a": true,
+   "model": true
+  },
+  "out": "gates: true\na: true\nmodel: true\n"
+ },
+ {
+  "name": "random 146",
+  "value": {
+   "a": "{%"
+  },
+  "out": "a: \"{%\"\n"
+ },
+ {
+  "name": "random 147",
+  "value": {
+   "gates": true,
+   "K9": "NULL1e3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  "out": "gates: true\nK9: NULL1e3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+ },
+ {
+  "name": "random 148",
+  "value": {
+   "model": 0.25,
+   "gates": 123456789,
+   "L0": true,
+   "a": true
+  },
+  "out": "model: 0.25\ngates: 123456789\nL0: true\na: true\n"
+ },
+ {
+  "name": "random 149",
+  "value": {
+   "model": "]"
+  },
+  "out": "model: \"]\"\n"
+ },
+ {
+  "name": "random 150",
+  "value": {
+   "a": 0
+  },
+  "out": "a: 0\n"
+ },
+ {
+  "name": "random 151",
+  "value": {
+   "b_c": 2,
+   "L0": 123456789,
+   "x-y": true,
+   "gates": true
+  },
+  "out": "b_c: 2\nL0: 123456789\nx-y: true\ngates: true\n"
+ },
+ {
+  "name": "random 152",
+  "value": {
+   "L0": true,
+   "x-y": 123456789,
+   "K9": true
+  },
+  "out": "L0: true\nx-y: 123456789\nK9: true\n"
+ },
+ {
+  "name": "random 153",
+  "value": {
+   "K9": 123456789,
+   "L0": 0.25
+  },
+  "out": "K9: 123456789\nL0: 0.25\n"
+ },
+ {
+  "name": "random 154",
+  "value": {
+   "K9": true
+  },
+  "out": "K9: true\n"
+ },
+ {
+  "name": "random 155",
+  "value": {
+   "gates": ")!&",
+   "a": true,
+   "model": "yes={`"
+  },
+  "out": "gates: )!&\na: true\nmodel: yes={`\n"
+ },
+ {
+  "name": "random 156",
+  "value": {
+   "x-y": "0x1F=",
+   "a": false,
+   "gates": 2
+  },
+  "out": "x-y: 0x1F=\na: false\ngates: 2\n"
+ },
+ {
+  "name": "random 157",
+  "value": {
+   "gates": ".NaN",
+   "b_c": "`{NULL:;",
+   "x-y": 123456789
+  },
+  "out": "gates: \".NaN\"\nb_c: \"`{NULL:;\"\nx-y: 123456789\n"
+ },
+ {
+  "name": "random 158",
+  "value": {
+   "K9": "[',.5",
+   "x-y": 0.25,
+   "b_c": "#NULL*.5",
+   "model": 123456789
+  },
+  "out": "K9: \"[',.5\"\nx-y: 0.25\nb_c: \"#NULL*.5\"\nmodel: 123456789\n"
+ },
+ {
+  "name": "random 159",
+  "value": {
+   "K9": true,
+   "x-y": "NULLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&"
+  },
+  "out": "K9: true\nx-y: NULLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&\n"
+ },
+ {
+  "name": "random 160",
+  "value": {
+   "b_c": 0.25,
+   "x-y": true,
+   "a": true,
+   "gates": "~"
+  },
+  "out": "b_c: 0.25\nx-y: true\na: true\ngates: \"~\"\n"
+ },
+ {
+  "name": "random 161",
+  "value": {
+   "x-y": 2,
+   "L0": "true",
+   "K9": true,
+   "model": true
+  },
+  "out": "x-y: 2\nL0: \"true\"\nK9: true\nmodel: true\n"
+ },
+ {
+  "name": "random 162",
+  "value": {
+   "gates": "runZ",
+   "x-y": true,
+   "L0": 0.25
+  },
+  "out": "gates: runZ\nx-y: true\nL0: 0.25\n"
+ },
+ {
+  "name": "random 163",
+  "value": {
+   "b_c": true
+  },
+  "out": "b_c: true\n"
+ },
+ {
+  "name": "random 164",
+  "value": {
+   "model": 123456789
+  },
+  "out": "model: 123456789\n"
+ },
+ {
+  "name": "random 165",
+  "value": {
+   "K9": 0.25
+  },
+  "out": "K9: 0.25\n"
+ },
+ {
+  "name": "random 166",
+  "value": {
+   "b_c": true
+  },
+  "out": "b_c: true\n"
+ },
+ {
+  "name": "random 167",
+  "value": {
+   "b_c": "]test.inf,.inf"
+  },
+  "out": "b_c: \"]test.inf,.inf\"\n"
+ },
+ {
+  "name": "random 168",
+  "value": {
+   "K9": "!$0'",
+   "x-y": " #xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'0x1F",
+   "a": true
+  },
+  "out": "K9: \"!$0'\"\nx-y: \" #xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'0x1F\"\na: true\n"
+ },
+ {
+  "name": "random 169",
+  "value": {
+   "b_c": "yes",
+   "a": true,
+   "x-y": 0.25,
+   "L0": true
+  },
+  "out": "b_c: yes\na: true\nx-y: 0.25\nL0: true\n"
+ },
+ {
+  "name": "random 170",
+  "value": {
+   "x-y": true,
+   "b_c": 0.25,
+   "gates": 2,
+   "a": 0.25
+  },
+  "out": "x-y: true\nb_c: 0.25\ngates: 2\na: 0.25\n"
+ },
+ {
+  "name": "random 171",
+  "value": {
+   "b_c": "NULLanulltrue",
+   "x-y": "@="
+  },
+  "out": "b_c: NULLanulltrue\nx-y: \"@=\"\n"
+ },
+ {
+  "name": "random 172",
+  "value": {
+   "model": ">"
+  },
+  "out": "model: \">\"\n"
+ },
+ {
+  "name": "random 173",
+  "value": {
+   "b_c": 0.25,
+   "x-y": "1e3",
+   "L0": "[!)",
+   "model": "1e3.NaN"
+  },
+  "out": "b_c: 0.25\nx-y: \"1e3\"\nL0: \"[!)\"\nmodel: 1e3.NaN\n"
+ },
+ {
+  "name": "random 174",
+  "value": {
+   "L0": "&Z"
+  },
+  "out": "L0: \"&Z\"\n"
+ },
+ {
+  "name": "random 175",
+  "value": {
+   "b_c": "1e3|"
+  },
+  "out": "b_c: 1e3|\n"
+ },
+ {
+  "name": "random 176",
+  "value": {
+   "x-y": ";>",
+   "a": "9.inf",
+   "b_c": -3
+  },
+  "out": "x-y: ;>\na: 9.inf\nb_c: -3\n"
+ },
+ {
+  "name": "random 177",
+  "value": {
+   "x-y": "-"
+  },
+  "out": "x-y: \"-\"\n"
+ },
+ {
+  "name": "random 178",
+  "value": {
+   "model": true,
+   "a": -3,
+   "L0": 123456789
+  },
+  "out": "model: true\na: -3\nL0: 123456789\n"
+ },
+ {
+  "name": "random 179",
+  "value": {
+   "K9": true,
+   "x-y": 2,
+   "b_c": true
+  },
+  "out": "K9: true\nx-y: 2\nb_c: true\n"
+ },
+ {
+  "name": "random 180",
+  "value": {
+   "a": 0,
+   "gates": -3
+  },
+  "out": "a: 0\ngates: -3\n"
+ },
+ {
+  "name": "random 181",
+  "value": {
+   "a": true,
+   "x-y": "~'a%",
+   "b_c": -3
+  },
+  "out": "a: true\nx-y: ~'a%\nb_c: -3\n"
+ },
+ {
+  "name": "random 182",
+  "value": {
+   "L0": true,
+   "x-y": "\"[",
+   "model": true
+  },
+  "out": "L0: true\nx-y: '\"['\nmodel: true\n"
+ },
+ {
+  "name": "random 183",
+  "value": {
+   "x-y": "Z*true\\0",
+   "a": true,
+   "model": -3,
+   "L0": 0.25
+  },
+  "out": "x-y: Z*true\\0\na: true\nmodel: -3\nL0: 0.25\n"
+ },
+ {
+  "name": "random 184",
+  "value": {
+   "a": true,
+   "gates": 2,
+   "L0": 0.25
+  },
+  "out": "a: true\ngates: 2\nL0: 0.25\n"
+ },
+ {
+  "name": "random 185",
+  "value": {
+   "x-y": "\\xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx #|*"
+  },
+  "out": "x-y: \"\\\\xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx #|*\"\n"
+ },
+ {
+  "name": "random 186",
+  "value": {
+   "K9": true,
+   "b_c": "test!run #0x1F",
+   "L0": true
+  },
+  "out": "K9: true\nb_c: \"test!run #0x1F\"\nL0: true\n"
+ },
+ {
+  "name": "random 187",
+  "value": {
+   "x-y": "]-1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxnpm",
+   "gates": "'&!"
+  },
+  "out": "x-y: \"]-1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxnpm\"\ngates: \"'&!\"\n"
+ },
+ {
+  "name": "random 188",
+  "value": {
+   "K9": 0,
+   "a": 2
+  },
+  "out": "K9: 0\na: 2\n"
+ },
+ {
+  "name": "random 189",
+  "value": {
+   "L0": "$",
+   "x-y": 0.25,
+   "gates": true,
+   "a": "[0x1F"
+  },
+  "out": "L0: $\nx-y: 0.25\ngates: true\na: \"[0x1F\"\n"
+ },
+ {
+  "name": "random 190",
+  "value": {
+   "b_c": 123456789,
+   "gates": false,
+   "K9": "0",
+   "model": "%/"
+  },
+  "out": "b_c: 123456789\ngates: false\nK9: \"0\"\nmodel: \"%/\"\n"
+ },
+ {
+  "name": "random 191",
+  "value": {
+   "a": 2
+  },
+  "out": "a: 2\n"
+ },
+ {
+  "name": "random 192",
+  "value": {
+   "K9": -3,
+   "b_c": true,
+   "L0": 2,
+   "a": "npm'axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  "out": "K9: -3\nb_c: true\nL0: 2\na: npm'axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+ },
+ {
+  "name": "random 193",
+  "value": {
+   "x-y": true,
+   "L0": "1",
+   "model": true
+  },
+  "out": "x-y: true\nL0: \"1\"\nmodel: true\n"
+ },
+ {
+  "name": "random 194",
+  "value": {
+   "x-y": true,
+   "gates": 2
+  },
+  "out": "x-y: true\ngates: 2\n"
+ },
+ {
+  "name": "random 195",
+  "value": {
+   "gates": "-1?.5",
+   "model": 0.25
+  },
+  "out": "gates: -1?.5\nmodel: 0.25\n"
+ },
+ {
+  "name": "random 196",
+  "value": {
+   "x-y": "+2`%+2",
+   "a": true,
+   "b_c": true
+  },
+  "out": "x-y: +2`%+2\na: true\nb_c: true\n"
+ },
+ {
+  "name": "random 197",
+  "value": {
+   "a": -3,
+   "model": true,
+   "x-y": " .5$",
+   "b_c": 0.25
+  },
+  "out": "a: -3\nmodel: true\nx-y: \" .5$\"\nb_c: 0.25\n"
+ },
+ {
+  "name": "random 198",
+  "value": {
+   "x-y": 123456789,
+   "b_c": "&?~|",
+   "gates": true,
+   "K9": 123456789,
+   "a": true
+  },
+  "out": "x-y: 123456789\nb_c: \"&?~|\"\ngates: true\nK9: 123456789\na: true\n"
+ },
+ {
+  "name": "random 199",
+  "value": {
+   "L0": true,
+   "a": true
+  },
+  "out": "L0: true\na: true\n"
+ },
+ {
+  "name": "random 200",
+  "value": {
+   "b_c": 0.25,
+   "L0": true,
+   "model": 0
+  },
+  "out": "b_c: 0.25\nL0: true\nmodel: 0\n"
+ },
+ {
+  "name": "random 201",
+  "value": {
+   "b_c": "00o7`: 0",
+   "x-y": 0.25,
+   "L0": "?=.inf"
+  },
+  "out": "b_c: \"00o7`: 0\"\nx-y: 0.25\nL0: ?=.inf\n"
+ },
+ {
+  "name": "random 202",
+  "value": {
+   "L0": 2,
+   "K9": "test/\""
+  },
+  "out": "L0: 2\nK9: test/\"\n"
+ },
+ {
+  "name": "random 203",
+  "value": {
+   "gates": 0.25,
+   "L0": -3,
+   "K9": true,
+   "a": "&\"NULL-1/"
+  },
+  "out": "gates: 0.25\nL0: -3\nK9: true\na: '&\"NULL-1/'\n"
+ },
+ {
+  "name": "random 204",
+  "value": {
+   "L0": -3,
+   "K9": "]",
+   "b_c": "1':-1~",
+   "model": "&1/"
+  },
+  "out": "L0: -3\nK9: \"]\"\nb_c: 1':-1~\nmodel: \"&1/\"\n"
+ },
+ {
+  "name": "random 205",
+  "value": {
+   "gates": "1e3",
+   "x-y": true
+  },
+  "out": "gates: \"1e3\"\nx-y: true\n"
+ },
+ {
+  "name": "random 206",
+  "value": {
+   "L0": ".inftest-%.5",
+   "x-y": true,
+   "model": 0.25,
+   "a": "Z*'npm"
+  },
+  "out": "L0: .inftest-%.5\nx-y: true\nmodel: 0.25\na: Z*'npm\n"
+ },
+ {
+  "name": "random 207",
+  "value": {
+   "model": true,
+   "x-y": "]"
+  },
+  "out": "model: true\nx-y: \"]\"\n"
+ },
+ {
+  "name": "random 208",
+  "value": {
+   "gates": 0,
+   "x-y": true,
+   "b_c": 2
+  },
+  "out": "gates: 0\nx-y: true\nb_c: 2\n"
+ },
+ {
+  "name": "random 209",
+  "value": {
+   "K9": 2
+  },
+  "out": "K9: 2\n"
+ },
+ {
+  "name": "random 210",
+  "value": {
+   "K9": "!/((*",
+   "gates": true,
+   "a": ".0yes",
+   "L0": 0
+  },
+  "out": "K9: \"!/((*\"\ngates: true\na: .0yes\nL0: 0\n"
+ },
+ {
+  "name": "random 211",
+  "value": {
+   "x-y": "./trueno",
+   "model": 0
+  },
+  "out": "x-y: ./trueno\nmodel: 0\n"
+ },
+ {
+  "name": "random 212",
+  "value": {
+   "b_c": "/~test #"
+  },
+  "out": "b_c: \"/~test #\"\n"
+ },
+ {
+  "name": "random 213",
+  "value": {
+   "gates": 2,
+   "model": "test0o7?npm"
+  },
+  "out": "gates: 2\nmodel: test0o7?npm\n"
+ },
+ {
+  "name": "random 214",
+  "value": {
+   "gates": "/0x1F})",
+   "K9": "`no?%",
+   "a": "0$="
+  },
+  "out": "gates: /0x1F})\nK9: \"`no?%\"\na: 0$=\n"
+ },
+ {
+  "name": "random 215",
+  "value": {
+   "L0": 2
+  },
+  "out": "L0: 2\n"
+ },
+ {
+  "name": "random 216",
+  "value": {
+   "model": 2,
+   "a": "true",
+   "x-y": "run}-:",
+   "L0": true
+  },
+  "out": "model: 2\na: \"true\"\nx-y: \"run}-:\"\nL0: true\n"
+ },
+ {
+  "name": "random 217",
+  "value": {
+   "a": -3,
+   "x-y": "&-1.5+2%",
+   "b_c": true,
+   "L0": -3,
+   "model": 0.25
+  },
+  "out": "a: -3\nx-y: \"&-1.5+2%\"\nb_c: true\nL0: -3\nmodel: 0.25\n"
+ },
+ {
+  "name": "random 218",
+  "value": {
+   "x-y": true,
+   "K9": true,
+   "L0": 123456789,
+   "gates": "?9.NaN"
+  },
+  "out": "x-y: true\nK9: true\nL0: 123456789\ngates: ?9.NaN\n"
+ },
+ {
+  "name": "random 219",
+  "value": {
+   "model": -3,
+   "a": true
+  },
+  "out": "model: -3\na: true\n"
+ },
+ {
+  "name": "random 220",
+  "value": {
+   "x-y": true
+  },
+  "out": "x-y: true\n"
+ },
+ {
+  "name": "random 221",
+  "value": {
+   "x-y": "\\runnpm",
+   "gates": "-10+2(-",
+   "a": true,
+   "L0": true
+  },
+  "out": "x-y: \\runnpm\ngates: -10+2(-\na: true\nL0: true\n"
+ },
+ {
+  "name": "random 222",
+  "value": {
+   "L0": 123456789,
+   "x-y": -3
+  },
+  "out": "L0: 123456789\nx-y: -3\n"
+ },
+ {
+  "name": "random 223",
+  "value": {
+   "b_c": ".;.5!\"",
+   "x-y": "?.NaN",
+   "model": true
+  },
+  "out": "b_c: .;.5!\"\nx-y: ?.NaN\nmodel: true\n"
+ },
+ {
+  "name": "random 224",
+  "value": {
+   "model": " (",
+   "b_c": 2,
+   "gates": "/'",
+   "K9": "\""
+  },
+  "out": "model: \" (\"\nb_c: 2\ngates: /'\nK9: '\"'\n"
+ },
+ {
+  "name": "random 225",
+  "value": {
+   "a": true
+  },
+  "out": "a: true\n"
+ },
+ {
+  "name": "random 226",
+  "value": {
+   "L0": true,
+   "model": true
+  },
+  "out": "L0: true\nmodel: true\n"
+ },
+ {
+  "name": "random 227",
+  "value": {
+   "model": true
+  },
+  "out": "model: true\n"
+ },
+ {
+  "name": "random 228",
+  "value": {
+   "K9": 2,
+   "model": ")|-1.inf",
+   "L0": ";yes{a",
+   "b_c": 0.25
+  },
+  "out": "K9: 2\nmodel: )|-1.inf\nL0: ;yes{a\nb_c: 0.25\n"
+ },
+ {
+  "name": "random 229",
+  "value": {
+   "K9": true
+  },
+  "out": "K9: true\n"
+ },
+ {
+  "name": "random 230",
+  "value": {
+   "gates": true
+  },
+  "out": "gates: true\n"
+ },
+ {
+  "name": "random 231",
+  "value": {
+   "L0": "noyes",
+   "gates": true
+  },
+  "out": "L0: noyes\ngates: true\n"
+ },
+ {
+  "name": "random 232",
+  "value": {
+   "b_c": true
+  },
+  "out": "b_c: true\n"
+ },
+ {
+  "name": "random 233",
+  "value": {
+   "a": true,
+   "b_c": 2,
+   "gates": "yes.NaNnpmNULL@"
+  },
+  "out": "a: true\nb_c: 2\ngates: yes.NaNnpmNULL@\n"
+ },
+ {
+  "name": "random 234",
+  "value": {
+   "model": true
+  },
+  "out": "model: true\n"
+ },
+ {
+  "name": "random 235",
+  "value": {
+   "L0": 0.25,
+   "gates": true
+  },
+  "out": "L0: 0.25\ngates: true\n"
+ },
+ {
+  "name": "random 236",
+  "value": {
+   "K9": 123456789,
+   "model": -3
+  },
+  "out": "K9: 123456789\nmodel: -3\n"
+ },
+ {
+  "name": "random 237",
+  "value": {
+   "b_c": true,
+   "a": 2,
+   "gates": -3
+  },
+  "out": "b_c: true\na: 2\ngates: -3\n"
+ },
+ {
+  "name": "random 238",
+  "value": {
+   "K9": ",~False"
+  },
+  "out": "K9: \",~False\"\n"
+ },
+ {
+  "name": "random 239",
+  "value": {
+   "b_c": " #.:_: "
+  },
+  "out": "b_c: \" #.:_: \"\n"
+ },
+ {
+  "name": "random 240",
+  "value": {
+   "x-y": "?10x1F/",
+   "b_c": true,
+   "model": 2
+  },
+  "out": "x-y: ?10x1F/\nb_c: true\nmodel: 2\n"
+ },
+ {
+  "name": "random 241",
+  "value": {
+   "L0": 2,
+   "K9": 0
+  },
+  "out": "L0: 2\nK9: 0\n"
+ },
+ {
+  "name": "random 242",
+  "value": {
+   "x-y": 0.25,
+   "model": true,
+   "b_c": 2
+  },
+  "out": "x-y: 0.25\nmodel: true\nb_c: 2\n"
+ },
+ {
+  "name": "random 243",
+  "value": {
+   "L0": -3,
+   "gates": 2,
+   "b_c": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxFalse",
+   "model": 0.25
+  },
+  "out": "L0: -3\ngates: 2\nb_c: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxFalse\nmodel: 0.25\n"
+ },
+ {
+  "name": "random 244",
+  "value": {
+   "b_c": "$?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "a": 0
+  },
+  "out": "b_c: $?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\na: 0\n"
+ },
+ {
+  "name": "random 245",
+  "value": {
+   "L0": true,
+   "x-y": 123456789,
+   "gates": 2
+  },
+  "out": "L0: true\nx-y: 123456789\ngates: 2\n"
+ },
+ {
+  "name": "random 246",
+  "value": {
+   "a": true,
+   "L0": true,
+   "K9": 0.25
+  },
+  "out": "a: true\nL0: true\nK9: 0.25\n"
+ },
+ {
+  "name": "random 247",
+  "value": {
+   "x-y": "]run0x1F+2: "
+  },
+  "out": "x-y: \"]run0x1F+2: \"\n"
+ },
+ {
+  "name": "random 248",
+  "value": {
+   "x-y": "0test|"
+  },
+  "out": "x-y: 0test|\n"
+ },
+ {
+  "name": "random 249",
+  "value": {
+   "L0": true
+  },
+  "out": "L0: true\n"
+ },
+ {
+  "name": "random 250",
+  "value": {
+   "gates": "&"
+  },
+  "out": "gates: \"&\"\n"
+ },
+ {
+  "name": "random 251",
+  "value": {
+   "L0": true,
+   "K9": true
+  },
+  "out": "L0: true\nK9: true\n"
+ },
+ {
+  "name": "random 252",
+  "value": {
+   "model": 0
+  },
+  "out": "model: 0\n"
+ },
+ {
+  "name": "random 253",
+  "value": {
+   "gates": -3,
+   "a": 0,
+   "K9": true
+  },
+  "out": "gates: -3\na: 0\nK9: true\n"
+ },
+ {
+  "name": "random 254",
+  "value": {
+   "model": true,
+   "b_c": "1",
+   "K9": true
+  },
+  "out": "model: true\nb_c: \"1\"\nK9: true\n"
+ },
+ {
+  "name": "random 255",
+  "value": {
+   "L0": ".inf",
+   "b_c": true
+  },
+  "out": "L0: \".inf\"\nb_c: true\n"
+ },
+ {
+  "name": "random 256",
+  "value": {
+   "gates": "90=",
+   "x-y": true,
+   "b_c": " #0 #&"
+  },
+  "out": "gates: 90=\nx-y: true\nb_c: \" #0 #&\"\n"
+ },
+ {
+  "name": "random 257",
+  "value": {
+   "x-y": 0,
+   "model": "+2@!.NaN",
+   "a": "1e3%.]",
+   "gates": true
+  },
+  "out": "x-y: 0\nmodel: +2@!.NaN\na: 1e3%.]\ngates: true\n"
+ },
+ {
+  "name": "random 258",
+  "value": {
+   "x-y": 0,
+   "L0": "no",
+   "a": "9@"
+  },
+  "out": "x-y: 0\nL0: no\na: 9@\n"
+ },
+ {
+  "name": "random 259",
+  "value": {
+   "gates": "%1e3|\"_",
+   "model": 2,
+   "a": "\".;"
+  },
+  "out": "gates: '%1e3|\"_'\nmodel: 2\na: '\".;'\n"
+ },
+ {
+  "name": "random 260",
+  "value": {
+   "L0": "@;: ",
+   "a": true,
+   "model": "@*"
+  },
+  "out": "L0: \"@;: \"\na: true\nmodel: \"@*\"\n"
+ },
+ {
+  "name": "random 261",
+  "value": {
+   "b_c": true,
+   "K9": -3
+  },
+  "out": "b_c: true\nK9: -3\n"
+ },
+ {
+  "name": "random 262",
+  "value": {
+   "x-y": "{"
+  },
+  "out": "x-y: \"{\"\n"
+ },
+ {
+  "name": "random 263",
+  "value": {
+   "model": true,
+   "x-y": 0.25
+  },
+  "out": "model: true\nx-y: 0.25\n"
+ },
+ {
+  "name": "random 264",
+  "value": {
+   "a": true,
+   "b_c": -3,
+   "K9": ".5",
+   "model": 0,
+   "x-y": "-.inf"
+  },
+  "out": "a: true\nb_c: -3\nK9: \".5\"\nmodel: 0\nx-y: \"-.inf\"\n"
+ },
+ {
+  "name": "random 265",
+  "value": {
+   "b_c": 2
+  },
+  "out": "b_c: 2\n"
+ },
+ {
+  "name": "random 266",
+  "value": {
+   "b_c": "Z#/test: ",
+   "L0": "$0o7",
+   "x-y": true,
+   "K9": true,
+   "gates": "0o7yes="
+  },
+  "out": "b_c: \"Z#/test: \"\nL0: $0o7\nx-y: true\nK9: true\ngates: 0o7yes=\n"
+ },
+ {
+  "name": "random 267",
+  "value": {
+   "L0": "no\""
+  },
+  "out": "L0: no\"\n"
+ },
+ {
+  "name": "random 268",
+  "value": {
+   "a": 0.25,
+   "gates": "NULL"
+  },
+  "out": "a: 0.25\ngates: \"NULL\"\n"
+ },
+ {
+  "name": "random 269",
+  "value": {
+   "a": "{npm",
+   "x-y": -3,
+   "K9": 0
+  },
+  "out": "a: \"{npm\"\nx-y: -3\nK9: 0\n"
+ },
+ {
+  "name": "random 270",
+  "value": {
+   "x-y": true
+  },
+  "out": "x-y: true\n"
+ },
+ {
+  "name": "random 271",
+  "value": {
+   "K9": 2,
+   "b_c": "[]False",
+   "model": 0.25
+  },
+  "out": "K9: 2\nb_c: \"[]False\"\nmodel: 0.25\n"
+ },
+ {
+  "name": "random 272",
+  "value": {
+   "gates": true
+  },
+  "out": "gates: true\n"
+ },
+ {
+  "name": "random 273",
+  "value": {
+   "x-y": -3,
+   "b_c": true,
+   "L0": "null",
+   "a": "! #-1"
+  },
+  "out": "x-y: -3\nb_c: true\nL0: \"null\"\na: \"! #-1\"\n"
+ },
+ {
+  "name": "random 274",
+  "value": {
+   "model": "norun9",
+   "b_c": 2
+  },
+  "out": "model: norun9\nb_c: 2\n"
+ },
+ {
+  "name": "random 275",
+  "value": {
+   "x-y": "False#@]"
+  },
+  "out": "x-y: False#@]\n"
+ },
+ {
+  "name": "random 276",
+  "value": {
+   "b_c": 0,
+   "K9": 0.25,
+   "L0": "0;,test"
+  },
+  "out": "b_c: 0\nK9: 0.25\nL0: 0;,test\n"
+ },
+ {
+  "name": "random 277",
+  "value": {
+   "L0": -3,
+   "model": "|",
+   "x-y": "true+2 #*-1"
+  },
+  "out": "L0: -3\nmodel: \"|\"\nx-y: \"true+2 #*-1\"\n"
+ },
+ {
+  "name": "random 278",
+  "value": {
+   "b_c": true,
+   "x-y": 2,
+   "K9": ";npm#!0",
+   "model": "%-1 #False.inf"
+  },
+  "out": "b_c: true\nx-y: 2\nK9: ;npm#!0\nmodel: \"%-1 #False.inf\"\n"
+ },
+ {
+  "name": "random 279",
+  "value": {
+   "x-y": 123456789,
+   "gates": 2,
+   "L0": 0.25,
+   "model": true
+  },
+  "out": "x-y: 123456789\ngates: 2\nL0: 0.25\nmodel: true\n"
+ },
+ {
+  "name": "random 280",
+  "value": {
+   "model": "+20o7=\\"
+  },
+  "out": "model: +20o7=\\\n"
+ },
+ {
+  "name": "random 281",
+  "value": {
+   "b_c": "~",
+   "L0": 123456789,
+   "model": -3
+  },
+  "out": "b_c: \"~\"\nL0: 123456789\nmodel: -3\n"
+ },
+ {
+  "name": "random 282",
+  "value": {
+   "a": "run.51a"
+  },
+  "out": "a: run.51a\n"
+ },
+ {
+  "name": "random 283",
+  "value": {
+   "gates": "{[\\",
+   "K9": -3
+  },
+  "out": "gates: \"{[\\\\\"\nK9: -3\n"
+ },
+ {
+  "name": "random 284",
+  "value": {
+   "model": true
+  },
+  "out": "model: true\n"
+ },
+ {
+  "name": "random 285",
+  "value": {
+   "L0": true
+  },
+  "out": "L0: true\n"
+ },
+ {
+  "name": "random 286",
+  "value": {
+   "b_c": true,
+   "x-y": -3,
+   "L0": 123456789
+  },
+  "out": "b_c: true\nx-y: -3\nL0: 123456789\n"
+ },
+ {
+  "name": "random 287",
+  "value": {
+   "a": 0.25,
+   "L0": -3,
+   "b_c": "null>: : ",
+   "x-y": true
+  },
+  "out": "a: 0.25\nL0: -3\nb_c: \"null>: : \"\nx-y: true\n"
+ },
+ {
+  "name": "random 288",
+  "value": {
+   "model": "true",
+   "K9": -3
+  },
+  "out": "model: \"true\"\nK9: -3\n"
+ },
+ {
+  "name": "random 289",
+  "value": {
+   "x-y": true
+  },
+  "out": "x-y: true\n"
+ },
+ {
+  "name": "random 290",
+  "value": {
+   "gates": -3
+  },
+  "out": "gates: -3\n"
+ },
+ {
+  "name": "random 291",
+  "value": {
+   "x-y": "#0x1F="
+  },
+  "out": "x-y: \"#0x1F=\"\n"
+ },
+ {
+  "name": "random 292",
+  "value": {
+   "a": 0
+  },
+  "out": "a: 0\n"
+ },
+ {
+  "name": "random 293",
+  "value": {
+   "K9": true,
+   "model": true,
+   "b_c": 2,
+   "a": true
+  },
+  "out": "K9: true\nmodel: true\nb_c: 2\na: true\n"
+ },
+ {
+  "name": "random 294",
+  "value": {
+   "model": true,
+   "K9": 0.25,
+   "b_c": true
+  },
+  "out": "model: true\nK9: 0.25\nb_c: true\n"
+ },
+ {
+  "name": "random 295",
+  "value": {
+   "x-y": "'",
+   "b_c": "*_",
+   "model": "no1run\\.5"
+  },
+  "out": "x-y: \"'\"\nb_c: \"*_\"\nmodel: no1run\\.5\n"
+ },
+ {
+  "name": "random 296",
+  "value": {
+   "K9": "-1:False ",
+   "b_c": true,
+   "L0": true
+  },
+  "out": "K9: \"-1:False \"\nb_c: true\nL0: true\n"
+ },
+ {
+  "name": "random 297",
+  "value": {
+   "x-y": true,
+   "gates": "91e3~}",
+   "L0": true
+  },
+  "out": "x-y: true\ngates: 91e3~}\nL0: true\n"
+ },
+ {
+  "name": "random 298",
+  "value": {
+   "gates": "true",
+   "K9": true
+  },
+  "out": "gates: \"true\"\nK9: true\n"
+ },
+ {
+  "name": "random 299",
+  "value": {
+   "L0": 0,
+   "K9": 0,
+   "gates": true,
+   "a": "_"
+  },
+  "out": "L0: 0\nK9: 0\ngates: true\na: _\n"
+ },
+ {
+  "name": "random 300",
+  "value": {
+   "K9": 0,
+   "gates": 2
+  },
+  "out": "K9: 0\ngates: 2\n"
+ },
+ {
+  "name": "random 301",
+  "value": {
+   "x-y": "]"
+  },
+  "out": "x-y: \"]\"\n"
+ },
+ {
+  "name": "random 302",
+  "value": {
+   "a": true,
+   "K9": -3,
+   "L0": true,
+   "gates": true
+  },
+  "out": "a: true\nK9: -3\nL0: true\ngates: true\n"
+ },
+ {
+  "name": "random 303",
+  "value": {
+   "gates": 2,
+   "x-y": "Zxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  "out": "gates: 2\nx-y: Zxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+ },
+ {
+  "name": "random 304",
+  "value": {
+   "gates": -3,
+   "b_c": -3
+  },
+  "out": "gates: -3\nb_c: -3\n"
+ },
+ {
+  "name": "random 305",
+  "value": {
+   "x-y": "no",
+   "L0": true,
+   "gates": "?",
+   "K9": true,
+   "model": true
+  },
+  "out": "x-y: no\nL0: true\ngates: \"?\"\nK9: true\nmodel: true\n"
+ },
+ {
+  "name": "random 306",
+  "value": {
+   "b_c": 123456789,
+   "K9": "\"run||,",
+   "model": true
+  },
+  "out": "b_c: 123456789\nK9: '\"run||,'\nmodel: true\n"
+ },
+ {
+  "name": "random 307",
+  "value": {
+   "a": "%",
+   "x-y": "@`]xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  "out": "a: \"%\"\nx-y: \"@`]xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\n"
+ },
+ {
+  "name": "random 308",
+  "value": {
+   "model": "anull::1",
+   "K9": true
+  },
+  "out": "model: anull::1\nK9: true\n"
+ },
+ {
+  "name": "random 309",
+  "value": {
+   "x-y": true,
+   "a": "%!test"
+  },
+  "out": "x-y: true\na: \"%!test\"\n"
+ },
+ {
+  "name": "random 310",
+  "value": {
+   "x-y": 0.25,
+   "K9": "+2:0o7NULL'",
+   "L0": "npm"
+  },
+  "out": "x-y: 0.25\nK9: +2:0o7NULL'\nL0: npm\n"
+ },
+ {
+  "name": "random 311",
+  "value": {
+   "x-y": 0,
+   "a": "1 #run",
+   "b_c": true,
+   "gates": "~&|",
+   "model": true
+  },
+  "out": "x-y: 0\na: \"1 #run\"\nb_c: true\ngates: ~&|\nmodel: true\n"
+ },
+ {
+  "name": "random 312",
+  "value": {
+   "gates": 0,
+   "K9": true,
+   "model": 2
+  },
+  "out": "gates: 0\nK9: true\nmodel: 2\n"
+ },
+ {
+  "name": "random 313",
+  "value": {
+   "K9": ".5",
+   "gates": true,
+   "L0": 0
+  },
+  "out": "K9: \".5\"\ngates: true\nL0: 0\n"
+ },
+ {
+  "name": "random 314",
+  "value": {
+   "model": "test("
+  },
+  "out": "model: test(\n"
+ },
+ {
+  "name": "random 315",
+  "value": {
+   "K9": true,
+   "gates": 0,
+   "L0": true,
+   "a": "\"\\1e3run0",
+   "x-y": "?"
+  },
+  "out": "K9: true\ngates: 0\nL0: true\na: '\"\\1e3run0'\nx-y: \"?\"\n"
+ },
+ {
+  "name": "random 316",
+  "value": {
+   "b_c": true,
+   "a": ":9",
+   "L0": -3
+  },
+  "out": "b_c: true\na: :9\nL0: -3\n"
+ },
+ {
+  "name": "random 317",
+  "value": {
+   "x-y": 2,
+   "L0": "{[run",
+   "K9": true,
+   "model": true
+  },
+  "out": "x-y: 2\nL0: \"{[run\"\nK9: true\nmodel: true\n"
+ },
+ {
+  "name": "random 318",
+  "value": {
+   "b_c": 123456789,
+   "K9": true,
+   "x-y": true,
+   "L0": 0.25
+  },
+  "out": "b_c: 123456789\nK9: true\nx-y: true\nL0: 0.25\n"
+ },
+ {
+  "name": "random 319",
+  "value": {
+   "gates": true,
+   "K9": "]xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;"
+  },
+  "out": "gates: true\nK9: \"]xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;\"\n"
+ },
+ {
+  "name": "random 320",
+  "value": {
+   "a": "0!{",
+   "gates": 2,
+   "L0": 0
+  },
+  "out": "a: 0!{\ngates: 2\nL0: 0\n"
+ },
+ {
+  "name": "random 321",
+  "value": {
+   "b_c": true
+  },
+  "out": "b_c: true\n"
+ },
+ {
+  "name": "random 322",
+  "value": {
+   "K9": -3
+  },
+  "out": "K9: -3\n"
+ },
+ {
+  "name": "random 323",
+  "value": {
+   "L0": true,
+   "x-y": true,
+   "model": "+2`"
+  },
+  "out": "L0: true\nx-y: true\nmodel: +2`\n"
+ },
+ {
+  "name": "random 324",
+  "value": {
+   "a": 2,
+   "L0": 123456789,
+   "b_c": 2,
+   "K9": "@a"
+  },
+  "out": "a: 2\nL0: 123456789\nb_c: 2\nK9: \"@a\"\n"
+ },
+ {
+  "name": "random 325",
+  "value": {
+   "L0": 0.25
+  },
+  "out": "L0: 0.25\n"
+ },
+ {
+  "name": "random 326",
+  "value": {
+   "gates": 0
+  },
+  "out": "gates: 0\n"
+ },
+ {
+  "name": "random 327",
+  "value": {
+   "a": true,
+   "L0": "#\"1e3\\",
+   "x-y": "$}",
+   "K9": 2
+  },
+  "out": "a: true\nL0: '#\"1e3\\'\nx-y: $}\nK9: 2\n"
+ },
+ {
+  "name": "random 328",
+  "value": {
+   "x-y": "@",
+   "L0": "0o7[",
+   "model": 123456789,
+   "b_c": "False1e3"
+  },
+  "out": "x-y: \"@\"\nL0: 0o7[\nmodel: 123456789\nb_c: False1e3\n"
+ },
+ {
+  "name": "random 329",
+  "value": {
+   "a": "1.NaN90NULL",
+   "b_c": "~;~?}",
+   "K9": true
+  },
+  "out": "a: 1.NaN90NULL\nb_c: ~;~?}\nK9: true\n"
+ },
+ {
+  "name": "random 330",
+  "value": {
+   "b_c": " #,0o7/",
+   "L0": ",0o7:Z",
+   "a": ")1e3+2yes+2"
+  },
+  "out": "b_c: \" #,0o7/\"\nL0: \",0o7:Z\"\na: )1e3+2yes+2\n"
+ },
+ {
+  "name": "random 331",
+  "value": {
+   "L0": true,
+   "a": 123456789,
+   "K9": "_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  "out": "L0: true\na: 123456789\nK9: _xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+ },
+ {
+  "name": "random 332",
+  "value": {
+   "a": true,
+   "K9": "\\#",
+   "gates": true
+  },
+  "out": "a: true\nK9: \\#\ngates: true\n"
+ },
+ {
+  "name": "random 333",
+  "value": {
+   "L0": "False #",
+   "model": "run[#",
+   "x-y": true
+  },
+  "out": "L0: \"False #\"\nmodel: run[#\nx-y: true\n"
+ },
+ {
+  "name": "random 334",
+  "value": {
+   "x-y": "!,Z",
+   "a": "0o7]?",
+   "L0": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  "out": "x-y: \"!,Z\"\na: 0o7]?\nL0: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+ },
+ {
+  "name": "random 335",
+  "value": {
+   "L0": 0.25,
+   "K9": 0.25,
+   "gates": "npm=no:"
+  },
+  "out": "L0: 0.25\nK9: 0.25\ngates: \"npm=no:\"\n"
+ },
+ {
+  "name": "random 336",
+  "value": {
+   "a": "{9"
+  },
+  "out": "a: \"{9\"\n"
+ },
+ {
+  "name": "random 337",
+  "value": {
+   "a": ">_9"
+  },
+  "out": "a: \">_9\"\n"
+ },
+ {
+  "name": "random 338",
+  "value": {
+   "a": "\\",
+   "L0": true
+  },
+  "out": "a: \\\nL0: true\n"
+ },
+ {
+  "name": "random 339",
+  "value": {
+   "b_c": 0.25,
+   "K9": 0.25
+  },
+  "out": "b_c: 0.25\nK9: 0.25\n"
+ },
+ {
+  "name": "random 340",
+  "value": {
+   "model": 0,
+   "K9": true,
+   "a": true,
+   "L0": true
+  },
+  "out": "model: 0\nK9: true\na: true\nL0: true\n"
+ },
+ {
+  "name": "random 341",
+  "value": {
+   "K9": true,
+   "a": "#true\\test@"
+  },
+  "out": "K9: true\na: \"#true\\\\test@\"\n"
+ },
+ {
+  "name": "random 342",
+  "value": {
+   "gates": true,
+   "x-y": "&@:\"_"
+  },
+  "out": "gates: true\nx-y: '&@:\"_'\n"
+ },
+ {
+  "name": "random 343",
+  "value": {
+   "model": 0.25,
+   "K9": true,
+   "L0": 2
+  },
+  "out": "model: 0.25\nK9: true\nL0: 2\n"
+ },
+ {
+  "name": "random 344",
+  "value": {
+   "b_c": true,
+   "gates": true,
+   "x-y": "NULL9"
+  },
+  "out": "b_c: true\ngates: true\nx-y: NULL9\n"
+ },
+ {
+  "name": "random 345",
+  "value": {
+   "K9": "=((",
+   "model": ").NaN%NULL[",
+   "L0": 0.25
+  },
+  "out": "K9: =((\nmodel: ).NaN%NULL[\nL0: 0.25\n"
+ },
+ {
+  "name": "random 346",
+  "value": {
+   "model": "+2",
+   "x-y": "NULL",
+   "b_c": true,
+   "K9": 2
+  },
+  "out": "model: \"+2\"\nx-y: \"NULL\"\nb_c: true\nK9: 2\n"
+ },
+ {
+  "name": "random 347",
+  "value": {
+   "a": true,
+   "x-y": 0.25
+  },
+  "out": "a: true\nx-y: 0.25\n"
+ },
+ {
+  "name": "random 348",
+  "value": {
+   "b_c": 0
+  },
+  "out": "b_c: 0\n"
+ },
+ {
+  "name": "random 349",
+  "value": {
+   "gates": "`",
+   "K9": true,
+   "L0": true,
+   "x-y": 123456789
+  },
+  "out": "gates: \"`\"\nK9: true\nL0: true\nx-y: 123456789\n"
+ },
+ {
+  "name": "random 350",
+  "value": {
+   "b_c": 123456789
+  },
+  "out": "b_c: 123456789\n"
+ },
+ {
+  "name": "random 351",
+  "value": {
+   "K9": "%#npmrun "
+  },
+  "out": "K9: \"%#npmrun \"\n"
+ },
+ {
+  "name": "random 352",
+  "value": {
+   "a": "`%' #?",
+   "L0": "9",
+   "gates": ".inf0x1F"
+  },
+  "out": "a: \"`%' #?\"\nL0: \"9\"\ngates: .inf0x1F\n"
+ },
+ {
+  "name": "random 353",
+  "value": {
+   "L0": "`:$",
+   "a": 2
+  },
+  "out": "L0: \"`:$\"\na: 2\n"
+ },
+ {
+  "name": "random 354",
+  "value": {
+   "L0": "a"
+  },
+  "out": "L0: a\n"
+ },
+ {
+  "name": "random 355",
+  "value": {
+   "model": 0.25,
+   "gates": 123456789
+  },
+  "out": "model: 0.25\ngates: 123456789\n"
+ },
+ {
+  "name": "random 356",
+  "value": {
+   "L0": "=(\":",
+   "b_c": true,
+   "K9": "1e3!)!"
+  },
+  "out": "L0: '=(\":'\nb_c: true\nK9: 1e3!)!\n"
+ },
+ {
+  "name": "random 357",
+  "value": {
+   "model": "# #]"
+  },
+  "out": "model: \"# #]\"\n"
+ },
+ {
+  "name": "random 358",
+  "value": {
+   "a": 2,
+   "x-y": true,
+   "L0": true,
+   "model": 2
+  },
+  "out": "a: 2\nx-y: true\nL0: true\nmodel: 2\n"
+ },
+ {
+  "name": "random 359",
+  "value": {
+   "gates": "&#\\,}",
+   "K9": 0.25
+  },
+  "out": "gates: \"&#\\\\,}\"\nK9: 0.25\n"
+ },
+ {
+  "name": "random 360",
+  "value": {
+   "L0": true,
+   "model": "=*'",
+   "a": true,
+   "gates": 0
+  },
+  "out": "L0: true\nmodel: =*'\na: true\ngates: 0\n"
+ },
+ {
+  "name": "random 361",
+  "value": {
+   "gates": "/(~,\"",
+   "b_c": "*true"
+  },
+  "out": "gates: /(~,\"\nb_c: \"*true\"\n"
+ },
+ {
+  "name": "random 362",
+  "value": {
+   "K9": -3,
+   "gates": "_[a"
+  },
+  "out": "K9: -3\ngates: _[a\n"
+ },
+ {
+  "name": "random 363",
+  "value": {
+   "L0": true,
+   "gates": 2,
+   "model": true
+  },
+  "out": "L0: true\ngates: 2\nmodel: true\n"
+ },
+ {
+  "name": "random 364",
+  "value": {
+   "model": 2
+  },
+  "out": "model: 2\n"
+ },
+ {
+  "name": "random 365",
+  "value": {
+   "b_c": -3,
+   "model": -3
+  },
+  "out": "b_c: -3\nmodel: -3\n"
+ },
+ {
+  "name": "random 366",
+  "value": {
+   "model": true,
+   "K9": 2
+  },
+  "out": "model: true\nK9: 2\n"
+ },
+ {
+  "name": "random 367",
+  "value": {
+   "a": "//(#",
+   "K9": true
+  },
+  "out": "a: //(#\nK9: true\n"
+ },
+ {
+  "name": "random 368",
+  "value": {
+   "model": true,
+   "gates": "[;!-.5"
+  },
+  "out": "model: true\ngates: \"[;!-.5\"\n"
+ },
+ {
+  "name": "random 369",
+  "value": {
+   "x-y": 2,
+   "gates": true,
+   "model": "_",
+   "b_c": "test0[1"
+  },
+  "out": "x-y: 2\ngates: true\nmodel: _\nb_c: test0[1\n"
+ },
+ {
+  "name": "random 370",
+  "value": {
+   "gates": 0
+  },
+  "out": "gates: 0\n"
+ },
+ {
+  "name": "random 371",
+  "value": {
+   "model": "a~]test",
+   "x-y": true,
+   "L0": -3,
+   "a": "NULL}"
+  },
+  "out": "model: a~]test\nx-y: true\nL0: -3\na: NULL}\n"
+ },
+ {
+  "name": "random 372",
+  "value": {
+   "b_c": true,
+   "K9": ".NaNyesa`0x1F"
+  },
+  "out": "b_c: true\nK9: .NaNyesa`0x1F\n"
+ },
+ {
+  "name": "random 373",
+  "value": {
+   "gates": "\\0x1F",
+   "L0": true
+  },
+  "out": "gates: \\0x1F\nL0: true\n"
+ },
+ {
+  "name": "random 374",
+  "value": {
+   "model": "1.NaN?>",
+   "b_c": ">noZ"
+  },
+  "out": "model: 1.NaN?>\nb_c: \">noZ\"\n"
+ },
+ {
+  "name": "random 375",
+  "value": {
+   "L0": -3,
+   "K9": "test"
+  },
+  "out": "L0: -3\nK9: test\n"
+ },
+ {
+  "name": "random 376",
+  "value": {
+   "gates": "False*.59@",
+   "model": -3,
+   "b_c": true
+  },
+  "out": "gates: False*.59@\nmodel: -3\nb_c: true\n"
+ },
+ {
+  "name": "random 377",
+  "value": {
+   "b_c": 2,
+   "a": "0x1F",
+   "x-y": true
+  },
+  "out": "b_c: 2\na: \"0x1F\"\nx-y: true\n"
+ },
+ {
+  "name": "random 378",
+  "value": {
+   "x-y": null
+  },
+  "out": "x-y: null\n"
+ },
+ {
+  "name": "random 379",
+  "value": {
+   "L0": "/0",
+   "x-y": true
+  },
+  "out": "L0: /0\nx-y: true\n"
+ },
+ {
+  "name": "random 380",
+  "value": {
+   "x-y": 0,
+   "K9": ".test",
+   "model": ",0o7"
+  },
+  "out": "x-y: 0\nK9: .test\nmodel: \",0o7\"\n"
+ },
+ {
+  "name": "random 381",
+  "value": {
+   "gates": "[[*,",
+   "L0": "npm* ",
+   "b_c": "!run`"
+  },
+  "out": "gates: \"[[*,\"\nL0: \"npm* \"\nb_c: \"!run`\"\n"
+ },
+ {
+  "name": "random 382",
+  "value": {
+   "K9": "(\"",
+   "L0": 0.25,
+   "model": "_"
+  },
+  "out": "K9: (\"\nL0: 0.25\nmodel: _\n"
+ },
+ {
+  "name": "random 383",
+  "value": {
+   "x-y": "_.5NULL0o7",
+   "K9": 2,
+   "gates": true,
+   "a": "test1yes{0o7"
+  },
+  "out": "x-y: _.5NULL0o7\nK9: 2\ngates: true\na: test1yes{0o7\n"
+ },
+ {
+  "name": "random 384",
+  "value": {
+   "a": true,
+   "x-y": "%axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "b_c": "+2.inf"
+  },
+  "out": "a: true\nx-y: \"%axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\nb_c: +2.inf\n"
+ },
+ {
+  "name": "random 385",
+  "value": {
+   "K9": 0.25
+  },
+  "out": "K9: 0.25\n"
+ },
+ {
+  "name": "random 386",
+  "value": {
+   "L0": true,
+   "gates": "npm9npm"
+  },
+  "out": "L0: true\ngates: npm9npm\n"
+ },
+ {
+  "name": "random 387",
+  "value": {
+   "K9": true
+  },
+  "out": "K9: true\n"
+ },
+ {
+  "name": "random 388",
+  "value": {
+   "b_c": "1Z1",
+   "x-y": "yes0o7",
+   "gates": "1%&",
+   "K9": 0,
+   "model": ".NaN+2"
+  },
+  "out": "b_c: 1Z1\nx-y: yes0o7\ngates: 1%&\nK9: 0\nmodel: .NaN+2\n"
+ },
+ {
+  "name": "random 389",
+  "value": {
+   "K9": "0!",
+   "b_c": ",>@.",
+   "L0": "0x1F~-0NULL"
+  },
+  "out": "K9: 0!\nb_c: \",>@.\"\nL0: 0x1F~-0NULL\n"
+ },
+ {
+  "name": "random 390",
+  "value": {
+   "L0": true,
+   "b_c": "%9-1test",
+   "x-y": 2,
+   "model": " {1",
+   "a": true
+  },
+  "out": "L0: true\nb_c: \"%9-1test\"\nx-y: 2\nmodel: \" {1\"\na: true\n"
+ },
+ {
+  "name": "random 391",
+  "value": {
+   "a": 2
+  },
+  "out": "a: 2\n"
+ },
+ {
+  "name": "random 392",
+  "value": {
+   "L0": 2
+  },
+  "out": "L0: 2\n"
+ },
+ {
+  "name": "random 393",
+  "value": {
+   "K9": "a[=False1",
+   "L0": 0.25,
+   "b_c": ",False"
+  },
+  "out": "K9: a[=False1\nL0: 0.25\nb_c: \",False\"\n"
+ },
+ {
+  "name": "random 394",
+  "value": {
+   "L0": 0.25,
+   "model": true
+  },
+  "out": "L0: 0.25\nmodel: true\n"
+ },
+ {
+  "name": "random 395",
+  "value": {
+   "gates": true,
+   "b_c": true,
+   "model": "="
+  },
+  "out": "gates: true\nb_c: true\nmodel: =\n"
+ },
+ {
+  "name": "random 396",
+  "value": {
+   "L0": 0,
+   "x-y": 123456789
+  },
+  "out": "L0: 0\nx-y: 123456789\n"
+ },
+ {
+  "name": "random 397",
+  "value": {
+   "K9": true,
+   "L0": 0
+  },
+  "out": "K9: true\nL0: 0\n"
+ },
+ {
+  "name": "random 398",
+  "value": {
+   "gates": "!!noNULL@",
+   "x-y": 123456789,
+   "a": true
+  },
+  "out": "gates: \"!!noNULL@\"\nx-y: 123456789\na: true\n"
+ },
+ {
+  "name": "random 399",
+  "value": {
+   "L0": -3,
+   "K9": 123456789
+  },
+  "out": "L0: -3\nK9: 123456789\n"
+ },
+ {
+  "name": "random 400",
+  "value": {
+   "b_c": 0,
+   "L0": "nullNULL",
+   "model": ".inf?&",
+   "a": 0,
+   "K9": 123456789
+  },
+  "out": "b_c: 0\nL0: nullNULL\nmodel: .inf?&\na: 0\nK9: 123456789\n"
+ },
+ {
+  "name": "random 401",
+  "value": {
+   "K9": "0x1F-1/&",
+   "L0": 0.25,
+   "model": " "
+  },
+  "out": "K9: 0x1F-1/&\nL0: 0.25\nmodel: \" \"\n"
+ },
+ {
+  "name": "random 402",
+  "value": {
+   "model": ";!",
+   "L0": true
+  },
+  "out": "model: ;!\nL0: true\n"
+ },
+ {
+  "name": "random 403",
+  "value": {
+   "a": "\\~: =.inf",
+   "gates": "npm$",
+   "L0": true
+  },
+  "out": "a: \"\\\\~: =.inf\"\ngates: npm$\nL0: true\n"
+ },
+ {
+  "name": "random 404",
+  "value": {
+   "L0": "+2-?.}",
+   "gates": 0.25,
+   "x-y": true
+  },
+  "out": "L0: +2-?.}\ngates: 0.25\nx-y: true\n"
+ },
+ {
+  "name": "random 405",
+  "value": {
+   "model": true,
+   "x-y": true
+  },
+  "out": "model: true\nx-y: true\n"
+ },
+ {
+  "name": "random 406",
+  "value": {
+   "K9": true
+  },
+  "out": "K9: true\n"
+ },
+ {
+  "name": "random 407",
+  "value": {
+   "b_c": true,
+   "a": "NULL)@}9",
+   "L0": 2
+  },
+  "out": "b_c: true\na: NULL)@}9\nL0: 2\n"
+ },
+ {
+  "name": "random 408",
+  "value": {
+   "gates": "!Falsenull/"
+  },
+  "out": "gates: \"!Falsenull/\"\n"
+ },
+ {
+  "name": "random 409",
+  "value": {
+   "a": 2,
+   "b_c": true
+  },
+  "out": "a: 2\nb_c: true\n"
+ },
+ {
+  "name": "random 410",
+  "value": {
+   "b_c": "=>|",
+   "x-y": 2
+  },
+  "out": "b_c: =>|\nx-y: 2\n"
+ },
+ {
+  "name": "random 411",
+  "value": {
+   "model": 2,
+   "b_c": 2
+  },
+  "out": "model: 2\nb_c: 2\n"
+ },
+ {
+  "name": "random 412",
+  "value": {
+   "x-y": "`",
+   "K9": ",Z",
+   "gates": "!",
+   "b_c": true
+  },
+  "out": "x-y: \"`\"\nK9: \",Z\"\ngates: \"!\"\nb_c: true\n"
+ },
+ {
+  "name": "random 413",
+  "value": {
+   "K9": 2,
+   "gates": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx*_0x1Frun"
+  },
+  "out": "K9: 2\ngates: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx*_0x1Frun\n"
+ },
+ {
+  "name": "random 414",
+  "value": {
+   "a": true
+  },
+  "out": "a: true\n"
+ },
+ {
+  "name": "random 415",
+  "value": {
+   "b_c": 2,
+   "gates": 0,
+   "L0": "}no"
+  },
+  "out": "b_c: 2\ngates: 0\nL0: \"}no\"\n"
+ },
+ {
+  "name": "random 416",
+  "value": {
+   "b_c": "no1e3.5.inf",
+   "x-y": true,
+   "gates": true,
+   "model": "$0"
+  },
+  "out": "b_c: no1e3.5.inf\nx-y: true\ngates: true\nmodel: $0\n"
+ },
+ {
+  "name": "random 417",
+  "value": {
+   "gates": 0,
+   "b_c": "}",
+   "a": true
+  },
+  "out": "gates: 0\nb_c: \"}\"\na: true\n"
+ },
+ {
+  "name": "random 418",
+  "value": {
+   "a": "'`Z",
+   "K9": "/"
+  },
+  "out": "a: \"'`Z\"\nK9: /\n"
+ },
+ {
+  "name": "random 419",
+  "value": {
+   "gates": "&~test|",
+   "model": true,
+   "L0": true
+  },
+  "out": "gates: \"&~test|\"\nmodel: true\nL0: true\n"
+ },
+ {
+  "name": "random 420",
+  "value": {
+   "K9": "\\",
+   "a": true,
+   "model": "Z",
+   "gates": true
+  },
+  "out": "K9: \\\na: true\nmodel: Z\ngates: true\n"
+ },
+ {
+  "name": "random 421",
+  "value": {
+   "K9": "0x1F!"
+  },
+  "out": "K9: 0x1F!\n"
+ },
+ {
+  "name": "random 422",
+  "value": {
+   "gates": true,
+   "K9": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxnpm.5"
+  },
+  "out": "gates: true\nK9: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxnpm.5\n"
+ },
+ {
+  "name": "random 423",
+  "value": {
+   "gates": true,
+   "x-y": true,
+   "L0": "!+2:"
+  },
+  "out": "gates: true\nx-y: true\nL0: \"!+2:\"\n"
+ },
+ {
+  "name": "random 424",
+  "value": {
+   "b_c": ".NaN.a",
+   "gates": "null.5"
+  },
+  "out": "b_c: .NaN.a\ngates: null.5\n"
+ },
+ {
+  "name": "random 425",
+  "value": {
+   "a": true
+  },
+  "out": "a: true\n"
+ },
+ {
+  "name": "random 426",
+  "value": {
+   "model": true,
+   "gates": 2,
+   "K9": 0.25,
+   "L0": 123456789
+  },
+  "out": "model: true\ngates: 2\nK9: 0.25\nL0: 123456789\n"
+ },
+ {
+  "name": "random 427",
+  "value": {
+   "K9": 123456789,
+   "gates": true,
+   "b_c": 123456789
+  },
+  "out": "K9: 123456789\ngates: true\nb_c: 123456789\n"
+ },
+ {
+  "name": "random 428",
+  "value": {
+   "model": "&`?"
+  },
+  "out": "model: \"&`?\"\n"
+ },
+ {
+  "name": "random 429",
+  "value": {
+   "x-y": "/Zrun",
+   "a": true,
+   "b_c": true
+  },
+  "out": "x-y: /Zrun\na: true\nb_c: true\n"
+ },
+ {
+  "name": "random 430",
+  "value": {
+   "b_c": ".NaN>.inf"
+  },
+  "out": "b_c: .NaN>.inf\n"
+ },
+ {
+  "name": "random 431",
+  "value": {
+   "b_c": 0,
+   "L0": "`run.inf",
+   "model": "':'="
+  },
+  "out": "b_c: 0\nL0: \"`run.inf\"\nmodel: \"':'=\"\n"
+ },
+ {
+  "name": "random 432",
+  "value": {
+   "x-y": true,
+   "a": "`(.;\"",
+   "K9": -3
+  },
+  "out": "x-y: true\na: '`(.;\"'\nK9: -3\n"
+ },
+ {
+  "name": "random 433",
+  "value": {
+   "a": true,
+   "model": "@&null",
+   "L0": true
+  },
+  "out": "a: true\nmodel: \"@&null\"\nL0: true\n"
+ },
+ {
+  "name": "random 434",
+  "value": {
+   "model": "0$&[1"
+  },
+  "out": "model: 0$&[1\n"
+ },
+ {
+  "name": "random 435",
+  "value": {
+   "b_c": "`}:",
+   "L0": 123456789
+  },
+  "out": "b_c: \"`}:\"\nL0: 123456789\n"
+ },
+ {
+  "name": "random 436",
+  "value": {
+   "a": "{?[_: "
+  },
+  "out": "a: \"{?[_: \"\n"
+ },
+ {
+  "name": "random 437",
+  "value": {
+   "K9": -3,
+   "b_c": true
+  },
+  "out": "K9: -3\nb_c: true\n"
+ },
+ {
+  "name": "random 438",
+  "value": {
+   "gates": "/"
+  },
+  "out": "gates: /\n"
+ },
+ {
+  "name": "random 439",
+  "value": {
+   "model": true,
+   "b_c": "): -1?:",
+   "K9": 0,
+   "gates": ": -1"
+  },
+  "out": "model: true\nb_c: \"): -1?:\"\nK9: 0\ngates: \": -1\"\n"
+ },
+ {
+  "name": "random 440",
+  "value": {
+   "model": 0
+  },
+  "out": "model: 0\n"
+ },
+ {
+  "name": "random 441",
+  "value": {
+   "K9": 123456789,
+   "x-y": "npm: |-1run",
+   "b_c": "0x1F",
+   "gates": 0
+  },
+  "out": "K9: 123456789\nx-y: \"npm: |-1run\"\nb_c: \"0x1F\"\ngates: 0\n"
+ },
+ {
+  "name": "random 442",
+  "value": {
+   "model": true,
+   "gates": "\\xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx NULL'"
+  },
+  "out": "model: true\ngates: \\xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx NULL'\n"
+ },
+ {
+  "name": "random 443",
+  "value": {
+   "b_c": 123456789
+  },
+  "out": "b_c: 123456789\n"
+ },
+ {
+  "name": "random 444",
+  "value": {
+   "model": ",test>"
+  },
+  "out": "model: \",test>\"\n"
+ },
+ {
+  "name": "random 445",
+  "value": {
+   "model": ".infFalse/\"",
+   "a": "$?)",
+   "x-y": 2
+  },
+  "out": "model: .infFalse/\"\na: $?)\nx-y: 2\n"
+ },
+ {
+  "name": "random 446",
+  "value": {
+   "gates": 0.25,
+   "b_c": 2,
+   "L0": true,
+   "a": "yesNULL"
+  },
+  "out": "gates: 0.25\nb_c: 2\nL0: true\na: yesNULL\n"
+ },
+ {
+  "name": "random 447",
+  "value": {
+   "model": 0.25,
+   "L0": 0.25,
+   "x-y": "a"
+  },
+  "out": "model: 0.25\nL0: 0.25\nx-y: a\n"
+ },
+ {
+  "name": "random 448",
+  "value": {
+   "K9": true
+  },
+  "out": "K9: true\n"
+ },
+ {
+  "name": "random 449",
+  "value": {
+   "b_c": true,
+   "K9": 123456789,
+   "a": ")run.5*-",
+   "model": true,
+   "x-y": 123456789
+  },
+  "out": "b_c: true\nK9: 123456789\na: )run.5*-\nmodel: true\nx-y: 123456789\n"
+ },
+ {
+  "name": "random 450",
+  "value": {
+   "gates": true,
+   "K9": true,
+   "b_c": "9"
+  },
+  "out": "gates: true\nK9: true\nb_c: \"9\"\n"
+ },
+ {
+  "name": "random 451",
+  "value": {
+   "gates": true,
+   "a": -3,
+   "x-y": 0
+  },
+  "out": "gates: true\na: -3\nx-y: 0\n"
+ },
+ {
+  "name": "random 452",
+  "value": {
+   "K9": 0.25
+  },
+  "out": "K9: 0.25\n"
+ },
+ {
+  "name": "random 453",
+  "value": {
+   "L0": 0.25,
+   "K9": true,
+   "b_c": true
+  },
+  "out": "L0: 0.25\nK9: true\nb_c: true\n"
+ },
+ {
+  "name": "random 454",
+  "value": {
+   "b_c": true,
+   "gates": 123456789
+  },
+  "out": "b_c: true\ngates: 123456789\n"
+ },
+ {
+  "name": "random 455",
+  "value": {
+   "b_c": "*1e3true~0x1F",
+   "L0": ":(*!",
+   "gates": 123456789
+  },
+  "out": "b_c: \"*1e3true~0x1F\"\nL0: :(*!\ngates: 123456789\n"
+ },
+ {
+  "name": "random 456",
+  "value": {
+   "gates": "False_ &"
+  },
+  "out": "gates: False_ &\n"
+ },
+ {
+  "name": "random 457",
+  "value": {
+   "a": true,
+   "model": true,
+   "K9": "9'"
+  },
+  "out": "a: true\nmodel: true\nK9: 9'\n"
+ },
+ {
+  "name": "random 458",
+  "value": {
+   "gates": -3,
+   "model": "null",
+   "L0": 0
+  },
+  "out": "gates: -3\nmodel: \"null\"\nL0: 0\n"
+ },
+ {
+  "name": "random 459",
+  "value": {
+   "a": true
+  },
+  "out": "a: true\n"
+ },
+ {
+  "name": "random 460",
+  "value": {
+   "x-y": "+2!."
+  },
+  "out": "x-y: +2!.\n"
+ },
+ {
+  "name": "random 461",
+  "value": {
+   "a": "NULL\\0#",
+   "model": "**"
+  },
+  "out": "a: NULL\\0#\nmodel: \"**\"\n"
+ },
+ {
+  "name": "random 462",
+  "value": {
+   "K9": true,
+   "L0": "atest:[",
+   "gates": "})!=1e3"
+  },
+  "out": "K9: true\nL0: atest:[\ngates: \"})!=1e3\"\n"
+ },
+ {
+  "name": "random 463",
+  "value": {
+   "K9": " #9=",
+   "L0": true,
+   "x-y": true,
+   "gates": 0.25
+  },
+  "out": "K9: \" #9=\"\nL0: true\nx-y: true\ngates: 0.25\n"
+ },
+ {
+  "name": "random 464",
+  "value": {
+   "gates": 0
+  },
+  "out": "gates: 0\n"
+ },
+ {
+  "name": "random 465",
+  "value": {
+   "x-y": 0,
+   "b_c": "\"",
+   "gates": true,
+   "a": true
+  },
+  "out": "x-y: 0\nb_c: '\"'\ngates: true\na: true\n"
+ },
+ {
+  "name": "random 466",
+  "value": {
+   "x-y": ".NaN",
+   "b_c": true
+  },
+  "out": "x-y: \".NaN\"\nb_c: true\n"
+ },
+ {
+  "name": "random 467",
+  "value": {
+   "x-y": true,
+   "b_c": "(,.NaN*",
+   "K9": true,
+   "gates": 0.25
+  },
+  "out": "x-y: true\nb_c: (,.NaN*\nK9: true\ngates: 0.25\n"
+ },
+ {
+  "name": "random 468",
+  "value": {
+   "b_c": -3,
+   "gates": "!)0o7 #`"
+  },
+  "out": "b_c: -3\ngates: \"!)0o7 #`\"\n"
+ },
+ {
+  "name": "random 469",
+  "value": {
+   "gates": true,
+   "model": true,
+   "K9": -3
+  },
+  "out": "gates: true\nmodel: true\nK9: -3\n"
+ },
+ {
+  "name": "random 470",
+  "value": {
+   "gates": true
+  },
+  "out": "gates: true\n"
+ },
+ {
+  "name": "random 471",
+  "value": {
+   "L0": "{`npmtrue.",
+   "b_c": "([0@9",
+   "a": 0,
+   "K9": true
+  },
+  "out": "L0: \"{`npmtrue.\"\nb_c: ([0@9\na: 0\nK9: true\n"
+ },
+ {
+  "name": "random 472",
+  "value": {
+   "model": true,
+   "gates": ".",
+   "b_c": "null#\\"
+  },
+  "out": "model: true\ngates: .\nb_c: null#\\\n"
+ },
+ {
+  "name": "random 473",
+  "value": {
+   "a": -3,
+   "L0": true
+  },
+  "out": "a: -3\nL0: true\n"
+ },
+ {
+  "name": "random 474",
+  "value": {
+   "x-y": 0.25,
+   "gates": 0
+  },
+  "out": "x-y: 0.25\ngates: 0\n"
+ },
+ {
+  "name": "random 475",
+  "value": {
+   "gates": "=",
+   "L0": true,
+   "model": 2
+  },
+  "out": "gates: =\nL0: true\nmodel: 2\n"
+ },
+ {
+  "name": "random 476",
+  "value": {
+   "a": -3
+  },
+  "out": "a: -3\n"
+ },
+ {
+  "name": "random 477",
+  "value": {
+   "L0": 2
+  },
+  "out": "L0: 2\n"
+ },
+ {
+  "name": "random 478",
+  "value": {
+   "x-y": ".inf",
+   "model": true,
+   "a": "%0true>NULL"
+  },
+  "out": "x-y: \".inf\"\nmodel: true\na: \"%0true>NULL\"\n"
+ },
+ {
+  "name": "random 479",
+  "value": {
+   "model": true,
+   "K9": "test.NaNxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx#"
+  },
+  "out": "model: true\nK9: test.NaNxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx#\n"
+ },
+ {
+  "name": "random 480",
+  "value": {
+   "K9": 0,
+   "b_c": 0
+  },
+  "out": "K9: 0\nb_c: 0\n"
+ },
+ {
+  "name": "random 481",
+  "value": {
+   "model": true
+  },
+  "out": "model: true\n"
+ },
+ {
+  "name": "random 482",
+  "value": {
+   "K9": true,
+   "gates": true
+  },
+  "out": "K9: true\ngates: true\n"
+ },
+ {
+  "name": "random 483",
+  "value": {
+   "L0": 123456789,
+   "b_c": "~~_",
+   "x-y": 0
+  },
+  "out": "L0: 123456789\nb_c: ~~_\nx-y: 0\n"
+ },
+ {
+  "name": "random 484",
+  "value": {
+   "x-y": 0.25
+  },
+  "out": "x-y: 0.25\n"
+ },
+ {
+  "name": "random 485",
+  "value": {
+   "x-y": " #no@(",
+   "L0": 0,
+   "b_c": 123456789,
+   "gates": "1e3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/;0"
+  },
+  "out": "x-y: \" #no@(\"\nL0: 0\nb_c: 123456789\ngates: 1e3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/;0\n"
+ },
+ {
+  "name": "random 486",
+  "value": {
+   "K9": 0.25,
+   "gates": "=yes[",
+   "a": "|",
+   "L0": 0,
+   "x-y": " #$_:"
+  },
+  "out": "K9: 0.25\ngates: =yes[\na: \"|\"\nL0: 0\nx-y: \" #$_:\"\n"
+ },
+ {
+  "name": "random 487",
+  "value": {
+   "gates": true
+  },
+  "out": "gates: true\n"
+ },
+ {
+  "name": "random 488",
+  "value": {
+   "a": true,
+   "model": 2
+  },
+  "out": "a: true\nmodel: 2\n"
+ },
+ {
+  "name": "random 489",
+  "value": {
+   "x-y": "$?test"
+  },
+  "out": "x-y: $?test\n"
+ },
+ {
+  "name": "random 490",
+  "value": {
+   "model": -3,
+   "x-y": "no",
+   "a": ","
+  },
+  "out": "model: -3\nx-y: no\na: \",\"\n"
+ },
+ {
+  "name": "random 491",
+  "value": {
+   "L0": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\no]"
+  },
+  "out": "L0: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\no]\n"
+ },
+ {
+  "name": "random 492",
+  "value": {
+   "model": true,
+   "x-y": true
+  },
+  "out": "model: true\nx-y: true\n"
+ },
+ {
+  "name": "random 493",
+  "value": {
+   "L0": ".NaN{test",
+   "K9": 123456789,
+   "model": -3
+  },
+  "out": "L0: .NaN{test\nK9: 123456789\nmodel: -3\n"
+ },
+ {
+  "name": "random 494",
+  "value": {
+   "a": true,
+   "gates": true,
+   "K9": true
+  },
+  "out": "a: true\ngates: true\nK9: true\n"
+ },
+ {
+  "name": "random 495",
+  "value": {
+   "x-y": true
+  },
+  "out": "x-y: true\n"
+ },
+ {
+  "name": "random 496",
+  "value": {
+   "gates": 0.25
+  },
+  "out": "gates: 0.25\n"
+ },
+ {
+  "name": "random 497",
+  "value": {
+   "a": "-1'",
+   "K9": true,
+   "L0": true
+  },
+  "out": "a: -1'\nK9: true\nL0: true\n"
+ },
+ {
+  "name": "random 498",
+  "value": {
+   "L0": -3,
+   "b_c": "#1:a."
+  },
+  "out": "L0: -3\nb_c: \"#1:a.\"\n"
+ },
+ {
+  "name": "random 499",
+  "value": {
+   "model": "[-1,",
+   "a": true
+  },
+  "out": "model: \"[-1,\"\na: true\n"
+ },
+ {
+  "name": "random 500",
+  "value": {
+   "b_c": 123456789,
+   "L0": 0,
+   "K9": true
+  },
+  "out": "b_c: 123456789\nL0: 0\nK9: true\n"
+ },
+ {
+  "name": "random 501",
+  "value": {
+   "L0": true
+  },
+  "out": "L0: true\n"
+ },
+ {
+  "name": "random 502",
+  "value": {
+   "K9": true,
+   "L0": 0
+  },
+  "out": "K9: true\nL0: 0\n"
+ },
+ {
+  "name": "random 503",
+  "value": {
+   "gates": true,
+   "K9": "null)|_-",
+   "x-y": "'?#no/",
+   "L0": "/=NULL"
+  },
+  "out": "gates: true\nK9: null)|_-\nx-y: \"'?#no/\"\nL0: /=NULL\n"
+ },
+ {
+  "name": "random 504",
+  "value": {
+   "model": "NULLrun%no",
+   "b_c": 2,
+   "x-y": "FalseNULL&(Z"
+  },
+  "out": "model: NULLrun%no\nb_c: 2\nx-y: FalseNULL&(Z\n"
+ },
+ {
+  "name": "random 505",
+  "value": {
+   "b_c": "0o7),_",
+   "a": 2,
+   "gates": true
+  },
+  "out": "b_c: 0o7),_\na: 2\ngates: true\n"
+ },
+ {
+  "name": "random 506",
+  "value": {
+   "L0": -3
+  },
+  "out": "L0: -3\n"
+ },
+ {
+  "name": "random 507",
+  "value": {
+   "a": true,
+   "x-y": true,
+   "model": 2
+  },
+  "out": "a: true\nx-y: true\nmodel: 2\n"
+ },
+ {
+  "name": "random 508",
+  "value": {
+   "L0": "#\\(",
+   "model": true,
+   "x-y": "~)a"
+  },
+  "out": "L0: \"#\\\\(\"\nmodel: true\nx-y: ~)a\n"
+ },
+ {
+  "name": "random 509",
+  "value": {
+   "gates": "\"1e3test",
+   "model": "{0x1F}"
+  },
+  "out": "gates: '\"1e3test'\nmodel: \"{0x1F}\"\n"
+ },
+ {
+  "name": "random 510",
+  "value": {
+   "model": 0,
+   "b_c": 2
+  },
+  "out": "model: 0\nb_c: 2\n"
+ },
+ {
+  "name": "random 511",
+  "value": {
+   "b_c": true,
+   "a": "0x1F{\"0o7"
+  },
+  "out": "b_c: true\na: 0x1F{\"0o7\n"
+ },
+ {
+  "name": "random 512",
+  "value": {
+   "b_c": "})test;",
+   "gates": "?",
+   "model": true
+  },
+  "out": "b_c: \"})test;\"\ngates: \"?\"\nmodel: true\n"
+ },
+ {
+  "name": "random 513",
+  "value": {
+   "x-y": ".yes*|+2",
+   "K9": "*testtrue.5>",
+   "model": true
+  },
+  "out": "x-y: .yes*|+2\nK9: \"*testtrue.5>\"\nmodel: true\n"
+ },
+ {
+  "name": "random 514",
+  "value": {
+   "gates": "1e3yes#("
+  },
+  "out": "gates: 1e3yes#(\n"
+ },
+ {
+  "name": "random 515",
+  "value": {
+   "b_c": 0.25,
+   "K9": true
+  },
+  "out": "b_c: 0.25\nK9: true\n"
+ },
+ {
+  "name": "random 516",
+  "value": {
+   "model": 123456789,
+   "a": 2
+  },
+  "out": "model: 123456789\na: 2\n"
+ },
+ {
+  "name": "random 517",
+  "value": {
+   "model": "#",
+   "K9": "\\0o7"
+  },
+  "out": "model: \"#\"\nK9: \\0o7\n"
+ },
+ {
+  "name": "random 518",
+  "value": {
+   "b_c": true,
+   "model": "$&no1e3",
+   "gates": "$",
+   "L0": true
+  },
+  "out": "b_c: true\nmodel: $&no1e3\ngates: $\nL0: true\n"
+ },
+ {
+  "name": "random 519",
+  "value": {
+   "L0": ")~",
+   "model": -3,
+   "b_c": -3
+  },
+  "out": "L0: )~\nmodel: -3\nb_c: -3\n"
+ },
+ {
+  "name": "random 520",
+  "value": {
+   "b_c": true,
+   "K9": true,
+   "gates": 0.25,
+   "a": 0
+  },
+  "out": "b_c: true\nK9: true\ngates: 0.25\na: 0\n"
+ },
+ {
+  "name": "random 521",
+  "value": {
+   "model": "0`",
+   "L0": "#run;;.NaN"
+  },
+  "out": "model: 0`\nL0: \"#run;;.NaN\"\n"
+ },
+ {
+  "name": "random 522",
+  "value": {
+   "model": true
+  },
+  "out": "model: true\n"
+ },
+ {
+  "name": "random 523",
+  "value": {
+   "x-y": "nulltestZ",
+   "K9": true,
+   "gates": -3
+  },
+  "out": "x-y: nulltestZ\nK9: true\ngates: -3\n"
+ },
+ {
+  "name": "random 524",
+  "value": {
+   "L0": 2
+  },
+  "out": "L0: 2\n"
+ },
+ {
+  "name": "random 525",
+  "value": {
+   "gates": 123456789,
+   "x-y": true,
+   "L0": true
+  },
+  "out": "gates: 123456789\nx-y: true\nL0: true\n"
+ },
+ {
+  "name": "random 526",
+  "value": {
+   "a": "}a/,&"
+  },
+  "out": "a: \"}a/,&\"\n"
+ },
+ {
+  "name": "random 527",
+  "value": {
+   "x-y": 0,
+   "gates": "(test&run",
+   "K9": 0,
+   "model": 2
+  },
+  "out": "x-y: 0\ngates: (test&run\nK9: 0\nmodel: 2\n"
+ },
+ {
+  "name": "random 528",
+  "value": {
+   "K9": true
+  },
+  "out": "K9: true\n"
+ },
+ {
+  "name": "random 529",
+  "value": {
+   "x-y": true,
+   "L0": true,
+   "a": -3,
+   "gates": 2
+  },
+  "out": "x-y: true\nL0: true\na: -3\ngates: 2\n"
+ },
+ {
+  "name": "random 530",
+  "value": {
+   "L0": ":&.NaN?",
+   "x-y": ".NaN0o7/!",
+   "gates": -3
+  },
+  "out": "L0: :&.NaN?\nx-y: .NaN0o7/!\ngates: -3\n"
+ },
+ {
+  "name": "random 531",
+  "value": {
+   "model": -3,
+   "K9": 2,
+   "x-y": "\"[`xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "gates": "test",
+   "L0": true
+  },
+  "out": "model: -3\nK9: 2\nx-y: '\"[`xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'\ngates: test\nL0: true\n"
+ },
+ {
+  "name": "random 532",
+  "value": {
+   "a": "%"
+  },
+  "out": "a: \"%\"\n"
+ },
+ {
+  "name": "random 533",
+  "value": {
+   "K9": true,
+   "a": 123456789
+  },
+  "out": "K9: true\na: 123456789\n"
+ },
+ {
+  "name": "random 534",
+  "value": {
+   "L0": -3
+  },
+  "out": "L0: -3\n"
+ },
+ {
+  "name": "random 535",
+  "value": {
+   "model": "}%:null",
+   "a": 0,
+   "b_c": 123456789
+  },
+  "out": "model: \"}%:null\"\na: 0\nb_c: 123456789\n"
+ },
+ {
+  "name": "random 536",
+  "value": {
+   "a": true
+  },
+  "out": "a: true\n"
+ },
+ {
+  "name": "random 537",
+  "value": {
+   "L0": true
+  },
+  "out": "L0: true\n"
+ },
+ {
+  "name": "random 538",
+  "value": {
+   "x-y": 0
+  },
+  "out": "x-y: 0\n"
+ },
+ {
+  "name": "random 539",
+  "value": {
+   "b_c": true
+  },
+  "out": "b_c: true\n"
+ },
+ {
+  "name": "random 540",
+  "value": {
+   "a": 2,
+   "model": "\\"
+  },
+  "out": "a: 2\nmodel: \\\n"
+ },
+ {
+  "name": "random 541",
+  "value": {
+   "b_c": 0
+  },
+  "out": "b_c: 0\n"
+ },
+ {
+  "name": "random 542",
+  "value": {
+   "model": true,
+   "a": "1e3.inf\""
+  },
+  "out": "model: true\na: 1e3.inf\"\n"
+ },
+ {
+  "name": "random 543",
+  "value": {
+   "model": true,
+   "a": "$;[1e3-",
+   "gates": true
+  },
+  "out": "model: true\na: $;[1e3-\ngates: true\n"
+ },
+ {
+  "name": "random 544",
+  "value": {
+   "a": true,
+   "model": " %",
+   "K9": 0,
+   "b_c": "a\\0x1F"
+  },
+  "out": "a: true\nmodel: \" %\"\nK9: 0\nb_c: a\\0x1F\n"
+ },
+ {
+  "name": "random 545",
+  "value": {
+   "a": 2,
+   "K9": -3
+  },
+  "out": "a: 2\nK9: -3\n"
+ },
+ {
+  "name": "random 546",
+  "value": {
+   "x-y": "0_False+2]",
+   "L0": "test~`npm",
+   "K9": true,
+   "model": 123456789
+  },
+  "out": "x-y: 0_False+2]\nL0: test~`npm\nK9: true\nmodel: 123456789\n"
+ },
+ {
+  "name": "random 547",
+  "value": {
+   "x-y": 0,
+   "b_c": 2,
+   "L0": -3
+  },
+  "out": "x-y: 0\nb_c: 2\nL0: -3\n"
+ },
+ {
+  "name": "random 548",
+  "value": {
+   "model": "]=9.NaN",
+   "a": ",=(!",
+   "x-y": ";.5testyes%"
+  },
+  "out": "model: \"]=9.NaN\"\na: \",=(!\"\nx-y: ;.5testyes%\n"
+ },
+ {
+  "name": "random 549",
+  "value": {
+   "model": true,
+   "a": 0.25,
+   "K9": true,
+   "x-y": "/+2no0"
+  },
+  "out": "model: true\na: 0.25\nK9: true\nx-y: /+2no0\n"
+ },
+ {
+  "name": "random 550",
+  "value": {
+   "L0": 0,
+   "model": 0.25
+  },
+  "out": "L0: 0\nmodel: 0.25\n"
+ },
+ {
+  "name": "random 551",
+  "value": {
+   "model": -3,
+   "b_c": true,
+   "gates": ".NaN"
+  },
+  "out": "model: -3\nb_c: true\ngates: \".NaN\"\n"
+ },
+ {
+  "name": "random 552",
+  "value": {
+   "a": true
+  },
+  "out": "a: true\n"
+ },
+ {
+  "name": "random 553",
+  "value": {
+   "x-y": true,
+   "K9": true,
+   "model": true,
+   "b_c": true
+  },
+  "out": "x-y: true\nK9: true\nmodel: true\nb_c: true\n"
+ },
+ {
+  "name": "random 554",
+  "value": {
+   "b_c": ".5.",
+   "gates": ",9",
+   "a": -3
+  },
+  "out": "b_c: .5.\ngates: \",9\"\na: -3\n"
+ },
+ {
+  "name": "random 555",
+  "value": {
+   "K9": "test #1="
+  },
+  "out": "K9: \"test #1=\"\n"
+ },
+ {
+  "name": "random 556",
+  "value": {
+   "model": "\"]"
+  },
+  "out": "model: '\"]'\n"
+ },
+ {
+  "name": "random 557",
+  "value": {
+   "L0": 0,
+   "b_c": "~&|true"
+  },
+  "out": "L0: 0\nb_c: ~&|true\n"
+ },
+ {
+  "name": "random 558",
+  "value": {
+   "model": 2
+  },
+  "out": "model: 2\n"
+ },
+ {
+  "name": "random 559",
+  "value": {
+   "K9": true,
+   "a": 2,
+   "gates": ")-0o71e3|"
+  },
+  "out": "K9: true\na: 2\ngates: )-0o71e3|\n"
+ },
+ {
+  "name": "random 560",
+  "value": {
+   "a": "$0x1F\\False",
+   "b_c": true,
+   "model": "-1$truerun",
+   "L0": 2
+  },
+  "out": "a: $0x1F\\False\nb_c: true\nmodel: -1$truerun\nL0: 2\n"
+ },
+ {
+  "name": "random 561",
+  "value": {
+   "K9": true,
+   "L0": true,
+   "a": true,
+   "gates": "Z}-]*",
+   "x-y": true
+  },
+  "out": "K9: true\nL0: true\na: true\ngates: Z}-]*\nx-y: true\n"
+ },
+ {
+  "name": "random 562",
+  "value": {
+   "a": true,
+   "x-y": "0':"
+  },
+  "out": "a: true\nx-y: \"0':\"\n"
+ },
+ {
+  "name": "random 563",
+  "value": {
+   "a": true,
+   "x-y": -3,
+   "b_c": 2
+  },
+  "out": "a: true\nx-y: -3\nb_c: 2\n"
+ },
+ {
+  "name": "random 564",
+  "value": {
+   "K9": true,
+   "model": 0,
+   "b_c": 0.25,
+   "x-y": true
+  },
+  "out": "K9: true\nmodel: 0\nb_c: 0.25\nx-y: true\n"
+ },
+ {
+  "name": "random 565",
+  "value": {
+   "K9": 0
+  },
+  "out": "K9: 0\n"
+ },
+ {
+  "name": "random 566",
+  "value": {
+   "gates": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx(9\""
+  },
+  "out": "gates: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx(9\"\n"
+ },
+ {
+  "name": "random 567",
+  "value": {
+   "gates": true,
+   "a": "]?a,>",
+   "L0": -3
+  },
+  "out": "gates: true\na: \"]?a,>\"\nL0: -3\n"
+ },
+ {
+  "name": "random 568",
+  "value": {
+   "L0": true,
+   "K9": 123456789,
+   "a": true,
+   "gates": true
+  },
+  "out": "L0: true\nK9: 123456789\na: true\ngates: true\n"
+ },
+ {
+  "name": "random 569",
+  "value": {
+   "gates": "Znull",
+   "a": true,
+   "L0": 0.25
+  },
+  "out": "gates: Znull\na: true\nL0: 0.25\n"
+ },
+ {
+  "name": "random 570",
+  "value": {
+   "x-y": true,
+   "a": -3
+  },
+  "out": "x-y: true\na: -3\n"
+ },
+ {
+  "name": "random 571",
+  "value": {
+   "a": "0o7@*",
+   "gates": 0.25
+  },
+  "out": "a: 0o7@*\ngates: 0.25\n"
+ },
+ {
+  "name": "random 572",
+  "value": {
+   "model": ")[",
+   "K9": 123456789
+  },
+  "out": "model: )[\nK9: 123456789\n"
+ },
+ {
+  "name": "random 573",
+  "value": {
+   "K9": "]",
+   "b_c": 2,
+   "x-y": "1e3{",
+   "L0": true
+  },
+  "out": "K9: \"]\"\nb_c: 2\nx-y: 1e3{\nL0: true\n"
+ },
+ {
+  "name": "random 574",
+  "value": {
+   "a": true
+  },
+  "out": "a: true\n"
+ },
+ {
+  "name": "random 575",
+  "value": {
+   "a": true
+  },
+  "out": "a: true\n"
+ },
+ {
+  "name": "random 576",
+  "value": {
+   "L0": true,
+   "model": "!| #"
+  },
+  "out": "L0: true\nmodel: \"!| #\"\n"
+ },
+ {
+  "name": "random 577",
+  "value": {
+   "gates": 123456789
+  },
+  "out": "gates: 123456789\n"
+ },
+ {
+  "name": "random 578",
+  "value": {
+   "L0": true,
+   "K9": "0"
+  },
+  "out": "L0: true\nK9: \"0\"\n"
+ },
+ {
+  "name": "random 579",
+  "value": {
+   "b_c": "0&.\\.",
+   "a": "1NULL-,;",
+   "model": 0
+  },
+  "out": "b_c: 0&.\\.\na: 1NULL-,;\nmodel: 0\n"
+ },
+ {
+  "name": "random 580",
+  "value": {
+   "a": "Z90o7>>",
+   "model": 0,
+   "b_c": -3
+  },
+  "out": "a: Z90o7>>\nmodel: 0\nb_c: -3\n"
+ },
+ {
+  "name": "random 581",
+  "value": {
+   "b_c": true,
+   "K9": ".5;",
+   "x-y": true,
+   "gates": true
+  },
+  "out": "b_c: true\nK9: .5;\nx-y: true\ngates: true\n"
+ },
+ {
+  "name": "random 582",
+  "value": {
+   "x-y": "+2|",
+   "model": 0,
+   "b_c": true
+  },
+  "out": "x-y: +2|\nmodel: 0\nb_c: true\n"
+ },
+ {
+  "name": "random 583",
+  "value": {
+   "gates": " #\"npm.infZ",
+   "x-y": 2,
+   "a": ".NaN"
+  },
+  "out": "gates: ' #\"npm.infZ'\nx-y: 2\na: \".NaN\"\n"
+ },
+ {
+  "name": "random 584",
+  "value": {
+   "gates": 0
+  },
+  "out": "gates: 0\n"
+ },
+ {
+  "name": "random 585",
+  "value": {
+   "x-y": true,
+   "b_c": 0.25,
+   "model": 0
+  },
+  "out": "x-y: true\nb_c: 0.25\nmodel: 0\n"
+ },
+ {
+  "name": "random 586",
+  "value": {
+   "L0": "run=|"
+  },
+  "out": "L0: run=|\n"
+ },
+ {
+  "name": "random 587",
+  "value": {
+   "gates": "\"",
+   "K9": "["
+  },
+  "out": "gates: '\"'\nK9: \"[\"\n"
+ },
+ {
+  "name": "random 588",
+  "value": {
+   "K9": ","
+  },
+  "out": "K9: \",\"\n"
+ },
+ {
+  "name": "random 589",
+  "value": {
+   "gates": -3
+  },
+  "out": "gates: -3\n"
+ },
+ {
+  "name": "random 590",
+  "value": {
+   "x-y": true,
+   "b_c": "_1e3{",
+   "L0": true
+  },
+  "out": "x-y: true\nb_c: _1e3{\nL0: true\n"
+ },
+ {
+  "name": "random 591",
+  "value": {
+   "gates": 123456789
+  },
+  "out": "gates: 123456789\n"
+ },
+ {
+  "name": "random 592",
+  "value": {
+   "model": true
+  },
+  "out": "model: true\n"
+ },
+ {
+  "name": "random 593",
+  "value": {
+   "model": "*",
+   "gates": -3
+  },
+  "out": "model: \"*\"\ngates: -3\n"
+ },
+ {
+  "name": "random 594",
+  "value": {
+   "a": true,
+   "K9": "0~/",
+   "x-y": "False(true"
+  },
+  "out": "a: true\nK9: 0~/\nx-y: False(true\n"
+ },
+ {
+  "name": "random 595",
+  "value": {
+   "x-y": -3,
+   "model": "test0x1F$.1",
+   "gates": true
+  },
+  "out": "x-y: -3\nmodel: test0x1F$.1\ngates: true\n"
+ },
+ {
+  "name": "random 596",
+  "value": {
+   "model": ".?'>",
+   "x-y": true,
+   "a": "0(\"/",
+   "L0": -3
+  },
+  "out": "model: .?'>\nx-y: true\na: 0(\"/\nL0: -3\n"
+ },
+ {
+  "name": "random 597",
+  "value": {
+   "gates": 2,
+   "model": true,
+   "x-y": 123456789
+  },
+  "out": "gates: 2\nmodel: true\nx-y: 123456789\n"
+ },
+ {
+  "name": "random 598",
+  "value": {
+   "a": true,
+   "K9": "npm.,:$",
+   "L0": true
+  },
+  "out": "a: true\nK9: npm.,:$\nL0: true\n"
+ },
+ {
+  "name": "random 599",
+  "value": {
+   "K9": 2,
+   "model": true,
+   "gates": true,
+   "L0": " $"
+  },
+  "out": "K9: 2\nmodel: true\ngates: true\nL0: \" $\"\n"
+ }
+]

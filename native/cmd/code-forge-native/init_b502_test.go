@@ -215,9 +215,9 @@ func TestB502InitHandOvers(t *testing.T) {
 		config string
 		reason string
 	}{
-		{[]string{"init"}, false, "", "init-setup"},
-		{[]string{"init", "--no-interaction", "--no-jev"}, false, "", "init-setup"},
-		{[]string{"init", "--coder-may-open-draft-pr", "yes", "--coder-may-push", "yes"}, false, "", "init-setup"},
+		{[]string{"init"}, false, "", "init-jev-key"},
+		{[]string{"init", "--no-interaction", "--no-jev"}, false, "", "init-doctor"},
+		{[]string{"init", "--coder-may-open-draft-pr", "yes", "--coder-may-push", "yes"}, false, "", "init-jev-key"},
 		{[]string{"init"}, true, "", "init-interactive"},
 		{[]string{"init", "--jev-ref", "https://my.1password.com/vaults/x/allitems/y"}, false, "", "init-jev-link"},
 		{[]string{"init", "--engine", "\xff"}, false, "", "init-arg-encoding"},

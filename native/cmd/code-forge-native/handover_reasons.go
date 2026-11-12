@@ -307,6 +307,15 @@ const (
 	hDoctorNativeBinary
 	hDoctorWorkerRegistry
 	hDoctorReviewStateRecord
+	hInitJevKey
+	hInitJevOp
+	hInitTools
+	hInitModels
+	hInitDoctor
+	hInitLinks
+	hInitConfigShape
+	hInitConfigCheck
+	hInitUserConfig
 )
 
 var handoverReasons = [...]string{
@@ -608,4 +617,13 @@ var handoverReasons = [...]string{
 	hDoctorNativeBinary:        "doctor-native-binary",
 	hDoctorWorkerRegistry:      "doctor-worker-registry",
 	hDoctorReviewStateRecord:   "doctor-review-state-record",
+	hInitJevKey:                "init-jev-key",
+	hInitJevOp:                 "init-jev-op",
+	hInitTools:                 "init-tools",
+	hInitModels:                "init-models",
+	hInitDoctor:                "init-doctor",
+	hInitLinks:                 "init-links",
+	hInitConfigShape:           "init-config-shape",
+	hInitConfigCheck:           "init-config-check",
+	hInitUserConfig:            "init-user-config",
 }

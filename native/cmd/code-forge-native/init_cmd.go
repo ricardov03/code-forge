@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -97,9 +98,10 @@ func initKeyValue(flag, value string) (string, string, string) {
 	return value[:eq], value[eq+1:], ""
 }
 
-// initShellWords is shellWords in flags.mjs; only its errors matter here.
-func initShellWords(text string) (int, string) {
-	words, has := 0, false
+// initShellWords is shellWords in flags.mjs: the words, or its error.
+func initShellWords(text string) ([]string, string) {
+	words, has := []string{}, false
+	var current strings.Builder
 	quote := rune(0)
 	runes := []rune(text)
 	for i := 0; i < len(runes); i++ {
@@ -108,32 +110,58 @@ func initShellWords(text string) (int, string) {
 		case quote == '\'':
 			if ch == '\'' {
 				quote = 0
+			} else {
+				current.WriteRune(ch)
 			}
 		case ch == '\\' && i+1 < len(runes):
 			i++
+			current.WriteRune(runes[i])
 			has = true
 		case quote == '"':
 			if ch == '"' {
 				quote = 0
+			} else {
+				current.WriteRune(ch)
 			}
 		case ch == '"' || ch == '\'':
 			quote, has = ch, true
 		case isJSSpace(ch):
 			if has {
-				words++
+				words = append(words, current.String())
 			}
+			current.Reset()
 			has = false
 		default:
+			current.WriteRune(ch)
 			has = true
 		}
 	}
 	if quote != 0 {
-		return 0, "--gate: unterminated quote"
+		return nil, "--gate: unterminated quote"
 	}
 	if has {
-		words++
+		words = append(words, current.String())
 	}
 	return words, ""
+}
+
+// initLevelValue is parseLevel's {level, spec}; spec keeps model, effort,
+// provider in that order.
+type initLevelValue struct {
+	level string
+	spec  ledger.Object
+}
+
+// initGateValue is the --gate value {name, argv}; argv is nil for none/null.
+type initGateValue struct {
+	name string
+	argv any
+}
+
+// initProofValue is the --proof value {key, value}.
+type initProofValue struct {
+	key   string
+	value any
 }
 
 // initConvert is convert in flags.mjs. It returns the value, a usage error,
@@ -158,6 +186,13 @@ func initConvert(flag, value string) (any, string, bool) {
 		if bad {
 			return nil, "--harness takes a comma list of " + strings.Join(initHarnessIDs, ", "), false
 		}
+		unique := []string{}
+		for _, id := range ids {
+			if !initHas(unique, id) {
+				unique = append(unique, id)
+			}
+		}
+		return unique, "", false
 	case "--provider", "--second-provider":
 		if !initHas(initProviders, value) {
 			return nil, flag + " must be one of " + strings.Join(initProviders, ", "), false
@@ -170,23 +205,30 @@ func initConvert(flag, value string) (any, string, bool) {
 		if !initHas([]string{"L0", "L1", "L2", "L3"}, level) {
 			return nil, "--level: level must be L0, L1, L2 or L3", false
 		}
-		body := rest
+		body, effort, provider := rest, "", ""
 		if at := strings.LastIndex(body, "@"); at >= 0 {
 			if !initHas(initProviders, body[at+1:]) {
 				return nil, "--level: unknown provider", false
 			}
-			body = body[:at]
+			provider, body = body[at+1:], body[:at]
 		}
 		if colon := strings.LastIndex(body, ":"); colon >= 0 {
 			if colon == len(body)-1 {
 				return nil, "--level: empty effort", false
 			}
-			body = body[:colon]
+			effort, body = body[colon+1:], body[:colon]
 		}
 		if body == "" {
 			return nil, "--level: empty model", false
 		}
-		return level, "", false
+		spec := ledger.Object{{Key: "model", Value: body}}
+		if effort != "" {
+			spec = append(spec, ledger.Field{Key: "effort", Value: effort})
+		}
+		if provider != "" {
+			spec = append(spec, ledger.Field{Key: "provider", Value: provider})
+		}
+		return initLevelValue{level, spec}, "", false
 	case "--multimodel":
 		if value != "on" && value != "off" {
 			return nil, "--multimodel must be on or off", false
@@ -216,6 +258,8 @@ func initConvert(flag, value string) (any, string, bool) {
 		if !initSoloProject.MatchString(value) {
 			return nil, "--solo-project must be a positive integer", false
 		}
+		n, _ := strconv.ParseFloat(value, 64)
+		return n, "", false
 	case "--gate":
 		name, cmd, msg := initKeyValue("--gate", value)
 		if msg != "" {
@@ -225,15 +269,20 @@ func initConvert(flag, value string) (any, string, bool) {
 			return nil, "--gate: gate must be one of test, lint, types, format", false
 		}
 		if cmd == "none" || cmd == "null" {
-			return nil, "", false
+			return initGateValue{name, nil}, "", false
 		}
 		words, msg := initShellWords(cmd)
 		if msg != "" {
 			return nil, msg, false
 		}
-		if words == 0 {
+		if len(words) == 0 {
 			return nil, "--gate: empty command", false
 		}
+		argv := []any{}
+		for _, w := range words {
+			argv = append(argv, w)
+		}
+		return initGateValue{name, argv}, "", false
 	case "--coder-may-push", "--coder-may-open-draft-pr":
 		if value != "yes" && value != "no" {
 			return nil, flag + " must be yes or no", false
@@ -247,9 +296,17 @@ func initConvert(flag, value string) (any, string, bool) {
 		if !initHas([]string{"isolation", "high", "link_dirs", "copy_untracked"}, key) {
 			return nil, "--proof: key must be one of isolation, high, link_dirs, copy_untracked", false
 		}
-		if key == "isolation" && raw != "export" && raw != "lock" {
-			return nil, "--proof isolation must be export or lock", false
+		if key == "isolation" {
+			if raw != "export" && raw != "lock" {
+				return nil, "--proof isolation must be export or lock", false
+			}
+			return initProofValue{key, raw}, "", false
 		}
+		list := []any{}
+		for _, item := range initCSV(raw) {
+			list = append(list, item)
+		}
+		return initProofValue{key, list}, "", false
 	}
 	return value, "", false
 }
@@ -286,7 +343,16 @@ func initParseArgs(args []string) (initParsed, string, bool) {
 			if flag == "--no-interaction" {
 				out.noInteraction = true
 			} else {
-				out.given = append(out.given, initGiven{flag, true})
+				value := any(true)
+				switch flag {
+				case "--copy":
+					value = "copy"
+				case "-g":
+					value = "global"
+				case "-p":
+					value = "project"
+				}
+				out.given = append(out.given, initGiven{flag, value})
 			}
 			continue
 		}
@@ -346,6 +412,8 @@ type initRefusal struct {
 	message string
 	hand    bool
 	reason  handoverReason
+	// existing: a .code-forge.yml was loaded (hInitSetup only)
+	existing bool
 }
 
 // initPlan decides, without side effects, what `init` does after the flags
@@ -390,7 +458,7 @@ func initPlan(parsed initParsed, home, cwd string, interactive bool) initRefusal
 	if draft == true && !initCoderMayPush(parsed, existing) {
 		return initRefusal{code: 2, message: initDraftRefusal}
 	}
-	return initRefusal{hand: true, reason: hInitSetup}
+	return initRefusal{hand: true, reason: hInitSetup, existing: existing != nil}
 }
 
 // initCoderMayPush is the coder_may_push answer of resolveAnswers.
@@ -483,6 +551,13 @@ func runInitVerb(args []string) int {
 	interactive := !parsed.noInteraction && !jsonMode
 	home := os.Getenv("HOME")
 	plan := initPlan(parsed, home, physicalCwd(), interactive)
+	if plan.hand && plan.reason == hInitSetup {
+		serve, reason := initSetupPlan(parsed, home, physicalCwd(), jsonMode, plan.existing)
+		if serve == nil {
+			return metaHandover("init", args, reason)
+		}
+		return metaServe("init", "", args, serve)
+	}
 	if plan.hand {
 		return metaHandover("init", args, plan.reason)
 	}
