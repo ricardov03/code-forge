@@ -1,0 +1,409 @@
+{
+ "fixture": {
+  "commit": {
+   "src/util.js": "export function helper(a) {\n  return a + 1;\n}\nexport const K = 2;\n",
+   "src/app.js": "import { helper } from './util.js';\n\nexport function run(x) {\n  return helper(x);\n}\n",
+   "src/main.js": "import { run } from './app.js';\nimport './legacy.js';\nrun(1);\n",
+   "src/legacy.js": "export const OLD = 1;\n",
+   "src/header.js": "import { helper } from './util.js';\nimport { K } from './util.js';\nimport { run } from './app.js';\n\nexport const v1 = helper(1) + K;\nexport const v2 = helper(2) + K;\nexport const v3 = helper(3) + K;\nexport const v4 = helper(4) + K;\nexport const v5 = helper(5) + K;\nexport const v6 = helper(6) + K;\nexport const v7 = helper(7) + K;\nexport const v8 = helper(8) + K;\nexport const v9 = helper(9) + K;\nexport const v10 = helper(10) + K;\nexport const v11 = helper(11) + K;\nexport const v12 = helper(12) + K;\nexport const v13 = helper(13) + K;\nexport const v14 = helper(14) + K;\nexport const v15 = helper(15) + K;\nexport const v16 = helper(16) + K;\nexport const v17 = helper(17) + K;\nexport const v18 = helper(18) + K;\nexport const v19 = helper(19) + K;\nexport const v20 = helper(20) + K;\nexport const v21 = helper(21) + K;\nexport const v22 = helper(22) + K;\nexport const v23 = helper(23) + K;\nexport const v24 = helper(24) + K;\nexport const v25 = helper(25) + K;\nexport const v26 = helper(26) + K;\nexport const v27 = helper(27) + K;\nexport const v28 = helper(28) + K;\nexport const v29 = helper(29) + K;\nexport const v30 = helper(30) + K;\nexport const v31 = helper(31) + K;\nexport const v32 = helper(32) + K;\nexport const v33 = helper(33) + K;\nexport const v34 = helper(34) + K;\nexport const v35 = helper(35) + K;\nexport const v36 = helper(36) + K;\nexport const v37 = helper(37) + K;\nexport const v38 = helper(38) + K;\nexport const v39 = helper(39) + K;\nexport const v40 = helper(40) + K;\nexport const v41 = helper(41) + K;\nexport const v42 = helper(42) + K;\nexport const v43 = helper(43) + K;\nexport const v44 = helper(44) + K;\nexport const v45 = helper(45) + K;\nexport const v46 = helper(46) + K;\nexport const v47 = helper(47) + K;\nexport const v48 = helper(48) + K;\nexport const v49 = helper(49) + K;\nexport const v50 = helper(50) + K;\nexport const v51 = helper(51) + K;\nexport const v52 = helper(52) + K;\nexport const v53 = helper(53) + K;\nexport const v54 = helper(54) + K;\nexport const v55 = helper(55) + K;\nexport const v56 = helper(56) + K;\nexport const v57 = helper(57) + K;\nexport const v58 = helper(58) + K;\nexport const v59 = helper(59) + K;\nexport const v60 = helper(60) + K;\nexport const v61 = helper(61) + K;\nexport const v62 = helper(62) + K;\nexport const v63 = helper(63) + K;\nexport const v64 = helper(64) + K;\nexport const v65 = helper(65) + K;\nexport const v66 = helper(66) + K;\nexport const v67 = helper(67) + K;\nexport const v68 = helper(68) + K;\nexport const v69 = helper(69) + K;\nexport const v70 = helper(70) + K;\nexport const v71 = helper(71) + K;\nexport const v72 = helper(72) + K;\nexport const v73 = helper(73) + K;\nexport const v74 = helper(74) + K;\nexport const v75 = helper(75) + K;\nexport const v76 = helper(76) + K;\nexport const v77 = helper(77) + K;\nexport const v78 = helper(78) + K;\nexport const v79 = helper(79) + K;\nexport const v80 = helper(80) + K;\nexport const v81 = helper(81) + K;\nexport const v82 = helper(82) + K;\nexport const v83 = helper(83) + K;\nexport const v84 = helper(84) + K;\nexport const v85 = helper(85) + K;\nexport const v86 = helper(86) + K;\nexport const v87 = helper(87) + K;\nexport const v88 = helper(88) + K;\nexport const v89 = helper(89) + K;\nexport const v90 = helper(90) + K;\nexport const v91 = helper(91) + K;\nexport const v92 = helper(92) + K;\nexport const v93 = helper(93) + K;\nexport const v94 = helper(94) + K;\nexport const v95 = helper(95) + K;\nexport const v96 = helper(96) + K;\nexport const v97 = helper(97) + K;\nexport const v98 = helper(98) + K;\nexport const v99 = helper(99) + K;\nexport const v100 = helper(100) + K;\nexport const v101 = helper(101) + K;\nexport const v102 = helper(102) + K;\nexport const v103 = helper(103) + K;\nexport const v104 = helper(104) + K;\nexport const v105 = helper(105) + K;\nexport const v106 = helper(106) + K;\nexport const v107 = helper(107) + K;\nexport const v108 = helper(108) + K;\nexport const v109 = helper(109) + K;\nexport const v110 = helper(110) + K;\nexport const v111 = helper(111) + K;\nexport const v112 = helper(112) + K;\nexport const v113 = helper(113) + K;\nexport const v114 = helper(114) + K;\nexport const v115 = helper(115) + K;\nexport const v116 = helper(116) + K;\nexport const v117 = helper(117) + K;\nexport const v118 = helper(118) + K;\nexport const v119 = helper(119) + K;\nexport const v120 = helper(120) + K;\nexport const v121 = helper(121) + K;\nexport const v122 = helper(122) + K;\nexport const v123 = helper(123) + K;\nexport const v124 = helper(124) + K;\nexport const v125 = helper(125) + K;\nexport const v126 = helper(126) + K;\nexport const v127 = helper(127) + K;\nexport const v128 = helper(128) + K;\nexport const v129 = helper(129) + K;\nexport const v130 = helper(130) + K;\nexport const v131 = helper(131) + K;\nexport const v132 = helper(132) + K;\nexport const v133 = helper(133) + K;\nexport const v134 = helper(134) + K;\nexport const v135 = helper(135) + K;\nexport const v136 = helper(136) + K;\nexport const v137 = helper(137) + K;\nexport const v138 = helper(138) + K;\nexport const v139 = helper(139) + K;\nexport const v140 = helper(140) + K;\nexport const v141 = helper(141) + K;\nexport const v142 = helper(142) + K;\nexport const v143 = helper(143) + K;\nexport const v144 = helper(144) + K;\nexport const v145 = helper(145) + K;\nexport const v146 = helper(146) + K;\nexport const v147 = helper(147) + K;\nexport const v148 = helper(148) + K;\nexport const v149 = helper(149) + K;\nexport const v150 = helper(150) + K;\nexport const v151 = helper(151) + K;\nexport const v152 = helper(152) + K;\nexport const v153 = helper(153) + K;\nexport const v154 = helper(154) + K;\nexport const v155 = helper(155) + K;\nexport const v156 = helper(156) + K;\nexport const v157 = helper(157) + K;\nexport const v158 = helper(158) + K;\nexport const v159 = helper(159) + K;\nexport const v160 = helper(160) + K;\nexport const v161 = helper(161) + K;\nexport const v162 = helper(162) + K;\nexport const v163 = helper(163) + K;\nexport const v164 = helper(164) + K;\nexport const v165 = helper(165) + K;\nexport const v166 = helper(166) + K;\nexport const v167 = helper(167) + K;\nexport const v168 = helper(168) + K;\nexport const v169 = helper(169) + K;\nexport const v170 = helper(170) + K;\nexport const v171 = helper(171) + K;\nexport const v172 = helper(172) + K;\nexport const v173 = helper(173) + K;\nexport const v174 = helper(174) + K;\nexport const v175 = helper(175) + K;\nexport const v176 = helper(176) + K;\nexport const v177 = helper(177) + K;\nexport const v178 = helper(178) + K;\nexport const v179 = helper(179) + K;\nexport const v180 = helper(180) + K;\nexport const v181 = helper(181) + K;\nexport const v182 = helper(182) + K;\nexport const v183 = helper(183) + K;\nexport const v184 = helper(184) + K;\nexport const v185 = helper(185) + K;\nexport const v186 = helper(186) + K;\nexport const v187 = helper(187) + K;\nexport const v188 = helper(188) + K;\nexport const v189 = helper(189) + K;\nexport const v190 = helper(190) + K;\nexport const v191 = helper(191) + K;\nexport const v192 = helper(192) + K;\nexport const v193 = helper(193) + K;\nexport const v194 = helper(194) + K;\nexport const v195 = helper(195) + K;\nexport const v196 = helper(196) + K;\nexport const v197 = helper(197) + K;\nexport const v198 = helper(198) + K;\nexport const v199 = helper(199) + K;\nexport const v200 = helper(200) + K;\nexport const v201 = helper(201) + K;\nexport const v202 = helper(202) + K;\nexport const v203 = helper(203) + K;\nexport const v204 = helper(204) + K;\nexport const v205 = helper(205) + K;\nexport const v206 = helper(206) + K;\nexport const v207 = helper(207) + K;\nexport const v208 = helper(208) + K;\nexport const v209 = helper(209) + K;\nexport const v210 = helper(210) + K;\nexport const v211 = helper(211) + K;\nexport const v212 = helper(212) + K;\nexport const v213 = helper(213) + K;\nexport const v214 = helper(214) + K;\nexport const v215 = helper(215) + K;\nexport const v216 = helper(216) + K;\nexport const v217 = helper(217) + K;\nexport const v218 = helper(218) + K;\nexport const v219 = helper(219) + K;\nexport const v220 = helper(220) + K;\nexport const v221 = helper(221) + K;\nexport const v222 = helper(222) + K;\nexport const v223 = helper(223) + K;\nexport const v224 = helper(224) + K;\nexport const v225 = helper(225) + K;\nexport const v226 = helper(226) + K;\nexport const v227 = helper(227) + K;\nexport const v228 = helper(228) + K;\nexport const v229 = helper(229) + K;\nexport const v230 = helper(230) + K;\nexport const v231 = helper(231) + K;\nexport const v232 = helper(232) + K;\nexport const v233 = helper(233) + K;\nexport const v234 = helper(234) + K;\nexport const v235 = helper(235) + K;\nexport const v236 = helper(236) + K;\nexport const v237 = helper(237) + K;\nexport const v238 = helper(238) + K;\nexport const v239 = helper(239) + K;\nexport const v240 = helper(240) + K;\nexport const v241 = helper(241) + K;\nexport const v242 = helper(242) + K;\nexport const v243 = helper(243) + K;\nexport const v244 = helper(244) + K;\nexport const v245 = helper(245) + K;\nexport const v246 = helper(246) + K;\nexport const v247 = helper(247) + K;\nexport const v248 = helper(248) + K;\nexport const v249 = helper(249) + K;\nexport const v250 = helper(250) + K;\nexport const v251 = helper(251) + K;\nexport const v252 = helper(252) + K;\nexport const v253 = helper(253) + K;\nexport const v254 = helper(254) + K;\nexport const v255 = helper(255) + K;\nexport const v256 = helper(256) + K;\nexport const v257 = helper(257) + K;\nexport const v258 = helper(258) + K;\nexport const v259 = helper(259) + K;\nexport const v260 = helper(260) + K;\nexport const v261 = helper(261) + K;\nexport const v262 = helper(262) + K;\nexport const v263 = helper(263) + K;\nexport const v264 = helper(264) + K;\nexport const v265 = helper(265) + K;\nexport const v266 = helper(266) + K;\nexport const v267 = helper(267) + K;\nexport const v268 = helper(268) + K;\nexport const v269 = helper(269) + K;\nexport const v270 = helper(270) + K;\nexport const v271 = helper(271) + K;\nexport const v272 = helper(272) + K;\nexport const v273 = helper(273) + K;\nexport const v274 = helper(274) + K;\nexport const v275 = helper(275) + K;\nexport const v276 = helper(276) + K;\nexport const v277 = helper(277) + K;\nexport const v278 = helper(278) + K;\nexport const v279 = helper(279) + K;\nexport const v280 = helper(280) + K;\nexport const v281 = helper(281) + K;\nexport const v282 = helper(282) + K;\nexport const v283 = helper(283) + K;\nexport const v284 = helper(284) + K;\nexport const v285 = helper(285) + K;\nexport const v286 = helper(286) + K;\nexport const v287 = helper(287) + K;\nexport const v288 = helper(288) + K;\nexport const v289 = helper(289) + K;\nexport const v290 = helper(290) + K;\nexport const v291 = helper(291) + K;\nexport const v292 = helper(292) + K;\nexport const v293 = helper(293) + K;\nexport const v294 = helper(294) + K;\nexport const v295 = helper(295) + K;\nexport const v296 = helper(296) + K;\nexport const v297 = helper(297) + K;\nexport const v298 = helper(298) + K;\nexport const v299 = helper(299) + K;\nexport const v300 = helper(300) + K;\nexport const v301 = helper(301) + K;\nexport const v302 = helper(302) + K;\nexport const v303 = helper(303) + K;\nexport const v304 = helper(304) + K;\nexport const v305 = helper(305) + K;\nexport const v306 = helper(306) + K;\nexport const v307 = helper(307) + K;\nexport const v308 = helper(308) + K;\nexport const v309 = helper(309) + K;\nexport const v310 = helper(310) + K;\nexport const v311 = helper(311) + K;\nexport const v312 = helper(312) + K;\nexport const v313 = helper(313) + K;\nexport const v314 = helper(314) + K;\nexport const v315 = helper(315) + K;\nexport const v316 = helper(316) + K;\nexport const v317 = helper(317) + K;\nexport const v318 = helper(318) + K;\nexport const v319 = helper(319) + K;\nexport const v320 = helper(320) + K;\nexport const v321 = helper(321) + K;\nexport const v322 = helper(322) + K;\nexport const v323 = helper(323) + K;\nexport const v324 = helper(324) + K;\nexport const v325 = helper(325) + K;\nexport const v326 = helper(326) + K;\nexport const v327 = helper(327) + K;\nexport const v328 = helper(328) + K;\nexport const v329 = helper(329) + K;\nexport const v330 = helper(330) + K;\nexport const v331 = helper(331) + K;\nexport const v332 = helper(332) + K;\nexport const v333 = helper(333) + K;\nexport const v334 = helper(334) + K;\nexport const v335 = helper(335) + K;\nexport const v336 = helper(336) + K;\nexport const v337 = helper(337) + K;\nexport const v338 = helper(338) + K;\nexport const v339 = helper(339) + K;\nexport const v340 = helper(340) + K;\nexport const v341 = helper(341) + K;\nexport const v342 = helper(342) + K;\nexport const v343 = helper(343) + K;\nexport const v344 = helper(344) + K;\nexport const v345 = helper(345) + K;\nexport const v346 = helper(346) + K;\nexport const v347 = helper(347) + K;\nexport const v348 = helper(348) + K;\nexport const v349 = helper(349) + K;\nexport const v350 = helper(350) + K;\nexport const v351 = helper(351) + K;\nexport const v352 = helper(352) + K;\nexport const v353 = helper(353) + K;\nexport const v354 = helper(354) + K;\nexport const v355 = helper(355) + K;\nexport const v356 = helper(356) + K;\nexport const v357 = helper(357) + K;\nexport const v358 = helper(358) + K;\nexport const v359 = helper(359) + K;\nexport const v360 = helper(360) + K;\nexport const v361 = helper(361) + K;\nexport const v362 = helper(362) + K;\nexport const v363 = helper(363) + K;\nexport const v364 = helper(364) + K;\nexport const v365 = helper(365) + K;\nexport const v366 = helper(366) + K;\nexport const v367 = helper(367) + K;\nexport const v368 = helper(368) + K;\nexport const v369 = helper(369) + K;\nexport const v370 = helper(370) + K;\nexport const v371 = helper(371) + K;\nexport const v372 = helper(372) + K;\nexport const v373 = helper(373) + K;\nexport const v374 = helper(374) + K;\nexport const v375 = helper(375) + K;\nexport const v376 = helper(376) + K;\nexport const v377 = helper(377) + K;\nexport const v378 = helper(378) + K;\nexport const v379 = helper(379) + K;\nexport const v380 = helper(380) + K;\nexport const v381 = helper(381) + K;\nexport const v382 = helper(382) + K;\nexport const v383 = helper(383) + K;\nexport const v384 = helper(384) + K;\nexport const v385 = helper(385) + K;\nexport const v386 = helper(386) + K;\nexport const v387 = helper(387) + K;\nexport const v388 = helper(388) + K;\nexport const v389 = helper(389) + K;\nexport const v390 = helper(390) + K;\nexport const v391 = helper(391) + K;\nexport const v392 = helper(392) + K;\nexport const v393 = helper(393) + K;\nexport const v394 = helper(394) + K;\nexport const v395 = helper(395) + K;\nexport const v396 = helper(396) + K;\nexport const v397 = helper(397) + K;\nexport const v398 = helper(398) + K;\nexport const v399 = helper(399) + K;\nexport const v400 = helper(400) + K;\nexport function last() {\n  return run(v1);\n}\n",
+   "styles/base.css": "body { margin: 0; }\n",
+   "styles/theme.css": "body { color: black; }\n",
+   "page.html": "<html><head><link rel=\"stylesheet\" href=\"styles/base.css\"><link rel=\"stylesheet\" href=\"styles/theme.css\"></head><body></body></html>\n",
+   "go/pkg/a.go": "package pkg\n\nfunc A() int { return 1 }\n",
+   "go/pkg/b.go": "package pkg\n\nfunc B() int { return A() }\n",
+   "go/pkg/a_test.go": "package pkg\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) {}\n",
+   "test/app.test.js": "import { readFileSync } from 'node:fs';\nimport assert from 'node:assert';\n\nassert.ok(true);\n",
+   "src/a.js": "// a\nexport function moveMe(items) {\n  const total = items.reduce((a, b) => a + b, 0);\n  const mean = total / items.length;\n  const spread = items.map((v) => (v - mean) ** 2);\n  return Math.sqrt(spread.reduce((a, b) => a + b, 0) / items.length);\n}\nexport const A = 1;\n",
+   "src/b.js": "// b\nexport const B = 1;\n",
+   "notes.txt": "one\ntwo\n",
+   "src/data.js": "export const d1 = 1;\nexport const d2 = 1;\nexport const d3 = 1;\nexport const d4 = 1;\nexport const d5 = 1;\nexport const d6 = 1;\nexport const d7 = 1;\nexport const d8 = 1;\nexport const d9 = 1;\nexport const d10 = 1;\nexport const d11 = 1;\nexport const d12 = 1;\nexport const d13 = 1;\nexport const d14 = 1;\nexport const d15 = 1;\nexport const d16 = 1;\nexport const d17 = 1;\nexport const d18 = 1;\nexport const d19 = 1;\nexport const d20 = 1;\nexport const d21 = 1;\nexport const d22 = 1;\nexport const d23 = 1;\nexport const d24 = 1;\nexport const d25 = 1;\nexport const d26 = 1;\nexport const d27 = 1;\nexport const d28 = 1;\nexport const d29 = 1;\nexport const d30 = 1;\nexport const d31 = 1;\nexport const d32 = 1;\nexport const d33 = 1;\nexport const d34 = 1;\nexport const d35 = 1;\nexport const d36 = 1;\nexport const d37 = 1;\nexport const d38 = 1;\nexport const d39 = 1;\nexport const d40 = 1;\nexport const d41 = 1;\nexport const d42 = 1;\nexport const d43 = 1;\nexport const d44 = 1;\nexport const d45 = 1;\nexport const d46 = 1;\nexport const d47 = 1;\nexport const d48 = 1;\nexport const d49 = 1;\nexport const d50 = 1;\nexport const d51 = 1;\nexport const d52 = 1;\nexport const d53 = 1;\nexport const d54 = 1;\nexport const d55 = 1;\nexport const d56 = 1;\nexport const d57 = 1;\nexport const d58 = 1;\nexport const d59 = 1;\nexport const d60 = 1;\nexport const d61 = 1;\nexport const d62 = 1;\nexport const d63 = 1;\nexport const d64 = 1;\nexport const d65 = 1;\nexport const d66 = 1;\nexport const d67 = 1;\nexport const d68 = 1;\nexport const d69 = 1;\nexport const d70 = 1;\nexport const d71 = 1;\nexport const d72 = 1;\nexport const d73 = 1;\nexport const d74 = 1;\nexport const d75 = 1;\nexport const d76 = 1;\nexport const d77 = 1;\nexport const d78 = 1;\nexport const d79 = 1;\nexport const d80 = 1;\nexport const d81 = 1;\nexport const d82 = 1;\nexport const d83 = 1;\nexport const d84 = 1;\nexport const d85 = 1;\nexport const d86 = 1;\nexport const d87 = 1;\nexport const d88 = 1;\nexport const d89 = 1;\nexport const d90 = 1;\nexport const d91 = 1;\nexport const d92 = 1;\nexport const d93 = 1;\nexport const d94 = 1;\nexport const d95 = 1;\nexport const d96 = 1;\nexport const d97 = 1;\nexport const d98 = 1;\nexport const d99 = 1;\nexport const d100 = 1;\nexport const d101 = 1;\nexport const d102 = 1;\nexport const d103 = 1;\nexport const d104 = 1;\nexport const d105 = 1;\nexport const d106 = 1;\nexport const d107 = 1;\nexport const d108 = 1;\nexport const d109 = 1;\nexport const d110 = 1;\nexport const d111 = 1;\nexport const d112 = 1;\nexport const d113 = 1;\nexport const d114 = 1;\nexport const d115 = 1;\nexport const d116 = 1;\nexport const d117 = 1;\nexport const d118 = 1;\nexport const d119 = 1;\nexport const d120 = 1;\nexport const d121 = 1;\nexport const d122 = 1;\nexport const d123 = 1;\nexport const d124 = 1;\nexport const d125 = 1;\nexport const d126 = 1;\nexport const d127 = 1;\nexport const d128 = 1;\nexport const d129 = 1;\nexport const d130 = 1;\nexport const d131 = 1;\nexport const d132 = 1;\nexport const d133 = 1;\nexport const d134 = 1;\nexport const d135 = 1;\nexport const d136 = 1;\nexport const d137 = 1;\nexport const d138 = 1;\nexport const d139 = 1;\nexport const d140 = 1;\nexport const d141 = 1;\nexport const d142 = 1;\nexport const d143 = 1;\nexport const d144 = 1;\nexport const d145 = 1;\nexport const d146 = 1;\nexport const d147 = 1;\nexport const d148 = 1;\nexport const d149 = 1;\nexport const d150 = 1;\nexport const d151 = 1;\nexport const d152 = 1;\nexport const d153 = 1;\nexport const d154 = 1;\nexport const d155 = 1;\nexport const d156 = 1;\nexport const d157 = 1;\nexport const d158 = 1;\nexport const d159 = 1;\nexport const d160 = 1;\nexport const d161 = 1;\nexport const d162 = 1;\nexport const d163 = 1;\nexport const d164 = 1;\nexport const d165 = 1;\nexport const d166 = 1;\nexport const d167 = 1;\nexport const d168 = 1;\nexport const d169 = 1;\nexport const d170 = 1;\nexport const d171 = 1;\nexport const d172 = 1;\nexport const d173 = 1;\nexport const d174 = 1;\nexport const d175 = 1;\nexport const d176 = 1;\nexport const d177 = 1;\nexport const d178 = 1;\nexport const d179 = 1;\nexport const d180 = 1;\nexport const d181 = 1;\nexport const d182 = 1;\nexport const d183 = 1;\nexport const d184 = 1;\nexport const d185 = 1;\nexport const d186 = 1;\nexport const d187 = 1;\nexport const d188 = 1;\nexport const d189 = 1;\nexport const d190 = 1;\nexport const d191 = 1;\nexport const d192 = 1;\nexport const d193 = 1;\nexport const d194 = 1;\nexport const d195 = 1;\nexport const d196 = 1;\nexport const d197 = 1;\nexport const d198 = 1;\nexport const d199 = 1;\nexport const d200 = 1;\nexport const d201 = 1;\nexport const d202 = 1;\nexport const d203 = 1;\nexport const d204 = 1;\nexport const d205 = 1;\nexport const d206 = 1;\nexport const d207 = 1;\nexport const d208 = 1;\nexport const d209 = 1;\nexport const d210 = 1;\nexport const d211 = 1;\nexport const d212 = 1;\nexport const d213 = 1;\nexport const d214 = 1;\nexport const d215 = 1;\nexport const d216 = 1;\nexport const d217 = 1;\nexport const d218 = 1;\nexport const d219 = 1;\nexport const d220 = 1;\nexport const d221 = 1;\nexport const d222 = 1;\nexport const d223 = 1;\nexport const d224 = 1;\nexport const d225 = 1;\nexport const d226 = 1;\nexport const d227 = 1;\nexport const d228 = 1;\nexport const d229 = 1;\nexport const d230 = 1;\nexport const d231 = 1;\nexport const d232 = 1;\nexport const d233 = 1;\nexport const d234 = 1;\nexport const d235 = 1;\nexport const d236 = 1;\nexport const d237 = 1;\nexport const d238 = 1;\nexport const d239 = 1;\nexport const d240 = 1;\nexport const d241 = 1;\nexport const d242 = 1;\nexport const d243 = 1;\nexport const d244 = 1;\nexport const d245 = 1;\nexport const d246 = 1;\nexport const d247 = 1;\nexport const d248 = 1;\nexport const d249 = 1;\nexport const d250 = 1;\nexport const d251 = 1;\nexport const d252 = 1;\nexport const d253 = 1;\nexport const d254 = 1;\nexport const d255 = 1;\nexport const d256 = 1;\nexport const d257 = 1;\nexport const d258 = 1;\nexport const d259 = 1;\nexport const d260 = 1;\nexport const d261 = 1;\nexport const d262 = 1;\nexport const d263 = 1;\nexport const d264 = 1;\nexport const d265 = 1;\nexport const d266 = 1;\nexport const d267 = 1;\nexport const d268 = 1;\nexport const d269 = 1;\nexport const d270 = 1;\nexport const d271 = 1;\nexport const d272 = 1;\nexport const d273 = 1;\nexport const d274 = 1;\nexport const d275 = 1;\nexport const d276 = 1;\nexport const d277 = 1;\nexport const d278 = 1;\nexport const d279 = 1;\nexport const d280 = 1;\nexport const d281 = 1;\nexport const d282 = 1;\nexport const d283 = 1;\nexport const d284 = 1;\nexport const d285 = 1;\nexport const d286 = 1;\nexport const d287 = 1;\nexport const d288 = 1;\nexport const d289 = 1;\nexport const d290 = 1;\nexport const d291 = 1;\nexport const d292 = 1;\nexport const d293 = 1;\nexport const d294 = 1;\nexport const d295 = 1;\nexport const d296 = 1;\nexport const d297 = 1;\nexport const d298 = 1;\nexport const d299 = 1;\nexport const d300 = 1;\nexport const d301 = 1;\nexport const d302 = 1;\nexport const d303 = 1;\nexport const d304 = 1;\nexport const d305 = 1;\nexport const d306 = 1;\nexport const d307 = 1;\nexport const d308 = 1;\nexport const d309 = 1;\nexport const d310 = 1;\nexport const d311 = 1;\nexport const d312 = 1;\nexport const d313 = 1;\nexport const d314 = 1;\nexport const d315 = 1;\nexport const d316 = 1;\nexport const d317 = 1;\nexport const d318 = 1;\nexport const d319 = 1;\nexport const d320 = 1;\nexport const d321 = 1;\nexport const d322 = 1;\nexport const d323 = 1;\nexport const d324 = 1;\nexport const d325 = 1;\nexport const d326 = 1;\nexport const d327 = 1;\nexport const d328 = 1;\nexport const d329 = 1;\nexport const d330 = 1;\nexport const d331 = 1;\nexport const d332 = 1;\nexport const d333 = 1;\nexport const d334 = 1;\nexport const d335 = 1;\nexport const d336 = 1;\nexport const d337 = 1;\nexport const d338 = 1;\nexport const d339 = 1;\nexport const d340 = 1;\nexport const d341 = 1;\nexport const d342 = 1;\nexport const d343 = 1;\nexport const d344 = 1;\nexport const d345 = 1;\nexport const d346 = 1;\nexport const d347 = 1;\nexport const d348 = 1;\nexport const d349 = 1;\nexport const d350 = 1;\nexport const d351 = 1;\nexport const d352 = 1;\nexport const d353 = 1;\nexport const d354 = 1;\nexport const d355 = 1;\nexport const d356 = 1;\nexport const d357 = 1;\nexport const d358 = 1;\nexport const d359 = 1;\nexport const d360 = 1;\nexport const d361 = 1;\nexport const d362 = 1;\nexport const d363 = 1;\nexport const d364 = 1;\nexport const d365 = 1;\nexport const d366 = 1;\nexport const d367 = 1;\nexport const d368 = 1;\nexport const d369 = 1;\nexport const d370 = 1;\nexport const d371 = 1;\nexport const d372 = 1;\nexport const d373 = 1;\nexport const d374 = 1;\nexport const d375 = 1;\nexport const d376 = 1;\nexport const d377 = 1;\nexport const d378 = 1;\nexport const d379 = 1;\nexport const d380 = 1;\nexport const d381 = 1;\nexport const d382 = 1;\nexport const d383 = 1;\nexport const d384 = 1;\nexport const d385 = 1;\nexport const d386 = 1;\nexport const d387 = 1;\nexport const d388 = 1;\nexport const d389 = 1;\nexport const d390 = 1;\nexport const d391 = 1;\nexport const d392 = 1;\nexport const d393 = 1;\nexport const d394 = 1;\nexport const d395 = 1;\nexport const d396 = 1;\nexport const d397 = 1;\nexport const d398 = 1;\nexport const d399 = 1;\nexport const d400 = 1;\n",
+   "docs/old.txt": "retired\n",
+   "docs/index.txt": "see docs/old.txt\n",
+   "tests/test_app.py": "def test_a(self):\n    pass\n",
+   "src/app.py": "def helper():\n    return 1\n",
+   "text/a.txt": "# a\nThe quarterly figures were checked twice by the finance team.\nEvery region reported its totals before the deadline this time.\nThe northern office found two duplicated invoices in March.\nThose invoices were removed and the totals were corrected.\nThe review closed with no open questions from the auditors.\n",
+   "text/b.txt": "# b\n",
+   "src/p1.js": "export const p = 1;\n",
+   "src/p2.js": "export const p = 2;\n",
+   "src/p3.js": "export const p = 3;\n",
+   "src/p4.js": "export const p = 4;\n",
+   "src/p5.js": "export const p = 5;\n"
+  },
+  "after": {
+   "src/util.js": "export function helper(a) {\n  return a + 2;\n}\nexport const K = 2;\n",
+   "src/app.js": "import { helper } from './util.js';\n\nexport function run(x) {\n  const y = helper(x);\n  return y * 2;\n}\n",
+   "src/header.js": "import { helper } from './util.js';\nimport { K } from './util.js';\nimport { run } from './app.js';\n\nexport const v1 = helper(1) + K;\nexport const v2 = helper(2) + K;\nexport const v3 = helper(3) + K;\nexport const v4 = helper(4) + K;\nexport const v5 = helper(5) + K;\nexport const v6 = helper(6) + K;\nexport const v7 = helper(7) + K;\nexport const v8 = helper(8) + K;\nexport const v9 = helper(9) + K;\nexport const v10 = helper(10) + K;\nexport const v11 = helper(11) + K;\nexport const v12 = helper(12) + K;\nexport const v13 = helper(13) + K;\nexport const v14 = helper(14) + K;\nexport const v15 = helper(15) + K;\nexport const v16 = helper(16) + K;\nexport const v17 = helper(17) + K;\nexport const v18 = helper(18) + K;\nexport const v19 = helper(19) + K;\nexport const v20 = helper(20) + K;\nexport const v21 = helper(21) + K;\nexport const v22 = helper(22) + K;\nexport const v23 = helper(23) + K;\nexport const v24 = helper(24) + K;\nexport const v25 = helper(25) + K;\nexport const v26 = helper(26) + K;\nexport const v27 = helper(27) + K;\nexport const v28 = helper(28) + K;\nexport const v29 = helper(29) + K;\nexport const v30 = helper(30) + K;\nexport const v31 = helper(31) + K;\nexport const v32 = helper(32) + K;\nexport const v33 = helper(33) + K;\nexport const v34 = helper(34) + K;\nexport const v35 = helper(35) + K;\nexport const v36 = helper(36) + K;\nexport const v37 = helper(37) + K;\nexport const v38 = helper(38) + K;\nexport const v39 = helper(39) + K;\nexport const v40 = helper(40) + K;\nexport const v41 = helper(41) + K;\nexport const v42 = helper(42) + K;\nexport const v43 = helper(43) + K;\nexport const v44 = helper(44) + K;\nexport const v45 = helper(45) + K;\nexport const v46 = helper(46) + K;\nexport const v47 = helper(47) + K;\nexport const v48 = helper(48) + K;\nexport const v49 = helper(49) + K;\nexport const v50 = helper(50) + K;\nexport const v51 = helper(51) + K;\nexport const v52 = helper(52) + K;\nexport const v53 = helper(53) + K;\nexport const v54 = helper(54) + K;\nexport const v55 = helper(55) + K;\nexport const v56 = helper(56) + K;\nexport const v57 = helper(57) + K;\nexport const v58 = helper(58) + K;\nexport const v59 = helper(59) + K;\nexport const v60 = helper(60) + K;\nexport const v61 = helper(61) + K;\nexport const v62 = helper(62) + K;\nexport const v63 = helper(63) + K;\nexport const v64 = helper(64) + K;\nexport const v65 = helper(65) + K;\nexport const v66 = helper(66) + K;\nexport const v67 = helper(67) + K;\nexport const v68 = helper(68) + K;\nexport const v69 = helper(69) + K;\nexport const v70 = helper(70) + K;\nexport const v71 = helper(71) + K;\nexport const v72 = helper(72) + K;\nexport const v73 = helper(73) + K;\nexport const v74 = helper(74) + K;\nexport const v75 = helper(75) + K;\nexport const v76 = helper(76) + K;\nexport const v77 = helper(77) + K;\nexport const v78 = helper(78) + K;\nexport const v79 = helper(79) + K;\nexport const v80 = helper(80) + K;\nexport const v81 = helper(81) + K;\nexport const v82 = helper(82) + K;\nexport const v83 = helper(83) + K;\nexport const v84 = helper(84) + K;\nexport const v85 = helper(85) + K;\nexport const v86 = helper(86) + K;\nexport const v87 = helper(87) + K;\nexport const v88 = helper(88) + K;\nexport const v89 = helper(89) + K;\nexport const v90 = helper(90) + K;\nexport const v91 = helper(91) + K;\nexport const v92 = helper(92) + K;\nexport const v93 = helper(93) + K;\nexport const v94 = helper(94) + K;\nexport const v95 = helper(95) + K;\nexport const v96 = helper(96) + K;\nexport const v97 = helper(97) + K;\nexport const v98 = helper(98) + K;\nexport const v99 = helper(99) + K;\nexport const v100 = helper(100) + K;\nexport const v101 = helper(101) + K;\nexport const v102 = helper(102) + K;\nexport const v103 = helper(103) + K;\nexport const v104 = helper(104) + K;\nexport const v105 = helper(105) + K;\nexport const v106 = helper(106) + K;\nexport const v107 = helper(107) + K;\nexport const v108 = helper(108) + K;\nexport const v109 = helper(109) + K;\nexport const v110 = helper(110) + K;\nexport const v111 = helper(111) + K;\nexport const v112 = helper(112) + K;\nexport const v113 = helper(113) + K;\nexport const v114 = helper(114) + K;\nexport const v115 = helper(115) + K;\nexport const v116 = helper(116) + K;\nexport const v117 = helper(117) + K;\nexport const v118 = helper(118) + K;\nexport const v119 = helper(119) + K;\nexport const v120 = helper(120) + K;\nexport const v121 = helper(121) + K;\nexport const v122 = helper(122) + K;\nexport const v123 = helper(123) + K;\nexport const v124 = helper(124) + K;\nexport const v125 = helper(125) + K;\nexport const v126 = helper(126) + K;\nexport const v127 = helper(127) + K;\nexport const v128 = helper(128) + K;\nexport const v129 = helper(129) + K;\nexport const v130 = helper(130) + K;\nexport const v131 = helper(131) + K;\nexport const v132 = helper(132) + K;\nexport const v133 = helper(133) + K;\nexport const v134 = helper(134) + K;\nexport const v135 = helper(135) + K;\nexport const v136 = helper(136) + K;\nexport const v137 = helper(137) + K;\nexport const v138 = helper(138) + K;\nexport const v139 = helper(139) + K;\nexport const v140 = helper(140) + K;\nexport const v141 = helper(141) + K;\nexport const v142 = helper(142) + K;\nexport const v143 = helper(143) + K;\nexport const v144 = helper(144) + K;\nexport const v145 = helper(145) + K;\nexport const v146 = helper(146) + K;\nexport const v147 = helper(147) + K;\nexport const v148 = helper(148) + K;\nexport const v149 = helper(149) + K;\nexport const v150 = helper(150) + K;\nexport const v151 = helper(151) + K;\nexport const v152 = helper(152) + K;\nexport const v153 = helper(153) + K;\nexport const v154 = helper(154) + K;\nexport const v155 = helper(155) + K;\nexport const v156 = helper(156) + K;\nexport const v157 = helper(157) + K;\nexport const v158 = helper(158) + K;\nexport const v159 = helper(159) + K;\nexport const v160 = helper(160) + K;\nexport const v161 = helper(161) + K;\nexport const v162 = helper(162) + K;\nexport const v163 = helper(163) + K;\nexport const v164 = helper(164) + K;\nexport const v165 = helper(165) + K;\nexport const v166 = helper(166) + K;\nexport const v167 = helper(167) + K;\nexport const v168 = helper(168) + K;\nexport const v169 = helper(169) + K;\nexport const v170 = helper(170) + K;\nexport const v171 = helper(171) + K;\nexport const v172 = helper(172) + K;\nexport const v173 = helper(173) + K;\nexport const v174 = helper(174) + K;\nexport const v175 = helper(175) + K;\nexport const v176 = helper(176) + K;\nexport const v177 = helper(177) + K;\nexport const v178 = helper(178) + K;\nexport const v179 = helper(179) + K;\nexport const v180 = helper(180) + K;\nexport const v181 = helper(181) + K;\nexport const v182 = helper(182) + K;\nexport const v183 = helper(183) + K;\nexport const v184 = helper(184) + K;\nexport const v185 = helper(185) + K;\nexport const v186 = helper(186) + K;\nexport const v187 = helper(187) + K;\nexport const v188 = helper(188) + K;\nexport const v189 = helper(189) + K;\nexport const v190 = helper(190) + K;\nexport const v191 = helper(191) + K;\nexport const v192 = helper(192) + K;\nexport const v193 = helper(193) + K;\nexport const v194 = helper(194) + K;\nexport const v195 = helper(195) + K;\nexport const v196 = helper(196) + K;\nexport const v197 = helper(197) + K;\nexport const v198 = helper(198) + K;\nexport const v199 = helper(199) + K;\nexport const v200 = helper(200) + K;\nexport const v201 = helper(201) + K;\nexport const v202 = helper(202) + K;\nexport const v203 = helper(203) + K;\nexport const v204 = helper(204) + K;\nexport const v205 = helper(205) + K;\nexport const v206 = helper(206) + K;\nexport const v207 = helper(207) + K;\nexport const v208 = helper(208) + K;\nexport const v209 = helper(209) + K;\nexport const v210 = helper(210) + K;\nexport const v211 = helper(211) + K;\nexport const v212 = helper(212) + K;\nexport const v213 = helper(213) + K;\nexport const v214 = helper(214) + K;\nexport const v215 = helper(215) + K;\nexport const v216 = helper(216) + K;\nexport const v217 = helper(217) + K;\nexport const v218 = helper(218) + K;\nexport const v219 = helper(219) + K;\nexport const v220 = helper(220) + K;\nexport const v221 = helper(221) + K;\nexport const v222 = helper(222) + K;\nexport const v223 = helper(223) + K;\nexport const v224 = helper(224) + K;\nexport const v225 = helper(225) + K;\nexport const v226 = helper(226) + K;\nexport const v227 = helper(227) + K;\nexport const v228 = helper(228) + K;\nexport const v229 = helper(229) + K;\nexport const v230 = helper(230) + K;\nexport const v231 = helper(231) + K;\nexport const v232 = helper(232) + K;\nexport const v233 = helper(233) + K;\nexport const v234 = helper(234) + K;\nexport const v235 = helper(235) + K;\nexport const v236 = helper(236) + K;\nexport const v237 = helper(237) + K;\nexport const v238 = helper(238) + K;\nexport const v239 = helper(239) + K;\nexport const v240 = helper(240) + K;\nexport const v241 = helper(241) + K;\nexport const v242 = helper(242) + K;\nexport const v243 = helper(243) + K;\nexport const v244 = helper(244) + K;\nexport const v245 = helper(245) + K;\nexport const v246 = helper(246) + K;\nexport const v247 = helper(247) + K;\nexport const v248 = helper(248) + K;\nexport const v249 = helper(249) + K;\nexport const v250 = helper(250) + K;\nexport const v251 = helper(251) + K;\nexport const v252 = helper(252) + K;\nexport const v253 = helper(253) + K;\nexport const v254 = helper(254) + K;\nexport const v255 = helper(255) + K;\nexport const v256 = helper(256) + K;\nexport const v257 = helper(257) + K;\nexport const v258 = helper(258) + K;\nexport const v259 = helper(259) + K;\nexport const v260 = helper(260) + K;\nexport const v261 = helper(261) + K;\nexport const v262 = helper(262) + K;\nexport const v263 = helper(263) + K;\nexport const v264 = helper(264) + K;\nexport const v265 = helper(265) + K;\nexport const v266 = helper(266) + K;\nexport const v267 = helper(267) + K;\nexport const v268 = helper(268) + K;\nexport const v269 = helper(269) + K;\nexport const v270 = helper(270) + K;\nexport const v271 = helper(271) + K;\nexport const v272 = helper(272) + K;\nexport const v273 = helper(273) + K;\nexport const v274 = helper(274) + K;\nexport const v275 = helper(275) + K;\nexport const v276 = helper(276) + K;\nexport const v277 = helper(277) + K;\nexport const v278 = helper(278) + K;\nexport const v279 = helper(279) + K;\nexport const v280 = helper(280) + K;\nexport const v281 = helper(281) + K;\nexport const v282 = helper(282) + K;\nexport const v283 = helper(283) + K;\nexport const v284 = helper(284) + K;\nexport const v285 = helper(285) + K;\nexport const v286 = helper(286) + K;\nexport const v287 = helper(287) + K;\nexport const v288 = helper(288) + K;\nexport const v289 = helper(289) + K;\nexport const v290 = helper(290) + K;\nexport const v291 = helper(291) + K;\nexport const v292 = helper(292) + K;\nexport const v293 = helper(293) + K;\nexport const v294 = helper(294) + K;\nexport const v295 = helper(295) + K;\nexport const v296 = helper(296) + K;\nexport const v297 = helper(297) + K;\nexport const v298 = helper(298) + K;\nexport const v299 = helper(299) + K;\nexport const v300 = helper(300) - K;\nexport const v301 = helper(301) + K;\nexport const v302 = helper(302) + K;\nexport const v303 = helper(303) + K;\nexport const v304 = helper(304) + K;\nexport const v305 = helper(305) + K;\nexport const v306 = helper(306) + K;\nexport const v307 = helper(307) + K;\nexport const v308 = helper(308) + K;\nexport const v309 = helper(309) + K;\nexport const v310 = helper(310) + K;\nexport const v311 = helper(311) + K;\nexport const v312 = helper(312) + K;\nexport const v313 = helper(313) + K;\nexport const v314 = helper(314) + K;\nexport const v315 = helper(315) + K;\nexport const v316 = helper(316) + K;\nexport const v317 = helper(317) + K;\nexport const v318 = helper(318) + K;\nexport const v319 = helper(319) + K;\nexport const v320 = helper(320) + K;\nexport const v321 = helper(321) + K;\nexport const v322 = helper(322) + K;\nexport const v323 = helper(323) + K;\nexport const v324 = helper(324) + K;\nexport const v325 = helper(325) + K;\nexport const v326 = helper(326) + K;\nexport const v327 = helper(327) + K;\nexport const v328 = helper(328) + K;\nexport const v329 = helper(329) + K;\nexport const v330 = helper(330) + K;\nexport const v331 = helper(331) + K;\nexport const v332 = helper(332) + K;\nexport const v333 = helper(333) + K;\nexport const v334 = helper(334) + K;\nexport const v335 = helper(335) + K;\nexport const v336 = helper(336) + K;\nexport const v337 = helper(337) + K;\nexport const v338 = helper(338) + K;\nexport const v339 = helper(339) + K;\nexport const v340 = helper(340) + K;\nexport const v341 = helper(341) + K;\nexport const v342 = helper(342) + K;\nexport const v343 = helper(343) + K;\nexport const v344 = helper(344) + K;\nexport const v345 = helper(345) + K;\nexport const v346 = helper(346) + K;\nexport const v347 = helper(347) + K;\nexport const v348 = helper(348) + K;\nexport const v349 = helper(349) + K;\nexport const v350 = helper(350) + K;\nexport const v351 = helper(351) + K;\nexport const v352 = helper(352) + K;\nexport const v353 = helper(353) + K;\nexport const v354 = helper(354) + K;\nexport const v355 = helper(355) + K;\nexport const v356 = helper(356) + K;\nexport const v357 = helper(357) + K;\nexport const v358 = helper(358) + K;\nexport const v359 = helper(359) + K;\nexport const v360 = helper(360) + K;\nexport const v361 = helper(361) + K;\nexport const v362 = helper(362) + K;\nexport const v363 = helper(363) + K;\nexport const v364 = helper(364) + K;\nexport const v365 = helper(365) + K;\nexport const v366 = helper(366) + K;\nexport const v367 = helper(367) + K;\nexport const v368 = helper(368) + K;\nexport const v369 = helper(369) + K;\nexport const v370 = helper(370) + K;\nexport const v371 = helper(371) + K;\nexport const v372 = helper(372) + K;\nexport const v373 = helper(373) + K;\nexport const v374 = helper(374) + K;\nexport const v375 = helper(375) + K;\nexport const v376 = helper(376) + K;\nexport const v377 = helper(377) + K;\nexport const v378 = helper(378) + K;\nexport const v379 = helper(379) + K;\nexport const v380 = helper(380) + K;\nexport const v381 = helper(381) + K;\nexport const v382 = helper(382) + K;\nexport const v383 = helper(383) + K;\nexport const v384 = helper(384) + K;\nexport const v385 = helper(385) + K;\nexport const v386 = helper(386) + K;\nexport const v387 = helper(387) + K;\nexport const v388 = helper(388) + K;\nexport const v389 = helper(389) + K;\nexport const v390 = helper(390) + K;\nexport const v391 = helper(391) + K;\nexport const v392 = helper(392) + K;\nexport const v393 = helper(393) + K;\nexport const v394 = helper(394) + K;\nexport const v395 = helper(395) + K;\nexport const v396 = helper(396) + K;\nexport const v397 = helper(397) + K;\nexport const v398 = helper(398) + K;\nexport const v399 = helper(399) + K;\nexport const v400 = helper(400) + K;\nexport function last() {\n  return run(v1);\n}\n",
+   "styles/theme.css": "body { color: navy; }\n",
+   "go/pkg/a.go": "package pkg\n\nfunc A() int { return 2 }\n",
+   "test/app.test.js": "import { readFileSync } from 'node:fs';\nimport assert from 'node:assert';\n\nconst src = readFileSync('src/app.js', 'utf8');\nassert.ok(src.includes('helper'));\n",
+   "src/a.js": "// a\nexport const A = 1;\n",
+   "src/b.js": "// b\nexport const B = 1;\nexport function moveMe(items) {\n  const total = items.reduce((a, b) => a + b, 0);\n  const mean = total / items.length;\n  const spread = items.map((v) => (v - mean) ** 2);\n  return Math.sqrt(spread.reduce((a, b) => a + b, 0) / items.length);\n}\n",
+   "src/data.js": "export const d1 = 2;\nexport const d2 = 2;\nexport const d3 = 2;\nexport const d4 = 2;\nexport const d5 = 2;\nexport const d6 = 2;\nexport const d7 = 2;\nexport const d8 = 2;\nexport const d9 = 2;\nexport const d10 = 2;\nexport const d11 = 2;\nexport const d12 = 2;\nexport const d13 = 2;\nexport const d14 = 2;\nexport const d15 = 2;\nexport const d16 = 2;\nexport const d17 = 2;\nexport const d18 = 2;\nexport const d19 = 2;\nexport const d20 = 2;\nexport const d21 = 2;\nexport const d22 = 2;\nexport const d23 = 2;\nexport const d24 = 2;\nexport const d25 = 2;\nexport const d26 = 2;\nexport const d27 = 2;\nexport const d28 = 2;\nexport const d29 = 2;\nexport const d30 = 2;\nexport const d31 = 2;\nexport const d32 = 2;\nexport const d33 = 2;\nexport const d34 = 2;\nexport const d35 = 2;\nexport const d36 = 2;\nexport const d37 = 2;\nexport const d38 = 2;\nexport const d39 = 2;\nexport const d40 = 2;\nexport const d41 = 2;\nexport const d42 = 2;\nexport const d43 = 2;\nexport const d44 = 2;\nexport const d45 = 2;\nexport const d46 = 2;\nexport const d47 = 2;\nexport const d48 = 2;\nexport const d49 = 2;\nexport const d50 = 2;\nexport const d51 = 2;\nexport const d52 = 2;\nexport const d53 = 2;\nexport const d54 = 2;\nexport const d55 = 2;\nexport const d56 = 2;\nexport const d57 = 2;\nexport const d58 = 2;\nexport const d59 = 2;\nexport const d60 = 2;\nexport const d61 = 2;\nexport const d62 = 2;\nexport const d63 = 2;\nexport const d64 = 2;\nexport const d65 = 2;\nexport const d66 = 2;\nexport const d67 = 2;\nexport const d68 = 2;\nexport const d69 = 2;\nexport const d70 = 2;\nexport const d71 = 2;\nexport const d72 = 2;\nexport const d73 = 2;\nexport const d74 = 2;\nexport const d75 = 2;\nexport const d76 = 2;\nexport const d77 = 2;\nexport const d78 = 2;\nexport const d79 = 2;\nexport const d80 = 2;\nexport const d81 = 2;\nexport const d82 = 2;\nexport const d83 = 2;\nexport const d84 = 2;\nexport const d85 = 2;\nexport const d86 = 2;\nexport const d87 = 2;\nexport const d88 = 2;\nexport const d89 = 2;\nexport const d90 = 2;\nexport const d91 = 2;\nexport const d92 = 2;\nexport const d93 = 2;\nexport const d94 = 2;\nexport const d95 = 2;\nexport const d96 = 2;\nexport const d97 = 2;\nexport const d98 = 2;\nexport const d99 = 2;\nexport const d100 = 2;\nexport const d101 = 2;\nexport const d102 = 2;\nexport const d103 = 2;\nexport const d104 = 2;\nexport const d105 = 2;\nexport const d106 = 2;\nexport const d107 = 2;\nexport const d108 = 2;\nexport const d109 = 2;\nexport const d110 = 2;\nexport const d111 = 2;\nexport const d112 = 2;\nexport const d113 = 2;\nexport const d114 = 2;\nexport const d115 = 2;\nexport const d116 = 2;\nexport const d117 = 2;\nexport const d118 = 2;\nexport const d119 = 2;\nexport const d120 = 2;\nexport const d121 = 2;\nexport const d122 = 2;\nexport const d123 = 2;\nexport const d124 = 2;\nexport const d125 = 2;\nexport const d126 = 2;\nexport const d127 = 2;\nexport const d128 = 2;\nexport const d129 = 2;\nexport const d130 = 2;\nexport const d131 = 2;\nexport const d132 = 2;\nexport const d133 = 2;\nexport const d134 = 2;\nexport const d135 = 2;\nexport const d136 = 2;\nexport const d137 = 2;\nexport const d138 = 2;\nexport const d139 = 2;\nexport const d140 = 2;\nexport const d141 = 2;\nexport const d142 = 2;\nexport const d143 = 2;\nexport const d144 = 2;\nexport const d145 = 2;\nexport const d146 = 2;\nexport const d147 = 2;\nexport const d148 = 2;\nexport const d149 = 2;\nexport const d150 = 2;\nexport const d151 = 2;\nexport const d152 = 2;\nexport const d153 = 2;\nexport const d154 = 2;\nexport const d155 = 2;\nexport const d156 = 2;\nexport const d157 = 2;\nexport const d158 = 2;\nexport const d159 = 2;\nexport const d160 = 2;\nexport const d161 = 2;\nexport const d162 = 2;\nexport const d163 = 2;\nexport const d164 = 2;\nexport const d165 = 2;\nexport const d166 = 2;\nexport const d167 = 2;\nexport const d168 = 2;\nexport const d169 = 2;\nexport const d170 = 2;\nexport const d171 = 2;\nexport const d172 = 2;\nexport const d173 = 2;\nexport const d174 = 2;\nexport const d175 = 2;\nexport const d176 = 2;\nexport const d177 = 2;\nexport const d178 = 2;\nexport const d179 = 2;\nexport const d180 = 2;\nexport const d181 = 2;\nexport const d182 = 2;\nexport const d183 = 2;\nexport const d184 = 2;\nexport const d185 = 2;\nexport const d186 = 2;\nexport const d187 = 2;\nexport const d188 = 2;\nexport const d189 = 2;\nexport const d190 = 2;\nexport const d191 = 2;\nexport const d192 = 2;\nexport const d193 = 2;\nexport const d194 = 2;\nexport const d195 = 2;\nexport const d196 = 2;\nexport const d197 = 2;\nexport const d198 = 2;\nexport const d199 = 2;\nexport const d200 = 2;\nexport const d201 = 2;\nexport const d202 = 2;\nexport const d203 = 2;\nexport const d204 = 2;\nexport const d205 = 2;\nexport const d206 = 2;\nexport const d207 = 2;\nexport const d208 = 2;\nexport const d209 = 2;\nexport const d210 = 2;\nexport const d211 = 2;\nexport const d212 = 2;\nexport const d213 = 2;\nexport const d214 = 2;\nexport const d215 = 2;\nexport const d216 = 2;\nexport const d217 = 2;\nexport const d218 = 2;\nexport const d219 = 2;\nexport const d220 = 2;\nexport const d221 = 2;\nexport const d222 = 2;\nexport const d223 = 2;\nexport const d224 = 2;\nexport const d225 = 2;\nexport const d226 = 2;\nexport const d227 = 2;\nexport const d228 = 2;\nexport const d229 = 2;\nexport const d230 = 2;\nexport const d231 = 2;\nexport const d232 = 2;\nexport const d233 = 2;\nexport const d234 = 2;\nexport const d235 = 2;\nexport const d236 = 2;\nexport const d237 = 2;\nexport const d238 = 2;\nexport const d239 = 2;\nexport const d240 = 2;\nexport const d241 = 2;\nexport const d242 = 2;\nexport const d243 = 2;\nexport const d244 = 2;\nexport const d245 = 2;\nexport const d246 = 2;\nexport const d247 = 2;\nexport const d248 = 2;\nexport const d249 = 2;\nexport const d250 = 2;\nexport const d251 = 2;\nexport const d252 = 2;\nexport const d253 = 2;\nexport const d254 = 2;\nexport const d255 = 2;\nexport const d256 = 2;\nexport const d257 = 2;\nexport const d258 = 2;\nexport const d259 = 2;\nexport const d260 = 2;\nexport const d261 = 2;\nexport const d262 = 2;\nexport const d263 = 2;\nexport const d264 = 2;\nexport const d265 = 2;\nexport const d266 = 2;\nexport const d267 = 2;\nexport const d268 = 2;\nexport const d269 = 2;\nexport const d270 = 2;\nexport const d271 = 2;\nexport const d272 = 2;\nexport const d273 = 2;\nexport const d274 = 2;\nexport const d275 = 2;\nexport const d276 = 2;\nexport const d277 = 2;\nexport const d278 = 2;\nexport const d279 = 2;\nexport const d280 = 2;\nexport const d281 = 2;\nexport const d282 = 2;\nexport const d283 = 2;\nexport const d284 = 2;\nexport const d285 = 2;\nexport const d286 = 2;\nexport const d287 = 2;\nexport const d288 = 2;\nexport const d289 = 2;\nexport const d290 = 2;\nexport const d291 = 2;\nexport const d292 = 2;\nexport const d293 = 2;\nexport const d294 = 2;\nexport const d295 = 2;\nexport const d296 = 2;\nexport const d297 = 2;\nexport const d298 = 2;\nexport const d299 = 2;\nexport const d300 = 2;\nexport const d301 = 2;\nexport const d302 = 2;\nexport const d303 = 2;\nexport const d304 = 2;\nexport const d305 = 2;\nexport const d306 = 2;\nexport const d307 = 2;\nexport const d308 = 2;\nexport const d309 = 2;\nexport const d310 = 2;\nexport const d311 = 2;\nexport const d312 = 2;\nexport const d313 = 2;\nexport const d314 = 2;\nexport const d315 = 2;\nexport const d316 = 2;\nexport const d317 = 2;\nexport const d318 = 2;\nexport const d319 = 2;\nexport const d320 = 2;\nexport const d321 = 2;\nexport const d322 = 2;\nexport const d323 = 2;\nexport const d324 = 2;\nexport const d325 = 2;\nexport const d326 = 2;\nexport const d327 = 2;\nexport const d328 = 2;\nexport const d329 = 2;\nexport const d330 = 2;\nexport const d331 = 2;\nexport const d332 = 2;\nexport const d333 = 2;\nexport const d334 = 2;\nexport const d335 = 2;\nexport const d336 = 2;\nexport const d337 = 2;\nexport const d338 = 2;\nexport const d339 = 2;\nexport const d340 = 2;\nexport const d341 = 2;\nexport const d342 = 2;\nexport const d343 = 2;\nexport const d344 = 2;\nexport const d345 = 2;\nexport const d346 = 2;\nexport const d347 = 2;\nexport const d348 = 2;\nexport const d349 = 2;\nexport const d350 = 2;\nexport const d351 = 2;\nexport const d352 = 2;\nexport const d353 = 2;\nexport const d354 = 2;\nexport const d355 = 2;\nexport const d356 = 2;\nexport const d357 = 2;\nexport const d358 = 2;\nexport const d359 = 2;\nexport const d360 = 2;\nexport const d361 = 2;\nexport const d362 = 2;\nexport const d363 = 2;\nexport const d364 = 2;\nexport const d365 = 2;\nexport const d366 = 2;\nexport const d367 = 2;\nexport const d368 = 2;\nexport const d369 = 2;\nexport const d370 = 2;\nexport const d371 = 2;\nexport const d372 = 2;\nexport const d373 = 2;\nexport const d374 = 2;\nexport const d375 = 2;\nexport const d376 = 2;\nexport const d377 = 2;\nexport const d378 = 2;\nexport const d379 = 2;\nexport const d380 = 2;\nexport const d381 = 2;\nexport const d382 = 2;\nexport const d383 = 2;\nexport const d384 = 2;\nexport const d385 = 2;\nexport const d386 = 2;\nexport const d387 = 2;\nexport const d388 = 2;\nexport const d389 = 2;\nexport const d390 = 2;\nexport const d391 = 2;\nexport const d392 = 2;\nexport const d393 = 2;\nexport const d394 = 2;\nexport const d395 = 2;\nexport const d396 = 2;\nexport const d397 = 2;\nexport const d398 = 2;\nexport const d399 = 2;\nexport const d400 = 2;\n",
+   "tests/test_app.py": "def test_a(self):\n    src = open('src/app.py').read()\n    self.assertIn('helper', src)\n",
+   "text/a.txt": "# a\n",
+   "text/b.txt": "# b\nThe quarterly figures were checked twice by the finance team.\nEvery region reported its totals before the deadline this time.\nThe northern office found two duplicated invoices in March.\nThose invoices were removed and the totals were corrected.\nThe review closed with no open questions from the auditors.\n",
+   "src/p1.js": "export const p = 11;\n",
+   "src/p2.js": "export const p = 12;\n",
+   "src/p3.js": "export const p = 13;\n",
+   "src/p4.js": "export const p = 14;\n",
+   "src/p5.js": "export const p = 15;\n"
+  },
+  "deleted": [
+   "src/legacy.js",
+   "docs/old.txt"
+  ]
+ },
+ "cases": [
+  {
+   "name": "related-js",
+   "file": "src/app.js",
+   "kind": "engine"
+  },
+  {
+   "name": "related-util",
+   "file": "src/util.js",
+   "kind": "engine"
+  },
+  {
+   "name": "css-cascade",
+   "file": "styles/theme.css",
+   "kind": "engine"
+  },
+  {
+   "name": "go-package",
+   "file": "go/pkg/a.go",
+   "kind": "engine"
+  },
+  {
+   "name": "header-js",
+   "file": "src/header.js",
+   "kind": "engine"
+  },
+  {
+   "name": "header-js-small",
+   "file": "src/header.js",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 6000
+     }
+    }
+   },
+   "kind": "engine"
+  },
+  {
+   "name": "deleted",
+   "file": "src/legacy.js",
+   "kind": "engine"
+  },
+  {
+   "name": "test-quality",
+   "file": "test/app.test.js",
+   "kind": "engine"
+  },
+  {
+   "name": "moved-in",
+   "file": "src/b.js",
+   "base": true,
+   "peers": [
+    "src/a.js"
+   ],
+   "kind": "engine"
+  },
+  {
+   "name": "moved-out",
+   "file": "src/a.js",
+   "base": true,
+   "peers": [
+    "src/b.js",
+    "src/util.js"
+   ],
+   "kind": "engine"
+  },
+  {
+   "name": "deleted-txt",
+   "file": "docs/old.txt",
+   "kind": "engine"
+  },
+  {
+   "name": "test-quality-py",
+   "file": "tests/test_app.py",
+   "kind": "engine"
+  },
+  {
+   "name": "moved-txt",
+   "file": "text/b.txt",
+   "base": true,
+   "peers": [
+    "text/a.txt"
+   ],
+   "kind": "engine"
+  },
+  {
+   "name": "peers-no-move",
+   "file": "src/app.js",
+   "base": true,
+   "peers": [
+    "src/util.js"
+   ],
+   "kind": "engine"
+  },
+  {
+   "name": "recheck-header",
+   "file": "src/header.js",
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/header.js",
+     "line_start": 304,
+     "line_end": 304,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "wrong sign",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "recheck-cross-file",
+   "file": "src/app.js",
+   "base": true,
+   "peers": [
+    "src/util.js",
+    "src/main.js"
+   ],
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/app.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "helper in util.js adds one",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "recheck-evidence-none",
+   "file": "src/app.js",
+   "base": true,
+   "peers": [
+    "src/util.js"
+   ],
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 700
+     }
+    }
+   },
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/app.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "helper in util.js adds one",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "recheck-evidence-cut",
+   "file": "src/app.js",
+   "base": true,
+   "peers": [
+    "src/util.js"
+   ],
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 760
+     }
+    }
+   },
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/app.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "helper in util.js adds one",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "recheck-evidence-many",
+   "file": "src/app.js",
+   "base": true,
+   "peers": [
+    "src/data.js",
+    "src/p1.js",
+    "src/p2.js",
+    "src/p3.js",
+    "src/p4.js",
+    "src/p5.js",
+    "src/util.js"
+   ],
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/app.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "see src/data.js, p1.js p2.js p3.js and ./src/p4.js. p5.js!",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "recheck-evidence-only",
+   "file": "src/app.js",
+   "base": true,
+   "peers": [
+    "src/util.js"
+   ],
+   "reviewedIsCurrent": true,
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/app.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "see util.js",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "recheck-scope-file",
+   "file": "src/app.js",
+   "base": true,
+   "peers": [
+    "src/util.js"
+   ],
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "recheck_scope": "file"
+    }
+   },
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/app.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "the helper result",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "recheck-scope-file-head",
+   "file": "src/app.js",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "recheck_scope": "file"
+    }
+   },
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/app.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "the helper result",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "recheck-moved",
+   "file": "src/b.js",
+   "base": true,
+   "peers": [
+    "src/a.js"
+   ],
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/b.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "mean of empty list",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  }
+ ]
+}

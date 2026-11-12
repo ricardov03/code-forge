@@ -64,6 +64,13 @@ func b545MatchNode(t *testing.T, fixtureName, goldenName string) {
 			if k, ok := c.Get("kind").(string); ok {
 				in.Kind = k
 			}
+			// B537: a case with peers diffs against HEAD like the Node generator
+			if peers, ok := c.Get("peers").([]any); ok {
+				in.Base = "HEAD"
+				for _, p := range peers {
+					in.Peers = append(in.Peers, p.(string))
+				}
+			}
 			if err := Check(in); err != nil {
 				t.Fatalf("Check refused a case Node reviews: %v", err)
 			}

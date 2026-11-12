@@ -2,7 +2,8 @@ package review
 
 // B545: the judge packet (packet.mjs assembleJudgePacket) for the dual-lens
 // and consensus plans: the judge lens, both reviewers' reports and the hunk
-// list (the diff itself only with review.judge_sees_diff).
+// list (the diff itself only with review.judge_sees_diff). B537: the moved
+// text (movedOf) goes before the diff when it is not empty.
 
 import (
 	"strings"
@@ -32,7 +33,7 @@ func stringifyOne(v any) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-func assembleJudgePacket(d *FileDiff, reportA, reportB any, cfg map[string]any) (*Packet, error) {
+func assembleJudgePacket(d *FileDiff, reportA, reportB any, cfg map[string]any, moved string) (*Packet, error) {
 	lens, err := LoadLens("judge")
 	if err != nil {
 		return nil, err
@@ -54,7 +55,11 @@ func assembleJudgePacket(d *FileDiff, reportA, reportB any, cfg map[string]any) 
 	if section(cfg, "review")["judge_sees_diff"] == true {
 		diff = append(diff, "", trimEnd(d.DiffText))
 	}
-	text := strings.Join([]string{"# code-forge review packet", "## lens", lens, "## reviewer A", a, "## reviewer B", b, "## diff", strings.Join(diff, "\n"), ""}, "\n")
+	parts := []string{"# code-forge review packet", "## lens", lens, "## reviewer A", a, "## reviewer B", b}
+	if moved != "" {
+		parts = append(parts, moved)
+	}
+	text := strings.Join(append(parts, "## diff", strings.Join(diff, "\n"), ""), "\n")
 	tokens := EstimateTokens(text)
 	return &Packet{Status: "ok", Text: text, HunkHeaders: headers, TokensIn: tokens, Budget: BudgetFor(cfg, "judge_in")}, nil
 }

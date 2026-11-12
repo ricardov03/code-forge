@@ -149,10 +149,10 @@ func TestFixLoopRoundReadFails(t *testing.T) {
 
 // Tickets that need a part Go does not port return ErrUnsupported before
 // anything is written (no budget row, no restored state, no round): a
-// `block reopen` row, an autopilot extra round, a recheck with no work dir
-// or review.recheck_scope file or a base with peers (B517 ports the
-// fix-hunk recheck only), and a stop the raised cap reopens into such a
-// recheck.
+// `block reopen` row, an autopilot extra round, a recheck with no work dir,
+// and a stop the raised cap reopens into such a recheck. (B537 ported the
+// review.recheck_scope file and base-with-peers rechecks: see
+// TestFixLoopRoundRecheckScopeAndPeersRun.)
 func TestFixLoopRoundUnsupportedWritesNothing(t *testing.T) {
 	sign := func(row ledger.Object) ledger.Object {
 		signed, err := signAt(append(ledger.Object{{Key: "run", Value: "r1"}}, row...), b496Key, b496Clock())
@@ -169,16 +169,6 @@ func TestFixLoopRoundUnsupportedWritesNothing(t *testing.T) {
 			l.rows = append(l.rows, sign(ledger.Object{{Key: "event", Value: "autopilot.extra_round"}, {Key: "block", Value: "B1"}, {Key: "file", Value: "a.go"}, {Key: "grant_id", Value: "g1"}}))
 		},
 		"recheck with no work dir": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) { b517Warn(t, l, r) },
-		"recheck_scope file": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) {
-			b517Warn(t, l, r)
-			r.Cfg = map[string]any{"review": map[string]any{"recheck_scope": "file"}, "levels": map[string]any{"L2": map[string]any{"provider": "p", "model": "m"}}}
-			r.Input = review.Input{RepoRoot: repo, File: "a.go", Cfg: r.Cfg, WorkDir: filepath.Join(home, "wd")}
-		},
-		"recheck with peers": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) {
-			b517Warn(t, l, r)
-			r.Cfg = map[string]any{"levels": map[string]any{"L2": map[string]any{"provider": "p", "model": "m"}}}
-			r.Input = review.Input{RepoRoot: repo, File: "a.go", Base: "HEAD", Peers: []string{"a.go", "b.go"}, Cfg: r.Cfg, WorkDir: filepath.Join(home, "wd")}
-		},
 		"stop the cap reopens": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) {
 			state := ledger.Object{{Key: "file", Value: "a.go"}, {Key: "level", Value: "L2"}, {Key: "round", Value: 1.0}, {Key: "rounds_at_level", Value: 1.0},
 				{Key: "warn_rounds_at_level", Value: 0.0}, {Key: "open", Value: []any{}}, {Key: "late", Value: []any{}}, {Key: "reviewed_content", Value: nil},
@@ -203,13 +193,60 @@ func TestFixLoopRoundUnsupportedWritesNothing(t *testing.T) {
 			if !IsUnsupported(err) {
 				t.Fatalf("got %v", err)
 			}
-			named := map[string]string{"recheck with no work dir": "a recheck with no work dir", "recheck_scope file": "review.recheck_scope file",
-				"recheck with peers": "cross-file evidence of a recheck", "stop the cap reopens": "a recheck with no work dir"}
+			named := map[string]string{"recheck with no work dir": "a recheck with no work dir", "stop the cap reopens": "a recheck with no work dir"}
 			if want, ok := named[name]; ok && !strings.Contains(err.Error(), want) {
 				t.Fatalf("got %v, want %q", err, want)
 			}
 			if len(l.rows) != mark || mustJSON(t, b496Files(t, home)) != before {
 				t.Fatalf("written: %d rows", len(l.rows)-mark)
+			}
+		})
+	}
+}
+
+// B537: a recheck under review.recheck_scope file and a recheck with a base
+// and peers (moved-code hints, cross-file evidence) now run in Go: the round
+// is a recheck session (never a full review) and its rows are written.
+func TestFixLoopRoundRecheckScopeAndPeersRun(t *testing.T) {
+	b517Lenses(t)
+	cases := map[string]func(home, repo, base string, r *FixLoopRequest){
+		"recheck_scope file": func(home, repo, base string, r *FixLoopRequest) {
+			r.Cfg = map[string]any{"review": map[string]any{"recheck_scope": "file"}, "levels": map[string]any{"L2": map[string]any{"provider": "p", "model": "m"}}}
+			r.Input = review.Input{RepoRoot: repo, File: "a.go", Base: base, Cfg: r.Cfg, WorkDir: filepath.Join(home, "wd")}
+		},
+		"recheck with peers": func(home, repo, base string, r *FixLoopRequest) {
+			r.Cfg = map[string]any{"levels": map[string]any{"L2": map[string]any{"provider": "p", "model": "m"}}}
+			r.Input = review.Input{RepoRoot: repo, File: "a.go", Base: base, Peers: []string{"a.go", "b.go"}, Cfg: r.Cfg, WorkDir: filepath.Join(home, "wd")}
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			home, repo := t.TempDir(), t.TempDir()
+			t.Setenv("HOME", home)
+			base := b496Repo(t, repo)
+			l := &b496Ledger{t: t, tk: FixLoopTicket{Block: "B1", File: "a.go", ContentHash: b496Hash(t, repo, "a.go")}}
+			r := b496Request(t, home, repo, l, nil)
+			b517Warn(t, l, &r)
+			if err := os.WriteFile(filepath.Join(repo, "a.go"), []byte("package a\n\nfunc A() { _ = 1 }\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			l.tk.ContentHash = b496Hash(t, repo, "a.go")
+			setup(home, repo, base, &r)
+			r.Review = func(func(ledger.Object) error) (ledger.Object, error) { t.Fatal("full review ran"); return nil, nil }
+			answer := ledger.Object{{Key: "passed", Value: true}, {Key: "summary", Value: "fine"}, {Key: "reviewed_hunks", Value: "$HUNKS"}, {Key: "findings", Value: []any{}},
+				{Key: "resolved", Value: []any{ledger.Object{{Key: "id", Value: "f1"}, {Key: "resolved", Value: true}, {Key: "why", Value: "fixed"}}}}}
+			sp := &b517Spawn{t: t, answers: []any{ledger.Object{{Key: "status", Value: "ok"}, {Key: "provider", Value: "p"}, {Key: "model", Value: "m"},
+				{Key: "usage", Value: ledger.Object{{Key: "tokens_in", Value: 100.0}, {Key: "tokens_out", Value: 500.0}}}, {Key: "answer", Value: answer}}}}
+			r.Session = review.Deps{Spawn: sp.spawn}
+			mark := len(l.rows)
+			if _, err := FixLoopRound(l.tk, r); err != nil {
+				t.Fatalf("FixLoopRound: %v", err)
+			}
+			if len(sp.seen) != 1 || sp.seen[0].(ledger.Object).Get("row_extra").(ledger.Object).Get("lens") != "recheck" {
+				t.Fatalf("sessions %v, want one recheck", sp.seen)
+			}
+			if ev := strings.Join(l.events()[mark:], ","); ev != "review.round,review.approved,review.state" {
+				t.Fatalf("rows %s", ev)
 			}
 		})
 	}

@@ -103,7 +103,7 @@ func TestPacketMatchesNodeGolden(t *testing.T) {
 				got["status"] = "no_change"
 			} else if err == nil {
 				var p *Packet
-				p, err = AssemblePacket(d, c.Lens, c.Digest, c.Facts, c.Cfg, "")
+				p, err = AssemblePacket(d, c.Lens, c.Digest, c.Facts, c.Cfg, "", "")
 				if err == nil {
 					got["status"] = p.Status
 					got["tokensIn"] = float64(p.TokensIn)
@@ -143,15 +143,5 @@ func TestPacketMatchesNodeGolden(t *testing.T) {
 				t.Errorf("fields: got %d, Node %d", len(got), len(want))
 			}
 		})
-	}
-}
-
-// TestPacketUnsupportedBeforeSpawn: a changed JS file needs related files and
-// definitions, so Go says unsupported instead of building a different packet.
-func TestPacketUnsupportedBeforeSpawn(t *testing.T) {
-	fx := readFixture(t, "packet_fixture.json")
-	repo := buildRepo(t, fx)
-	if _, err := ReadFileDiff(repo, "app.js", ""); !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("app.js: got %v, want ErrUnsupported", err)
 	}
 }

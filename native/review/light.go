@@ -58,8 +58,9 @@ func PrepareLight(in LightInput) (*LightBatch, error) {
 	return &LightBatch{in: in, packet: p}, nil
 }
 
-// assembleLightPacket is packet.mjs assembleLightPacket for diffs with no
-// related files (the ones ReadFileDiff accepts).
+// assembleLightPacket is packet.mjs assembleLightPacket: the related file
+// names of every diff (B537, the files not shown, sorted, at most 12) go in
+// until the packet is over the budget.
 func assembleLightPacket(diffs []*FileDiff, cfg map[string]any, rulesDigest, facts string) (*Packet, error) {
 	full, err := LoadLens("full")
 	if err != nil {
@@ -90,15 +91,39 @@ func assembleLightPacket(diffs []*FileDiff, cfg map[string]any, rulesDigest, fac
 	}
 	mode := "auto"
 	ctx := context(mode)
-	text := render(lens, digest, facts, ctx, diffText, "")
+	shown, seen := map[string]bool{}, map[string]bool{}
+	for _, d := range diffs {
+		shown[d.File] = true
+	}
+	related := []string{}
+	for _, d := range diffs {
+		for _, f := range d.Related {
+			if !seen[f] && !shown[f] {
+				related = append(related, f)
+			}
+			seen[f] = true
+		}
+	}
+	sortUTF16(related)
+	if len(related) > 12 {
+		related = related[:12]
+	}
+	relatedSection := ""
+	if len(related) > 0 {
+		relatedSection = "## related files (not shown)\n" + strings.Join(related, "\n")
+	}
+	text := render(lens, digest, facts, ctx, diffText, "", "", relatedSection, "")
+	if EstimateTokens(text) > budget && len(related) > 0 {
+		text = render(lens, digest, facts, ctx, diffText, "", "", "", "")
+	}
 	if EstimateTokens(text) > budget {
 		mode = "minimal"
 		ctx = context(mode)
-		text = render(lens, digest, facts, ctx, diffText, "")
+		text = render(lens, digest, facts, ctx, diffText, "", "", "", "")
 	}
 	for EstimateTokens(text) > budget && len(digest) > 0 {
 		digest = digest[:len(digest)-1]
-		text = render(lens, digest, facts, ctx, diffText, "")
+		text = render(lens, digest, facts, ctx, diffText, "", "", "", "")
 	}
 	tokens := EstimateTokens(text)
 	status := "ok"

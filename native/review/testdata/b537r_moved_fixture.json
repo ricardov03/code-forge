@@ -1,0 +1,875 @@
+{
+ "commit": {
+  "doc.md": "# Intro\n\nintro line 0 plain text words\nintro line 1 plain text words\nintro line 2 plain text words\nintro line 3 plain text words\nintro line 4 plain text words\nintro line 5 plain text words\nintro line 6 plain text words\nintro line 7 plain text words\n\n## Setup\n\nsetup line 0 plain text words\nsetup line 1 plain text words\nsetup line 2 plain text words\nsetup line 3 plain text words\nsetup line 4 plain text words\nsetup line 5 plain text words\nsetup line 6 plain text words\nsetup line 7 plain text words\nsetup line 8 plain text words\nsetup line 9 plain text words\nsetup line 10 plain text words\nsetup line 11 plain text words\n\n## Install\n\ninstall line 0 plain text words\ninstall line 1 plain text words\ninstall line 2 plain text words\ninstall line 3 plain text words\ninstall line 4 plain text words\ninstall line 5 plain text words\ninstall tail line 0 plain text words\ninstall tail line 1 plain text words\ninstall tail line 2 plain text words\ninstall tail line 3 plain text words\ninstall tail line 4 plain text words\ninstall tail line 5 plain text words\n\n## Usage\n\nusage line 0 plain text words\nusage line 1 plain text words\nusage line 2 plain text words\nusage line 3 plain text words\nusage line 4 plain text words\nusage line 5 plain text words\nusage detail one describes the command line flags\nusage detail two describes the environment variables\nusage detail three describes the exit status codes\nusage detail four describes the log file location\nusage tail line 0 plain text words\nusage tail line 1 plain text words\nusage tail line 2 plain text words\nusage tail line 3 plain text words\nusage tail line 4 plain text words\nusage tail line 5 plain text words\n",
+  "other.md": "# Other\n\nother line 0 plain text words\nother line 1 plain text words\nother line 2 plain text words\nother line 3 plain text words\nother line 4 plain text words\nother line 5 plain text words\nmoved alpha paragraph explains the widget configuration\nmoved alpha paragraph lists the default timeout values\nmoved alpha paragraph names the retry policy for uploads\nmoved alpha paragraph closes with the support contact\nother tail line 0 plain text words\nother tail line 1 plain text words\nother tail line 2 plain text words\nother tail line 3 plain text words\n",
+  "src.txt": "code line 0 does something useful here\ncode line 1 does something useful here\ncode line 2 does something useful here\ncode line 3 does something useful here\ncode line 4 does something useful here\ncode line 5 does something useful here\ncode line 6 does something useful here\ncode line 7 does something useful here\ncode line 8 does something useful here\ncode line 9 does something useful here\ncode line 10 does something useful here\ncode line 11 does something useful here\ncode line 12 does something useful here\ncode line 13 does something useful here\ncode line 14 does something useful here\ncode line 15 does something useful here\ncode line 16 does something useful here\ncode line 17 does something useful here\ncode line 18 does something useful here\ncode line 19 does something useful here\n",
+  "peer.txt": "peer line 0 does other things entirely\npeer line 1 does other things entirely\npeer line 2 does other things entirely\npeer line 3 does other things entirely\npeer line 4 does other things entirely\nfunction moved helper computes the shipping total\nit reads the cart items and their weights\nit applies the regional surcharge table\nit returns the rounded amount in cents\npeer line 5 does other things entirely\npeer line 6 does other things entirely\npeer line 7 does other things entirely\npeer line 8 does other things entirely\npeer line 9 does other things entirely\n"
+ },
+ "after": {
+  "doc.md": "# Intro\n\nintro line 0 plain text words\nintro line 1 plain text words\nintro line 2 plain text words\nintro line 3 plain text words\nintro line 4 plain text words\nintro line 5 plain text words\nintro line 6 plain text words\nintro line 7 plain text words\n\n## Setup\n\nsetup line 0 plain text words\nsetup line 1 plain text words\nsetup line 2 plain text words\nsetup line 3 plain text words\nsetup line 4 plain text words\nsetup line 5 plain text words\nsetup line 6 plain text words\nsetup line 7 plain text words\nsetup line 8 plain text words\nsetup line 9 plain text words\nsetup line 10 plain text words\nsetup line 11 plain text words\nsetup line added in this block\n\n## Install\n\ninstall line 0 plain text words\ninstall line 1 plain text words\ninstall line 2 plain text words\ninstall line 3 plain text words\ninstall line 4 plain text words\ninstall line 5 plain text words\nmoved alpha paragraph explains the widget configuration\nmoved alpha paragraph lists the default timeout values\nmoved alpha paragraph names the retry policy for uploads\nmoved alpha paragraph closes with the support contact\ninstall tail line 0 plain text words\ninstall tail line 1 plain text words\ninstall tail line 2 plain text words\ninstall tail line 3 plain text words\ninstall tail line 4 plain text words\ninstall tail line 5 plain text words\n\n## Usage\n\nusage line 0 plain text words\nusage line 1 plain text words\nusage line 2 plain text words\nusage line 3 plain text words\nusage line 4 plain text words\nusage line 5 plain text words\nusage tail line 0 plain text words\nusage tail line 1 plain text words\nusage tail line 2 plain text words\nusage tail line 3 plain text words\nusage tail line 4 plain text words\nusage tail line 5 plain text words\n\n## Notes\n\nnotes line added in this block\n",
+  "other.md": "# Other\n\nother line 0 plain text words\nother line 1 plain text words\nother line 2 plain text words\nother line 3 plain text words\nother line 4 plain text words\nother line 5 plain text words\nusage detail one describes the command line flags\nusage detail two describes the environment variables\nusage detail three describes the exit status codes\nusage detail four describes the log file location\nother tail line 0 plain text words\nother tail line 1 plain text words\nother tail line 2 plain text words\nother tail line 3 plain text words\n",
+  "src.txt": "code line 0 does something useful here\ncode line 1 does something useful here\ncode line 2 does something useful here\ncode line 3 does something useful here\ncode line 4 does something useful here\ncode line 5 does something useful here\ncode line 6 does something useful here\ncode line 7 does something useful here\ncode line 8 does something useful here\ncode line 9 does something useful here\nfunction moved helper computes the shipping total\nit reads the cart items and their weights\nit applies the regional surcharge table\nit returns the rounded amount in cents\ncode line 10 does something useful here\ncode line 11 does something useful here\ncode line 12 does something useful here\ncode line 13 does something useful here\ncode line 14 does something useful here\ncode line 15 does something useful here\ncode line 16 does something useful here\ncode line 17 does something useful here\ncode line 18 does something useful here\ncode line 19 does something useful here\ncode line tail added in this block\n",
+  "peer.txt": "peer line 0 does other things entirely\npeer line 1 does other things entirely\npeer line 2 does other things entirely\npeer line 3 does other things entirely\npeer line 4 does other things entirely\npeer line 5 does other things entirely\npeer line 6 does other things entirely\npeer line 7 does other things entirely\npeer line 8 does other things entirely\npeer line 9 does other things entirely\n"
+ },
+ "cases": [
+  {
+   "name": "md-moved-sections",
+   "file": "doc.md",
+   "peers": [
+    "other.md"
+   ],
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 1000,
+      "quick_in": 1000
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "s1",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "s2",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "s3",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "s4",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "s5",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "s6",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "s7",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "md-moved-whole",
+   "file": "doc.md",
+   "peers": [
+    "other.md"
+   ],
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "whole",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "md-moved-dual-sections",
+   "file": "doc.md",
+   "kind": "code",
+   "risk": 2,
+   "peers": [
+    "other.md"
+   ],
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 1000,
+      "quick_in": 1000
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x1",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x2",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x3",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x4",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x5",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x6",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x7",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x8",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x9",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x10",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x11",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x12",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x13",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x14",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x15",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x16",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x17",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x18",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x19",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x20",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x21",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x22",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x23",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "x24",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "dual-moved-judge",
+   "file": "src.txt",
+   "risk": 2,
+   "peers": [
+    "peer.txt"
+   ],
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "a",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "b",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "judge",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "dual-moved-judge-sees-diff",
+   "file": "src.txt",
+   "risk": 2,
+   "peers": [
+    "peer.txt"
+   ],
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "judge_sees_diff": true
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "a",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "b",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "judge",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "md-moved-too-big",
+   "file": "doc.md",
+   "peers": [
+    "other.md"
+   ],
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 900,
+      "quick_in": 900
+     }
+    }
+   },
+   "script": []
+  },
+  {
+   "name": "md-moved-dual-too-big",
+   "file": "doc.md",
+   "kind": "code",
+   "risk": 2,
+   "peers": [
+    "other.md"
+   ],
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 900,
+      "quick_in": 900
+     }
+    }
+   },
+   "script": []
+  }
+ ]
+}

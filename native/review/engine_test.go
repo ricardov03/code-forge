@@ -287,13 +287,9 @@ func TestReviewFileGapAfterSpawn(t *testing.T) {
 func TestReviewFileUnsupportedBeforeSpawn(t *testing.T) {
 	useRepoLenses(t)
 	fx := readFixture(t, "packet_fixture.json")
-	fx.After["pkg/thing_test.txt"] = "one\n"
 	fx.After["README.md"] = strings.Repeat("# head\nsome words here\n", 200)
 	fx.After["emoji.md"] = "# " + strings.Repeat("a", 117) + "\U0001F600 tail\n" + strings.Repeat("some words here\n", 200)
 	repo := buildRepo(t, fx)
-	if err := os.Remove(filepath.Join(repo, "same.txt")); err != nil {
-		t.Fatal(err)
-	}
 	f := func(v float64) *float64 { return &v }
 	withReview := func(r map[string]any) map[string]any { c := baseCfg(); c["review"] = r; return c }
 	withL2 := func(l map[string]any) map[string]any { c := baseCfg(); c["levels"] = map[string]any{"L2": l}; return c }
@@ -310,14 +306,9 @@ func TestReviewFileUnsupportedBeforeSpawn(t *testing.T) {
 		{"fallback-ladder", Input{File: "notes.txt", Cfg: withL2(map[string]any{"provider": "claude", "model": "m2", "fallback": []any{"x"}}), Risk: f(1)}},
 		{"no-model", Input{File: "notes.txt", Cfg: withL2(map[string]any{"provider": "claude"}), Risk: f(1)}},
 		{"no-provider", Input{File: "notes.txt", Cfg: map[string]any{"levels": map[string]any{"L2": map[string]any{"model": "m2"}}}, Risk: f(1)}},
-		{"moved-code", Input{File: "notes.txt", Cfg: baseCfg(), Risk: f(1), HasPeerDiffs: true}},
-		{"peers-with-base", Input{File: "notes.txt", Cfg: baseCfg(), Risk: f(1), Base: "HEAD", Peers: []string{"big.txt"}}},
-		{"deleted", Input{File: "same.txt", Cfg: baseCfg(), Risk: f(1)}},
-		{"test-file", Input{File: "pkg/thing_test.txt", Cfg: baseCfg(), Risk: f(1)}},
 		// B545: a Markdown file over the budget reviews by section (TestB545MarkdownSectionsMatchNode);
 		// only a heading Node cuts inside a surrogate pair stays with Node
 		{"markdown-heading-surrogate-cut", Input{File: "emoji.md", Cfg: withReview(map[string]any{"budgets": map[string]any{"full_in": 100.0}}), Risk: f(1)}},
-		{"related-files", Input{File: "app.js", Cfg: baseCfg(), Risk: f(1)}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

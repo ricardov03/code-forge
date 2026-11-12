@@ -241,6 +241,7 @@ type Context struct {
 	Mode      string
 	Text      string
 	LineCount int
+	Windows   []window
 }
 
 // BuildContext is context.mjs buildContext; mode is auto, minimal or recheck.
@@ -261,7 +262,11 @@ func BuildContext(file string, content *string, hunks []Hunk, cfg map[string]any
 	}
 	if chosen == "whole" {
 		out := numbered([]string{fmt.Sprintf("### %s (whole file, %d lines)", file, len(lines))}, 1, len(lines))
-		return Context{chosen, strings.Join(out, "\n"), len(lines)}
+		windows := []window{}
+		if len(lines) > 0 {
+			windows = append(windows, window{1, len(lines)})
+		}
+		return Context{chosen, strings.Join(out, "\n"), len(lines), windows}
 	}
 	radius := contextSetting(cfg, "hunk_context_lines", 40)
 	if chosen == "minimal" {
@@ -277,18 +282,103 @@ func BuildContext(file string, content *string, hunks []Hunk, cfg map[string]any
 	if len(windows) == 0 {
 		parts = append(parts, "### "+file+" (no current content)")
 	}
-	return Context{chosen, strings.Join(parts, "\n"), count}
+	return Context{chosen, strings.Join(parts, "\n"), count, windows}
+}
+
+// importHeaderExt is importHeaderEnd's file test, case-insensitive for ASCII
+// letters only (a JS /i regex without u never folds ſ to s).
+var importHeaderExt = regexp.MustCompile(`\.(?:[cCmM]?[jJtT][sS][xX]?|[cC][sS][sS]|[sS][cC][sS][sS]|[hH][tT][mM][lL]?|[aA][sS][tT][rR][oO]|[vV][uU][eE])$`)
+
+var importHeaderTokenRE = regexp.MustCompile("//[^\\r\\n]*|/\\*" + jsAny + "*?\\*/|<!--" + jsAny + "*?-->|`(?:\\\\" + jsAny + "|[^`\\\\])*`|'(?:\\\\" + jsAny + "|[^'\\\\])*'|\"(?:\\\\" + jsAny + "|[^\"\\\\])*\"|[\\w$]+|" + jsNonWS)
+
+// importHeaderEnd is packet.mjs importHeaderEnd: the last line of a
+// top-level import/require, 0 for none.
+func importHeaderEnd(file string, content *string) int {
+	if content == nil || *content == "" || !importHeaderExt.MatchString(file) {
+		return 0
+	}
+	tokens := []jsToken{}
+	for _, t := range jsTokens(importHeaderTokenRE, *content) {
+		if !strings.HasPrefix(t.value, "//") && !strings.HasPrefix(t.value, "/*") && !strings.HasPrefix(t.value, "<!--") {
+			tokens = append(tokens, t)
+		}
+	}
+	at := func(i int) (string, bool) {
+		if i < 0 || i >= len(tokens) {
+			return "", false
+		}
+		return tokens[i].value, true
+	}
+	is := func(i int, v string) bool { t, ok := at(i); return ok && t == v }
+	depth := 0
+	importing, importSource, requiring := false, false, false
+	end := 0
+	for i, tk := range tokens {
+		token := tk.value
+		if depth == 0 && token == "import" && !is(i+1, "(") && !is(i+1, ".") && !is(i-1, ".") {
+			importing = true
+			importSource = false
+		}
+		if depth == 0 && token == "require" && is(i+1, "(") && !is(i-1, ".") {
+			requiring = true
+		}
+		switch token {
+		case "{", "(", "[":
+			depth++
+		case "}", ")", "]":
+			depth = max(0, depth-1)
+		}
+		quoted := strings.HasPrefix(token, "'") || strings.HasPrefix(token, `"`)
+		if depth == 0 && ((importing && (quoted || (importSource && token == "}") || token == ";")) || (requiring && token == ")")) {
+			end = tk.index + len(token)
+			importSource = true
+			if !((is(i+1, "with") || is(i+1, "assert")) && is(i+2, "{")) {
+				importing = false
+			}
+			requiring = false
+		}
+	}
+	if end == 0 {
+		return 0
+	}
+	return strings.Count((*content)[:end], "\n") + 1
+}
+
+// packetContext is packet.mjs packetContext: the import header lines no
+// window shows, before the context.
+func packetContext(file string, content *string, hunks []Hunk, cfg map[string]any, mode string) Context {
+	ctx := BuildContext(file, content, hunks, cfg, mode)
+	end := importHeaderEnd(file, content)
+	lines := SplitLines(content)
+	missing := []string{}
+	for n := 1; n <= end; n++ {
+		shown := false
+		for _, w := range ctx.Windows {
+			shown = shown || (w.start <= n && n <= w.end)
+		}
+		if !shown {
+			missing = append(missing, strconv.Itoa(n)+"| "+lines[n-1])
+		}
+	}
+	if len(missing) == 0 {
+		return ctx
+	}
+	ctx.LineCount += len(missing)
+	ctx.Text = strings.Join(append(append([]string{fmt.Sprintf("### %s (import header context, lines 1-%d)", file, end)}, missing...), ctx.Text), "\n")
+	return ctx
 }
 
 // FileDiff is one file's diff against the block base.
 type FileDiff struct {
-	File       string
-	Kind       string // tracked or new
-	DiffText   string
-	Content    *string // nil: deleted
-	Hunks      []Hunk
-	PlusCount  int
-	MinusCount int
+	File        string
+	Kind        string // tracked or new
+	DiffText    string
+	Content     *string // nil: deleted
+	Hunks       []Hunk
+	PlusCount   int
+	MinusCount  int
+	Related     []string     // related file names, never their content (B537)
+	Definitions []definition // called-symbol bodies (B537)
 }
 
 var secretLike = []*regexp.Regexp{
@@ -388,12 +478,9 @@ func gitOK(root string, env []string, ok []int, args ...string) (string, int, bo
 	return out, -1, false
 }
 
-// nativeExts are the extensions Node gives import-header context, related
-// files or called-symbol definitions: not ported yet.
-var nativeExts = regexp.MustCompile(`(?i)\.(?:[cm]?[jt]sx?|css|scss|html?|astro|vue|go)$`)
-
-// ReadFileDiff is Node's readFileDiff for files with no related-file,
-// definition or import-header context (ErrUnsupported otherwise).
+// ReadFileDiff is Node's readFileDiff, with the related file names and the
+// called-symbol definitions (B537); ErrUnsupported for a diff or file that
+// is not UTF-8.
 func ReadFileDiff(repoRoot, file, base string) (*FileDiff, error) {
 	if err := AssertPacketPath(repoRoot, file); err != nil {
 		return nil, err
@@ -454,11 +541,42 @@ func ReadFileDiff(repoRoot, file, base string) (*FileDiff, error) {
 			content = &s
 		}
 	}
-	if trimJS(diffText) != "" && nativeExts.MatchString(file) {
-		return nil, unsupported("related files and definitions are not ported")
+	readFile := func(rel string) *string {
+		if IsSecretLike(rel) {
+			return nil
+		}
+		if rel == file {
+			return content
+		}
+		if AssertPacketPath(repoRoot, rel) != nil {
+			return nil
+		}
+		return readRepoTextOrNil(repoRoot, rel)
+	}
+	var tracked []string
+	listFiles := func() []string {
+		if tracked == nil {
+			tracked = gitListFiles(repoRoot)
+		}
+		return append([]string{}, tracked...)
+	}
+	related := []string{}
+	if trimJS(diffText) != "" {
+		related = relatedFiles(file, relatedIO{read: readFile, list: listFiles})
 	}
 	hunks, plus, minus := ParseDiff(diffText)
-	return &FileDiff{file, kind, diffText, content, hunks, plus, minus}, nil
+	definitions := []definition{}
+	if content != nil && trimJS(diffText) != "" {
+		windows := []window{}
+		for _, h := range hunks {
+			windows = append(windows, window{h.NewStart, h.NewStart + h.NewLines - 1})
+		}
+		lines := SplitLines(content)
+		header := strings.Join(lines[:min(len(lines), importHeaderEnd(file, content))], "\n")
+		definitions = findDefinitions(file, strings.Split(diffText, "\n"), header, &defIO{read: readFile, list: listFiles, windows: windows})
+	}
+	return &FileDiff{File: file, Kind: kind, DiffText: diffText, Content: content, Hunks: hunks, PlusCount: plus, MinusCount: minus,
+		Related: related, Definitions: definitions}, nil
 }
 
 // Packet is an assembled reviewer packet.
@@ -472,6 +590,13 @@ type Packet struct {
 	TokensIn    int
 	Budget      int
 	OverBudget  bool
+	// a recheck packet's cross-file evidence (buildRecheckPacket, B537):
+	// HasExtra when the packet carries the extra_files fields.
+	HasExtra     bool
+	ExtraText    string
+	ExtraFiles   []string
+	ExtraOmitted int
+	ExtraTrimmed []string
 }
 
 func diffSectionOf(d *FileDiff) string {
@@ -482,7 +607,9 @@ func diffSectionOf(d *FileDiff) string {
 	return strings.Join(append(parts, "", trimEnd(d.DiffText)), "\n")
 }
 
-func render(lens string, digest []string, facts, context, diff, moved string, paired ...string) string {
+// render is packet.mjs render: context, related, definitions, paired, moved,
+// then the diff.
+func render(lens string, digest []string, facts, context, diff, moved, paired, related, definitions string) string {
 	digestText := "(none)"
 	if len(digest) > 0 {
 		digestText = strings.Join(digest, "\n")
@@ -495,8 +622,14 @@ func render(lens string, digest []string, facts, context, diff, moved string, pa
 		context = "(none)"
 	}
 	parts := []string{"# code-forge review packet", "## lens", lens, "## project rules", digestText, "## facts", factsText, "## context", context}
-	if len(paired) > 0 && paired[0] != "" {
-		parts = append(parts, paired[0])
+	if related != "" {
+		parts = append(parts, related)
+	}
+	if definitions != "" {
+		parts = append(parts, trimEnd(definitions))
+	}
+	if paired != "" {
+		parts = append(parts, paired)
 	}
 	if moved != "" {
 		parts = append(parts, moved)
@@ -504,16 +637,16 @@ func render(lens string, digest []string, facts, context, diff, moved string, pa
 	return strings.Join(append(parts, "## diff", diff, ""), "\n")
 }
 
-// AssemblePacket is Node's assemblePacket with no related, definitions or
-// moved sections (the cases ReadFileDiff accepts); paired is engine.mjs
-// pairedContext's text (” for none).
-func AssemblePacket(d *FileDiff, lens, rulesDigest, factsExcerpt string, cfg map[string]any, paired string) (*Packet, error) {
-	return assemblePacketMode(d, lens, rulesDigest, factsExcerpt, cfg, paired, "auto")
+// AssemblePacket is Node's assemblePacket: paired is engine.mjs
+// pairedContext's text and moved the file's `## moved code` / deleted /
+// test-quality text (” for none).
+func AssemblePacket(d *FileDiff, lens, rulesDigest, factsExcerpt string, cfg map[string]any, paired, moved string) (*Packet, error) {
+	return assemblePacketMode(d, lens, rulesDigest, factsExcerpt, cfg, paired, moved, "auto")
 }
 
 // assemblePacketMode is assemblePacket with its contextMode (auto, or
 // recheck for a fix-hunk packet); over the budget it falls to minimal.
-func assemblePacketMode(d *FileDiff, lens, rulesDigest, factsExcerpt string, cfg map[string]any, paired, mode string) (*Packet, error) {
+func assemblePacketMode(d *FileDiff, lens, rulesDigest, factsExcerpt string, cfg map[string]any, paired, moved, mode string) (*Packet, error) {
 	lensText, err := LoadLens(lens)
 	if err != nil {
 		return nil, err
@@ -523,12 +656,13 @@ func assemblePacketMode(d *FileDiff, lens, rulesDigest, factsExcerpt string, cfg
 		key = "quick_in"
 	}
 	limit := BudgetFor(cfg, key)
+	fullIn := BudgetFor(cfg, "full_in")
 	headers := []string{}
 	for _, h := range d.Hunks {
 		headers = append(headers, h.Header)
 	}
 	diff := diffSectionOf(d)
-	if bare := EstimateTokens(render(lensText, nil, "", "", diff, "")); bare > limit {
+	if bare := EstimateTokens(render(lensText, nil, "", "", diff, moved, "", "", "")); bare > limit {
 		return &Packet{Status: "split_required", TokensIn: bare, Budget: limit}, nil
 	}
 	rd := rulesDigest
@@ -536,23 +670,55 @@ func assemblePacketMode(d *FileDiff, lens, rulesDigest, factsExcerpt string, cfg
 	if len(digest) > DigestMaxLines {
 		digest = digest[:DigestMaxLines]
 	}
-	ctx := BuildContext(d.File, d.Content, d.Hunks, cfg, mode)
-	pairedSection := boundedPaired(paired, BudgetFor(cfg, "full_in"))
-	if EstimateTokens(render(lensText, digest, factsExcerpt, ctx.Text, diff, "")) > limit {
-		pairedSection = ""
-		ctx = BuildContext(d.File, d.Content, d.Hunks, cfg, "minimal")
+	ctx := packetContext(d.File, d.Content, d.Hunks, cfg, mode)
+	pairedSection := boundedPaired(paired, fullIn)
+	relatedSection := ""
+	if (lens == "quick" || lens == "full") && len(d.Related) > 0 {
+		relatedSection = "## related files (not shown)\n" + strings.Join(d.Related, "\n")
 	}
-	text := render(lensText, digest, factsExcerpt, ctx.Text, diff, "", pairedSection)
+	if EstimateTokens(render(lensText, digest, factsExcerpt, ctx.Text, diff, moved, "", "", "")) > limit {
+		relatedSection = ""
+		pairedSection = ""
+		ctx = packetContext(d.File, d.Content, d.Hunks, cfg, "minimal")
+	}
+	definitions := []definition{}
+	if lens != "judge" {
+		for _, def := range d.Definitions {
+			shown := false
+			for _, w := range ctx.Windows {
+				shown = shown || (w.start <= def.Start && def.End <= w.end)
+			}
+			if def.Path != d.File || !shown {
+				definitions = append(definitions, def)
+			}
+		}
+	}
+	for len(definitions) > 0 && EstimateTokens(definitionsSection(definitions)) > fullIn/8 {
+		definitions = definitions[:len(definitions)-1]
+	}
+	renderPacket := func() string {
+		return render(lensText, digest, factsExcerpt, ctx.Text, diff, moved, pairedSection, relatedSection, definitionsSection(definitions))
+	}
+	text := renderPacket()
+	if EstimateTokens(text) > limit && relatedSection != "" {
+		relatedSection = ""
+		text = renderPacket()
+	}
+	for EstimateTokens(text) > limit && len(definitions) > 0 {
+		definitions = definitions[:len(definitions)-1]
+		text = renderPacket()
+	}
 	if EstimateTokens(text) > limit && pairedSection != "" {
 		pairedSection = ""
-		text = render(lensText, digest, factsExcerpt, ctx.Text, diff, "", pairedSection)
+		text = renderPacket()
 	}
 	for EstimateTokens(text) > limit && len(digest) > 0 {
 		digest = digest[:len(digest)-1]
-		text = render(lensText, digest, factsExcerpt, ctx.Text, diff, "", pairedSection)
+		text = renderPacket()
 	}
 	tokens := EstimateTokens(text)
-	return &Packet{"ok", text, headers, ctx.Mode, ctx.LineCount, len(digest), tokens, limit, tokens > limit}, nil
+	return &Packet{Status: "ok", Text: text, HunkHeaders: headers, ContextMode: ctx.Mode, ContextLine: ctx.LineCount, DigestLines: len(digest),
+		TokensIn: tokens, Budget: limit, OverBudget: tokens > limit}, nil
 }
 
 func jsonString(s string) (string, error) {

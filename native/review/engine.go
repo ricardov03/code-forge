@@ -7,8 +7,10 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 
 	"github.com/ricardov03/code-forge/native/blockopen"
 	"github.com/ricardov03/code-forge/native/filelock"
@@ -244,13 +246,6 @@ func planGuards(pl sessionPlan, cfg map[string]any) error {
 
 var markdownFile = regexp.MustCompile(`(?i)\.(md|markdown)$`)
 
-// testLike is a superset of Node's isCheckedTestFile: such files may get the
-// B92 test-quality hint, which is not ported.
-func testLike(file string) bool {
-	low := strings.ToLower(file)
-	return strings.Contains(low, "test") || strings.Contains(low, "spec")
-}
-
 func randomHex(r io.Reader) (string, error) {
 	if r == nil {
 		r = rand.Reader
@@ -296,14 +291,17 @@ type prepared struct {
 	head    ledger.Object
 	// sections: a Markdown file over the budget, one packet set per section
 	sections []sectionPacket
+	// extras: the movedOf parts every packet carries (B537)
+	extras packetParts
 }
 
-// packetsFor is engine.mjs packetsFor: one packet per reviewer lens.
-func packetsFor(pl sessionPlan, d *FileDiff, in Input, paired string) ([]*Packet, *Packet, error) {
+// packetsFor is engine.mjs packetsFor: one packet per reviewer lens, each
+// with moved (movedOf of the part's keys).
+func packetsFor(pl sessionPlan, d *FileDiff, in Input, paired, moved string) ([]*Packet, *Packet, error) {
 	out := []*Packet{}
 	var split *Packet
 	for _, spec := range pl.reviewers {
-		pk, err := AssemblePacket(d, spec.lens, in.RulesDigest, in.FactsExcerpt, in.Cfg, paired)
+		pk, err := AssemblePacket(d, spec.lens, in.RulesDigest, in.FactsExcerpt, in.Cfg, paired, moved)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -355,28 +353,17 @@ func prepare(in Input) (*prepared, error) {
 		return p, nil
 	}
 	p.mkdir = true
-	if in.HasPeerDiffs {
-		return nil, unsupported("moved-code hints are not ported")
+	extras, err := packetExtras(in, diff)
+	if err != nil {
+		return nil, err
 	}
-	if in.Base != "" {
-		for _, peer := range in.Peers {
-			if peer != diff.File {
-				return nil, unsupported("moved-code hints are not ported")
-			}
-		}
-	}
-	if diff.Content == nil {
-		return nil, unsupported("the deletion note is not ported")
-	}
-	if testLike(diff.File) {
-		return nil, unsupported("the test-quality hint is not ported")
-	}
+	p.extras = extras
 	changed := in.ChangedFiles
 	if changed == nil {
 		changed = in.Peers
 	}
 	paired := PairedContext(PairedInput{RepoRoot: in.RepoRoot, File: in.File, OwnedFiles: in.OwnedFiles, ChangedFiles: changed, TestFiles: in.TestFiles, Secrets: in.Secrets})
-	packets, split, err := packetsFor(plan, diff, in, paired)
+	packets, split, err := packetsFor(plan, diff, in, paired, extras.movedOf(nil))
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +382,7 @@ func prepare(in Input) (*prepared, error) {
 			p.head.Set("engine", full.mode)
 			p.head.Set("depth", full.depth)
 			p.head = append(p.head, p.stepUp...)
-			if packets, split, err = packetsFor(full, diff, in, paired); err != nil {
+			if packets, split, err = packetsFor(full, diff, in, paired, extras.movedOf(nil)); err != nil {
 				return nil, err
 			}
 		}
@@ -410,6 +397,50 @@ func prepare(in Input) (*prepared, error) {
 	}
 	p.packets = packets
 	return p, nil
+}
+
+// packetParts is reviewFile's parts of movedOf (B537): the `## deleted file`
+// note of a pure deletion, the moves for the `## moved code` section (B56)
+// and the `## test-quality` hint (B92).
+type packetParts struct {
+	deleted, quality string
+	moves            *mvMoves
+	content          *string
+}
+
+// movedOf is engine.mjs movedOf(keys): keys nil is the whole file, else a
+// Markdown section's heading-group keys (only its moves).
+func (pp packetParts) movedOf(keys []int) string {
+	parts := []string{}
+	for _, t := range []string{pp.deleted, movedText(pp.moves, pp.content, keys), pp.quality} {
+		if t != "" {
+			parts = append(parts, t)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// packetExtras reads reviewFile's movedOf parts once.
+func packetExtras(in Input, diff *FileDiff) (packetParts, error) {
+	pp := packetParts{content: diff.Content}
+	if diff.Content == nil && isAbsent(in.RepoRoot, diff.File) {
+		note, err := deletionNote(in.RepoRoot, diff.File)
+		if err != nil {
+			if note, err = renderDeletionNote(diff.File, delRefs{status: "not_checked", paths: []string{}}); err != nil {
+				return pp, err
+			}
+		}
+		pp.deleted = note
+	}
+	pp.moves = movesFor(diff.DiffText, in.RepoRoot, in.Base, diff.File, in.Peers)
+	pp.quality = testQualityNote(diff.File, diff.Content)
+	return pp, nil
+}
+
+// isAbsent is engine.mjs isAbsent: lstat fails with ENOENT or ENOTDIR.
+func isAbsent(repoRoot, file string) bool {
+	_, err := os.Lstat(filepath.Join(repoRoot, file))
+	return err != nil && (errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ENOTDIR))
 }
 
 // Check is File's dry pass: nil when File would serve the input (a session
@@ -452,7 +483,7 @@ func File(in Input, deps Deps) (ledger.Object, error) {
 	if p.sections != nil {
 		return fileSections(p, in, deps, result)
 	}
-	part, err := reviewPart(p, p.diff, p.packets, in, deps, p.stepUp)
+	part, err := reviewPart(p, p.diff, p.packets, in, deps, p.stepUp, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -480,8 +511,9 @@ type partOutcome struct {
 // reviewPart is engine.mjs reviewPart: the review.plan row (rowExtra
 // appended), each reviewer's session and needs_file round, then the judge
 // on both reports. Node starts the reviewers together; Go runs them in
-// plan order.
-func reviewPart(p *prepared, part *FileDiff, packets []*Packet, in Input, deps Deps, rowExtra ledger.Object) (partOutcome, error) {
+// plan order. keys: the section's heading-group keys for the judge packet's
+// moved text (nil = the whole file).
+func reviewPart(p *prepared, part *FileDiff, packets []*Packet, in Input, deps Deps, rowExtra ledger.Object, keys []int) (partOutcome, error) {
 	forecast := 0
 	for _, pk := range packets {
 		forecast += pk.TokensIn
@@ -519,7 +551,7 @@ func reviewPart(p *prepared, part *FileDiff, packets []*Packet, in Input, deps D
 		for i, spec := range p.plan.reviewers {
 			reports[spec.slot] = done[i].Get("review")
 		}
-		jp, err := assembleJudgePacket(part, reports["A"], reports["B"], in.Cfg)
+		jp, err := assembleJudgePacket(part, reports["A"], reports["B"], in.Cfg, p.extras.movedOf(keys))
 		if err != nil {
 			return partOutcome{}, err
 		}

@@ -314,15 +314,22 @@ type packResult struct {
 	section  string
 }
 
-func packSections(d *FileDiff, budget int, measure func(*FileDiff) int) (packResult, error) {
+// measure gets the part and its heading-group keys (nil = the whole file).
+func packSections(d *FileDiff, budget int, measure func(*FileDiff, []int) int) (packResult, error) {
 	groups, ok, err := sectionGroups(d)
 	if err != nil {
 		return packResult{}, err
 	}
 	if !ok || len(groups) == 0 {
-		return packResult{tokensIn: measure(d)}, nil
+		return packResult{tokensIn: measure(d, nil)}, nil
 	}
-	size := func(set []sectionGroup) int { return measure(mergeGroups(d, set)) }
+	size := func(set []sectionGroup) int {
+		keys := make([]int, 0, len(set))
+		for _, g := range set {
+			keys = append(keys, g.key)
+		}
+		return measure(mergeGroups(d, set), keys)
+	}
 	sections := []mdSection{}
 	open := []sectionGroup{}
 	flush := func() {
@@ -368,10 +375,11 @@ func prepareSections(p *prepared, d *FileDiff, split *Packet, in Input, paired s
 		}
 		lenses = append(lenses, text)
 	}
-	measure := func(part *FileDiff) int {
+	measure := func(part *FileDiff, keys []int) int {
+		moved := p.extras.movedOf(keys)
 		most := 0
 		for i, lens := range lenses {
-			if n := EstimateTokens(render(lens, nil, "", "", diffSectionOf(part), "")); i == 0 || n > most {
+			if n := EstimateTokens(render(lens, nil, "", "", diffSectionOf(part), moved, "", "", "")); i == 0 || n > most {
 				most = n
 			}
 		}
@@ -398,7 +406,7 @@ func prepareSections(p *prepared, d *FileDiff, split *Packet, in Input, paired s
 	}
 	out := []sectionPacket{}
 	for _, sec := range packed.sections {
-		packets, over, err := packetsFor(p.plan, sec.diff, in, paired)
+		packets, over, err := packetsFor(p.plan, sec.diff, in, paired, p.extras.movedOf(sec.keys))
 		if err != nil {
 			return nil, err
 		}
@@ -430,7 +438,7 @@ func fileSections(p *prepared, in Input, deps Deps, result func(ledger.Object, .
 	for _, sp := range p.sections {
 		index := float64(sp.sec.index)
 		extra := append(p.stepUp.Clone(), ledger.Field{Key: "section", Value: index}, ledger.Field{Key: "sections", Value: float64(len(p.sections))})
-		part, err := reviewPart(p, sp.sec.diff, sp.packets, in, deps, extra)
+		part, err := reviewPart(p, sp.sec.diff, sp.packets, in, deps, extra, sp.sec.keys)
 		if err != nil {
 			return nil, err
 		}

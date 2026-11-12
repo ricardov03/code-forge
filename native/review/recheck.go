@@ -10,29 +10,26 @@ package review
 // S1's resolved band closes an open finding before the packet is built; the
 // rest go to the session (the dry pass plans with every open finding).
 //
-// Not ported (ErrUnsupported before anything runs): review.recheck_scope
-// file, moved-code hints and cross-file evidence (a base with peers), the
-// import-header context of a JS/TS/CSS/HTML/Astro/Vue packet, Markdown
-// section rechecks (a Markdown packet over the budget), and every config
+// B537 added review.recheck_scope file (the packet against the block base),
+// moved-code hints and cross-file evidence (a base with peers) and the
+// import-header context. Not ported (ErrUnsupported before anything runs):
+// Markdown section rechecks (a Markdown packet over the budget), a
+// recheck_scope file diff that fails to read (Node throws), and every config
 // shape levelGuards refuses. B545: review.second_levels, a levels.L2 ladder
 // and review.routes run like Node's recheckSession.
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
-
-// importHeaderExts are packet.mjs importHeaderEnd's files: a recheck packet
-// of one of them gets the import-header context, which is not ported.
-var importHeaderExts = regexp.MustCompile(`(?i)\.(?:[cm]?[jt]sx?|css|scss|html?|astro|vue)$`)
 
 // normaliseWhitespace is fixloop.mjs normaliseWhitespace.
 func normaliseWhitespace(text string) string {
@@ -136,17 +133,39 @@ func insideHunks(f ledger.Object, hunks []Hunk) bool {
 	return false
 }
 
-// buildRecheckPacket is fixloop.mjs buildRecheckPacket with no moved code and
-// no cross-file evidence.
-func buildRecheckPacket(diff *FileDiff, open []any, deps LoopDeps, paired string) (*Packet, error) {
-	p, err := assemblePacketMode(diff, "recheck", deps.Input.RulesDigest, deps.Input.FactsExcerpt, deps.Cfg, paired, "recheck")
+// buildRecheckPacket is fixloop.mjs buildRecheckPacket: the recheck lens in
+// contextMode, the moved-code text, then the cross-file evidence when it fits
+// the packet budget (else its one-line cut, else nothing) and the open
+// findings.
+func buildRecheckPacket(diff *FileDiff, open []any, deps LoopDeps, paired, moved, mode string, extra extraEvidence) (*Packet, error) {
+	p, err := assemblePacketMode(diff, "recheck", deps.Input.RulesDigest, deps.Input.FactsExcerpt, deps.Cfg, paired, moved, mode)
 	if err != nil || p.Status != "ok" {
 		return p, err
 	}
 	appended := openFindingsText(open)
 	out := *p
-	out.Text = p.Text + appended
-	out.TokensIn = p.TokensIn + EstimateTokens(appended)
+	if len(extra.files) == 0 && extra.omitted == 0 {
+		out.Text = p.Text + appended
+		out.TokensIn = p.TokensIn + EstimateTokens(appended)
+		return &out, nil
+	}
+	baseline := p.Text + appended
+	fits := EstimateTokens(baseline+extra.text) <= p.Budget
+	cut := fmt.Sprintf("## cross-file evidence\n(%d other files omitted: packet budget)\n", extra.omitted+len(extra.files))
+	addition := ""
+	if fits {
+		addition = extra.text
+	} else if EstimateTokens(baseline+cut) <= p.Budget {
+		addition = cut
+	}
+	out.Text = p.Text + addition + appended
+	out.TokensIn = EstimateTokens(out.Text)
+	out.HasExtra = true
+	out.ExtraText = addition
+	out.ExtraFiles, out.ExtraOmitted, out.ExtraTrimmed = []string{}, extra.omitted+len(extra.files), []string{}
+	if fits {
+		out.ExtraFiles, out.ExtraOmitted, out.ExtraTrimmed = extra.files, extra.omitted, extra.trimmed
+	}
 	return &out, nil
 }
 
@@ -154,6 +173,7 @@ func buildRecheckPacket(diff *FileDiff, open []any, deps LoopDeps, paired string
 type recheckPlan struct {
 	rel, content, hash string
 	diff               *FileDiff
+	extra              extraEvidence
 	noFixHunks         bool
 	pending            []any
 	jevClosed          int     // open findings S1's resolved band closed (B533)
@@ -169,25 +189,7 @@ func idKey(v any) string {
 // whole packet. dry: the dry pass (no seam randomness, the work dir it made
 // is removed again). ErrUnsupported for a part not ported.
 func planRecheck(state ledger.Object, kind string, deps LoopDeps, dry bool) (*recheckPlan, error) {
-	review := section(deps.Cfg, "review")
-	if review["recheck_scope"] == "file" {
-		return nil, unsupported("review.recheck_scope file (a recheck against the block base) is not ported")
-	}
-	if deps.Input.Base != "" {
-		if deps.Input.HasPeerDiffs {
-			return nil, unsupported("moved-code hints and cross-file evidence of a recheck are not ported")
-		}
-		peers := deps.Input.Peers
-		if peers == nil {
-			peers = deps.Input.ChangedFiles
-		}
-		file, _ := state.Get("file").(string)
-		for _, p := range peers {
-			if p != file {
-				return nil, unsupported("moved-code hints and cross-file evidence of a recheck are not ported")
-			}
-		}
-	}
+	scopeFile := section(deps.Cfg, "review")["recheck_scope"] == "file"
 	if deps.Input.WorkDir == "" {
 		return nil, unsupported("a recheck with no work dir")
 	}
@@ -216,15 +218,36 @@ func planRecheck(state ledger.Object, kind string, deps LoopDeps, dry bool) (*re
 			defer os.Remove(deps.Input.WorkDir)
 		}
 	}
-	if p.diff, err = fixHunkDiff(file, previous, content, deps.Input.WorkDir, session); err != nil {
+	if scopeFile {
+		if p.diff, err = ReadFileDiff(deps.RepoRoot, file, deps.Input.Base); err != nil {
+			if errors.Is(err, ErrUnsupported) {
+				return nil, err
+			}
+			return nil, unsupported("a recheck_scope file diff that fails to read (" + err.Error() + ")")
+		}
+	} else if p.diff, err = fixHunkDiff(file, previous, content, deps.Input.WorkDir, session); err != nil {
 		return nil, err
 	}
+	// the peers' diffs, read once for the evidence and the moves (Node's
+	// memoised reader); any failure is none
+	var peerDiffs []mvPeerDiff
+	if deps.Input.Base != "" {
+		peers := deps.Input.Peers
+		if peers == nil {
+			peers = deps.Input.ChangedFiles
+		}
+		peerDiffs, _ = readPeerDiffs(deps.RepoRoot, deps.Input.Base, file, peers)
+		open, _ := state.Get("open").([]any)
+		p.extra = crossFileEvidence(deps.RepoRoot, file, peerDiffs, &content, open, "", deps.Cfg)
+	} else {
+		p.extra = packExtraDiffs(nil, 0)
+	}
 	reviewed, isString := state.Get("reviewed_content").(string)
-	if kind == "recheck" && ((isString && reviewed == content) || len(p.diff.Hunks) == 0) {
+	if kind == "recheck" && ((isString && reviewed == content) || len(p.diff.Hunks) == 0) && len(p.extra.files) == 0 {
 		p.noFixHunks = true
 		return p, nil
 	}
-	if len(p.diff.Hunks) == 0 {
+	if len(p.diff.Hunks) == 0 && len(p.extra.files) == 0 {
 		return p, nil
 	}
 	open, _ := state.Get("open").([]any)
@@ -242,8 +265,23 @@ func planRecheck(state ledger.Object, kind string, deps LoopDeps, dry bool) (*re
 	if len(p.pending) == 0 {
 		return p, nil
 	}
-	if importHeaderExts.MatchString(file) {
-		return nil, unsupported("the import-header context of a recheck packet is not ported")
+	mode := "recheck"
+	if scopeFile {
+		mode = "auto"
+	}
+	moved := ""
+	if len(peerDiffs) > 0 {
+		baseDiff := p.diff
+		if !scopeFile {
+			if baseDiff, err = ReadFileDiff(deps.RepoRoot, file, deps.Input.Base); err != nil && errors.Is(err, ErrUnsupported) {
+				return nil, err
+			}
+		}
+		if err == nil {
+			if m := mvMovedCode(baseDiff.DiffText, peerDiffs); len(m.out)+len(m.into) > 0 {
+				moved = renderMoved(&m)
+			}
+		}
 	}
 	changed := deps.Input.ChangedFiles
 	if changed == nil {
@@ -251,7 +289,7 @@ func planRecheck(state ledger.Object, kind string, deps LoopDeps, dry bool) (*re
 	}
 	paired := PairedContext(PairedInput{RepoRoot: deps.RepoRoot, File: file, OwnedFiles: deps.Input.OwnedFiles, ChangedFiles: changed,
 		TestFiles: deps.Input.TestFiles, Secrets: deps.Input.Secrets})
-	whole, err := buildRecheckPacket(p.diff, p.pending, deps, paired)
+	whole, err := buildRecheckPacket(p.diff, p.pending, deps, paired, moved, mode, p.extra)
 	if err != nil {
 		return nil, err
 	}
@@ -452,7 +490,7 @@ func runRecheck(state ledger.Object, deps LoopDeps, kind string) (ledger.Object,
 		state.Set("pending_kind", nil)
 		return state, nil
 	}
-	if len(plan.diff.Hunks) > 0 {
+	if len(plan.diff.Hunks) > 0 || len(plan.extra.files) > 0 {
 		pending := plan.pending
 		draft.Set("open", []any{})
 		if len(pending) > 0 {
@@ -460,7 +498,7 @@ func runRecheck(state ledger.Object, deps LoopDeps, kind string) (ledger.Object,
 				return stopBeforeRound(state, deps, kind, plan.rel, plan.hash, plan.whole), nil
 			}
 			packet := plan.whole
-			currentText := normaliseWhitespace(plan.content + "\n")
+			currentText := normaliseWhitespace(plan.content + "\n" + currentDiffLines(packet.ExtraText))
 			packetInfo = ledger.Object{{Key: "context_mode", Value: packet.ContextMode}, {Key: "context_lines", Value: float64(packet.ContextLine)}}
 			session, err := recheckSession(packet, deps, pending)
 			if err != nil {
@@ -596,6 +634,11 @@ func runRecheck(state ledger.Object, deps LoopDeps, kind string) (ledger.Object,
 	if packetInfo != nil {
 		roundRow = append(roundRow, ledger.Field{Key: "context_mode", Value: packetInfo.Get("context_mode")})
 	}
+	if plan.whole != nil && plan.whole.HasExtra && packetInfo != nil {
+		roundRow = append(roundRow, ledger.Field{Key: "extra_files", Value: stringsAny(plan.whole.ExtraFiles)},
+			ledger.Field{Key: "extra_files_omitted", Value: float64(max(0, plan.whole.ExtraOmitted))},
+			ledger.Field{Key: "extra_files_trimmed", Value: stringsAny(plan.whole.ExtraTrimmed)})
+	}
 	if len(repeated.items) > 0 {
 		roundRow = append(roundRow, ledger.Field{Key: "repeated", Value: append([]any{}, repeated.items...)})
 	}
@@ -661,4 +704,13 @@ func truthyValue(v any) bool {
 		return x != ""
 	}
 	return true
+}
+
+// stringsAny is a []string as a JSON array value.
+func stringsAny(list []string) []any {
+	out := []any{}
+	for _, s := range list {
+		out = append(out, s)
+	}
+	return out
 }
