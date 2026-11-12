@@ -1,0 +1,1 @@
+Possible secret found in the report (high-entropy string, report line 35; the title is line 1); not sent. Find it with code-forge logs --json and remove it with code-forge logs clear.
