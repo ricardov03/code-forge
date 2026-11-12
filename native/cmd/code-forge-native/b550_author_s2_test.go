@@ -235,7 +235,7 @@ func TestB550OpenAILevelHandsOverAndWritesNothing(t *testing.T) {
 		reason string
 	}{
 		{[]string{"author", "--job", "plan", "--brief", "brief.md", "--facts", "facts.md", "--run", "r9"}, "author-provider"},
-		{[]string{"s2", "--packet", "packet.json", "--run", "r9"}, "s2-provider"},
+		{[]string{"s2", "--packet", "packet.json", "--run", "r9"}, "system-two-provider"},
 	} {
 		f, repo := newB550Fixture(t, "openai")
 		t.Setenv("FAKE_MODE", "author")
