@@ -362,7 +362,6 @@ func TestAutopilotVerbHandsOver(t *testing.T) {
 	}{
 		{[]string{"ask", "--run", "r-a", "--scope", "round:extra", "--question", "q"}, "autopilot-ask"},
 		{[]string{"waive", "--run", "r-a"}, "autopilot-action"},
-		{[]string{"approve", "--run", "r-a"}, "autopilot-approve"},
 		{[]string{"status", "--run", "r-appr"}, "autopilot-restore"},
 		{[]string{"start", "--run", "r-shape", "--yes"}, "autopilot-shape"},
 		{[]string{"stop", "--run", "r-bad"}, "autopilot-record"},

@@ -236,8 +236,6 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 		return nil, hAutopilotAsk
 	case "waive":
 		return nil, hAutopilotAction
-	case "approve":
-		return nil, hAutopilotApprove
 	}
 	if sub == "start" && !flags.bools["yes"] && autopilotIsTTY() && !autopilotPromptable() {
 		return nil, hAutopilotPrompt // stdin is a terminal but stdout is not: clack's output stays with Node
@@ -274,6 +272,11 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 					return autopilotReport(o, sub, invalid)
 				}
 			}
+			if sub == "approve" {
+				if _, invalid := autopilotApproveInput(flags, now); invalid != nil {
+					return autopilotReport(o, sub, invalid)
+				}
+			}
 			return autopilotReport(o, sub, err)
 		}, 0
 	}
@@ -290,6 +293,9 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 		return nil, hAutopilotRestore
 	case err != nil:
 		return nil, hAutopilotShape
+	}
+	if sub == "approve" {
+		return autopilotApprovePlan(runID, record, flags, now)
 	}
 	read, err := autopilot.ReadGrant(record, now)
 	if err != nil {
