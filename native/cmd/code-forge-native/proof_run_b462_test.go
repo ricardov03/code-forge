@@ -85,7 +85,7 @@ func b462Fixture(t *testing.T, c b462Case) (home, repo string) {
 func b462Git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
-	cmd.Dir, cmd.Env = dir, gitx.ChildEnv()
+	cmd.Dir, cmd.Env = dir, append(gitx.ChildEnv(), "GIT_AUTHOR_DATE=2026-11-11T00:00:00Z", "GIT_COMMITTER_DATE=2026-11-11T00:00:00Z")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
@@ -249,6 +249,11 @@ func b462Collect(t *testing.T, home, repo string) b462State {
 			return nil
 		}
 		info, _ := d.Info()
+		if info.Mode()&fs.ModeSymlink != 0 {
+			target, _ := os.Readlink(p)
+			got.files[rel] = "link " + strings.ReplaceAll(target, repo, "<REPO>")
+			return nil
+		}
 		text, _ := os.ReadFile(p)
 		body := b462Stamp.ReplaceAllString(strings.ReplaceAll(string(text), repo, "<REPO>"), "<T>")
 		got.files[rel] = strconv.FormatUint(uint64(info.Mode().Perm()), 8) + " " + body
@@ -319,6 +324,10 @@ func TestB462ProofRunGo(t *testing.T) {
 			case "export-remove":
 				if _, err := os.Stat(filepath.Join(repo, ".code-forge", "export", "B1")); !errors.Is(err, fs.ErrNotExist) {
 					t.Fatalf("export dir kept: %v", err)
+				}
+			case "export-build", "export-config-lists":
+				if len(after.rows) != 1 || !strings.Contains(after.rows[0], `"step":"export"`) {
+					t.Fatalf("rows %v, want one export row", after.rows)
 				}
 			default:
 				if len(after.rows) != 0 {

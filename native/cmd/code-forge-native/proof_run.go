@@ -390,8 +390,3 @@ func proofRestoreJournal(dir string) ([]any, error) {
 	}
 	return files, nil
 }
-
-// proofExport builds the block's export: not ported yet, Node runs it.
-func proofExport(home, runID, blockID string, record ledger.Object) (*proofOutcome, handoverReason) {
-	return nil, hProofRun
-}
