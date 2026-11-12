@@ -25,14 +25,18 @@ func TestB471UpgradeUsageAndSourceMatchNode(t *testing.T) {
 	})
 }
 
-// Re-pointing the installs (with the release notes and docs sync) and a path
-// holding control characters go to Node.
-func TestB471UpgradeRelinkHandsOver(t *testing.T) {
-	_, repo := smallProject(t, "")
-	if err := os.MkdirAll(filepath.Join(repo, "skill"), 0o700); err != nil {
-		t.Fatal(err)
+// Re-pointing the installs (with the release notes and docs sync) runs in
+// Go now (B475); the cases B471 handed over all finish here.
+func TestB471UpgradeRelinkRunsInGo(t *testing.T) {
+	_, repo, root := upgradeFixture(t)
+	for _, dir := range []string{filepath.Join(repo, "skill"), filepath.Join(repo, "a\x1b[31mb")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
-	expectHandover(t, "upgrade-relink", "upgrade")
-	expectHandover(t, "upgrade-relink", "upgrade", "--source", "skill", "--plain")
-	expectHandover(t, "upgrade-control-chars", "upgrade", "--source", "a\x1b[31mb")
+	checkSmallCases(t, []smallCase{
+		{[]string{"upgrade"}, 0, upgradeBanner("first versioned upgrade") + "nothing to upgrade\n" + upgradeNotes(root) + "docs: kept packed 0.23.0\n", ""},
+		{[]string{"upgrade", "--source", "skill", "--plain"}, 0, "nothing to upgrade\ndocs: kept packed 0.23.0\n", ""},
+		{[]string{"upgrade", "--source", "a\x1b[31mb", "--plain"}, 0, "nothing to upgrade\ndocs: kept packed 0.23.0\n", ""},
+	})
 }

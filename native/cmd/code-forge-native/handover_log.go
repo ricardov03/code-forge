@@ -220,6 +220,12 @@ const (
 	hUpgradePackageRoot
 	hUpgradeUnsafeTarget
 	hUpgradeDocsSync
+	hUpgradeNoHome
+	hUpgradeUnfinishable
+	hUpgradeLedgerEncoding
+	hUpgradeVersionOrder
+	hUpgradeCopyEntry
+	hUpgradePathEncoding
 )
 
 var handoverReasons = [...]string{
@@ -419,6 +425,12 @@ var handoverReasons = [...]string{
 	hUpgradePackageRoot:        "upgrade-package-root",
 	hUpgradeUnsafeTarget:       "upgrade-unsafe-target",
 	hUpgradeDocsSync:           "upgrade-docs-sync",
+	hUpgradeNoHome:             "upgrade-no-home",
+	hUpgradeUnfinishable:       "upgrade-unfinishable",
+	hUpgradeLedgerEncoding:     "upgrade-ledger-encoding",
+	hUpgradeVersionOrder:       "upgrade-version-order",
+	hUpgradeCopyEntry:          "upgrade-copy-entry",
+	hUpgradePathEncoding:       "upgrade-path-encoding",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
