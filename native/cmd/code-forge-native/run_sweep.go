@@ -23,10 +23,9 @@ import (
 
 // B468: the process sweep a plain `run start` runs first (src/util/reaper.mjs
 // sweepProcesses({apply: true, root, zombies: false}) and tmp.mjs sweepRoots).
-// Go makes Node's read-only decisions; when Node would signal a process (a
-// finished run's worker, an orphan whose owner died, a registered child of a
-// dead run root), the whole start goes to Node before anything is written.
-// Otherwise the only effect is sweepRoots' removal of dead run roots, done here.
+// B472: Go also stops what Node stops (a finished run's worker, an orphan
+// whose owner died, a registered child of a dead run root) with Node's checks:
+// SIGTERM, a grace, SIGKILL, each signal after a fresh start-time match.
 
 type runProc struct {
 	uid, pid, ppid int
@@ -237,9 +236,22 @@ var (
 	runOwnerPid      = regexp.MustCompile(`^[1-9]\d*$`)
 )
 
-// runSweepWouldSignal is sweepProcesses' item search. true means Node would
-// stop at least one process (or Go cannot tell): the caller hands over.
-func runSweepWouldSignal(home, root string) bool {
+// runSweepRootUnreadable: sweepProcesses reads the trusted temp base with
+// readdirSync, which throws in Node (its error, its message): that start
+// stays with Node, decided before anything is written.
+func runSweepRootUnreadable(root string) bool {
+	if runUntrusted(root) {
+		return false
+	}
+	_, err := os.ReadDir(root)
+	return err != nil
+}
+
+// runSweepItems is sweepProcesses' worker and orphan search: a worker of a
+// run that has ended (or has no record) and an orphan whose owner died, in
+// the process table's order. Registry children are not listed: apply only
+// reports them; sweepRoots' sweep is what stops them (runSweepPids).
+func runSweepItems(home string) []runProc {
 	rows := runReadProcesses()
 	uid := os.Getuid()
 	own := []runProc{}
@@ -249,6 +261,15 @@ func runSweepWouldSignal(home, root string) bool {
 		}
 	}
 	blocked := runProtected(rows)
+	items := []runProc{}
+	listed := func(pid int) bool {
+		for _, item := range items {
+			if item.pid == pid {
+				return true
+			}
+		}
+		return false
+	}
 	for _, p := range own {
 		if p.pid <= 1 || blocked[p.pid] {
 			continue
@@ -258,20 +279,12 @@ func runSweepWouldSignal(home, root string) bool {
 			if env == nil || env["HOME"] != home {
 				continue
 			}
-			record, err := state.ReadRun(home, m[1])
-			if err != nil {
-				var stateErr *state.Error
-				if !errors.As(err, &stateErr) || stateErr.Code == "no-run" {
-					return true
-				}
-				continue
-			}
-			if status, ok := record.Get("status").(string); ok && status != "open" && status != "running" && status != "active" {
-				return true
+			if runWorkerRunEnded(home, m[1]) {
+				items = append(items, p)
 			}
 			continue
 		}
-		if p.ppid != 1 {
+		if p.ppid != 1 || listed(p.pid) {
 			continue
 		}
 		env := runReadEnv(p)
@@ -298,38 +311,218 @@ func runSweepWouldSignal(home, root string) bool {
 			dead = strings.HasPrefix(live.state, "Z") || (recorded != "" && recorded != "unknown" && live.start != recorded)
 		}
 		if dead {
-			return true
+			items = append(items, p)
 		}
 	}
-	if runUntrusted(root) {
+	return items
+}
+
+// runWorkerRunEnded: no run record, or a record whose status is a string
+// other than open, running or active. A record that cannot be read or parsed
+// (or is not an object) authorizes nothing, as in Node's catch.
+func runWorkerRunEnded(home, runID string) bool {
+	record, err := state.ReadRun(home, runID)
+	if err != nil {
+		var stateErr *state.Error
+		if errors.As(err, &stateErr) {
+			return stateErr.Code == "no-run"
+		}
+		// Go's decoder refused it; read it the way JSON.parse would
+		data, readErr := os.ReadFile(filepath.Join(home, ".code-forge", "runs", runID+".json"))
+		var parsed map[string]any
+		if readErr != nil || json.Unmarshal(data, &parsed) != nil || parsed == nil {
+			return false
+		}
+		status, ok := parsed["status"].(string)
+		return ok && status != "open" && status != "running" && status != "active"
+	}
+	status, ok := record.Get("status").(string)
+	return ok && status != "open" && status != "running" && status != "active"
+}
+
+// Seams for tests: signals, process groups, the clock and the grace between
+// SIGTERM and SIGKILL (reaper.mjs DEFAULT_GRACE_MS, POLL_MS).
+var (
+	runSignal        = func(pid int, sig syscall.Signal) error { return syscall.Kill(pid, sig) }
+	runGroupMembers  = runPsGroupMembers
+	runSweepNow      = time.Now
+	runSweepSleep    = time.Sleep
+	runSweepGrace    = 2000 * time.Millisecond
+	runSweepPoll     = 25 * time.Millisecond
+	runPsGroupLine   = regexp.MustCompile(`^\s*(\d+)\s+(\d+)\s+(.+?)\s*$`)
+	runSweepSpaceRun = regexp.MustCompile(`\s+`)
+)
+
+type runMember struct {
+	pid   int
+	start string
+}
+
+// runPsGroupMembers is groupMembers: every OTHER member of group pgid (not
+// this process) with its start time, in ps order; empty when ps fails.
+func runPsGroupMembers(pgid int) []runMember {
+	out, ok := runPsOutput("-A", "-o", "pid=,pgid=,lstart=")
+	members := []runMember{}
+	if !ok {
+		return members
+	}
+	for _, line := range strings.Split(out, "\n") {
+		m := runPsGroupLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		pid, _ := strconv.Atoi(m[1])
+		group, _ := strconv.Atoi(m[2])
+		if group == pgid && pid != pgid && pid != os.Getpid() {
+			members = append(members, runMember{pid, runSweepSpaceRun.ReplaceAllString(m[3], " ")})
+		}
+	}
+	return members
+}
+
+// runSignalMember is signalMember: a fresh process-table check (our uid, not
+// protected, same start time) right before a bare-pid signal.
+func runSignalMember(pid int, started string, sig syscall.Signal) bool {
+	if started == "" || started == "unknown" {
 		return false
 	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return true // readdirSync throws in Node: its error, its message
+	rows := runReadProcesses()
+	var p *runProc
+	for i := range rows {
+		if rows[i].pid == pid {
+			p = &rows[i]
+			break
+		}
 	}
-	for _, entry := range entries {
-		full := filepath.Join(root, entry.Name())
-		if !entry.IsDir() || runUntrusted(full) {
-			continue
-		}
-		owner := runOwnerState(full)
-		reap := owner == "dead"
-		if owner == "missing" {
-			reap = runAllOld(full)
-		}
-		if !reap {
-			continue
-		}
-		for _, e := range runListEntries(filepath.Join(full, "pids")) {
-			for _, p := range own {
-				if p.pid == e.pid && p.start == e.start && !blocked[p.pid] {
-					return true
-				}
+	if p == nil || p.uid != os.Getuid() || runProtected(rows)[pid] || p.start != started {
+		return false
+	}
+	return runSignal(pid, sig) == nil
+}
+
+// runStillRunning: any sent pid still in the table, not a zombie, same start.
+func runStillRunning(sent []runMember) bool {
+	live := runReadProcesses()
+	for _, s := range sent {
+		for _, p := range live {
+			if p.pid == s.pid && !strings.HasPrefix(p.state, "Z") && p.start == s.start {
+				return true
 			}
 		}
 	}
 	return false
+}
+
+// runStopItems is sweepProcesses' apply for workers and orphans: each item is
+// stopMembers(new Map([[pid, start]])) on its own: SIGTERM, a grace for it to
+// exit, SIGKILL if it did not, then a wait for SIGKILL to take effect.
+func runStopItems(items []runProc) {
+	for _, item := range items {
+		runStopMember(runMember{item.pid, item.start})
+	}
+}
+
+func runStopMember(m runMember) {
+	if !runSignalMember(m.pid, m.start, syscall.SIGTERM) {
+		return
+	}
+	sent := []runMember{m}
+	deadline := runSweepNow().Add(runSweepGrace)
+	for runSweepNow().Before(deadline) {
+		if !runStillRunning(sent) {
+			break
+		}
+		runSweepSleep(runSweepPoll)
+	}
+	runSignalMember(m.pid, m.start, syscall.SIGKILL)
+	wait := runSweepGrace
+	if wait < time.Second {
+		wait = time.Second
+	}
+	killed := runSweepNow().Add(wait)
+	for runSweepNow().Before(killed) {
+		runSweepSleep(runSweepPoll)
+		if !runStillRunning(sent) {
+			break
+		}
+	}
+}
+
+// runSignalIfOurs is reaper.mjs signalIfOurs: the group gets the signal only
+// when every member is ours and the leader's live start time matches.
+func runSignalIfOurs(pid int, recorded string, sig syscall.Signal) string {
+	rows := runReadProcesses()
+	blocked := runProtected(rows)
+	var leader *runProc
+	for i := range rows {
+		if rows[i].pid == pid {
+			leader = &rows[i]
+			break
+		}
+	}
+	uid := os.Getuid()
+	if leader == nil || leader.uid != uid || blocked[pid] {
+		return "eperm"
+	}
+	members := runGroupMembers(pid)
+	safe := true
+	for _, member := range members {
+		found := false
+		for _, p := range rows {
+			if p.pid == member.pid && p.uid == uid && !blocked[member.pid] && p.start == member.start {
+				found = true
+				break
+			}
+		}
+		if !found {
+			safe = false
+			break
+		}
+	}
+	live := runStartTime(float64(pid))
+	if live == nil || *live != recorded {
+		return "mismatch"
+	}
+	if !safe {
+		sent := runSignalMember(pid, recorded, sig)
+		for _, member := range members {
+			runSignalMember(member.pid, member.start, sig)
+		}
+		if sent {
+			return "sent"
+		}
+		return "eperm"
+	}
+	err := runSignal(-pid, sig)
+	if err == nil {
+		return "sent"
+	}
+	if errors.Is(err, syscall.EPERM) {
+		return "eperm"
+	}
+	if !errors.Is(err, syscall.ESRCH) {
+		return "gone"
+	}
+	err = runSignal(pid, sig)
+	if err == nil {
+		return "sent"
+	}
+	if errors.Is(err, syscall.EPERM) {
+		return "eperm"
+	}
+	return "gone"
+}
+
+// runWaitForDeath is waitForDeath: poll isAlive until the deadline.
+func runWaitForDeath(pid int, within time.Duration) bool {
+	deadline := runSweepNow().Add(within)
+	for runSweepNow().Before(deadline) {
+		if !runAlive(float64(pid)) {
+			return true
+		}
+		runSweepSleep(runSweepPoll)
+	}
+	return !runAlive(float64(pid))
 }
 
 // runAllOld: sweepProcesses' ownerless grace (root, pids/ and every entry older
@@ -457,9 +650,9 @@ func runLastActivity(dir string) time.Time {
 	return newest
 }
 
-// runSweepRoots is sweepRoots({root}) after runSweepWouldSignal found no
-// registered child to stop: dead roots (and ownerless ones idle for ten
-// minutes) are claimed as tombstones and removed; stale pid entries are dropped.
+// runSweepRoots is sweepRoots({root}): dead roots (and ownerless ones idle for
+// ten minutes) are claimed as tombstones, their registered children stopped
+// (runSweepPids) and the tombstones removed.
 func runSweepRoots(base string) {
 	entries, err := os.ReadDir(base)
 	if err != nil {
@@ -497,37 +690,52 @@ func runSweepRoots(base string) {
 	}
 }
 
-// runSweepPids is reaper.mjs sweep(dir) for entries that need no signal: a
-// dead pid's entry is dropped; a live one whose start time differs is not ours.
+// runSweepPids is reaper.mjs sweep(dir): a registered child whose live start
+// time still matches is stopped (its group when every member is ours), a dead
+// pid's entry is dropped, anything unproven is left alone.
 func runSweepPids(dir string) {
 	rows := runReadProcesses()
 	blocked := runProtected(rows)
 	uid := os.Getuid()
+	unregister := func(pid int) { _ = os.Remove(filepath.Join(dir, strconv.Itoa(pid)+".json")) }
 	for _, e := range runListEntries(dir) {
 		if blocked[e.pid] {
 			continue
 		}
-		alive := runAlive(float64(e.pid))
 		ours := false
 		for _, p := range rows {
 			if p.pid == e.pid && p.uid == uid {
 				ours = true
 			}
 		}
-		if alive && !ours {
+		if runAlive(float64(e.pid)) && !ours {
 			continue
 		}
-		if !alive {
-			_ = os.Remove(filepath.Join(dir, strconv.Itoa(e.pid)+".json"))
+		if !runAlive(float64(e.pid)) {
+			unregister(e.pid)
 			continue
 		}
-		live := runStartTime(float64(e.pid))
-		if e.start == "unknown" || live == nil {
+		if e.start == "unknown" || runStartTime(float64(e.pid)) == nil {
 			continue
 		}
-		if *live != e.start {
-			_ = os.Remove(filepath.Join(dir, strconv.Itoa(e.pid)+".json"))
+		members := runGroupMembers(e.pid)
+		switch runSignalIfOurs(e.pid, e.start, syscall.SIGTERM) {
+		case "mismatch":
+			unregister(e.pid)
+			continue
+		case "eperm":
+			continue
 		}
+		if !runWaitForDeath(e.pid, runSweepGrace) {
+			if runSignalIfOurs(e.pid, e.start, syscall.SIGKILL) != "sent" {
+				continue
+			}
+			runWaitForDeath(e.pid, runSweepGrace)
+		}
+		for _, member := range members {
+			runSignalMember(member.pid, member.start, syscall.SIGKILL)
+		}
+		unregister(e.pid)
 	}
 }
 

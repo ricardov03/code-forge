@@ -340,17 +340,16 @@ func TestRunStartSweep(t *testing.T) {
 			t.Fatalf("live root removed: %v", err)
 		}
 	})
-	t.Run("a process to stop hands over", func(t *testing.T) {
+	t.Run("an unreadable temp base hands over", func(t *testing.T) {
 		f := newStartFixture(t, "project:\n  slug: unit\ntmp:\n  root: TMPROOT\n")
 		t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
 		t.Setenv("CODE_FORGE_NATIVE", "1")
 		t.Setenv("CODE_FORGE_NODE", filepath.Join(f.home, "missing-node"))
-		beforeEnv := runReadEnv
-		runReadEnv = func(p runProc) map[string]string { return map[string]string{"HOME": f.home} }
-		t.Cleanup(func() { runReadEnv = beforeEnv })
-		runReadProcesses = func() []runProc {
-			return []runProc{{uid: os.Getuid(), pid: 999999, ppid: 1, state: "S", start: "x", command: "node /x/bin/code-forge.mjs worker --run r-gone"}}
+		// Node's readdirSync throws on it: its error, its message
+		if err := os.Chmod(f.tmpRoot, 0o300); err != nil {
+			t.Fatal(err)
 		}
+		t.Cleanup(func() { _ = os.Chmod(f.tmpRoot, 0o700) })
 		sleeper, _ := startSleeper(t)
 		code, out, _ := runVerbCall(t, "start", "--cwd", f.repo, "--run", "r-new", "--worker-pid", strconv.Itoa(sleeper.Process.Pid))
 		if code != 127 || out != "" {

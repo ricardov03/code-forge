@@ -470,7 +470,7 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 			return nil, hRunStart
 		}
 	}
-	if runSweepWouldSignal(home, base) {
+	if runSweepRootUnreadable(base) {
 		return nil, hRunSweep
 	}
 	engine := any("auto")
@@ -480,6 +480,7 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 		engine = v
 	}
 	return func(o *runOut) int {
+		runStopItems(runSweepItems(home))
 		runSweepRoots(base)
 		now := runNow().UTC()
 		runID, given := flags.values["run"]
