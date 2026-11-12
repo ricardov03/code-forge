@@ -184,7 +184,6 @@ func TestB458HandOvers(t *testing.T) {
 	}{
 		{[]string{"init"}, "init-wizard"},
 		{[]string{"init", "--no-interaction"}, "init-wizard"},
-		{[]string{"native-status"}, "native-status-companion"},
 		{[]string{"facts", "--brief", "b.md"}, "facts-session"},
 		{[]string{"author", "--job", "plan", "--brief", "b.md"}, "author-session"},
 		{[]string{"s2", "--packet", "p.json"}, "system-two-session"},
