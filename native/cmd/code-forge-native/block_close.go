@@ -430,7 +430,8 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	// Node's acknowledgement check runs after coder-tests and before the test gate.
 	acked, ackKnown := gatecheck.AgentWaiversAcked(blockMap(blockMap(cfg["review"])["agent_waivers"])["require_ack"] == true, run, id, rows, key)
 	if !ackKnown {
-		return fallback(hCloseGatesFormat)
+		// B493: only a signed digest that matches an order Go cannot prove is left.
+		return fallback(hCloseAckDigestOrder)
 	}
 	if !acked {
 		if autoDecide && !confirmed {

@@ -41,7 +41,7 @@ func jsDateParse(v any, present bool) (ms float64, ok, known bool) {
 func jsDateString(value string) (ms float64, ok, known bool) {
 	m := isoDate.FindStringSubmatch(value)
 	if m == nil {
-		return math.NaN(), false, false
+		return jsLegacyDate(value)
 	}
 	if m[1] == "-000000" {
 		return math.NaN(), false, true
@@ -109,6 +109,55 @@ func jsDateString(value string) (ms float64, ok, known bool) {
 		return math.NaN(), false, true
 	}
 	return ms, true, true
+}
+
+// utcDate is the Date.prototype.toUTCString form (RFC 1123) and toString's
+// form with a GMT offset and an optional zone name. V8's legacy parser skips
+// the leading weekday word and the parenthesised name. Each form names its
+// zone, so local time plays no part. Other legacy forms stay unknown.
+var (
+	utcDate    = regexp.MustCompile(`^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), )?(\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{4}) (\d{2}):(\d{2}):(\d{2}) (?:GMT|UTC)$`)
+	stringDate = regexp.MustCompile(`^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) )?(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{2}) (\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT([+-])(\d{2})(\d{2})(?: \([A-Za-z ]*\))?$`)
+	monthNames = "JanFebMarAprMayJunJulAugSepOctNovDec"
+)
+
+func jsLegacyDate(value string) (ms float64, ok, known bool) {
+	var day, mon, year, hour, minute, second string
+	offset := 0
+	if m := utcDate.FindStringSubmatch(value); m != nil {
+		day, mon, year, hour, minute, second = m[1], m[2], m[3], m[4], m[5], m[6]
+	} else if m := stringDate.FindStringSubmatch(value); m != nil {
+		mon, day, year, hour, minute, second = m[1], m[2], m[3], m[4], m[5], m[6]
+		oh, _ := strconv.Atoi(m[8])
+		om, _ := strconv.Atoi(m[9])
+		if oh > 23 || om > 59 {
+			return math.NaN(), false, false
+		}
+		offset = oh*60 + om
+		if m[7] == "-" {
+			offset = -offset
+		}
+	} else {
+		return math.NaN(), false, false
+	}
+	y, _ := strconv.Atoi(year)
+	d, _ := strconv.Atoi(day)
+	h, _ := strconv.Atoi(hour)
+	mi, _ := strconv.Atoi(minute)
+	sec, _ := strconv.Atoi(second)
+	month := 1
+	for i := 0; i < 12; i++ {
+		if monthNames[i*3:i*3+3] == mon {
+			month = i + 1
+		}
+	}
+	// V8 rolls an overflowing day or time over; Go proves only the plain range.
+	// V8 reads a year below 100 as 19xx or 20xx in this form.
+	if y < 100 || d < 1 || d > time.Date(y, time.Month(month)+1, 0, 0, 0, 0, 0, time.UTC).Day() || h > 23 || mi > 59 || sec > 59 {
+		return math.NaN(), false, false
+	}
+	t := time.Date(y, time.Month(month), d, h, mi, sec, 0, time.FixedZone("", offset*60))
+	return float64(t.UnixMilli()), true, true
 }
 
 // JSDateParse exposes jsDateParse to callers outside the gate checker.

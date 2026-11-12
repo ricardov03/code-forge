@@ -47,7 +47,9 @@ func Supported(rows []Row) bool {
 	for _, r := range rows {
 		event := Text(r["event"])
 		if event == "review.late_finding" || event == "review.late_ruling" {
-			if Text(r["file"]) == "" || Text(r["finding"]) == "" {
+			// A row with no file key is read as Node reads undefined; a
+			// file that is empty or not text is not.
+			if _, has := r["file"]; (has && Text(r["file"]) == "") || Text(r["finding"]) == "" {
 				return false
 			}
 		}

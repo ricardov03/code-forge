@@ -372,7 +372,7 @@ func AgentWaiversAcked(requireAck bool, run, block string, rows []Row, key []byt
 		return 0
 	})
 	if !known && len(set) > 1 {
-		return false, false
+		return ackedByAnyOrder(set, func(e entry) []any { return e.item }, candidates, key)
 	}
 	items := []any{}
 	for _, e := range set {
@@ -388,6 +388,57 @@ func AgentWaiversAcked(requireAck bool, run, block string, rows []Row, key []byt
 		if r["digest"] == digest && Verified(r, key) {
 			return true, true
 		}
+	}
+	return false, true
+}
+
+// ackedByAnyOrder decides an ack whose order needs a collation Go does not
+// carry (a non-ASCII file name). Node's digest is the digest of one order of
+// the set, so when no order's digest is on a verified candidate Node does not
+// ack either. A match stays unknown: Go cannot prove Node sorts to that order.
+func ackedByAnyOrder[E any](set []E, item func(E) []any, candidates []Row, key []byte) (bool, bool) {
+	if len(set) > 8 {
+		return false, false
+	}
+	signed := map[string]bool{}
+	for _, r := range candidates {
+		if d, ok := r["digest"].(string); ok && Verified(r, key) {
+			signed[d] = true
+		}
+	}
+	if len(signed) == 0 {
+		return false, true
+	}
+	order := make([]int, len(set))
+	for i := range order {
+		order[i] = i
+	}
+	var walk func(k int) bool
+	walk = func(k int) bool {
+		if k == len(order) {
+			items := make([]any, len(order))
+			for i, at := range order {
+				items[i] = item(set[at])
+			}
+			data, err := ledger.Stringify(items, false)
+			if err != nil {
+				return true
+			}
+			sum := sha256.Sum256(data)
+			return signed[hex.EncodeToString(sum[:])]
+		}
+		for i := k; i < len(order); i++ {
+			order[k], order[i] = order[i], order[k]
+			found := walk(k + 1)
+			order[k], order[i] = order[i], order[k]
+			if found {
+				return true
+			}
+		}
+		return false
+	}
+	if walk(0) {
+		return false, false
 	}
 	return false, true
 }
@@ -517,10 +568,15 @@ func (g *gate) latestOf(file, hash string) latest {
 	return out
 }
 
-func (g *gate) matches(r Row, file, id string) bool { return r["finding"] == id && r["file"] == file }
+// matches is Node's r.finding === id && r.file === file; file may be
+// undefined (a late finding row with no file).
+func (g *gate) matches(r Row, file jv, id string) bool {
+	return r["finding"] == id && strictEq(prop(r, "file"), file)
+}
 
-func (g *gate) answered(file, id string, severity any) bool {
-	if id == "proof" || !answerable(severity) {
+func (g *gate) answered(fileV jv, id string, severity any) bool {
+	file, isText := fileV.v.(string)
+	if id == "proof" || !answerable(severity) || !isText {
 		return false
 	}
 	now, has := g.current[file]
@@ -541,6 +597,10 @@ func (g *gate) answered(file, id string, severity any) bool {
 // waiverOf is reviewRules' waiverOf: "human", "answer", "agent", "autopilot"
 // or "" with why the autopilot waivers do not count.
 func (g *gate) waiverOf(file, id string, severity, answerSeverity any) (string, string) {
+	return g.waiverOfValue(str(file), id, severity, answerSeverity)
+}
+
+func (g *gate) waiverOfValue(file jv, id string, severity, answerSeverity any) (string, string) {
 	if slices.ContainsFunc(g.human, func(r Row) bool { return g.matches(r, file, id) }) {
 		return "human", ""
 	}
@@ -548,7 +608,7 @@ func (g *gate) waiverOf(file, id string, severity, answerSeverity any) (string, 
 		return "answer", ""
 	}
 	if id != "proof" && (delegable(severity) || severity == "critical") {
-		recorded, _ := recordedSeverity(g.mine, str(g.in.Block), str(file), str(id), g.ok)
+		recorded, _ := recordedSeverity(g.mine, str(g.in.Block), file, str(id), g.ok)
 		may := delegable(severity) && (recorded == "warning" || recorded == "nit") || severity == "critical" && recorded == "critical"
 		if may && slices.ContainsFunc(g.agent, func(r Row) bool { return g.matches(r, file, id) && r["severity"] == recorded }) {
 			return "agent", ""
@@ -580,7 +640,11 @@ func (g *gate) waiverOf(file, id string, severity, answerSeverity any) (string, 
 }
 
 func (g *gate) waiverFor(file, id string, answerSeverity any) (bool, string) {
-	by, invalid := g.waiverOf(file, id, nil, answerSeverity)
+	return g.waiverForValue(str(file), id, answerSeverity)
+}
+
+func (g *gate) waiverForValue(file jv, id string, answerSeverity any) (bool, string) {
+	by, invalid := g.waiverOfValue(file, id, nil, answerSeverity)
 	return by != "", invalid
 }
 
@@ -996,10 +1060,13 @@ func Evaluate(in Input) Result {
 		if r["event"] != "review.late_finding" {
 			continue
 		}
-		file, id := Text(r["file"]), Text(r["finding"])
+		// Supported lets through a late row with no file: Node reads
+		// late.file as undefined and prints it as "undefined".
+		fileV, id := prop(r, "file"), Text(r["finding"])
+		file := Text(fileV.v)
 		if r["severity"] == "warning" || r["severity"] == "nit" {
 			if slices.ContainsFunc(g.mine, func(ruling Row) bool {
-				return ruling["event"] == "review.late_ruling" && g.matches(ruling, file, id) && ruling["ruling"] == "nit" && g.ok(ruling)
+				return ruling["event"] == "review.late_ruling" && g.matches(ruling, fileV, id) && ruling["ruling"] == "nit" && g.ok(ruling)
 			}) {
 				continue
 			}
@@ -1008,8 +1075,10 @@ func Evaluate(in Input) Result {
 		if s, ok := r["severity"].(string); ok {
 			severity = s
 		}
-		if waived, invalid := g.waiverFor(file, id, severity); !waived {
-			orInvalid("late_unruled", file, id, fmt.Sprintf("late finding %s in %s has no ruling", id, file), invalid)
+		if waived, invalid := g.waiverForValue(fileV, id, severity); !waived && invalid != "" && !fileV.ok {
+			add("autopilot_waiver_invalid", "", id, "the autopilot waiver of "+id+" in undefined does not count: "+invalid)
+		} else if !waived {
+			orInvalid("late_unruled", file, id, fmt.Sprintf("late finding %s in %s has no ruling", id, jsString(fileV)), invalid)
 		}
 	}
 	for i, cap := range g.mine {

@@ -343,8 +343,9 @@ func TestB380AgentWaiverUnwaiveAndAck(t *testing.T) {
 		foreign = append(foreign, c)
 	}
 	foreign = append(foreign, Row{"event": "agent_waivers.acked", "digest": strings.Repeat("0", 64), "by": "human"})
-	if _, known := AgentWaiversAcked(true, "r1", "B1", b380Rows(t, key, foreign...), key); known {
-		t.Fatal("a digest order that needs non-ASCII collation is unknown, so the caller hands over")
+	// B493: no order of the set has the signed digest, so Node does not ack either.
+	if acked, known := AgentWaiversAcked(true, "r1", "B1", b380Rows(t, key, foreign...), key); acked || !known {
+		t.Fatal("a digest that matches no order of a non-ASCII set is not acked, in Go")
 	}
 }
 
