@@ -1,0 +1,110 @@
+=== step 1: release minor
+exit 1
+--- stdout
+release @example/pkg: 0.21.0 → 0.22.0
+
+== 1. preflight ==
+ok    CHANGELOG.md [Unreleased] has entries
+ok    working tree is clean
+--- stderr
+
+REFUSED: on branch "feat", expected "main" (use --allow-branch feat to release from it)
+--- repo refs
+refs/heads/feat 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
+refs/heads/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
+refs/remotes/origin/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
+refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b Release v0.21.0
+--- repo status
+--- tag v0.21.0
+object 7a2bd0c80c7dd008ad9e4bca7b7a939c56922902
+type commit
+tag v0.21.0
+tagger Test <test@example.invalid> 1794477600 +0000
+
+Release v0.21.0
+--- file package.json
+{
+  "name": "@example/pkg",
+  "version": "0.21.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/example/pkg.git"
+  }
+}
+--- file npm-shrinkwrap.json
+{
+  "name": "@example/pkg",
+  "version": "0.21.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "@example/pkg",
+      "version": "0.21.0"
+    }
+  }
+}
+--- file .claude-plugin/plugin.json
+{
+  "name": "pkg",
+  "version": "0.21.0"
+}
+--- file skill/scripts/forge
+#!/bin/sh
+# shim: PINNED_VERSION="0.21.0" is set below
+PINNED_VERSION="0.21.0"
+set -eu
+--- file CHANGELOG.md
+# Changelog
+
+## [Unreleased]
+
+### Added
+
+- A new verb.
+
+### Fixed
+
+- A fixed bug.
+
+## [0.21.0] — 2026-11-01
+
+### Added
+
+- The first verb.
+
+[Unreleased]: https://github.com/example/pkg/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/example/pkg/compare/v0.20.0...v0.21.0
+--- file README.md
+# pkg
+
+Latest: 0.21.0 - see [CHANGELOG](CHANGELOG.md)
+--- file docs/step-by-step.md
+# Step by step
+
+Install:
+
+    npx @codedology/code-forge@0.21.0 init
+
+```
+@codedology/code-forge 0.21.0
+```
+
+Not a pin: @codedology/code-forge@0.21.0x stays.
+--- file docs/release-docs.json
+{
+  "through": "7a2bd0c80c7dd008ad9e4bca7b7a939c56922902",
+  "tag": "v0.21.0"
+}
+--- origin refs
+refs/heads/main 8a15962788ece72ef64a2215357f61f94b9682f7
+refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b
+--- release temp files
+--- fake log
+--- repo .code-forge-tmp
+--- seen
+--- repo HEAD
+docs: stamp
+
+docs/release-docs.json

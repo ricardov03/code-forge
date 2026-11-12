@@ -1,0 +1,194 @@
+=== step 1: release patch
+exit 1
+--- stdout
+release @example/pkg: 0.21.0 → 0.21.1
+
+== 1. preflight ==
+--- stderr
+
+REFUSED: CHANGELOG.md: "## [Unreleased]" has no entries: add one with npm run changelog -- added "…"
+--- repo refs
+refs/heads/main 2467a373be772bb06f9901b119cfff808dfb2e9e change CHANGELOG.md
+refs/remotes/origin/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
+refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b Release v0.21.0
+--- repo status
+--- tag v0.21.0
+object 7a2bd0c80c7dd008ad9e4bca7b7a939c56922902
+type commit
+tag v0.21.0
+tagger Test <test@example.invalid> 1794477600 +0000
+
+Release v0.21.0
+--- file package.json
+{
+  "name": "@example/pkg",
+  "version": "0.21.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/example/pkg.git"
+  }
+}
+--- file npm-shrinkwrap.json
+{
+  "name": "@example/pkg",
+  "version": "0.21.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "@example/pkg",
+      "version": "0.21.0"
+    }
+  }
+}
+--- file .claude-plugin/plugin.json
+{
+  "name": "pkg",
+  "version": "0.21.0"
+}
+--- file skill/scripts/forge
+#!/bin/sh
+# shim: PINNED_VERSION="0.21.0" is set below
+PINNED_VERSION="0.21.0"
+set -eu
+--- file CHANGELOG.md
+# Changelog
+
+## [Unreleased]
+
+### Added
+
+## [0.21.0] — 2026-11-01
+
+- First.
+--- file README.md
+# pkg
+
+A useful tool.
+
+--- file docs/step-by-step.md
+# Step by step
+
+Install:
+
+    npx @codedology/code-forge@0.21.0 init
+
+```
+@codedology/code-forge 0.21.0
+```
+
+Not a pin: @codedology/code-forge@0.21.0x stays.
+--- file docs/release-docs.json
+{
+  "through": "7a2bd0c80c7dd008ad9e4bca7b7a939c56922902",
+  "tag": "v0.21.0"
+}
+--- origin refs
+refs/heads/main 8a15962788ece72ef64a2215357f61f94b9682f7
+refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b
+--- release temp files
+--- fake log
+--- repo .code-forge-tmp
+--- seen
+--- repo HEAD
+change CHANGELOG.md
+
+CHANGELOG.md
+=== step 2: release patch --dry-run
+exit 1
+--- stdout
+release @example/pkg: 0.21.0 → 0.21.1 (dry run: nothing is written)
+
+== 1. preflight ==
+--- stderr
+
+REFUSED: CHANGELOG.md: "## [Unreleased]" has no entries: add one with npm run changelog -- added "…"
+--- repo refs
+refs/heads/main 2467a373be772bb06f9901b119cfff808dfb2e9e change CHANGELOG.md
+refs/remotes/origin/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
+refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b Release v0.21.0
+--- repo status
+--- tag v0.21.0
+object 7a2bd0c80c7dd008ad9e4bca7b7a939c56922902
+type commit
+tag v0.21.0
+tagger Test <test@example.invalid> 1794477600 +0000
+
+Release v0.21.0
+--- file package.json
+{
+  "name": "@example/pkg",
+  "version": "0.21.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/example/pkg.git"
+  }
+}
+--- file npm-shrinkwrap.json
+{
+  "name": "@example/pkg",
+  "version": "0.21.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "@example/pkg",
+      "version": "0.21.0"
+    }
+  }
+}
+--- file .claude-plugin/plugin.json
+{
+  "name": "pkg",
+  "version": "0.21.0"
+}
+--- file skill/scripts/forge
+#!/bin/sh
+# shim: PINNED_VERSION="0.21.0" is set below
+PINNED_VERSION="0.21.0"
+set -eu
+--- file CHANGELOG.md
+# Changelog
+
+## [Unreleased]
+
+### Added
+
+## [0.21.0] — 2026-11-01
+
+- First.
+--- file README.md
+# pkg
+
+A useful tool.
+
+--- file docs/step-by-step.md
+# Step by step
+
+Install:
+
+    npx @codedology/code-forge@0.21.0 init
+
+```
+@codedology/code-forge 0.21.0
+```
+
+Not a pin: @codedology/code-forge@0.21.0x stays.
+--- file docs/release-docs.json
+{
+  "through": "7a2bd0c80c7dd008ad9e4bca7b7a939c56922902",
+  "tag": "v0.21.0"
+}
+--- origin refs
+refs/heads/main 8a15962788ece72ef64a2215357f61f94b9682f7
+refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b
+--- release temp files
+--- fake log
+--- repo .code-forge-tmp
+--- seen
+--- repo HEAD
+change CHANGELOG.md
+
+CHANGELOG.md

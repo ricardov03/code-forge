@@ -96,10 +96,13 @@ The version argument is `patch`, `minor`, `major` or an explicit `x.y.z`. Option
 `scripts/cf-release.sh`, which builds `native/cmd/cf-release` with `go` (CGO off) into
 `node_modules/.cache/code-forge/cf-release` and runs it from the current folder. You need Go to
 release. The commands, arguments, output, exit codes, file edits and git commands are the same as
-the Node scripts they replace; parity tests in `native/cmd/cf-release` compare each case with a
-golden recorded from the Node script. The Node scripts stay in `scripts/` because tests,
-`scripts/gen-site-data.mjs` and the release workflow still use them. Neither the Go tool nor
-`scripts/cf-release.sh` ships in the npm package (B570).
+the Node scripts they replaced (B570); parity tests in `native/cmd/cf-release` compare each case,
+single runs and multi-step flows, with a golden recorded from the Node script. The Node scripts
+`scripts/release.mjs`, `release-site.mjs`, `docs-block.mjs` and `changelog.mjs` and their Node
+tests are gone (B574): the release workflow runs the Go tool and `scripts/gen-site-data.mjs` has
+its own CHANGELOG reader. To record a new golden from Node, use a checkout that still has the
+scripts (commit `5c2510a7`). Neither the Go tool nor `scripts/cf-release.sh` ships in the npm
+package.
 
 ## The docs block
 
@@ -304,12 +307,13 @@ command to finish by hand.
 ## GitHub Releases
 
 Each version gets a GitHub release whose body is its CHANGELOG section plus two links: the
-version's npm page and the CHANGELOG at the tag. `node scripts/release.mjs notes vX.Y.Z [--out
-<file>]` prints that body (exit 1 when the CHANGELOG has no such version); `npm run release --
-notes vX.Y.Z` prints the same bytes from the Go tool.
+version's npm page and the CHANGELOG at the tag. `npm run release -- notes vX.Y.Z [--out
+<file>]` (or `sh scripts/cf-release.sh release notes vX.Y.Z`) prints that body from the Go tool
+(exit 1 when the CHANGELOG has no such version).
 
 - **Automatic (tag push).** `.github/workflows/release.yml` runs on every `v*` tag. It checks
-  that the tag equals `v` + the `package.json` version, writes the notes with the command above,
+  that the tag equals `v` + the `package.json` version, sets up Go from `native/go.mod`, writes
+  the notes with `sh scripts/cf-release.sh release notes` (no Node, no `npm ci`; B574),
   and runs `gh release create vX.Y.Z --verify-tag`. It has `contents: write` and nothing else (no
   npm token, no id-token). If the release already exists (a re-run), it edits it with the same notes.
 - **By hand.** If the tag run fails (for example GitHub Actions is off), run the command the release

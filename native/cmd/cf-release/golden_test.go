@@ -2,9 +2,10 @@ package main
 
 // Byte-for-byte parity with the Node scripts (B570): each case runs the Go port in a fresh fixture
 // and compares exit code, stdout, stderr and the state left behind with a golden recorded from the
-// Node script on the same fixture. Record the goldens with
+// Node script on the same fixture. Record the goldens with a checkout that still has the Node
+// scripts (B570, 5c2510a7; B574 deleted them):
 //
-//	CF_RELEASE_NODE_GOLDENS=<repo root> go test ./cmd/cf-release -run TestNodeParity -count=1
+//	CF_RELEASE_NODE_GOLDENS=<that checkout's root> go test ./cmd/cf-release -run TestNodeParity -count=1
 //
 // Masks: the fixture folder is <CASE>, the release temp folder's random suffix is <RAND>, and the
 // npm test log's time and pid are <MS> and <PID>.

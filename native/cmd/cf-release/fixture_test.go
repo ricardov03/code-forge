@@ -18,12 +18,29 @@ import (
 
 const fakeNpm = `#!/bin/sh
 echo "$(pwd) npm $*" >> "$FAKE_LOG"
+case_dir=$(dirname "$FAKE_LOG")
+# <case>/seen exists: copy the release files as this check sees them into <case>/seen/<check>/ (B574).
+seen() {
+  [ -d "$case_dir/seen" ] || return 0
+  for f in README.md CHANGELOG.md package.json package-lock.json docs/step-by-step.md; do
+    if [ -f "$f" ]; then mkdir -p "$case_dir/seen/$1/$(dirname "$f")"; cp "$f" "$case_dir/seen/$1/$f"; fi
+  done
+}
 case "$1" in
 view)
+  if [ -n "$FAKE_NPM_VIEW_AFTER" ]; then
+    n=$(cat "$case_dir/polls" 2>/dev/null || echo 0); echo $((n + 1)) > "$case_dir/polls"
+    if [ "$n" -lt "$FAKE_NPM_VIEW_AFTER" ]; then echo "npm error code E404" >&2; exit 1; fi
+  fi
   if [ "$FAKE_NPM_VIEW" = E404 ]; then echo "npm error code E404" >&2; echo "npm error 404 Not Found" >&2; exit 1; fi
   echo "${FAKE_NPM_VIEW:-0.21.0}"; exit 0 ;;
 test)
   if [ $# -gt 1 ]; then echo "alone $*"; exit "${FAKE_NPM_ALONE_EXIT:-0}"; fi
+  seen test
+  if [ -f "$case_dir/npm-test.out" ]; then
+    cat "$case_dir/npm-test.out"; [ -f "$case_dir/npm-test.err" ] && cat "$case_dir/npm-test.err" >&2
+    exit "${FAKE_NPM_TEST_EXIT:-0}"
+  fi
   if [ "${FAKE_NPM_TEST_EXIT:-0}" != 0 ]; then
     echo "TAP version 13"
     echo "not ok 1 - flaky thing"
@@ -36,9 +53,14 @@ test)
   echo "fake npm test"; exit 0 ;;
 run)
   case "$2" in
-  typecheck) [ "${FAKE_NPM_TYPECHECK_EXIT:-0}" = 0 ] || echo "type error in src/x.js" >&2; exit "${FAKE_NPM_TYPECHECK_EXIT:-0}" ;;
+  typecheck) seen typecheck; [ "${FAKE_NPM_TYPECHECK_EXIT:-0}" = 0 ] || echo "type error in src/x.js" >&2; exit "${FAKE_NPM_TYPECHECK_EXIT:-0}" ;;
   build:site)
-    mkdir -p docs-site/site/.pages-out && echo '<h1>site</h1>' > docs-site/site/.pages-out/index.html
+    case "$FAKE_BUILD_MERGED" in
+    none) ;;
+    noindex) mkdir -p docs-site/site/.pages-out/docs ;;
+    *) mkdir -p docs-site/site/.pages-out && echo '<h1>site</h1>' > docs-site/site/.pages-out/index.html ;;
+    esac
+    [ -z "$FAKE_BUILD_DIST" ] || { mkdir -p dist && echo 'marketing only' > dist/index.html; }
     echo "built site with $(cat src/data/site-data.json)"; exit "${FAKE_BUILD_EXIT:-0}" ;;
   esac ;;
 pack)
@@ -63,6 +85,9 @@ head=$(git rev-parse HEAD)
 case "$FAKE_GH" in
 green) printf '[{"headSha":"%s","status":"completed","conclusion":"success"}]\n' "$head" ;;
 red) printf '[{"headSha":"%s","status":"completed","conclusion":"failure"}]\n' "$head" ;;
+empty) echo '[]' ;;
+pending) printf '[{"headSha":"%s","status":"in_progress","conclusion":null}]\n' "$head" ;;
+foreign) echo '[{"headSha":"wrong","status":"completed","conclusion":"success"}]' ;;
 *) echo "fake gh: no runs" >&2; exit 1 ;;
 esac
 `

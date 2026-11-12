@@ -2,9 +2,9 @@ name: Release
 
 # Runs on a `v*` tag only. It never publishes to npm: the maintainer publishes from their own
 # machine before pushing the tag (docs/releasing.md). This workflow only creates the GitHub release for the tag,
-# with that version's CHANGELOG.md section as its notes (`node scripts/release.mjs notes`, which
-# needs only node:*, so no `npm ci`). Re-running it is safe: an existing release is edited with the
-# same notes instead of failing.
+# with that version's CHANGELOG.md section as its notes (`sh scripts/cf-release.sh release notes`,
+# the Go release tool built from native/ with the standard library only, so no `npm ci`; B574).
+# Re-running it is safe: an existing release is edited with the same notes instead of failing.
 on:
   push:
     tags:
@@ -24,21 +24,22 @@ jobs:
         with:
           ref: ${{ github.ref }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-go@v5
         with:
-          node-version: 22
+          go-version-file: native/go.mod
+          cache: false
 
       # Refuse a tag that does not name the exact version package.json carries.
       - name: The tag must match package.json's version
         run: |
-          version="$(node -p "require('./package.json').version")"
+          version="$(jq -r .version package.json)"
           if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
             echo "tag ${GITHUB_REF_NAME} does not match package.json version v${version}" >&2
             exit 1
           fi
 
       - name: Release notes from CHANGELOG.md
-        run: node scripts/release.mjs notes "$GITHUB_REF_NAME" --out notes.md
+        run: sh scripts/cf-release.sh release notes "$GITHUB_REF_NAME" --out notes.md
 
       - name: Create the GitHub release (or update it when it already exists)
         env:

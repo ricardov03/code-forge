@@ -7,7 +7,21 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildSpend } from '../src/ledger/report.mjs';
-import { findSection } from './changelog.mjs';
+
+/**
+ * The `## [<name>]` section of CHANGELOG lines: `{ start, end }` with `start` its heading line and
+ * `end` the next `## ` heading or link definition (exclusive), or null when absent. Matching
+ * ignores case and anything after the bracketed name (B574: moved here from the retired
+ * scripts/changelog.mjs, same rules as the Go release tool's parser).
+ * @param {string[]} lines @param {string} name
+ */
+function findSection(lines, name) {
+  const want = `[${name.toLowerCase()}]`;
+  const start = lines.findIndex((l) => l.startsWith('## ') && l.slice(3).trim().toLowerCase().split(/\s/)[0] === want);
+  if (start < 0) return null;
+  const end = lines.findIndex((l, i) => i > start && (/^## /.test(l) || /^\[[^\]]+\]:\s/.test(l)));
+  return { start, end: end < 0 ? lines.length : end };
+}
 
 const USAGE = 'usage: node scripts/gen-site-data.mjs --tag <vX.Y.Z> [--out <file>] [--ledger-dir <dir>]';
 

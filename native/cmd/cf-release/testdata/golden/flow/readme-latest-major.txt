@@ -1,0 +1,460 @@
+=== step 1: release major --dry-run --date 2026-11-12
+exit 0
+--- stdout
+release @example/pkg: 0.21.0 → 1.0.0 (dry run: nothing is written)
+
+== 1. preflight ==
+ok    CHANGELOG.md [Unreleased] has entries
+ok    working tree is clean
+ok    on branch main
+WARN  main is ahead of origin/main: the push will also send those commits
+ok    1.0.0 > 0.21.0 (package.json) and > 0.21.0 (npm)
+ok    tag v1.0.0 is free (local and origin)
+ok    docs block covers 7a2bd0c80c7dd008ad9e4bca7b7a939c56922902 since v0.21.0
+
+== 2. bump + 3. CHANGELOG and README ==
+package.json: version  0.21.0 → 1.0.0
+        "name": "@example/pkg",
+    -   "version": "0.21.0",
+    +   "version": "1.0.0",
+npm-shrinkwrap.json: version, packages[""].version  0.21.0 → 1.0.0
+        "name": "@example/pkg",
+    -   "version": "0.21.0",
+    +   "version": "1.0.0",
+            "name": "@example/pkg",
+    -       "version": "0.21.0"
+    +       "version": "1.0.0"
+.claude-plugin/plugin.json: version  0.21.0 → 1.0.0
+        "name": "pkg",
+    -   "version": "0.21.0"
+    +   "version": "1.0.0"
+skill/scripts/forge: PINNED_VERSION  0.21.0 → 1.0.0
+      # shim: PINNED_VERSION="0.21.0" is set below
+    - PINNED_VERSION="0.21.0"
+    + PINNED_VERSION="1.0.0"
+CHANGELOG.md: [Unreleased] → [1.0.0] — 2026-11-12
+      
+      ## [Unreleased]
+      
+    - ### Added
+    - 
+    - - A new verb.
+    - 
+    - ### Fixed
+    - 
+    - - A fixed bug.
+    - 
+    - ## [0.21.0] — 2026-11-01
+    - 
+    - ### Added
+    - 
+    - - The first verb.
+    - 
+    - [Unreleased]: https://github.com/example/pkg/compare/v0.21.0...HEAD
+    + ## [1.0.0] — 2026-11-12
+    + 
+    + ### Added
+    + 
+    + - A new verb.
+    + 
+    + ### Fixed
+    + 
+    + - A fixed bug.
+    + 
+    + ## [0.21.0] — 2026-11-01
+    + 
+    + ### Added
+    + 
+    + - The first verb.
+    + 
+    + [Unreleased]: https://github.com/example/pkg/compare/v1.0.0...HEAD
+    + [1.0.0]: https://github.com/example/pkg/compare/v0.21.0...v1.0.0
+      [0.21.0]: https://github.com/example/pkg/compare/v0.20.0...v0.21.0
+      
+README.md: Latest: 0.21.0 → 1.0.0
+      
+    - Latest: 0.21.0 - see [CHANGELOG.md](CHANGELOG.md)
+    + Latest: 1.0.0 - see [CHANGELOG.md](CHANGELOG.md)
+docs/step-by-step.md: version pins: 0.21.0 → 1.0.0
+      
+    -     npx @codedology/code-forge@0.21.0 init
+    +     npx @codedology/code-forge@1.0.0 init
+      ```
+    - @codedology/code-forge 0.21.0
+    + @codedology/code-forge 1.0.0
+
+== plan (dry run) ==
+would run the checks: gen-config-doc --check, gen-commands-doc --check, npm test, npm run typecheck, npm pack --dry-run, npm ls --json, claude plugin validate .
+would commit "Release v1.0.0" (7 files) and create the annotated tag v1.0.0
+would print: git push origin main --follow-tags
+dry run: 0 files changed, 0 commits, 0 tags
+--- stderr
+--- repo refs
+refs/heads/main 65185a7ad12dfd6383161a9a517ec841565b4688 change README.md
+refs/remotes/origin/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
+refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b Release v0.21.0
+--- repo status
+--- tag v0.21.0
+object 7a2bd0c80c7dd008ad9e4bca7b7a939c56922902
+type commit
+tag v0.21.0
+tagger Test <test@example.invalid> 1794477600 +0000
+
+Release v0.21.0
+--- file package.json
+{
+  "name": "@example/pkg",
+  "version": "0.21.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/example/pkg.git"
+  }
+}
+--- file npm-shrinkwrap.json
+{
+  "name": "@example/pkg",
+  "version": "0.21.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "@example/pkg",
+      "version": "0.21.0"
+    }
+  }
+}
+--- file .claude-plugin/plugin.json
+{
+  "name": "pkg",
+  "version": "0.21.0"
+}
+--- file skill/scripts/forge
+#!/bin/sh
+# shim: PINNED_VERSION="0.21.0" is set below
+PINNED_VERSION="0.21.0"
+set -eu
+--- file CHANGELOG.md
+# Changelog
+
+## [Unreleased]
+
+### Added
+
+- A new verb.
+
+### Fixed
+
+- A fixed bug.
+
+## [0.21.0] — 2026-11-01
+
+### Added
+
+- The first verb.
+
+[Unreleased]: https://github.com/example/pkg/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/example/pkg/compare/v0.20.0...v0.21.0
+--- file README.md
+# pkg
+
+A useful tool.
+
+Latest: 0.21.0 - see [CHANGELOG.md](CHANGELOG.md)
+
+## What's new in 0.21
+
+In the next release:
+
+- New.
+  Continued.
+
+In 0.21.0:
+
+- Old.
+--- file docs/step-by-step.md
+# Step by step
+
+Install:
+
+    npx @codedology/code-forge@0.21.0 init
+
+```
+@codedology/code-forge 0.21.0
+```
+
+Not a pin: @codedology/code-forge@0.21.0x stays.
+--- file docs/release-docs.json
+{
+  "through": "7a2bd0c80c7dd008ad9e4bca7b7a939c56922902",
+  "tag": "v0.21.0"
+}
+--- origin refs
+refs/heads/main 8a15962788ece72ef64a2215357f61f94b9682f7
+refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b
+--- release temp files
+--- fake log
+<CASE>/repo npm view @example/pkg version
+--- repo .code-forge-tmp
+--- seen
+--- repo HEAD
+change README.md
+
+README.md
+=== step 2: release major --date 2026-11-12
+exit 0
+--- stdout
+release @example/pkg: 0.21.0 → 1.0.0
+
+== 1. preflight ==
+ok    CHANGELOG.md [Unreleased] has entries
+ok    working tree is clean
+ok    on branch main
+WARN  main is ahead of origin/main: the push will also send those commits
+ok    1.0.0 > 0.21.0 (package.json) and > 0.21.0 (npm)
+ok    tag v1.0.0 is free (local and origin)
+ok    docs block covers 7a2bd0c80c7dd008ad9e4bca7b7a939c56922902 since v0.21.0
+
+== 2. bump + 3. CHANGELOG and README ==
+package.json: version  0.21.0 → 1.0.0
+npm-shrinkwrap.json: version, packages[""].version  0.21.0 → 1.0.0
+.claude-plugin/plugin.json: version  0.21.0 → 1.0.0
+skill/scripts/forge: PINNED_VERSION  0.21.0 → 1.0.0
+CHANGELOG.md: [Unreleased] → [1.0.0] — 2026-11-12
+      
+      ## [Unreleased]
+      
+    - ### Added
+    - 
+    - - A new verb.
+    - 
+    - ### Fixed
+    - 
+    - - A fixed bug.
+    - 
+    - ## [0.21.0] — 2026-11-01
+    - 
+    - ### Added
+    - 
+    - - The first verb.
+    - 
+    - [Unreleased]: https://github.com/example/pkg/compare/v0.21.0...HEAD
+    + ## [1.0.0] — 2026-11-12
+    + 
+    + ### Added
+    + 
+    + - A new verb.
+    + 
+    + ### Fixed
+    + 
+    + - A fixed bug.
+    + 
+    + ## [0.21.0] — 2026-11-01
+    + 
+    + ### Added
+    + 
+    + - The first verb.
+    + 
+    + [Unreleased]: https://github.com/example/pkg/compare/v1.0.0...HEAD
+    + [1.0.0]: https://github.com/example/pkg/compare/v0.21.0...v1.0.0
+      [0.21.0]: https://github.com/example/pkg/compare/v0.20.0...v0.21.0
+      
+README.md: Latest: 0.21.0 → 1.0.0
+      
+    - Latest: 0.21.0 - see [CHANGELOG.md](CHANGELOG.md)
+    + Latest: 1.0.0 - see [CHANGELOG.md](CHANGELOG.md)
+docs/step-by-step.md: version pins: 0.21.0 → 1.0.0
+      
+    -     npx @codedology/code-forge@0.21.0 init
+    +     npx @codedology/code-forge@1.0.0 init
+      ```
+    - @codedology/code-forge 0.21.0
+    + @codedology/code-forge 1.0.0
+
+== 4. checks ==
+ok    gen-config-doc --check
+ok    gen-commands-doc --check
+check npm test …
+ok    npm test
+ok    npm run typecheck
+ok    package size: 1234567 bytes (1.23 MB; limit <20 MB)
+ok    npm pack --dry-run: @example/pkg@1.0.0, 7 files
+ok    npm ls: 0 invalid, 0 missing
+ok    claude plugin validate .
+
+== 5. commit + tag ==
+ok    committed "Release v1.0.0" (7 files)
+ok    annotated tag v1.0.0
+
+== 6. next steps (nothing was pushed or published) ==
+  publish to npm first, then push (the tag push only creates the GitHub release; CI never publishes):
+      npm publish
+      npm run release:site
+      git push origin main --follow-tags
+  if the tag run cannot create the GitHub release, create it by hand (notes already written to <CASE>/tmp/code-forge-release-<RAND>/release-notes-v1.0.0.md):
+      gh release create v1.0.0 --title v1.0.0 --notes-file <CASE>/tmp/code-forge-release-<RAND>/release-notes-v1.0.0.md --verify-tag
+--- stderr
+--- repo refs
+refs/heads/main 25dec665b2aff222dbf3a7cf6573a4aea2335220 Release v1.0.0
+refs/remotes/origin/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
+refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b Release v0.21.0
+refs/tags/v1.0.0 09f97db570b5b8a81de0e290c71d9c60623f0fd7 Release v1.0.0
+--- repo status
+--- tag v0.21.0
+object 7a2bd0c80c7dd008ad9e4bca7b7a939c56922902
+type commit
+tag v0.21.0
+tagger Test <test@example.invalid> 1794477600 +0000
+
+Release v0.21.0
+--- tag v1.0.0
+object 25dec665b2aff222dbf3a7cf6573a4aea2335220
+type commit
+tag v1.0.0
+tagger Test <test@example.invalid> 1794477600 +0000
+
+Release v1.0.0
+
+### Added
+
+- A new verb.
+
+### Fixed
+
+- A fixed bug.
+--- file package.json
+{
+  "name": "@example/pkg",
+  "version": "1.0.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/example/pkg.git"
+  }
+}
+--- file npm-shrinkwrap.json
+{
+  "name": "@example/pkg",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "@example/pkg",
+      "version": "1.0.0"
+    }
+  }
+}
+--- file .claude-plugin/plugin.json
+{
+  "name": "pkg",
+  "version": "1.0.0"
+}
+--- file skill/scripts/forge
+#!/bin/sh
+# shim: PINNED_VERSION="0.21.0" is set below
+PINNED_VERSION="1.0.0"
+set -eu
+--- file CHANGELOG.md
+# Changelog
+
+## [Unreleased]
+
+## [1.0.0] — 2026-11-12
+
+### Added
+
+- A new verb.
+
+### Fixed
+
+- A fixed bug.
+
+## [0.21.0] — 2026-11-01
+
+### Added
+
+- The first verb.
+
+[Unreleased]: https://github.com/example/pkg/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/example/pkg/compare/v0.21.0...v1.0.0
+[0.21.0]: https://github.com/example/pkg/compare/v0.20.0...v0.21.0
+--- file README.md
+# pkg
+
+A useful tool.
+
+Latest: 1.0.0 - see [CHANGELOG.md](CHANGELOG.md)
+
+## What's new in 0.21
+
+In the next release:
+
+- New.
+  Continued.
+
+In 0.21.0:
+
+- Old.
+--- file docs/step-by-step.md
+# Step by step
+
+Install:
+
+    npx @codedology/code-forge@1.0.0 init
+
+```
+@codedology/code-forge 1.0.0
+```
+
+Not a pin: @codedology/code-forge@0.21.0x stays.
+--- file docs/release-docs.json
+{
+  "through": "7a2bd0c80c7dd008ad9e4bca7b7a939c56922902",
+  "tag": "v0.21.0"
+}
+--- origin refs
+refs/heads/main 8a15962788ece72ef64a2215357f61f94b9682f7
+refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b
+--- release temp files
+# <CASE>/tmp/code-forge-release-<RAND>/release-notes-v1.0.0.md
+### Added
+
+- A new verb.
+
+### Fixed
+
+- A fixed bug.
+
+npm: https://www.npmjs.com/package/@example/pkg/v/1.0.0
+Full changelog: https://github.com/example/pkg/blob/v1.0.0/CHANGELOG.md
+# <CASE>/tmp/code-forge-release-<RAND>/tag-message.txt
+Release v1.0.0
+
+### Added
+
+- A new verb.
+
+### Fixed
+
+- A fixed bug.
+--- fake log
+<CASE>/repo npm view @example/pkg version
+<CASE>/repo npm view @example/pkg version
+<CASE>/repo npm test
+<CASE>/repo npm run typecheck
+<CASE>/repo npm pack --dry-run --json
+<CASE>/repo npm ls --json
+<CASE>/repo claude plugin validate .
+--- repo .code-forge-tmp
+--- seen
+--- repo HEAD
+Release v1.0.0
+
+.claude-plugin/plugin.json
+CHANGELOG.md
+README.md
+docs/step-by-step.md
+npm-shrinkwrap.json
+package.json
+skill/scripts/forge
