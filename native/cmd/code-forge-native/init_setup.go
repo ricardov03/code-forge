@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -1064,49 +1065,103 @@ type initLinkStep struct {
 // initSetupPlan decides the non-interactive setup without side effects:
 // the run, or the reason it hands over.
 func initSetupPlan(parsed initParsed, home, cwd string, jsonMode, existingFile bool) (func(stdout, stderr io.Writer) int, handoverReason) {
+	st, reason := initSetupLoad(parsed, home, cwd, existingFile)
+	if reason != 0 {
+		return nil, reason
+	}
+	r, reason := initSetupFinish(st, parsed, jsonMode, nil)
+	if reason != 0 {
+		return nil, reason
+	}
+	return initSetupRun(r), 0
+}
+
+// initSetupState is what runInit has read before the answers are asked.
+type initSetupState struct {
+	home, cwd, configFile, userFile string
+	existingFile                    bool
+	existing, user                  ledger.Object
+	ctx                             initCtx
+	v                               initValues
+}
+
+// initSetupWizard is what the terminal wizard (B528) adds to the setup:
+// the summary and settings lines it already printed, and the tools and
+// model-cache steps it serves.
+type initSetupWizard struct {
+	said    []string // lines said after the summary, before the jev line
+	printed int      // lines already on stdout
+	// the summary as shown before "Customize now" changed the answers
+	summary  []string
+	settings ledger.Object
+	blank    []string
+}
+
+// initSetupLoad reads the existing config, the user config and the
+// project, and resolves the answers from defaults, existing and flags.
+func initSetupLoad(parsed initParsed, home, cwd string, existingFile bool) (initSetupState, handoverReason) {
 	configFile := filepath.Join(cwd, config.Filename)
 	var existing ledger.Object
 	if existingFile {
 		raw, err := os.ReadFile(configFile)
 		if err != nil || !initYAMLPlain(string(raw)) {
-			return nil, hInitConfigShape
+			return initSetupState{}, hInitConfigShape
 		}
 		m, order, err := config.ParseTextOrdered(string(raw), configFile)
 		if err != nil {
-			return nil, hInitConfigShape
+			return initSetupState{}, hInitConfigShape
 		}
 		value, ok := initPlainValue(order.Object(m))
 		if !ok {
-			return nil, hInitConfigShape
+			return initSetupState{}, hInitConfigShape
 		}
 		existing = value.(ledger.Object)
 	}
 	userFile := filepath.Join(home, ".code-forge", "config.yml")
 	user, ok := initReadUserConfig(userFile)
 	if !ok {
-		return nil, hInitUserConfig
+		return initSetupState{}, hInitUserConfig
 	}
 	ctx := initGather(cwd, home)
 	v, ok := initResolve(ctx, existing, user, existingFile, parsed)
 	if !ok {
-		return nil, hInitConfigShape
+		return initSetupState{}, hInitConfigShape
 	}
+	return initSetupState{home: home, cwd: cwd, configFile: configFile, userFile: userFile, existingFile: existingFile,
+		existing: existing, user: user, ctx: ctx, v: v}, 0
+}
+
+// initSetupFinish is runInit from the summary on, decided without side
+// effects: what the run says, writes and returns. wiz is nil for the
+// --no-interaction path (B527).
+func initSetupFinish(st initSetupState, parsed initParsed, jsonMode bool, wiz *initSetupWizard) (initSetupResult, handoverReason) {
+	home, cwd, configFile, userFile := st.home, st.cwd, st.configFile, st.userFile
+	existingFile, existing, user, ctx, v := st.existingFile, st.existing, st.user, st.ctx, st.v
+	var err error
 	settings, blank, summaryLines := initSummary(v, ctx)
+	if wiz != nil && wiz.summary != nil {
+		settings, blank, summaryLines = wiz.settings, wiz.blank, wiz.summary
+	}
 
 	// what the run says and does, decided here; fail ends it before writes
 	lines := append([]string{}, summaryLines...)
-	fail := func(code int, message string) (func(stdout, stderr io.Writer) int, handoverReason) {
-		return initSetupRun(initSetupResult{home: home, jsonMode: jsonMode, lines: lines, shown: len(summaryLines), code: code, err: message, settings: settings, blank: blank}), 0
+	printed := 0
+	if wiz != nil {
+		lines = append(lines, wiz.said...)
+		printed = wiz.printed
+	}
+	fail := func(code int, message string) (initSetupResult, handoverReason) {
+		return initSetupResult{home: home, jsonMode: jsonMode, lines: lines, shown: len(summaryLines), printed: printed, code: code, err: message, settings: settings, blank: blank}, 0
 	}
 
 	jevRef, jevSource := "", "none"
 	switch v.jevMode {
 	case "auto":
-		return nil, hInitJevKey
+		return initSetupResult{}, hInitJevKey
 	case "ref":
 		jevRef = v.jevRef
 		if !strings.HasPrefix(jevRef, "env:") && !initOpRef.MatchString(jevRef) && jevRef != "user" && !strings.HasPrefix(jevRef, "keychain:") {
-			return nil, hInitJevOp
+			return initSetupResult{}, hInitJevOp
 		}
 		switch {
 		case strings.HasPrefix(jevRef, "env:"):
@@ -1156,18 +1211,18 @@ func initSetupPlan(parsed initParsed, home, cwd string, jsonMode, existingFile b
 	merged := initMergeConfig(existing, initGenerated(v, ctx, jevRef))
 	text, err := yamledit.StringifyPlain(merged)
 	if err != nil {
-		return nil, hInitConfigShape
+		return initSetupResult{}, hInitConfigShape
 	}
 	cfg, order, err := config.ParseTextOrdered(text, configFile)
 	if err != nil || !initDeepEqual(order.Object(cfg), merged) {
-		return nil, hInitConfigShape
+		return initSetupResult{}, hInitConfigShape
 	}
 	if len(config.SchemaIssues(cfg, "")) > 0 || configHoldsSecretShape(cfg) {
-		return nil, hInitConfigCheck
+		return initSetupResult{}, hInitConfigCheck
 	}
 	if sandbox, ok := objAt(cfg, "coder", "sandbox"); ok {
 		if dirs, ok := sandbox["add_dirs"].([]any); ok && len(dirs) > 0 {
-			return nil, hInitConfigCheck
+			return initSetupResult{}, hInitConfigCheck
 		}
 	}
 	errs, warns := configValidator{cfg: cfg, order: order, hasCli: func(string) bool { return true }}.run()
@@ -1181,9 +1236,10 @@ func initSetupPlan(parsed initParsed, home, cwd string, jsonMode, existingFile b
 	for _, w := range warns {
 		lines = append(lines, "config warning: "+w.rule)
 	}
-	writeConfig := true
+	writeConfig, changeCount := true, 0
 	if existingFile {
 		changed := initChangedPaths(existing, merged, "")
+		changeCount = len(changed)
 		if len(changed) == 0 {
 			writeConfig = false
 			lines = append(lines, config.Filename+": unchanged")
@@ -1192,31 +1248,36 @@ func initSetupPlan(parsed initParsed, home, cwd string, jsonMode, existingFile b
 		}
 	}
 
-	// steps after the write that Go does not serve hand over now
+	// steps after the write that Go does not serve hand over now; the
+	// wizard checked the tools and the model cache before its first prompt
+	var after []string
 	if v.tools == "recommended" {
-		return nil, hInitTools
+		if wiz == nil {
+			return initSetupResult{}, hInitTools
+		}
+		after = initWizToolLines(ctx)
 	}
-	if v.refreshModels {
-		return nil, hInitModels
+	if v.refreshModels && wiz == nil {
+		return initSetupResult{}, hInitModels
 	}
 	if v.doctor {
-		return nil, hInitDoctor
+		return initSetupResult{}, hInitDoctor
 	}
 	var links []initLinkStep
 	source, version := "", ""
 	if len(v.harnesses) > 0 {
 		root, ok := upgradePackageRoot()
 		if !ok {
-			return nil, hInitLinks
+			return initSetupResult{}, hInitLinks
 		}
 		source = filepath.Join(root, "skill")
 		if initExists(source) {
 			if version, err = docsync.InstalledVersion(root); err != nil {
-				return nil, hInitLinks
+				return initSetupResult{}, hInitLinks
 			}
 			installs := installsFilePath(home)
 			if _, ok := upgradeReadTargets(installs); !ok || !cacheFileWritable(installs) || !initOutputSafe(source) {
-				return nil, hInitLinks
+				return initSetupResult{}, hInitLinks
 			}
 			for _, id := range v.harnesses {
 				var h installHarness
@@ -1231,7 +1292,7 @@ func initSetupPlan(parsed initParsed, home, cwd string, jsonMode, existingFile b
 				}
 				t := upgradeTarget{installRecord{target: target}, v.method}
 				if _, ok := upgradeLinkable(source, t, home); !ok {
-					return nil, hInitLinks
+					return initSetupResult{}, hInitLinks
 				}
 				links = append(links, initLinkStep{id, target})
 			}
@@ -1253,42 +1314,49 @@ func initSetupPlan(parsed initParsed, home, cwd string, jsonMode, existingFile b
 	userText := ""
 	if len(initChangedPaths(userBase, userNext, "")) > 0 {
 		if userText, err = yamledit.StringifyPlain(userNext); err != nil {
-			return nil, hInitConfigShape
+			return initSetupResult{}, hInitConfigShape
 		}
 	}
 	engineStop := ctx.agent && ctx.harness != "claude" && !ctx.solo && (merged.Get("engine") == "auto" || merged.Get("engine") == "harness")
 
-	return initSetupRun(initSetupResult{
-		home: home, jsonMode: jsonMode, lines: lines, shown: len(summaryLines), settings: settings, blank: blank,
+	return initSetupResult{
+		home: home, jsonMode: jsonMode, lines: lines, shown: len(summaryLines), printed: printed, settings: settings, blank: blank,
+		after: after, refreshModels: v.refreshModels && wiz != nil, existingFile: existingFile, changeCount: changeCount,
 		configFile: configFile, configText: text, writeConfig: writeConfig,
 		links: links, source: source, version: version, scope: v.scope, method: v.method, harnessCount: len(v.harnesses),
 		userFile: userFile, userText: userText, engineStop: engineStop, engine: merged.Get("engine"),
-	}), 0
+	}, 0
 }
 
 // initSetupResult is everything the run writes and says.
 type initSetupResult struct {
-	home         string
-	jsonMode     bool
-	lines        []string
-	shown        int
-	code         int
-	err          string
-	settings     ledger.Object
-	blank        []string
-	configFile   string
-	configText   string
-	writeConfig  bool
-	links        []initLinkStep
-	source       string
-	version      string
-	scope        string
-	method       string
-	harnessCount int
-	userFile     string
-	userText     string
-	engineStop   bool
-	engine       any
+	home     string
+	jsonMode bool
+	lines    []string
+	shown    int
+	printed  int
+	after    []string // tool lines, said after the config write (wizard)
+	// refreshModels: read the CLI model caches after the tools (wizard)
+	refreshModels bool
+	existingFile  bool
+	changeCount   int
+	code          int
+	err           string
+	settings      ledger.Object
+	blank         []string
+	configFile    string
+	configText    string
+	writeConfig   bool
+	links         []initLinkStep
+	source        string
+	version       string
+	scope         string
+	method        string
+	harnessCount  int
+	userFile      string
+	userText      string
+	engineStop    bool
+	engine        any
 }
 
 func initWriteText(file, text string) error {
@@ -1303,9 +1371,9 @@ func initWriteText(file, text string) error {
 func initSetupRun(r initSetupResult) func(stdout, stderr io.Writer) int {
 	return func(stdout, stderr io.Writer) int {
 		lines := r.lines
-		printed := 0
-		if !r.jsonMode {
-			_, _ = io.WriteString(stdout, strings.Join(lines[:r.shown], "\n")+"\n")
+		printed := r.printed
+		if !r.jsonMode && r.shown > printed {
+			_, _ = io.WriteString(stdout, strings.Join(lines[printed:r.shown], "\n")+"\n")
 			printed = r.shown
 		}
 		wrote := []any{}
@@ -1324,6 +1392,14 @@ func initSetupRun(r initSetupResult) func(stdout, stderr io.Writer) int {
 					}
 					wrote = append(wrote, r.configFile)
 					lines = append(lines, config.Filename+": written")
+				}
+				lines = append(lines, r.after...)
+				if r.refreshModels {
+					res, err := config.RefreshFromCLICaches(r.home)
+					if err != nil {
+						return err
+					}
+					lines = append(lines, "models: "+strconv.Itoa(len(res.SourcesRead))+" CLI cache(s) read")
 				}
 				if r.harnessCount > 0 && len(r.links) == 0 {
 					lines = append(lines, "links: skill source missing ("+r.source+"); no harness linked")

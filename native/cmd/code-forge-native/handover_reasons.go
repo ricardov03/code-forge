@@ -332,6 +332,10 @@ const (
 	hAutopilotApproveYAMLShape
 	hAutopilotApproveReloadShape
 	hAutopilotRestoreReloadShape
+	hInitWizardShape
+	hInitWizardEOF
+	hInitWizardTools
+	hInitWizardModels
 )
 
 var handoverReasons = [...]string{
@@ -660,4 +664,8 @@ var handoverReasons = [...]string{
 	hAutopilotApproveYAMLShape:   "autopilot-approve-yaml-shape",
 	hAutopilotApproveReloadShape: "autopilot-approve-reload-shape",
 	hAutopilotRestoreReloadShape: "autopilot-restore-reload-shape",
+	hInitWizardShape:           "init-wizard-shape",
+	hInitWizardEOF:             "init-wizard-eof",
+	hInitWizardTools:           "init-wizard-tools",
+	hInitWizardModels:          "init-wizard-models",
 }

@@ -448,11 +448,12 @@ func initPlan(parsed initParsed, home, cwd string, interactive bool) initRefusal
 		}
 		existing = loaded
 	}
-	if interactive {
-		return initRefusal{hand: true, reason: hInitInteractive}
-	}
 	if existing != nil && initAnswersThrow(parsed, existing) {
 		return initRefusal{hand: true, reason: hInitAnswers}
+	}
+	if interactive {
+		// B528: the wizard asks first; a draft-PR refusal comes after it
+		return initRefusal{hand: true, reason: hInitWizard, existing: existing != nil}
 	}
 	draft, _ := parsed.initLast("--coder-may-open-draft-pr")
 	if draft == true && !initCoderMayPush(parsed, existing) {
@@ -557,6 +558,30 @@ func runInitVerb(args []string) int {
 			return metaHandover("init", args, reason)
 		}
 		return metaServe("init", "", args, serve)
+	}
+	if plan.hand && plan.reason == hInitWizard {
+		serve, reason := initWizardServe(parsed, home, physicalCwd(), plan.existing)
+		if serve != nil && !routerHintReadable() {
+			// Go cannot judge the hint state Node would print after a cancel
+			serve, reason = nil, hInitWizardShape
+		}
+		if serve == nil {
+			return metaHandover("init", args, reason)
+		}
+		// metaServe without the error log when the input ended at a prompt:
+		// Node exits 13 on the unsettled await before it logs anything
+		before := gatesBreadcrumbName("init")
+		stderr := &contextErrWriter{}
+		eof := false
+		code := serve(os.Stdout, stderr, &eof)
+		if code != 0 && !eof {
+			var message any
+			if stderr.last != "" {
+				message = stderr.last
+			}
+			routerHint(nativeVerbFailure("init", "", args, code, message, before), code)
+		}
+		return code
 	}
 	if plan.hand {
 		return metaHandover("init", args, plan.reason)
