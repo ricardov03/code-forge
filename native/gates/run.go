@@ -793,6 +793,31 @@ func Executable(cwd string, c *Command) string {
 	return ""
 }
 
+// NeedsShell reports a command that resolves to a regular executable file
+// that is neither a #! script nor a known binary (B469). Node's spawn gives
+// such a file to /bin/sh on Linux (execvp's ENOEXEC rule) and throws
+// "spawn ENOEXEC" on macOS; Go's exec does neither, so gates run hands it
+// over to Node before any write.
+func NeedsShell(cwd string, c *Command) bool {
+	if c == nil || len(c.Argv) == 0 || c.Argv[0] == "{test_files}" || c.Argv[0] == "{changed_files}" {
+		return false
+	}
+	p, e := resolveExecutable(cwd, c)
+	if e != nil {
+		return false
+	}
+	st, e := os.Stat(p)
+	if e != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0111 == 0 {
+		return false
+	}
+	f, e := os.Open(p)
+	if e != nil {
+		return false
+	}
+	f.Close()
+	return Executable(cwd, c) == ""
+}
+
 func resolveExecutable(cwd string, c *Command) (string, error) {
 	cwd, _ = filepath.Abs(cwd)
 	name := c.Argv[0]

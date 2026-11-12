@@ -137,10 +137,12 @@ func b450OneLine(t *testing.T, code int, stdout, stderr string, wantCode int, wa
 }
 
 // Node's os.homedir() falls back to the user database; an unscoped run with no
-// --slug reads and writes nothing under the home folder.
+// --slug reads and writes no run or ledger file under the home folder. The
+// machine test slot would still be taken under the user database's (real)
+// home, so the test turns the queue off: a test must never write there (B469).
 func TestB450GatesRunHomeUnset(t *testing.T) {
 	f := b450Setup(t, b450Green(), nil)
-	code, out, errOut := f.call([]string{"HOME="}, "gates", "run")
+	code, out, errOut := f.call([]string{"HOME=", "CODE_FORGE_TEST_QUEUE=off"}, "gates", "run")
 	if code != 0 || !f.result(out).AllOK || errOut != "" {
 		t.Fatalf("HOME unset: exit=%d stdout=%s stderr=%q, want a green run", code, out, errOut)
 	}

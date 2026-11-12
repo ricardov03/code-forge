@@ -491,8 +491,20 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 			}
 		}
 	}
-	// B450: a command that cannot start (missing, not executable, not a
-	// program) is a red gate with reason spawn-error from gates.Run.
+	// B450: a command that cannot start (missing, not executable) is a red
+	// gate with reason spawn-error from gates.Run. B469: an executable file
+	// that is not a program (no #!, no binary header) starts through /bin/sh
+	// in Node on Linux and throws ENOEXEC on macOS; keep it in Node.
+	for name, command := range p.Commands {
+		if command != nil && (!p.Restricted || gates.Has(p.Names, name)) && gates.NeedsShell(cwd, command) {
+			return 0, false
+		}
+	}
+	for _, c := range p.Custom {
+		if (!p.Restricted || gates.Has(p.Names, c.Name)) && gates.NeedsShell(cwd, c.Command) {
+			return 0, false
+		}
+	}
 	var listed []string
 	var listErr error
 	if o.run != "" && (gates.Scoped(p) || o.changed) {

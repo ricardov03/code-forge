@@ -101,16 +101,19 @@ test('review F1 signals: native termination diagnostics match Node signal names'
   }
 });
 
-test('review spawn/PATH: unresolvable child commands hand over to Node before running', async () => {
+test('review spawn/PATH: B450 Go runs missing and non-executable child commands with Node parity; B469 a script with no #! hands over', async () => {
   const missing = await fixture({ test: { argv: ['sh', '-c', 'echo wrong-parent-path'], env: { PATH: '/nonexistent-child-path' } } });
   const denied = await fixture({ test: ['./no-execute'] });
   await writeFile(path.join(denied.repo, 'no-execute'), '#!/bin/sh\nexit 0\n', { mode: 0o600 });
   const shell = await fixture({ test: ['./plain-script'] });
   await writeFile(path.join(shell.repo, 'plain-script'), 'printf shell-fallback\n', { mode: 0o755 });
-  for (const f of [missing, denied, shell]) {
-    assert.equal((await launch(f).ended).code, 127, 'preflight delegates unsupported spawns to Node');
-    await parity(f, ARGS, true);
+  for (const f of [missing, denied]) {
+    assert.notEqual((await launch(f).ended).code, 127, 'B450: the spawn case runs in Go without Node');
+    await parity(f, ARGS);
   }
+  // Node starts it through /bin/sh on Linux and throws spawn ENOEXEC on macOS.
+  assert.equal((await launch(shell).ended).code, 127, 'B469: a script with no #! still requires Node');
+  await parity(shell, ARGS, true);
 });
 
 test('review F1 scope: changed Swift and Python test pairs (Go also pairs *_test.py since B394)', async () => {
@@ -238,25 +241,22 @@ test('gates run: native speed and byte parity for gates, scope, lock, worktrees,
     await parity(green, [...ARGS, ...flags], false, { CODE_FORGE_NO_ERROR_LOG: '0' });
   }
   for (const args of [['gates', 'run', '--run', 'fixture'], ['gates', 'run', '--block', 'B1']]) await parity(green, args);
-  /** @type {[Record<string, any>, Record<string, any>, number][]} */
-  const ported = [
-    [{ custom: [{ name: 'extra', argv: command('') }] }, {}, 0],
-    [{}, { kind: 'light' }, 1],
-  ];
-  for (const [gates, block, code] of ported) {
-    const f = await fixture(gates, block);
-    assert.equal((await launch(f).ended).code, code, 'ported case runs in Go with unavailable Node');
-    await parity(f);
-  }
   /** @type {[Record<string, any>, Record<string, any>, string[]][]} */
-  const handovers = [
-    [{ test: ['/nonexistent-gate-tool'] }, {}, ARGS], [{}, {}, ['gates', 'detect']], [{}, {}, ['gates', 'run']],
+  const ported = [
+    [{ custom: [{ name: 'extra', argv: command('') }] }, {}, ARGS],
+    [{}, { kind: 'light' }, ARGS],
+    // B450: a missing gate tool and an unscoped run handed over before; Go runs them now.
+    [{ test: ['/nonexistent-gate-tool'] }, {}, ARGS],
+    [{}, {}, ['gates', 'run']],
   ];
-  for (const [gates, block, args] of handovers) {
+  for (const [gates, block, args] of ported) {
     const f = await fixture(gates, block);
-    assert.equal((await launch(f, args).ended).code, 127, 'unported case requires Node');
-    await parity(f, args, true);
+    assert.notEqual((await launch(f, args).ended).code, 127, 'ported case runs in Go with unavailable Node');
+    await parity(f, args);
   }
+  const detect = await fixture();
+  assert.equal((await launch(detect, ['gates', 'detect']).ended).code, 127, 'gates detect still requires Node');
+  await parity(detect, ['gates', 'detect'], true);
 });
 
 test('gates run waits for a concurrent run writer and preserves its new proof lock', async () => {

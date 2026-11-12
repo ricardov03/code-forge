@@ -173,22 +173,31 @@ test('gates run boundary: the proof holder may run its own gates', async () => {
   assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).proof_lock, { block: 'B1' }, 'the holder retains its proof lock');
 });
 
-test('B289 telemetry: an unsupported flag records exactly one hand-over with its reason', async () => {
+test('B289 telemetry: a still-unported gates subcommand records exactly one hand-over with its reason; B450 gates run --help runs in Go with no row', async () => {
   const f = await fixture();
   const runFile = path.join(f.home, '.code-forge/runs/fixture.json');
+  const handovers = path.join(f.home, '.code-forge/native/handovers.jsonl');
+  // B450: Node reads no --help on gates run (an ignored flag: the gates run);
+  // Go does the same with Node unavailable and writes no hand-over row.
+  await parity(f, [...ARGS, '--help']);
+  const help = await launch(f, [...ARGS, '--help'], { CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1' }).ended;
+  assert.equal(help.code, 0, `gates run --help runs the gates in Go without Node: ${help.stderr}`);
+  assert.equal(JSON.parse(help.stdout).allOk, true, 'the ignored flag runs the green gates');
+  await assert.rejects(readFile(handovers), { code: 'ENOENT' });
   const before = await readFile(runFile, 'utf8');
-  const result = await launch(f, [...ARGS, '--help'], { CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1' }).ended;
-  assert.equal(result.code, 127, 'unsupported flag still requires Node');
-  const recorded = (await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+  const ledgerBefore = await readFile(path.join(f.home, '.code-forge/ledger/fixture.jsonl'), 'utf8');
+  const result = await launch(f, ['gates', 'detect'], { CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1' }).ended;
+  assert.equal(result.code, 127, 'gates detect still requires Node');
+  const recorded = (await readFile(handovers, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
   assert.equal(recorded.length, 1, 'one invocation writes exactly one hand-over row');
   assert.deepEqual(Object.keys(recorded[0]).sort(), ['at', 'reason', 'sub', 'verb', 'version']);
-  assert.deepEqual({ ...recorded[0], at: '<time>' }, { at: '<time>', verb: 'gates', sub: 'run', reason: 'gates-unsupported-flag', version: '0.19.0' });
+  assert.deepEqual({ ...recorded[0], at: '<time>' }, { at: '<time>', verb: 'gates', sub: 'detect', reason: 'gates-unported-subcommand', version: '0.19.0' });
   assert.equal(Number.isNaN(Date.parse(recorded[0].at)), false, 'row includes a valid timestamp');
   assert.equal(await readFile(runFile, 'utf8'), before, 'hand-over leaves run state unchanged');
-  await assert.rejects(readFile(path.join(f.home, '.code-forge/ledger/fixture.jsonl')), { code: 'ENOENT' });
+  assert.equal(await readFile(path.join(f.home, '.code-forge/ledger/fixture.jsonl'), 'utf8'), ledgerBefore, 'hand-over adds no ledger row');
 });
 
-test('B289 boundary: light refusals and usage match; unsupported commands hand over before writes', async () => {
+test('B289 boundary: light refusals and usage match; B450 forms run in Go with Node parity; unported subcommands hand over before writes', async () => {
   const light = await fixture({}, { kind: 'light' });
   const refused = await launch(light).ended;
   assert.equal(refused.code, 1, 'light block missing token is refused in Go');
@@ -198,19 +207,23 @@ test('B289 boundary: light refusals and usage match; unsupported commands hand o
   for (const flags of [['--cwd'], ['--slug'], ['--timeout-ms'], ['--timeout-ms', '0']]) await parity(f, [...ARGS, ...flags]);
   const graph = await fixture({ repeat_new_tests: 2, test: command('', '{test_files}') }, { owned_files: ['source.mjs'] });
   await writeFile(path.join(graph.repo, 'source.mjs'), 'export const value = 1;\n');
+  // B450: these forms handed over before; Go now runs them with Node unavailable.
   /** @type {[{repo: string, home: string}, string[]][]} */
-  const unsupported = [
+  const ported = [
     [graph, ARGS],
     [await fixture({ custom: [{ name: 'extra', argv: ['/missing-gate'] }] }), ARGS],
     [await fixture({ rerun_failed: 2 }), ARGS],
     [await fixture({ custom: [{ name: 'extra', argv: command('', '{test_files}') }] }), ARGS],
-    [f, ['gates', 'detect']], [f, ['gates', 'scope']], [f, ['gates', 'run']],
+    [f, ['gates', 'run']],
   ];
-  for (const [sample, args] of unsupported) {
-    const before = await readFile(path.join(sample.home, '.code-forge/runs/fixture.json'), 'utf8');
-    assert.equal((await launch(sample, args).ended).code, 127, 'hand-over needs Node');
-    assert.equal(await readFile(path.join(sample.home, '.code-forge/runs/fixture.json'), 'utf8'), before, 'hand-over makes zero run writes');
-    await assert.rejects(readFile(path.join(sample.home, '.code-forge/ledger/fixture.jsonl')), { code: 'ENOENT' });
-    await parity(sample, args, true);
+  for (const [sample, args] of ported) {
+    assert.notEqual((await launch(sample, args).ended).code, 127, `${args.join(' ')} runs in Go without Node`);
+    await parity(sample, args);
+  }
+  for (const args of [['gates', 'detect'], ['gates', 'scope']]) {
+    const before = await readFile(path.join(f.home, '.code-forge/runs/fixture.json'), 'utf8');
+    assert.equal((await launch(f, args).ended).code, 127, 'hand-over needs Node');
+    assert.equal(await readFile(path.join(f.home, '.code-forge/runs/fixture.json'), 'utf8'), before, 'hand-over makes zero run writes');
+    await parity(f, args, true);
   }
 });
