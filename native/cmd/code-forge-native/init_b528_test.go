@@ -205,6 +205,11 @@ func b528GoldenFile(name string) string {
 func TestB528InitWizardMatchesNode(t *testing.T) {
 	for _, c := range b528Cases {
 		t.Run(c.name, func(t *testing.T) {
+			// B560: the goldens come from a Mac with Solo.app installed
+			b552SealApps(t)
+			if err := os.MkdirAll(filepath.Join(toolSystemApps, "Solo.app"), 0o755); err != nil {
+				t.Fatal(err)
+			}
 			data, err := os.ReadFile(b528GoldenFile(c.name))
 			if err != nil {
 				t.Fatal(err)

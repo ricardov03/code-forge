@@ -229,6 +229,12 @@ function assertHandoverBudget(overhead) {
 test('Go handover stays within 25 ms', (t) => {
   const f = fixture(t);
   const overhead = handoverOverhead(t, f);
+  // B560: shared CI runners gave 10 to 63 ms for the same binary, so CI only
+  // reports the number; local runs keep the 25 ms gate.
+  if (process.env.CI) {
+    t.diagnostic('CI runner: overhead ' + overhead.toFixed(2) + ' ms reported, not gated');
+    return;
+  }
   assertHandoverBudget(overhead);
 });
 

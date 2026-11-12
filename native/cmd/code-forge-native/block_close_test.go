@@ -132,7 +132,13 @@ func (f *closeReviewFixture) result(p ticket.Parts, outcome string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(f.top, ".code-forge/queue", id+".done"), data, 0600)
+	// B560: write then rename, like the worker, so close never reads a
+	// half-written marker (CI saw "stopped or superseded review requires Node").
+	name := filepath.Join(f.top, ".code-forge/queue", id+".done")
+	if err := os.WriteFile(name+".tmp", data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(name+".tmp", name)
 }
 
 // The fake reviewer observes the real queue. It waits for every file before

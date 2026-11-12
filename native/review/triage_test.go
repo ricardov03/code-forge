@@ -24,6 +24,19 @@ type triageFake struct {
 	mu       sync.Mutex
 	replies  []ledger.Object
 	requests []any
+	srv      *httptest.Server
+}
+
+// seen waits for every request the fake still serves (a client that gave up
+// on a timeout leaves its handler running), then reads them under the lock
+// (B560: the race detector caught the bare read on CI).
+func (f *triageFake) seen() []any {
+	if f.srv != nil {
+		f.srv.Close()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]any(nil), f.requests...)
 }
 
 func (f *triageFake) serve(t *testing.T) string {
@@ -49,6 +62,7 @@ func (f *triageFake) serve(t *testing.T) string {
 		w.WriteHeader(int(rep.Get("status").(float64)))
 		_, _ = io.WriteString(w, rep.Get("body").(string))
 	}))
+	f.srv = srv
 	t.Cleanup(srv.Close)
 	return srv.URL + "/v1/systemone"
 }
@@ -147,7 +161,7 @@ func TestB533TriageWithJevMatchesNode(t *testing.T) {
 					t.Fatalf("rows differ\n go: %s\nnode: %s", a, b)
 				}
 			}
-			if a, b := js(t, fake.requests), js(t, gold.Get("requests")); a != b && sc.Get("down") != true {
+			if a, b := js(t, fake.seen()), js(t, gold.Get("requests")); a != b && sc.Get("down") != true {
 				t.Fatalf("requests differ\n go: %s\nnode: %s", a, b)
 			}
 			if a, b := js(t, slept), js(t, gold.Get("slept")); a != b {

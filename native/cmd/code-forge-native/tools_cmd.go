@@ -64,12 +64,16 @@ func toolIDs() []string {
 // this machine has (B552: Solo.app on a Mac, none on Linux CI).
 var toolSystemApps = "/Applications"
 
+// toolOS is the platform the tool rows and install hints follow (Node's
+// process.platform). Tests pin it so Mac goldens hold on Linux CI (B560).
+var toolOS = runtime.GOOS
+
 // detectTool is detectTool: the command on PATH, or (macOS) its app bundle.
 func detectTool(tool toolRow) bool {
 	if commandOnPath(tool.command, os.Getenv("PATH")) {
 		return true
 	}
-	if tool.app == "" || runtime.GOOS != "darwin" {
+	if tool.app == "" || toolOS != "darwin" {
 		return false
 	}
 	places := []string{filepath.Join(toolSystemApps, tool.app)}
@@ -94,7 +98,7 @@ func toolInstallPlan(tool toolRow) (argv []string, hint string) {
 		}
 		return nil, "install Node.js/npm first, then: " + strings.Join(argv, " ")
 	}
-	if tool.brew != nil && runtime.GOOS == "darwin" {
+	if tool.brew != nil && toolOS == "darwin" {
 		if commandOnPath("brew", path) {
 			return append([]string{"brew", "install"}, tool.brew...), ""
 		}

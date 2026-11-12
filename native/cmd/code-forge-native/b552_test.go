@@ -11,9 +11,11 @@ import (
 // does not exist, so doctor and tools rows are the same on every machine.
 func b552SealApps(t *testing.T) {
 	t.Helper()
-	before := toolSystemApps
+	before, beforeOS := toolSystemApps, toolOS
 	toolSystemApps = filepath.Join(t.TempDir(), "no-apps")
-	t.Cleanup(func() { toolSystemApps = before })
+	// B560: the goldens come from Node on a Mac; pin the platform too
+	toolOS = "darwin"
+	t.Cleanup(func() { toolSystemApps, toolOS = before, beforeOS })
 }
 
 // TestB552AppsSealedFromMachine: with the seal, an app bundle only counts
