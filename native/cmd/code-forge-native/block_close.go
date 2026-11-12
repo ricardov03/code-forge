@@ -147,9 +147,6 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	if step != nil && step.preflight && step.record != nil {
 		record = step.record
 	}
-	if record.Get("autopilot") != nil && flags["auto-claim"] == true {
-		return fallback(hCloseAutoClaim)
-	}
 	// This is the hand-over boundary. Everything through preflight is read-only;
 	// it must finish before a transcript warning or a stopped-block row is signed.
 	safeGrant := blockGrantEndSafe(record)

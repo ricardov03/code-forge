@@ -6,11 +6,16 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ricardov03/code-forge/native/canon"
+	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
+	"github.com/ricardov03/code-forge/native/ticket"
 )
 
 func b493SetConfig(t *testing.T, f *closeReviewFixture, cfg ledger.Object) {
@@ -129,4 +134,114 @@ func TestB493CloseAckDigestNonASCII(t *testing.T) {
 	if reason != hCloseAckDigestOrder || out != "" || errs != "" {
 		t.Fatalf("matching order: exit=%d reason=%v out=%q err=%q; want the close-ack-digest-order hand-over before any output", code, reason, out, errs)
 	}
+}
+
+// b493AutoClaimFixture is an approved close fixture with an autopilot grant
+// (until is the grant's end), a recorded tree at open, one unowned changed
+// file (extra.txt), a live worker file and a fake reviewer that approves
+// extra.txt once it is queued.
+func b493AutoClaimFixture(t *testing.T, until string) *closeReviewFixture {
+	t.Helper()
+	f := newCloseReviewFixture(t, 1)
+	b493Approve(t, f)
+	record, err := state.ReadRun(f.home, "r-close-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Set("autopilot", ledger.Object{{Key: "grant_id", Value: "g-1"}, {Key: "status", Value: "active"}, {Key: "scopes", Value: []any{"close:routine"}}, {Key: "deny", Value: []any{}}, {Key: "delegate", Value: "L2"}, {Key: "until", Value: until}, {Key: "caps", Value: ledger.Object{}}, {Key: "stop_at", Value: 0.8}, {Key: "started_at", Value: "2019-01-01T00:00:00.000Z"}})
+	blocks := record.Get("blocks").(ledger.Object)
+	entry := blocks.Get("B1").(ledger.Object)
+	entry.Set("tree_at_open", ledger.Object{})
+	blocks.Set("B1", entry)
+	record.Set("blocks", blocks)
+	if err := state.SaveRun(f.home, record); err != nil {
+		t.Fatal(err)
+	}
+	closeFixtureWrite(t, filepath.Join(f.top, "extra.txt"), []byte("extra\n"))
+	stamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	pid := strconv.Itoa(os.Getpid())
+	closeFixtureWrite(t, filepath.Join(f.top, ".code-forge", "workers", pid+"-unknown.json"), []byte(`{"pid":`+pid+`,"start_time":"unknown","run":"r-close-fixture","started_at":"`+stamp+`","heartbeat_at":"`+stamp+`"}`))
+	hash, err := gitx.ContentHash(f.top, "extra.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := ticket.Parts{Run: "r-close-fixture", Block: "B1", File: "extra.txt", ContentHash: hash}
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+			entries, _ := os.ReadDir(filepath.Join(f.top, ".code-forge/queue"))
+			for _, e := range entries {
+				if strings.HasPrefix(e.Name(), ticket.ReviewID(extra)) && !strings.HasSuffix(e.Name(), ".done") {
+					_ = f.result(extra, "approved")
+					return
+				}
+			}
+		}
+	}()
+	return f
+}
+
+func b493CloseAutoClaim(f *closeReviewFixture, extra ...string) (int, string, string, handoverReason) {
+	var out, errs bytes.Buffer
+	var reason handoverReason
+	args := append([]string{"B1", "--run", "r-close-fixture", "--report", f.report, "--transcript", f.transcript, "--auto-claim"}, extra...)
+	code := closeFlagsStep(args, &landStep{stdout: &out, stderr: &errs}, &reason)
+	return code, out.String(), errs.String(), reason
+}
+
+// B493: --auto-claim on a run with an autopilot grant runs in Go. Node's bytes
+// and rows (CODE_FORGE_NATIVE=0 on the same fixture): an expired grant signs
+// autopilot.expire once, before the block.claim row; an active grant signs none.
+func TestB493CloseAutoClaimWithAutopilotGrant(t *testing.T) {
+	const stdout = "block B1 auto-claimed extra.txt\nreviewed extra.txt ticket 0a276b0b4e62b3cc2d085cb0\nreviewed file0.txt ticket b82733d3089a96c3991c870e\nblock B1 closed\n"
+	for _, tc := range []struct {
+		name, until string
+		expire      int
+	}{{"expired", "2020-01-01T00:00:00.000Z", 1}, {"active", "2099-01-01T00:00:00.000Z", 0}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := b493AutoClaimFixture(t, tc.until)
+			code, out, errs, reason := b493CloseAutoClaim(f)
+			if code != 0 || out != stdout || errs != "" {
+				t.Fatalf("exit=%d reason=%v\nstdout %q\nstderr %q", code, reason, out, errs)
+			}
+			all, err := ledger.ReadAllRows(filepath.Join(f.home, ".code-forge/ledger"), "fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			events := []string{}
+			for _, v := range all {
+				if e := v.(map[string]any)["event"].(string); e == "autopilot.expire" || e == "block.claim" || e == "block.close" {
+					events = append(events, e)
+				}
+			}
+			want := []string{"block.claim", "block.close"}
+			if tc.expire == 1 {
+				want = append([]string{"autopilot.expire"}, want...)
+			}
+			if strings.Join(events, ",") != strings.Join(want, ",") {
+				t.Fatalf("rows %v, want %v", events, want)
+			}
+			saved, err := state.ReadRun(f.home, "r-close-fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.expire == 1 && saved.Get("autopilot").(ledger.Object).Get("status") != "expired" {
+				t.Fatalf("grant not expired: %v", saved.Get("autopilot"))
+			}
+		})
+	}
+	t.Run("json", func(t *testing.T) {
+		f := b493AutoClaimFixture(t, "2020-01-01T00:00:00.000Z")
+		code, out, errs, reason := b493CloseAutoClaim(f, "--json")
+		want := `{"block":"B1","event":"closed","status":"closed","reason":null,"close_event":null,"reviewed":[{"file":"extra.txt","ticket":"0a276b0b4e62b3cc2d085cb0","via":"approved"},{"file":"file0.txt","ticket":"b82733d3089a96c3991c870e","via":"approved"}]}` + "\n"
+		if code != 0 || out != want || errs != "block B1 auto-claimed extra.txt\n" {
+			t.Fatalf("exit=%d reason=%v\nstdout %q\nstderr %q", code, reason, out, errs)
+		}
+	})
 }

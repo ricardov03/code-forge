@@ -213,6 +213,14 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 			print = os.Stderr
 		}
 	}
+	// B493: Node runs the lazy grant expiry check before the claims, so an
+	// expired grant's autopilot.expire row precedes the block.claim rows. The
+	// close's own later check is then a no-op.
+	if record.Get("autopilot") != nil && flags["decide"] != true {
+		if cfg, ok := blockSnapshot(record); ok && blockMap(cfg["close"])["require_human"] != true {
+			blockGrantExpiry(home, run, stderr)
+		}
+	}
 	if err := closeAutoClaim(home, run, id, top, record, files, print, false); err != nil {
 		return fail(err)
 	}
