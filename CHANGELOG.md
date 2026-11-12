@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.22.1] — 2026-11-11
+
 ### Added
 
 - `run status`, `run end` and `run start --reattach` (with or without `--worker-pid`) run in Go with the same output, exit codes, run record, mirror and signed ledger rows as Node, as do `run` help, usage errors and unknown flags; a plain `run start`, `run start --add-worker` and `run reload` still hand over to Node with their own reason (B454)
