@@ -31,6 +31,7 @@ type runProc struct {
 	uid, pid, ppid int
 	state, start   string
 	command        string
+	rss            float64 // KB, as ps prints it (B486: sweep's rssMb is rss/1024)
 }
 
 var runPsLine = regexp.MustCompile(`^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d+:\d+:\d+\s+\d{4})\s+(.+?)\s*$`)
@@ -83,7 +84,8 @@ func runParseProcesses(text string) []runProc {
 		uid, _ := strconv.Atoi(m[1])
 		pid, _ := strconv.Atoi(m[2])
 		ppid, _ := strconv.Atoi(m[3])
-		rows = append(rows, runProc{uid, pid, ppid, m[4], strings.Join(strings.Fields(m[6]), " "), m[7]})
+		rss, _ := strconv.ParseFloat(m[5], 64)
+		rows = append(rows, runProc{uid, pid, ppid, m[4], strings.Join(strings.Fields(m[6]), " "), m[7], rss})
 	}
 	return rows
 }
@@ -422,9 +424,10 @@ func runStopItems(items []runProc) {
 	}
 }
 
-func runStopMember(m runMember) {
+// runStopMember reports whether SIGTERM was sent (stopMembers' sent.has(pid)).
+func runStopMember(m runMember) bool {
 	if !runSignalMember(m.pid, m.start, syscall.SIGTERM) {
-		return
+		return false
 	}
 	sent := []runMember{m}
 	deadline := runSweepNow().Add(runSweepGrace)
@@ -446,6 +449,7 @@ func runStopMember(m runMember) {
 			break
 		}
 	}
+	return true
 }
 
 // runSignalIfOurs is reaper.mjs signalIfOurs: the group gets the signal only

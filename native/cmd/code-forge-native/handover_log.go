@@ -287,6 +287,9 @@ const (
 	hNativeStatusTTY
 	hNativeStatusLine
 	hRunSweep
+	hSweepHome
+	hSweepRoot
+	hSweepIdle
 )
 
 var handoverReasons = [...]string{
@@ -553,6 +556,9 @@ var handoverReasons = [...]string{
 	hNativeStatusTTY:           "native-status-tty",
 	hNativeStatusLine:          "native-status-line",
 	hRunSweep:                  "run-sweep",
+	hSweepHome:                 "sweep-home",
+	hSweepRoot:                 "sweep-root-unreadable",
+	hSweepIdle:                 "sweep-idle-unknown",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
