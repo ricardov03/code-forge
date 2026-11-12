@@ -470,8 +470,8 @@ func TestRunVerbHandsOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.record(t, "r-shape", "active", `,"blocks":[1]`)
-	// a config that loads: run start without Node to launch the worker, and
-	// run reload's validation, stay with Node
+	// a config that loads: run start without Node to launch the worker stays
+	// with Node; run reload hands over a config with schema issues (B473)
 	if err := os.WriteFile(filepath.Join(f.workspace, ".code-forge.yml"), []byte("project:\n  slug: unit\ntmp:\n  root: "+t.TempDir()+"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ func TestRunVerbHandsOver(t *testing.T) {
 	}{
 		{[]string{"start", "--cwd", f.workspace}, "run-start"},
 		{[]string{"start", "--cwd", f.workspace, "--run", "r-new", "--mode", "brief"}, "run-start"},
-		{[]string{"reload", "--run", "r-test"}, "run-reload"},
+		{[]string{"reload", "--run", "r-test"}, "run-reload-schema-issues"},
 		{[]string{"start", "--cwd", syntax}, "run-start"},
 		{[]string{"reload", "--run", "r-syntax"}, "run-reload"},
 		{[]string{"status", "--run", "r-bad"}, "run-record"},

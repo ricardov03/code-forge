@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -23,127 +22,14 @@ import (
 	"github.com/ricardov03/code-forge/native/state"
 )
 
-// B473: `run reload` in Go (src/cli/run.mjs reloadVerb → src/autopilot/limits.mjs
-// reloadWorkspace → src/state/run.mjs reloadRun). run start, status and end
-// stay with Node.
-func init() {
-	routes["run"] = smallVerb{
-		name: "run", usage: runUsage,
-		// SUBCOMMANDS run in src/util/breadcrumbs.mjs has no reload.
-		subs:     []string{"start", "status", "end"},
-		subUsage: runSubUsage,
-		prepare:  prepareRun,
-	}.run
-}
-
-const runUsage = "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>\n"
-
-var runSubUsage = map[string]string{
-	"start":  "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief]\nusage: code-forge run start --add-worker --run <id>\nusage: code-forge run start --reattach --run <id> [--worker-pid <pid>]\n",
-	"status": "usage: code-forge run status --run <id>\n",
-	"reload": "usage: code-forge run reload --run <id>\n",
-	"end":    "usage: code-forge run end --run <id>\n",
-}
+// B473: `run reload` with a config that loads, in Go (src/cli/run.mjs
+// reloadVerb → src/autopilot/limits.mjs reloadWorkspace → src/state/run.mjs
+// reloadRun). runRun (run_cmd.go) parses the flags and runReloadPlan
+// (run_start.go) answers the record and config-load refusals; it calls
+// runReloadLoadedPlan once the config loads.
 
 // runReloadNow is the clock seam for reloaded_at and the autopilot grant check.
 var runReloadNow = time.Now
-
-type runBody = func(stdout, stderr io.Writer) int
-
-func runUsageBody() (runBody, handoverReason, bool) {
-	return func(_, stderr io.Writer) int {
-		fmt.Fprint(stderr, runUsage)
-		return 2
-	}, 0, true
-}
-
-func runErrorBody(sub, message string, code int) (runBody, handoverReason, bool) {
-	return func(_, stderr io.Writer) int {
-		fmt.Fprintf(stderr, "run %s: %s\n", sub, message)
-		return code
-	}, 0, true
-}
-
-// runParseFlags is parseFlags in src/state/cli-args.mjs with run.mjs's spec.
-func runParseFlags(args []string) (map[string]any, string) {
-	values := []string{"run", "cwd", "engine", "worker-pid", "mode"}
-	booleans := []string{"reattach", "add-worker"}
-	flags := map[string]any{}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if !strings.HasPrefix(arg, "--") {
-			continue
-		}
-		name, inline, hasInline := strings.Cut(arg[2:], "=")
-		isBool, isValue := inList(name, booleans), inList(name, values)
-		if !isBool && !isValue {
-			quoted, _ := ledger.Stringify(arg, false)
-			return nil, "unknown flag " + string(quoted)
-		}
-		if _, seen := flags[name]; seen {
-			return nil, "--" + name + " given more than once"
-		}
-		switch {
-		case isBool:
-			if hasInline {
-				return nil, "--" + name + " takes no value"
-			}
-			flags[name] = true
-		case hasInline:
-			if inline == "" {
-				return nil, "--" + name + " needs a value"
-			}
-			flags[name] = inline
-		default:
-			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
-				return nil, "--" + name + " needs a value"
-			}
-			flags[name] = args[i+1]
-			i++
-		}
-	}
-	return flags, ""
-}
-
-var runPositiveInt = regexp.MustCompile(`^[1-9][0-9]*$`)
-
-// prepareRun is runRun in src/cli/run.mjs for everything but start, status
-// and end, which go to Node.
-func prepareRun(args []string) (runBody, handoverReason, bool) {
-	sub := ""
-	if len(args) > 0 {
-		sub = args[0]
-	}
-	switch sub {
-	case "start", "status", "end":
-		return nil, hRunUnportedSubcommand, false
-	case "reload":
-	default:
-		return runUsageBody()
-	}
-	flags, problem := runParseFlags(args[1:])
-	if problem != "" {
-		return runErrorBody(sub, problem, 2)
-	}
-	if raw, ok := flags["worker-pid"]; ok {
-		text, _ := raw.(string)
-		n, err := strconv.ParseFloat(text, 64)
-		if !runPositiveInt.MatchString(text) || err != nil || n > 9007199254740991 {
-			return runErrorBody(sub, "--worker-pid must be a positive integer", 2)
-		}
-	}
-	if _, ok := flags["mode"]; ok {
-		return runErrorBody(sub, "--mode is set once, by a new run start (the mode is fixed for the run)", 2)
-	}
-	if _, ok := flags["add-worker"]; ok {
-		return runErrorBody(sub, "run start --add-worker needs --run and cannot use --reattach or --worker-pid", 2)
-	}
-	runID, _ := flags["run"].(string)
-	if runID == "" {
-		return runUsageBody()
-	}
-	return prepareRunReload(args, runID)
-}
 
 // reloadInput is what reloadWorkspace reads before it takes the run lock.
 type reloadInput struct {
@@ -153,63 +39,53 @@ type reloadInput struct {
 	now                   time.Time
 }
 
-func prepareRunReload(args []string, runID string) (runBody, handoverReason, bool) {
-	home := os.Getenv("HOME")
-	record, err := state.ReadRun(home, runID)
-	if err != nil {
-		var stateErr *state.Error
-		if errors.As(err, &stateErr) {
-			return runErrorBody("reload", stateErr.Message, 1)
-		}
-		return nil, hRunReloadRecordUnreadable, false
+// rrWriter sends a write to runOut, so the last stderr text reaches the error log.
+type rrWriter struct {
+	o      *runOut
+	stderr bool
+}
+
+func (w rrWriter) Write(p []byte) (int, error) {
+	if w.stderr {
+		w.o.err(string(p))
+	} else {
+		w.o.out(string(p))
 	}
-	if status, _ := objGet(record, "status"); status != "active" {
-		return runErrorBody("reload", fmt.Sprintf("run %s has ended", runID), 1)
-	}
-	workspace, ok := record.Get("workspace").(string)
-	if !ok || workspaceHoldsRuns(home, workspace) {
-		return nil, hRunReloadWorkspace, false
+	return len(p), nil
+}
+
+// runReloadLoadedPlan is reloadWorkspace after loadProjectConfig succeeded:
+// validation, the guards and the plan are read before the run lock; a case Go
+// does not reproduce keeps its named hand-over.
+func runReloadLoadedPlan(home, runID string, record ledger.Object, workspace string) (func(o *runOut) int, handoverReason) {
+	if rrWorkspaceHoldsRuns(home, workspace) {
+		return nil, hRunReloadWorkspace
 	}
 	root := config.ProjectRootFor(workspace)
 	raw, readErr := os.ReadFile(filepath.Join(root, config.Filename))
 	if readErr == nil && strings.Contains(string(raw), "!!") {
 		// a tagged scalar can load as a Date, a byte array, a Set or a Map in Node
-		return nil, hRunReloadYAMLTag, false
+		return nil, hRunReloadYAMLTag
 	}
 	cfgMap, order, err := config.LoadOrdered(workspace)
 	if err != nil {
-		var cfgErr *config.Error
-		if !errors.As(err, &cfgErr) || yamlSyntaxError(err) {
-			return nil, hRunReloadConfigError, false
-		}
-		switch cfgErr.Kind {
-		case "not-found":
-			return runErrorBody("reload", "no "+config.Filename+" in the workspace — nothing changed", 1)
-		case "parse-error":
-			return runErrorBody("reload", "the config could not be parsed ("+config.Filename+") — nothing changed", 1)
-		case "migrate-error":
-			return runErrorBody("reload", config.Filename+" could not be migrated to the current format — nothing changed", 1)
-		}
-		code := regexp.MustCompile(`could not read .*: (E[A-Z]+)$`).FindStringSubmatch(cfgErr.Message)
-		if code == nil {
-			return nil, hRunReloadConfigError, false
-		}
-		return runErrorBody("reload", config.Filename+" could not be read ("+code[1]+") — nothing changed", 1)
+		// LoadSnapshot loaded the same file a moment ago
+		return nil, hRunReloadConfigError
 	}
 	if len(config.SchemaIssues(cfgMap, "")) > 0 {
-		return nil, hRunReloadSchemaIssues, false
+		return nil, hRunReloadSchemaIssues
 	}
 	if configHoldsSecretShape(cfgMap) {
-		return nil, hRunReloadSecretValues, false
+		return nil, hRunReloadSecretValues
 	}
 	if sandbox, ok := objAt(cfgMap, "coder", "sandbox"); ok {
 		if dirs, ok := sandbox["add_dirs"].([]any); ok && len(dirs) > 0 {
-			return nil, hRunReloadSandboxDirs, false
+			return nil, hRunReloadSandboxDirs
 		}
 	}
 	v := configValidator{cfg: cfgMap, order: order, seen: config.LoadSeenInCache(home), hasCli: hasCliOnPath}
 	if errs, _ := v.run(); len(errs) > 0 {
-		return func(_, stderr io.Writer) int {
+		return func(o *runOut) int {
 			var lines strings.Builder
 			for _, issue := range errs {
 				lines.WriteString("  [" + issue.rule + "]\n")
@@ -218,9 +94,9 @@ func prepareRunReload(args []string, runID string) (runBody, handoverReason, boo
 			if len(errs) == 1 {
 				noun = "error"
 			}
-			fmt.Fprintf(stderr, "run reload: %s is invalid (%d %s) — nothing changed; run code-forge validate\n%s", config.Filename, len(errs), noun, lines.String())
+			o.err(fmt.Sprintf("run reload: %s is invalid (%d %s) — nothing changed; run code-forge validate\n%s", config.Filename, len(errs), noun, lines.String()))
 			return 1
-		}, 0, true
+		}, 0
 	}
 	cfg, _ := order.Object(cfgMap).(ledger.Object)
 	in := reloadInput{home: home, runID: runID, cfg: cfg, effectiveSlug: planSlugFor(cfgMap, workspace), now: runReloadNow()}
@@ -230,16 +106,16 @@ func prepareRunReload(args []string, runID string) (runBody, handoverReason, boo
 	// every refusal Go cannot word is decided here, before any side effect
 	pending, _ := reloadPendingTickets(in.repoRoot)
 	if _, _, reason, ok := planReload(record, in, pending); !ok {
-		return nil, reason, false
+		return nil, reason
 	}
-	return func(stdout, stderr io.Writer) int {
-		return runReloadLocked(args, in, stdout, stderr)
-	}, 0, true
+	return func(o *runOut) int {
+		return runReloadLocked([]string{"reload", "--run", runID}, in, rrWriter{o, false}, rrWriter{o, true})
+	}, 0
 }
 
-// workspaceHoldsRuns is the case where state.SaveRun refuses a record that
+// rrWorkspaceHoldsRuns is the case where state.SaveRun refuses a record that
 // Node's saveRun would write.
-func workspaceHoldsRuns(home, workspace string) bool {
+func rrWorkspaceHoldsRuns(home, workspace string) bool {
 	canonical := func(p string) string {
 		if resolved, err := filepath.EvalSymlinks(p); err == nil {
 			p = resolved
@@ -299,16 +175,16 @@ func runReloadLocked(args []string, in reloadInput, stdout, stderr io.Writer) in
 		snapshots := ledger.Object{{Key: plan.newHash, Value: plan.config}}
 		for _, field := range pins {
 			hash := field.Value.(string)
-			value, _ := objGet(plan.stored, hash)
+			value, _ := rrObjGet(plan.stored, hash)
 			snapshots.Set(hash, value)
 		}
 		current.Set("config", ledger.Object{
 			{Key: "hash", Value: plan.newHash}, {Key: "snapshots", Value: snapshots}, {Key: "pins", Value: pins},
 			{Key: "reloaded_at", Value: in.now.UTC().Format("2006-01-02T15:04:05.000Z")},
 		})
-		current.Set("provider", jsOr(plan.config, nil, "provider"))
-		current.Set("levels", jsOr(plan.config, nil, "levels"))
-		current.Set("fallback_mode", jsOr(plan.config, "rules", "system1", "fallback"))
+		current.Set("provider", rrJSOr(plan.config, nil, "provider"))
+		current.Set("levels", rrJSOr(plan.config, nil, "levels"))
+		current.Set("fallback_mode", rrJSOr(plan.config, "rules", "system1", "fallback"))
 		if err := state.SaveRun(in.home, current); err != nil {
 			return err
 		}
@@ -334,14 +210,14 @@ func runReloadLocked(args []string, in reloadInput, stdout, stderr io.Writer) in
 			row = append(row, ledger.Field{Key: "kept_keys", Value: kept})
 		}
 		if _, err := state.WriteSigned(in.home, in.runID, row); err != nil {
-			out.rowError = rowErrorCode(err)
+			out.rowError = rrRowErrorCode(err)
 		}
 		return nil
 	})
 	if race != 0 {
 		// the record changed between the check and the lock into a shape Go
 		// does not reproduce; nothing was written, so Node runs it from the top
-		return smallVerbHandover("run", args, race)
+		return runHandover(args, race)
 	}
 	if err != nil {
 		var stateErr *state.Error
@@ -381,8 +257,8 @@ func runReloadLocked(args []string, in reloadInput, stdout, stderr io.Writer) in
 	return 0
 }
 
-// rowErrorCode is err.code ?? err.name ?? 'error' for a failed writeSigned.
-func rowErrorCode(err error) string {
+// rrRowErrorCode is err.code ?? err.name ?? 'error' for a failed writeSigned.
+func rrRowErrorCode(err error) string {
 	var stateErr *state.Error
 	if errors.As(err, &stateErr) {
 		return stateErr.Code
@@ -471,11 +347,11 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 		return reloadPlan{}, "", hRunReloadRecordShape, false
 	}
 	refuse := func(message string) (reloadPlan, string, handoverReason, bool) { return reloadPlan{}, message, 0, true }
-	if status, _ := objGet(current, "status"); status != "active" {
+	if status, _ := rrObjGet(current, "status"); status != "active" {
 		return refuse(fmt.Sprintf("run %s has ended", in.runID))
 	}
 	var stateObj, stored ledger.Object
-	if value, _ := objGet(current, "config"); value != nil {
+	if value, _ := rrObjGet(current, "config"); value != nil {
 		if obj, ok := value.(ledger.Object); ok {
 			if _, ok := obj.Get("hash").(string); ok {
 				stateObj = obj
@@ -491,7 +367,7 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 		}
 	}
 	p := reloadPlan{config: in.cfg, stored: stored}
-	newHash, err := snapshotHash(in.cfg)
+	newHash, err := rrSnapshotHash(in.cfg)
 	if err != nil {
 		return shape()
 	}
@@ -505,7 +381,7 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 	}
 	var before ledger.Object
 	if stateObj != nil {
-		value, ok := objGet(stored, p.oldHash.(string))
+		value, ok := rrObjGet(stored, p.oldHash.(string))
 		if _, isList := value.([]any); isList {
 			return shape()
 		}
@@ -515,9 +391,9 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 		}
 		before = obj
 	}
-	oldHuman, oldHas := chainGet(before, "close", "require_human")
-	newHuman, newHas := chainGet(in.cfg, "close", "require_human")
-	if !jsStrictEqual(oldHuman, oldHas, newHuman, newHas) {
+	oldHuman, oldHas := rrChainGet(before, "close", "require_human")
+	newHuman, newHas := rrChainGet(in.cfg, "close", "require_human")
+	if !rrJSStrictEqual(oldHuman, oldHas, newHuman, newHas) {
 		return refuse("close.require_human cannot change mid-run (fixed by the owner before the run starts)")
 	}
 	var frozen []string
@@ -525,11 +401,11 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 		frozen = immutableChangesGo(before, in.cfg)
 	} else {
 		frozen = []string{}
-		if project, _ := objGet(current, "project"); project != in.effectiveSlug {
+		if project, _ := rrObjGet(current, "project"); project != in.effectiveSlug {
 			frozen = append(frozen, "project.slug")
 		}
 		if engine, ok := current.Get("engine").(string); ok {
-			want, has := objGet(in.cfg, "engine")
+			want, has := rrObjGet(in.cfg, "engine")
 			if !has || want == nil {
 				want = "auto"
 			}
@@ -537,19 +413,19 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 				frozen = append(frozen, "engine")
 			}
 		}
-		if v, _ := chainGet(in.cfg, "review", "external", "required"); v == true {
+		if v, _ := rrChainGet(in.cfg, "review", "external", "required"); v == true {
 			frozen = append(frozen, "review.external")
 		}
-		if v, _ := chainGet(in.cfg, "proof", "isolation"); v == "worktree" {
+		if v, _ := rrChainGet(in.cfg, "proof", "isolation"); v == "worktree" {
 			frozen = append(frozen, "proof.isolation")
 		}
-		if v, _ := chainGet(in.cfg, "context", "require_coder_tests"); v == true {
+		if v, _ := rrChainGet(in.cfg, "context", "require_coder_tests"); v == true {
 			frozen = append(frozen, "context.require_coder_tests")
 		}
-		if _, has := chainGet(in.cfg, "hooks", "on_block_end"); has {
+		if _, has := rrChainGet(in.cfg, "hooks", "on_block_end"); has {
 			frozen = append(frozen, "hooks.on_block_end")
 		}
-		if _, has := chainGet(in.cfg, "coder", "sandbox"); has {
+		if _, has := rrChainGet(in.cfg, "coder", "sandbox"); has {
 			frozen = append(frozen, "coder.sandbox")
 		}
 	}
@@ -560,7 +436,7 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 		}
 		if next != nil {
 			p.config = next
-			if p.newHash, err = snapshotHash(next); err != nil {
+			if p.newHash, err = rrSnapshotHash(next); err != nil {
 				return shape()
 			}
 			p.kept = frozen
@@ -570,7 +446,7 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 	if len(frozen) > 0 {
 		why := make([]string, len(frozen))
 		for i, key := range frozen {
-			why[i] = key + " cannot change mid-run (" + immutableReasons[key] + ")"
+			why[i] = key + " cannot change mid-run (" + rrImmutableReasons[key] + ")"
 		}
 		pronoun := "them"
 		if len(frozen) == 1 {
@@ -584,7 +460,7 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 		p.legacy = true
 	}
 	// B48: limitGuard(null, now)
-	if grant, has := objGet(current, "autopilot"); has && jsTruthy(grant, true) {
+	if grant, has := rrObjGet(current, "autopilot"); has && jsTruthy(grant, true) {
 		if _, isList := grant.([]any); isList {
 			return reloadPlan{}, "", hRunReloadAutopilotGrant, false
 		}
@@ -599,7 +475,7 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 					hit = "the whole config"
 				} else {
 					for _, key := range p.changed {
-						if isLimitKey(key) {
+						if rrIsLimitKey(key) {
 							hit = key
 							break
 						}
@@ -621,11 +497,11 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 	}
 	p.pins = ledger.Object{}
 	for _, ticket := range pending {
-		if _, seen := objGet(p.pins, ticket); seen {
+		if _, seen := rrObjGet(p.pins, ticket); seen {
 			continue
 		}
 		if hash, ok := oldPins.Get(ticket).(string); ok {
-			if _, has := objGet(stored, hash); has {
+			if _, has := rrObjGet(stored, hash); has {
 				if hash == "__proto__" {
 					return shape()
 				}
@@ -640,8 +516,8 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 	return p, "", 0, true
 }
 
-// snapshotHash is configHash: sha256 of canonicalJSON.
-func snapshotHash(value any) (string, error) {
+// rrSnapshotHash is configHash: sha256 of canonicalJSON.
+func rrSnapshotHash(value any) (string, error) {
 	data, err := canon.Marshal(value)
 	if err != nil {
 		return "", err
@@ -650,8 +526,8 @@ func snapshotHash(value any) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// objGet is an own property of a mapping; anything else has none.
-func objGet(value any, key string) (any, bool) {
+// rrObjGet is an own property of a mapping; anything else has none.
+func rrObjGet(value any, key string) (any, bool) {
 	obj, ok := value.(ledger.Object)
 	if !ok {
 		return nil, false
@@ -664,27 +540,27 @@ func objGet(value any, key string) (any, bool) {
 	return nil, false
 }
 
-// chainGet is a?.b?.c: undefined past a missing key or a non-mapping.
-func chainGet(value any, keys ...string) (any, bool) {
+// rrChainGet is a?.b?.c: undefined past a missing key or a non-mapping.
+func rrChainGet(value any, keys ...string) (any, bool) {
 	present := value != nil
 	for _, key := range keys {
-		if value, present = objGet(value, key); !present {
+		if value, present = rrObjGet(value, key); !present {
 			return nil, false
 		}
 	}
 	return value, present
 }
 
-// jsOr is a?.b ?? fallback.
-func jsOr(value any, fallback any, keys ...string) any {
-	if v, ok := chainGet(value, keys...); ok && v != nil {
+// rrJSOr is a?.b ?? fallback.
+func rrJSOr(value any, fallback any, keys ...string) any {
+	if v, ok := rrChainGet(value, keys...); ok && v != nil {
 		return v
 	}
 	return fallback
 }
 
-// jsStrictEqual is === on JSON values: a mapping or list is never equal.
-func jsStrictEqual(a any, aok bool, b any, bok bool) bool {
+// rrJSStrictEqual is === on JSON values: a mapping or list is never equal.
+func rrJSStrictEqual(a any, aok bool, b any, bok bool) bool {
 	if !aok || !bok {
 		return aok == bok
 	}
@@ -699,7 +575,7 @@ func jsStrictEqual(a any, aok bool, b any, bok bool) bool {
 	return a == b
 }
 
-func canonText(value any, present bool) string {
+func rrCanonText(value any, present bool) string {
 	if !present {
 		value = nil
 	}
@@ -710,27 +586,27 @@ func canonText(value any, present bool) string {
 	return string(data)
 }
 
-// valueAtDotted is valueAt in src/state/config-snapshot.mjs.
-func valueAtDotted(value any, dotted string) (any, bool) {
+// rrValueAtDotted is valueAt in src/state/config-snapshot.mjs.
+func rrValueAtDotted(value any, dotted string) (any, bool) {
 	cur, present := value, true
 	for _, seg := range strings.Split(dotted, ".") {
 		if _, ok := cur.(ledger.Object); !ok {
 			return nil, false
 		}
-		if cur, present = objGet(cur, seg); !present {
+		if cur, present = rrObjGet(cur, seg); !present {
 			return nil, false
 		}
 	}
 	return cur, present
 }
 
-var immutableKeyOrder = []string{
+var rrImmutableKeyOrder = []string{
 	"version", "project.slug", "engine", "tmp.root", "keys", "system1.key", "review.external",
 	"review.agent_waivers.require_ack", "proof.isolation", "proof.worktree", "context.require_coder_tests",
 	"hooks.on_block_end", "proof.runners", "coder.sandbox",
 }
 
-var immutableReasons = map[string]string{
+var rrImmutableReasons = map[string]string{
 	"version":                          "the config format is fixed for the run",
 	"project.slug":                     "the ledger file of the run is chosen at run start",
 	"engine":                           "the run engine is fixed at run start",
@@ -750,9 +626,9 @@ var immutableReasons = map[string]string{
 // immutableChangesGo is immutableChanges: proof.runners may only grow at the end.
 func immutableChangesGo(before, after any) []string {
 	out := []string{}
-	for _, key := range immutableKeyOrder {
-		oldValue, oldHas := valueAtDotted(before, key)
-		newValue, newHas := valueAtDotted(after, key)
+	for _, key := range rrImmutableKeyOrder {
+		oldValue, oldHas := rrValueAtDotted(before, key)
+		newValue, newHas := rrValueAtDotted(after, key)
 		if key == "proof.runners" {
 			if newList, ok := newValue.([]any); ok && newHas {
 				oldRunners := any([]any{})
@@ -762,7 +638,7 @@ func immutableChangesGo(before, after any) []string {
 				if oldList, ok := oldRunners.([]any); ok && len(newList) >= len(oldList) {
 					prefix := true
 					for i, entry := range oldList {
-						if canonText(entry, true) != canonText(newList[i], true) {
+						if rrCanonText(entry, true) != rrCanonText(newList[i], true) {
 							prefix = false
 							break
 						}
@@ -773,18 +649,18 @@ func immutableChangesGo(before, after any) []string {
 				}
 			}
 		}
-		if canonText(oldValue, oldHas) != canonText(newValue, newHas) {
+		if rrCanonText(oldValue, oldHas) != rrCanonText(newValue, newHas) {
 			out = append(out, key)
 		}
 	}
 	return out
 }
 
-var plainKeySegment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
+var rrPlainKeySegment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 
-func joinKeyPath(at, key string) string {
+func rrJoinKeyPath(at, key string) string {
 	seg := key
-	if !plainKeySegment.MatchString(key) {
+	if !rrPlainKeySegment.MatchString(key) {
 		quoted, _ := ledger.Stringify(key, false)
 		seg = "[" + string(quoted) + "]"
 	}
@@ -816,13 +692,13 @@ func changedKeyPathsGo(before, after any) []string {
 				}
 			}
 			for _, key := range keys {
-				av, ah := objGet(am, key)
-				bv, bh := objGet(bm, key)
-				walk(av, ah, bv, bh, joinKeyPath(at, key))
+				av, ah := rrObjGet(am, key)
+				bv, bh := rrObjGet(bm, key)
+				walk(av, ah, bv, bh, rrJoinKeyPath(at, key))
 			}
 			return
 		}
-		if canonText(a, aok) != canonText(b, bok) || aok != bok {
+		if rrCanonText(a, aok) != rrCanonText(b, bok) || aok != bok {
 			out = append(out, at)
 		}
 	}
@@ -831,18 +707,18 @@ func changedKeyPathsGo(before, after any) []string {
 	return out
 }
 
-func deepCloneJSON(value any) any {
+func rrDeepCloneJSON(value any) any {
 	switch v := value.(type) {
 	case ledger.Object:
 		out := make(ledger.Object, len(v))
 		for i, field := range v {
-			out[i] = ledger.Field{Key: field.Key, Value: deepCloneJSON(field.Value)}
+			out[i] = ledger.Field{Key: field.Key, Value: rrDeepCloneJSON(field.Value)}
 		}
 		return out
 	case []any:
 		out := make([]any, len(v))
 		for i, item := range v {
-			out[i] = deepCloneJSON(item)
+			out[i] = rrDeepCloneJSON(item)
 		}
 		return out
 	default:
@@ -853,25 +729,25 @@ func deepCloneJSON(value any) any {
 // reviewOnlyReloadGo is reviewOnlyReload: nil when the reload is more than a
 // review recovery; supported false for a shape Node handles with JS quirks.
 func reviewOnlyReloadGo(before, after ledger.Object, frozen []string) (ledger.Object, bool) {
-	next := deepCloneJSON(before).(ledger.Object)
+	next := rrDeepCloneJSON(before).(ledger.Object)
 	review := ledger.Object{}
-	beforeReview, beforeHas := objGet(before, "review")
+	beforeReview, beforeHas := rrObjGet(before, "review")
 	if beforeHas {
 		obj, ok := beforeReview.(ledger.Object)
 		if !ok {
 			return nil, false
 		}
-		review = deepCloneJSON(obj).(ledger.Object)
+		review = rrDeepCloneJSON(obj).(ledger.Object)
 	}
-	afterReview, afterHas := objGet(after, "review")
+	afterReview, afterHas := rrObjGet(after, "review")
 	if afterHas && afterReview != nil {
 		if _, ok := afterReview.(ledger.Object); !ok {
 			return nil, false
 		}
 	}
 	for _, key := range []string{"second_levels", "routes", "session_timeout_s"} {
-		if value, ok := objGet(afterReview, key); ok {
-			review.Set(key, deepCloneJSON(value))
+		if value, ok := rrObjGet(afterReview, key); ok {
+			review.Set(key, rrDeepCloneJSON(value))
 		} else {
 			review.Delete(key)
 		}
@@ -880,27 +756,27 @@ func reviewOnlyReloadGo(before, after ledger.Object, frozen []string) (ledger.Ob
 	if len(review) == 0 && !beforeHas {
 		next.Delete("review")
 	}
-	nextHash, err1 := snapshotHash(next)
-	beforeHash, err2 := snapshotHash(before)
+	nextHash, err1 := rrSnapshotHash(next)
+	beforeHash, err2 := rrSnapshotHash(before)
 	if err1 != nil || err2 != nil {
 		return nil, false
 	}
 	if nextHash == beforeHash {
 		return nil, true
 	}
-	retained := deepCloneJSON(after).(ledger.Object)
+	retained := rrDeepCloneJSON(after).(ledger.Object)
 	for _, key := range frozen {
 		parts := strings.Split(key, ".")
-		value, has := valueAtDotted(before, key)
-		updated, ok := restoreFrozen(retained, parts[:len(parts)-1], parts[len(parts)-1], value, has)
+		value, has := rrValueAtDotted(before, key)
+		updated, ok := rrRestoreFrozen(retained, parts[:len(parts)-1], parts[len(parts)-1], value, has)
 		if !ok {
 			return nil, false
 		}
 		retained = updated
 	}
 	for _, key := range changedKeyPathsGo(next, retained) {
-		value, _ := valueAtDotted(retained, key)
-		_, nextHas := valueAtDotted(next, key)
+		value, _ := rrValueAtDotted(retained, key)
+		_, nextHas := rrValueAtDotted(next, key)
 		if obj, ok := value.(ledger.Object); ok && !nextHas && len(obj) == 0 {
 			continue
 		}
@@ -909,26 +785,26 @@ func reviewOnlyReloadGo(before, after ledger.Object, frozen []string) (ledger.Ob
 	return next, true
 }
 
-// restoreFrozen is `target = target[part] ??= {}` down the parts, then the
+// rrRestoreFrozen is `target = target[part] ??= {}` down the parts, then the
 // leaf set to a clone of value or deleted.
-func restoreFrozen(target ledger.Object, parts []string, leaf string, value any, present bool) (ledger.Object, bool) {
+func rrRestoreFrozen(target ledger.Object, parts []string, leaf string, value any, present bool) (ledger.Object, bool) {
 	if len(parts) == 0 {
 		if present {
-			target.Set(leaf, deepCloneJSON(value))
+			target.Set(leaf, rrDeepCloneJSON(value))
 		} else {
 			target.Delete(leaf)
 		}
 		return target, true
 	}
 	child := ledger.Object{}
-	if existing, ok := objGet(target, parts[0]); ok && existing != nil {
+	if existing, ok := rrObjGet(target, parts[0]); ok && existing != nil {
 		obj, isObj := existing.(ledger.Object)
 		if !isObj {
 			return nil, false
 		}
 		child = obj
 	}
-	updated, ok := restoreFrozen(child, parts[1:], leaf, value, present)
+	updated, ok := rrRestoreFrozen(child, parts[1:], leaf, value, present)
 	if !ok {
 		return nil, false
 	}
@@ -936,19 +812,19 @@ func restoreFrozen(target ledger.Object, parts []string, leaf string, value any,
 	return target, true
 }
 
-var limitKeys = []string{
+var rrLimitKeys = []string{
 	"budget", "review.budgets", "review.block_budget_tokens", "review.block_budget_usd",
 	"review.max_rounds_per_file", "review.single_reviewer_max_risk", "review.multimodel",
 	"review.closed_book", "review.allow_open_book_codex", "thresholds", "escalation", "proof",
 	"system1", "production", "autopilot",
 }
 
-// isLimitKey is src/autopilot/scopes.mjs isLimitKey.
-func isLimitKey(keyPath string) bool {
+// rrIsLimitKey is src/autopilot/scopes.mjs rrIsLimitKey.
+func rrIsLimitKey(keyPath string) bool {
 	if keyPath == "" {
 		return true
 	}
-	for _, key := range limitKeys {
+	for _, key := range rrLimitKeys {
 		if keyPath == key || strings.HasPrefix(keyPath, key+".") || strings.HasPrefix(key, keyPath+".") {
 			return true
 		}

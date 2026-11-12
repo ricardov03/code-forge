@@ -857,9 +857,13 @@ func runReloadPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 		return nil, hRunShape
 	}
 	_, err := config.LoadSnapshot(workspace)
+	if err == nil {
+		// B473: a config that loads is validated, diffed and guarded in Go
+		return runReloadLoadedPlan(home, runID, record, workspace)
+	}
 	var cfgErr *config.Error
-	if err == nil || !errors.As(err, &cfgErr) || runYAMLSyntax(cfgErr) {
-		// a config that loads is validated, diffed and guarded by Node
+	if !errors.As(err, &cfgErr) || runYAMLSyntax(cfgErr) {
+		// Node's parser words a YAML syntax error (and counts its line)
 		return nil, hRunReload
 	}
 	var text string

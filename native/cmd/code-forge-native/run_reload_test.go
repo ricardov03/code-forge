@@ -182,14 +182,6 @@ func TestB473RunReloadErrorLogMatchesNode(t *testing.T) {
 	}
 }
 
-// run start, status and end stay with Node.
-func TestB473RunOtherSubcommandsHandOver(t *testing.T) {
-	smallProject(t, "")
-	for _, sub := range []string{"start", "status", "end"} {
-		expectHandover(t, "run-unported-subcommand", "run", sub, "--run", "r-x")
-	}
-}
-
 // Group 2: a reload that changes keys writes Node's record, mirror and row.
 func TestB473RunReloadWritesNodeRecordAndRow(t *testing.T) {
 	f := b473Setup(t, "start-snapshot.json", "c2.yml", nil)
@@ -387,14 +379,14 @@ func TestB473RunReloadKeptHandovers(t *testing.T) {
 		edit         func(map[string]any)
 		text         string
 	}{
-		{"yaml syntax error", "run-reload-config-error", nil, "a: [\n"},
+		{"yaml syntax error", "run-reload", nil, "a: [\n"},
 		{"schema issue", "run-reload-schema-issues", nil, "engine: claude\n"},
 		{"explicit yaml tag", "run-reload-yaml-tag", nil, "provider: !!str anthropic\n"},
 		{"array grant", "run-reload-autopilot-grant", func(r map[string]any) { r["autopilot"] = []any{} }, ""},
 		{"array snapshots", "run-reload-record-shape", func(r map[string]any) {
 			r["config"].(map[string]any)["snapshots"] = []any{}
 		}, ""},
-		{"workspace not a string", "run-reload-workspace", func(r map[string]any) { r["workspace"] = 5 }, ""},
+		{"workspace not a string", "run-shape", func(r map[string]any) { r["workspace"] = 5 }, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := b473Setup(t, "start-snapshot.json", "c2.yml", c.edit)

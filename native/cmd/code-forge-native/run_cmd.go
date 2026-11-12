@@ -24,7 +24,8 @@ import (
 // B454: `code-forge run` in Go (src/cli/run.mjs). status, end and
 // start --reattach (with or without --worker-pid) run here; a plain run start,
 // start --add-worker and reload keep their hand-over to Node (see the report
-// and docs/native-engine.md).
+// and docs/native-engine.md). B473: reload with a config that loads runs in
+// Go too (run_reload.go); odd cases keep named hand-overs.
 func init() { routes["run"] = runRun }
 
 const runUsage = "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>\n"
