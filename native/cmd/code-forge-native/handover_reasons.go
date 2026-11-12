@@ -349,6 +349,21 @@ const (
 	hLogsReportKnownFixes
 	hLogsReportSystem
 	hLogsReportPrompt
+	// B550
+	hAuthorProvider
+	hAuthorInput
+	hAuthorConfig
+	hAuthorHome
+	hS2Provider
+	hS2Input
+	hS2Config
+	hS2Home
+	hJevAskState
+	hJevAskConfig
+	hJevAskKey
+	hJevAskPayload
+	hJevAskAnswer
+	hJevAskHome
 )
 
 var handoverReasons = [...]string{
@@ -699,4 +714,19 @@ var handoverReasons = [...]string{
 	hLogsReportKnownFixes: "logs-report-known-fixes",
 	hLogsReportSystem:     "logs-report-system",
 	hLogsReportPrompt:     "logs-report-prompt",
+	// B550
+	hAuthorProvider: "author-provider",
+	hAuthorInput:    "author-input",
+	hAuthorConfig:   "author-config",
+	hAuthorHome:     "author-home",
+	hS2Provider:     "s2-provider",
+	hS2Input:        "s2-input",
+	hS2Config:       "s2-config",
+	hS2Home:         "s2-home",
+	hJevAskState:    "jev-ask-state",
+	hJevAskConfig:   "jev-ask-config",
+	hJevAskKey:      "jev-ask-key",
+	hJevAskPayload:  "jev-ask-payload",
+	hJevAskAnswer:   "jev-ask-answer",
+	hJevAskHome:     "jev-ask-home",
 }

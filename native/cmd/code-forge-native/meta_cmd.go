@@ -286,16 +286,6 @@ func metaSessionVerb(verb, usage string, spec metaFlagSpec, required []string, r
 	})
 }
 
-func runAuthorVerb(args []string) int {
-	spec := metaFlagSpec{values: []string{"job", "brief", "facts", "draft", "answers", "out", "run", "timeout"}}
-	return metaSessionVerb("author", authorUsage, spec, []string{"job", "brief"}, hAuthorSession, args)
-}
-
-func runS2Verb(args []string) int {
-	spec := metaFlagSpec{values: []string{"packet", "run", "block", "timeout"}}
-	return metaSessionVerb("s2", s2Usage, spec, []string{"packet"}, hS2Session, args)
-}
-
 // jevQuestions is QUESTIONS in src/decide/questions.mjs.
 var jevQuestions = []string{"lane", "risk", "security_sensitive", "next", "scope", "defect", "resolved"}
 
@@ -347,17 +337,3 @@ func jevAskUsage(args []string) string {
 // strconvQuoteJS is the template literal "${id}" in jev.mjs: plain double
 // quotes around the raw text, no escaping.
 func strconvQuoteJS(s string) string { return `"` + s + `"` }
-
-func runJevVerb(args []string) int {
-	if metaHelp(args, jevUsage, map[string]string{"ask": jevUsage}) {
-		return 0
-	}
-	refusal := jevAskUsage(args)
-	if refusal == "" {
-		return metaHandover("jev", args, hJevAsk)
-	}
-	return metaServe("jev", metaSub(args, "ask"), args, func(_, stderr io.Writer) int {
-		fmt.Fprint(stderr, refusal)
-		return 2
-	})
-}

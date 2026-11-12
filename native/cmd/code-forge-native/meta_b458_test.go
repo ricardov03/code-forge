@@ -190,9 +190,6 @@ func TestB458HandOvers(t *testing.T) {
 		{[]string{"init"}, "init-jev-keychain"},
 		{[]string{"init", "--no-interaction"}, "init-jev-keychain"},
 		{[]string{"facts", "--brief", brief}, "facts-session"},
-		{[]string{"author", "--job", "plan", "--brief", "b.md"}, "author-session"},
-		{[]string{"s2", "--packet", "p.json"}, "system-two-session"},
-		{[]string{"jev", "ask", "lane", "--state", "s.json"}, "jev-ask"},
 	}
 	for _, c := range cases {
 		home := t.TempDir()

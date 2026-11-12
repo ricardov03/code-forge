@@ -54,6 +54,7 @@ type Result struct {
 	Status    int
 	RequestID *string
 	Attempts  int
+	Raw       []byte // B550: the 2xx body, for a caller that needs JSON.parse's key order
 }
 
 var (
@@ -146,7 +147,7 @@ func once(o Opts, body []byte, attempt int) (Result, bool) {
 		default:
 			return Result{Kind: "invalid_response", Status: status, Attempts: attempt}, false
 		}
-		return Result{OK: true, Answers: obj["answers"], Usage: obj["usage"], Attempts: attempt}, false
+		return Result{OK: true, Answers: obj["answers"], Usage: obj["usage"], Attempts: attempt, Raw: data}, false
 	}
 	if kind, ok := terminalKinds[status]; ok {
 		return Result{Kind: kind, Status: status, RequestID: requestID(resp), Attempts: attempt}, false
