@@ -71,6 +71,10 @@ waits on a second real consumer (plan §10.4, Q17).
 - `resolve`, `models`, `list`, `remove`, `pipeline status|next`, `outcome seal|check` (and the check part of `outcome record`) and `tools [install]` run in Go with Node's output, exit codes and files, including help, usage errors and unknown flags; YAML syntax errors, schema errors, files Go cannot write, signing a passing `outcome record` and the `tools install` yes prompt still hand over to Node; `validate`, `plan check`, `sweep` and `upgrade` still run in Node (B455)
 - Go prints the router's once-a-day error-log hint on a terminal (and keeps `~/.code-forge/logs/hints.json`) for the verbs it serves, so `ledger` no longer hands a failure over for it; `logs clear` asks its confirm prompt in Go; `pipeline status|next` reports outcome files it cannot read (for example a folder) in Go; a hint state Go cannot judge hands over as `router-hint-state` (B500)
 
+### Fixed
+
+- `block land` and `review-file --wait-block` no longer stop at the join with "reviews did not finish" on a busy machine: a git helper that exited 0 counted as failed when its output pipes were read more than 50 ms after it exited (`exec.ErrWaitDelay`); the pipe grace is now 2 s. The doctor golden tests read a sealed process table, so a zombie of another program on the machine no longer changes their `sweep` row (B544)
+
 ## [0.22.1] — 2026-11-11
 
 ### Added

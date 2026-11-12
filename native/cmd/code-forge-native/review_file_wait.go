@@ -301,6 +301,13 @@ func reviewWaitCommand(ctx context.Context, cwd, name string, args []string, env
 	return out, ok
 }
 
+// reviewWaitPipeGrace is how long Wait may still read a finished helper's
+// pipes. B544: at 50 ms a loaded machine starved the pipe copiers of a git
+// that had exited 0, Wait returned exec.ErrWaitDelay and a join or scope read
+// failed ("reviews did not finish"); the grace only delays a helper whose
+// descendants keep the pipes open.
+const reviewWaitPipeGrace = 2 * time.Second
+
 func reviewWaitCommandErr(ctx context.Context, cwd, name string, args []string, env []string, limit time.Duration) (string, string, bool) {
 	childCtx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
@@ -308,7 +315,7 @@ func reviewWaitCommandErr(ctx context.Context, cwd, name string, args []string, 
 	cmd.Dir, cmd.Env = cwd, env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = 50 * time.Millisecond
+	cmd.WaitDelay = reviewWaitPipeGrace
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	err := cmd.Run()

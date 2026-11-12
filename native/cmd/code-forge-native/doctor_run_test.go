@@ -90,12 +90,15 @@ func b525Setup(t *testing.T, c b525Case, version string) *b525Env {
 	if c.jevKey {
 		t.Setenv("CODE_FORGE_KEY_JEV", "b525-fake-key")
 	}
-	beforeBinary, beforeTimeout, beforeJev := runWorkerBinary, runLaunchTimeout, doctorJevOpts
+	beforeBinary, beforeTimeout, beforeJev, beforeProcs := runWorkerBinary, runLaunchTimeout, doctorJevOpts, runReadProcesses
 	runWorkerBinary = func() (string, error) { return fake, nil }
 	runLaunchTimeout = 5 * time.Second
 	doctorJevOpts = jev.Opts{URL: b525JevDown, Sleep: func(float64) {}}
+	// B544: the sweep and memory rows read a sealed (empty) process table,
+	// never the machine's: a zombie of another program is not in the golden.
+	runReadProcesses = func() []runProc { return []runProc{} }
 	t.Cleanup(func() {
-		runWorkerBinary, runLaunchTimeout, doctorJevOpts = beforeBinary, beforeTimeout, beforeJev
+		runWorkerBinary, runLaunchTimeout, doctorJevOpts, runReadProcesses = beforeBinary, beforeTimeout, beforeJev, beforeProcs
 		for _, pid := range e.launched() {
 			if pid > 1 {
 				_ = syscall.Kill(pid, syscall.SIGKILL) // only the fake workers this test started

@@ -124,7 +124,7 @@ func reviewTreeGit(ctx context.Context, cwd string, extra []string, args ...stri
 	cmd.Dir, cmd.Env = cwd, env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = 50 * time.Millisecond
+	cmd.WaitDelay = reviewWaitPipeGrace
 	out, err := cmd.Output()
 	if childCtx.Err() != nil {
 		return "", false
