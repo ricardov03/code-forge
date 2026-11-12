@@ -242,6 +242,16 @@ const (
 	hSpawnSchema
 	hReviewFlow
 	hReviewGit
+	hAutopilotHome
+	hAutopilotRecord
+	hAutopilotShape
+	hAutopilotLedger
+	hAutopilotFiles
+	hAutopilotPrompt
+	hAutopilotAsk
+	hAutopilotAction
+	hAutopilotApprove
+	hAutopilotBinnacle
 )
 
 var handoverReasons = [...]string{
@@ -463,6 +473,16 @@ var handoverReasons = [...]string{
 	hSpawnSchema:               "spawn-schema",
 	hReviewFlow:                "review-flow",
 	hReviewGit:                 "review-git",
+	hAutopilotHome:             "autopilot-home",
+	hAutopilotRecord:           "autopilot-record",
+	hAutopilotShape:            "autopilot-shape",
+	hAutopilotLedger:           "autopilot-ledger",
+	hAutopilotFiles:            "autopilot-files",
+	hAutopilotPrompt:           "autopilot-prompt",
+	hAutopilotAsk:              "autopilot-ask",
+	hAutopilotAction:           "autopilot-action",
+	hAutopilotApprove:          "autopilot-approve",
+	hAutopilotBinnacle:         "autopilot-binnacle",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
