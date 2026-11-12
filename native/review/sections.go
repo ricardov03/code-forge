@@ -351,21 +351,31 @@ func packSections(d *FileDiff, budget int, measure func(*FileDiff) int) (packRes
 	return packResult{ok: true, sections: sections}, nil
 }
 
-// sectionPacket is one Markdown section and its assembled packet.
+// sectionPacket is one Markdown section and its packets (one per reviewer).
 type sectionPacket struct {
-	sec    mdSection
-	packet *Packet
+	sec     mdSection
+	packets []*Packet
 }
 
 // prepareSections is reviewFile's B54 branch before any session: a
-// split_required early result, or every section packet assembled.
+// split_required early result, or every section's packets assembled.
 func prepareSections(p *prepared, d *FileDiff, split *Packet, in Input, paired string, result func(ledger.Object, ...ledger.Field) ledger.Object) (*prepared, error) {
-	lensText, err := LoadLens(p.spec.lens)
-	if err != nil {
-		return nil, err
+	lenses := []string{}
+	for _, spec := range p.plan.reviewers {
+		text, err := LoadLens(spec.lens)
+		if err != nil {
+			return nil, err
+		}
+		lenses = append(lenses, text)
 	}
 	measure := func(part *FileDiff) int {
-		return EstimateTokens(render(lensText, nil, "", "", diffSectionOf(part), ""))
+		most := 0
+		for i, lens := range lenses {
+			if n := EstimateTokens(render(lens, nil, "", "", diffSectionOf(part), "")); i == 0 || n > most {
+				most = n
+			}
+		}
+		return most
 	}
 	splitOutcome := func(tokens, budget int, section string) *prepared {
 		tail := []ledger.Field{{Key: "tokens_in", Value: float64(tokens)}, {Key: "budget", Value: float64(budget)}}
@@ -388,18 +398,18 @@ func prepareSections(p *prepared, d *FileDiff, split *Packet, in Input, paired s
 	}
 	out := []sectionPacket{}
 	for _, sec := range packed.sections {
-		pk, err := AssemblePacket(sec.diff, p.spec.lens, in.RulesDigest, in.FactsExcerpt, in.Cfg, paired)
+		packets, over, err := packetsFor(p.plan, sec.diff, in, paired)
 		if err != nil {
 			return nil, err
 		}
-		if pk.Status != "ok" {
+		if over != nil {
 			heading := "(before first heading)"
 			if len(sec.headings) > 0 {
 				heading = sec.headings[0]
 			}
-			return splitOutcome(pk.TokensIn, pk.Budget, heading), nil
+			return splitOutcome(over.TokensIn, over.Budget, heading), nil
 		}
-		out = append(out, sectionPacket{sec, pk})
+		out = append(out, sectionPacket{sec, packets})
 	}
 	p.sections = out
 	return p, nil
@@ -420,7 +430,7 @@ func fileSections(p *prepared, in Input, deps Deps, result func(ledger.Object, .
 	for _, sp := range p.sections {
 		index := float64(sp.sec.index)
 		extra := append(p.stepUp.Clone(), ledger.Field{Key: "section", Value: index}, ledger.Field{Key: "sections", Value: float64(len(p.sections))})
-		part, err := reviewPart(p, sp.packet, in, deps, extra)
+		part, err := reviewPart(p, sp.sec.diff, sp.packets, in, deps, extra)
 		if err != nil {
 			return nil, err
 		}

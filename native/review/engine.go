@@ -121,31 +121,125 @@ func SingleReviewerMaxRisk(cfg map[string]any) float64 {
 	return 1
 }
 
-// errConsensus marks planSessions' consensus mode (not ported).
-var errConsensus = unsupported("consensus review is not ported")
-
 // blockKinds is escalation.mjs BLOCK_KINDS.
 func isDocsKind(kind string) bool { return kind == "docs" || kind == "contract" }
 
-// planSpec is planSessions for the adaptive single-session plans; anything
-// else (two lenses + judge, consensus) is unsupported.
-func planSpec(risk float64, cfg map[string]any, kind string) (sessionSpec, string, error) {
-	if math.IsNaN(risk) || risk < 0 || risk > 3 {
-		return sessionSpec{}, "", unsupported("risk outside 0-3")
+// sessionPlan is planSessions' plan: the reviewers in order, the judge
+// (nil: none) and a consensus refusal ("" = none).
+type sessionPlan struct {
+	mode, depth string
+	reviewers   []sessionSpec
+	judge       *sessionSpec
+	refused     string
+}
+
+func (pl sessionPlan) depthValue() any {
+	if pl.depth == "" {
+		return nil
 	}
+	return pl.depth
+}
+
+// specs is every session of the plan, the judge last.
+func (pl sessionPlan) specs() []sessionSpec {
+	out := append([]sessionSpec{}, pl.reviewers...)
+	if pl.judge != nil {
+		out = append(out, *pl.judge)
+	}
+	return out
+}
+
+// consensusSecond is engine.mjs secondLevel: slot B's levels.L2, or the
+// refusal reason.
+func consensusSecond(cfg map[string]any) (map[string]any, string) {
+	first, ok := resolveLevelOf(cfg, "L2")
+	if !ok {
+		return nil, "consensus-no-l2"
+	}
+	override, _ := section(cfg, "review", "second_levels")["L2"].(map[string]any)
+	provider := override["provider"]
+	if provider == nil {
+		provider = section(cfg, "review")["second_provider"]
+	}
+	p, _ := provider.(string)
+	if p == "" {
+		return nil, "consensus-no-second-provider"
+	}
+	if p == first.provider {
+		return nil, "consensus-same-provider"
+	}
+	if m, _ := override["model"].(string); m == "" {
+		return nil, "consensus-no-second-model"
+	}
+	level := map[string]any{}
+	for k, v := range override {
+		level[k] = v
+	}
+	level["provider"] = p
+	fallback := []any{}
+	if list, ok := override["fallback"].([]any); ok {
+		for _, f := range list {
+			if fm, ok := f.(map[string]any); ok && fm["provider"] == first.provider {
+				continue
+			}
+			fallback = append(fallback, f)
+		}
+	}
+	level["fallback"] = fallback
+	out := map[string]any{}
+	for k, v := range cfg {
+		out[k] = v
+	}
+	levels := map[string]any{}
+	for k, v := range section(cfg, "levels") {
+		levels[k] = v
+	}
+	levels["L2"] = level
+	out["levels"] = levels
+	return out, ""
+}
+
+// planSessions is engine.mjs planSessions (B34): consensus, one L2
+// session (quick or full), or two blind lenses and an L3 judge.
+func planSessions(risk float64, cfg map[string]any, kind string) (sessionPlan, error) {
+	if math.IsNaN(risk) || risk < 0 || risk > 3 {
+		return sessionPlan{}, unsupported("risk outside 0-3")
+	}
+	judge := &sessionSpec{lens: "judge", role: "judge", level: "L3"}
 	single := risk <= SingleReviewerMaxRisk(cfg)
 	review := section(cfg, "review")
 	docsOff := isDocsKind(kind) && review["multimodel_for_docs"] != true
 	if review["multimodel"] == true && !single && !docsOff {
-		return sessionSpec{}, "", errConsensus
+		second, refused := consensusSecond(cfg)
+		if refused != "" {
+			return sessionPlan{mode: "consensus", refused: refused}, nil
+		}
+		return sessionPlan{mode: "consensus", depth: "consensus", judge: judge, reviewers: []sessionSpec{
+			{lens: "full", role: "reviewer", level: "L2", slot: "A"}, {lens: "full", role: "reviewer", level: "L2", slot: "B", cfg: second}}}, nil
 	}
 	if risk < 1 {
-		return sessionSpec{lens: "quick", role: "reviewer", level: "L2"}, "quick", nil
+		return sessionPlan{mode: "adaptive", depth: "quick", reviewers: []sessionSpec{{lens: "quick", role: "reviewer", level: "L2"}}}, nil
 	}
 	if risk < 2 || single {
-		return sessionSpec{lens: "full", role: "reviewer", level: "L2"}, "full", nil
+		return sessionPlan{mode: "adaptive", depth: "full", reviewers: []sessionSpec{{lens: "full", role: "reviewer", level: "L2"}}}, nil
 	}
-	return sessionSpec{}, "", unsupported("the dual-lens review with a judge is not ported")
+	return sessionPlan{mode: "adaptive", depth: "dual", judge: judge, reviewers: []sessionSpec{
+		{lens: "A", role: "reviewer", level: "L2", slot: "A"}, {lens: "B", role: "reviewer", level: "L2", slot: "B"}}}, nil
+}
+
+// planGuards is levelGuards for every session of the plan, each on its own
+// config.
+func planGuards(pl sessionPlan, cfg map[string]any) error {
+	for _, spec := range pl.specs() {
+		c := cfg
+		if spec.cfg != nil {
+			c = spec.cfg
+		}
+		if err := levelGuards(c, spec.level); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 var markdownFile = regexp.MustCompile(`(?i)\.(md|markdown)$`)
@@ -217,22 +311,39 @@ func (d Deps) note(row ledger.Object) {
 }
 
 // prepared is File up to its first write: an early result (no_change,
-// split_required) or the session's spec and packet.
+// split_required, refused) or the plan and its packets.
 type prepared struct {
-	early  ledger.Object // no session
-	mkdir  bool          // Node made the work dir before the early result
-	spec   sessionSpec
-	depth  string
-	risk   float64
-	packet *Packet
-	stepUp ledger.Object
-	head   ledger.Object
-	// sections: a Markdown file over the budget, one packet per section
+	early   ledger.Object // no session
+	mkdir   bool          // Node made the work dir before the early result
+	plan    sessionPlan
+	risk    float64
+	diff    *FileDiff
+	packets []*Packet // one per reviewer
+	stepUp  ledger.Object
+	head    ledger.Object
+	// sections: a Markdown file over the budget, one packet set per section
 	sections []sectionPacket
 }
 
+// packetsFor is engine.mjs packetsFor: one packet per reviewer lens.
+func packetsFor(pl sessionPlan, d *FileDiff, in Input, paired string) ([]*Packet, *Packet, error) {
+	out := []*Packet{}
+	var split *Packet
+	for _, spec := range pl.reviewers {
+		pk, err := AssemblePacket(d, spec.lens, in.RulesDigest, in.FactsExcerpt, in.Cfg, paired)
+		if err != nil {
+			return nil, nil, err
+		}
+		if split == nil && pk.Status == "split_required" {
+			split = pk
+		}
+		out = append(out, pk)
+	}
+	return out, split, nil
+}
+
 // prepare is reviewFile before any write: the diff, the risk, the plan, the
-// packet. Every part Go does not port is ErrUnsupported here.
+// packets. Every part Go does not port is ErrUnsupported here.
 func prepare(in Input) (*prepared, error) {
 	diff, err := ReadFileDiff(in.RepoRoot, in.File, in.Base)
 	if err != nil {
@@ -248,19 +359,23 @@ func prepare(in Input) (*prepared, error) {
 	if kind == "" {
 		kind = blockopen.Kind([]string{diff.File}, "")
 	}
-	spec, depth, err := planSpec(risk, in.Cfg, kind)
+	plan, err := planSessions(risk, in.Cfg, kind)
 	if err != nil {
 		return nil, err
 	}
-	if err := levelGuards(in.Cfg, spec.level); err != nil {
-		return nil, err
-	}
-	head := ledger.Object{{Key: "engine", Value: "adaptive"}, {Key: "depth", Value: depth}, {Key: "risk", Value: risk}, {Key: "file", Value: diff.File}}
-	p := &prepared{spec: spec, depth: depth, risk: risk, head: head}
+	head := ledger.Object{{Key: "engine", Value: plan.mode}, {Key: "depth", Value: plan.depthValue()}, {Key: "risk", Value: risk}, {Key: "file", Value: diff.File}}
+	p := &prepared{plan: plan, risk: risk, head: head, diff: diff}
 	result := func(fields ledger.Object, tail ...ledger.Field) ledger.Object {
 		out := append(ledger.Object{}, fields...)
 		out = append(out, p.head...)
 		return append(out, tail...)
+	}
+	if plan.refused != "" {
+		p.early = result(ledger.Object{{Key: "status", Value: "refused"}, {Key: "reason", Value: plan.refused}, {Key: "approved", Value: false}}, ledger.Field{Key: "sessions", Value: []any{}})
+		return p, nil
+	}
+	if err := planGuards(plan, in.Cfg); err != nil {
+		return nil, err
 	}
 	if trimJS(diff.DiffText) == "" {
 		p.early = result(ledger.Object{{Key: "status", Value: "no_change"}, {Key: "approved", Value: false}}, ledger.Field{Key: "sessions", Value: []any{}})
@@ -288,35 +403,39 @@ func prepare(in Input) (*prepared, error) {
 		changed = in.Peers
 	}
 	paired := PairedContext(PairedInput{RepoRoot: in.RepoRoot, File: in.File, OwnedFiles: in.OwnedFiles, ChangedFiles: changed, TestFiles: in.TestFiles, Secrets: in.Secrets})
-	packet, err := AssemblePacket(diff, spec.lens, in.RulesDigest, in.FactsExcerpt, in.Cfg, paired)
+	packets, split, err := packetsFor(plan, diff, in, paired)
 	if err != nil {
 		return nil, err
 	}
-	if packet.Status == "split_required" && depth == "quick" {
-		fullSpec, fullDepth, err := planSpec(1, in.Cfg, kind)
-		if err != nil && err != errConsensus {
+	if split != nil && plan.depth == "quick" {
+		full, err := planSessions(1, in.Cfg, kind)
+		if err != nil {
 			return nil, err
 		}
-		if err == nil && fullDepth == "full" {
-			p.stepUp = ledger.Object{{Key: "step_up", Value: ledger.Object{{Key: "from", Value: "quick"}, {Key: "tokens_in", Value: float64(packet.TokensIn)}, {Key: "budget", Value: float64(packet.Budget)}}}}
-			spec, depth = fullSpec, fullDepth
-			p.spec, p.depth = spec, depth
-			p.head.Set("depth", depth)
+		// a configured consensus/refusal is not the single full session this step permits
+		if full.depth == "full" {
+			if err := planGuards(full, in.Cfg); err != nil {
+				return nil, err
+			}
+			p.stepUp = ledger.Object{{Key: "step_up", Value: ledger.Object{{Key: "from", Value: "quick"}, {Key: "tokens_in", Value: float64(split.TokensIn)}, {Key: "budget", Value: float64(split.Budget)}}}}
+			p.plan = full
+			p.head.Set("engine", full.mode)
+			p.head.Set("depth", full.depth)
 			p.head = append(p.head, p.stepUp...)
-			if packet, err = AssemblePacket(diff, spec.lens, in.RulesDigest, in.FactsExcerpt, in.Cfg, paired); err != nil {
+			if packets, split, err = packetsFor(full, diff, in, paired); err != nil {
 				return nil, err
 			}
 		}
 	}
-	if packet.Status == "split_required" {
+	if split != nil {
 		if markdownFile.MatchString(diff.File) {
-			return prepareSections(p, diff, packet, in, paired, result)
+			return prepareSections(p, diff, split, in, paired, result)
 		}
 		p.early = result(ledger.Object{{Key: "status", Value: "split_required"}, {Key: "approved", Value: false}},
-			ledger.Field{Key: "tokens_in", Value: float64(packet.TokensIn)}, ledger.Field{Key: "budget", Value: float64(packet.Budget)}, ledger.Field{Key: "sessions", Value: []any{}})
+			ledger.Field{Key: "tokens_in", Value: float64(split.TokensIn)}, ledger.Field{Key: "budget", Value: float64(split.Budget)}, ledger.Field{Key: "sessions", Value: []any{}})
 		return p, nil
 	}
-	p.packet = packet
+	p.packets = packets
 	return p, nil
 }
 
@@ -328,14 +447,14 @@ func Check(in Input) error {
 	return err
 }
 
-// SpawnLevel is the level and role File's session runs at (Check's pass);
-// ok false when File ends before any session.
+// SpawnLevel is the level and role File's first session runs at (Check's
+// pass); ok false when File ends before any session.
 func SpawnLevel(in Input) (level, role string, ok bool, err error) {
 	p, err := prepare(in)
 	if err != nil || p.early != nil {
 		return "", "", false, err
 	}
-	return p.spec.level, p.spec.role, true, nil
+	return p.plan.reviewers[0].level, p.plan.reviewers[0].role, true, nil
 }
 
 // File reviews one file. The outcome is Node's reviewFile result object.
@@ -360,7 +479,7 @@ func File(in Input, deps Deps) (ledger.Object, error) {
 	if p.sections != nil {
 		return fileSections(p, in, deps, result)
 	}
-	part, err := reviewPart(p, p.packet, in, deps, p.stepUp)
+	part, err := reviewPart(p, p.diff, p.packets, in, deps, p.stepUp)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +494,7 @@ func File(in Input, deps Deps) (ledger.Object, error) {
 		ledger.Field{Key: "summary", Value: part.summary}, ledger.Field{Key: "findings", Value: part.findings}, ledger.Field{Key: "sessions", Value: sessions}), nil
 }
 
-// partOutcome is engine.mjs reviewPart's answer for one packet.
+// partOutcome is engine.mjs reviewPart's answer for one packet set.
 type partOutcome struct {
 	reviewed bool
 	reason   any
@@ -385,27 +504,63 @@ type partOutcome struct {
 	sessions []ledger.Object
 }
 
-// reviewPart is engine.mjs reviewPart with one reviewer and no judge: the
-// review.plan row (rowExtra appended), the session, its needs_file round.
-func reviewPart(p *prepared, packet *Packet, in Input, deps Deps, rowExtra ledger.Object) (partOutcome, error) {
-	spec := p.spec
-	plan := ledger.Object{{Key: "event", Value: "review.plan"}, {Key: "depth_unconstrained", Value: p.depth}, {Key: "depth_chosen", Value: p.depth},
-		{Key: "degrade_step", Value: 0.0}, {Key: "risk", Value: p.risk}, {Key: "context_mode", Value: packet.ContextMode}, {Key: "forecast_tokens", Value: float64(packet.TokensIn)}}
+// reviewPart is engine.mjs reviewPart: the review.plan row (rowExtra
+// appended), each reviewer's session and needs_file round, then the judge
+// on both reports. Node starts the reviewers together; Go runs them in
+// plan order.
+func reviewPart(p *prepared, part *FileDiff, packets []*Packet, in Input, deps Deps, rowExtra ledger.Object) (partOutcome, error) {
+	forecast := 0
+	for _, pk := range packets {
+		forecast += pk.TokensIn
+	}
+	depth := p.plan.depthValue()
+	plan := ledger.Object{{Key: "event", Value: "review.plan"}, {Key: "depth_unconstrained", Value: depth}, {Key: "depth_chosen", Value: depth},
+		{Key: "degrade_step", Value: 0.0}, {Key: "risk", Value: p.risk}, {Key: "context_mode", Value: packets[0].ContextMode}, {Key: "forecast_tokens", Value: float64(forecast)}}
 	deps.note(append(plan, rowExtra...))
-	done, err := runOneWith(spec, packet.Text, packet, in, deps, true)
-	if err != nil {
-		return partOutcome{}, err
+	schemaFallback := p.plan.mode != "consensus"
+	done := []ledger.Object{}
+	for i, spec := range p.plan.reviewers {
+		res, err := runOneWith(spec, packets[i].Text, packets[i], in, deps, schemaFallback)
+		if err != nil {
+			return partOutcome{}, err
+		}
+		if res, err = needsFileRound(res, spec, packets[i], in, deps); err != nil {
+			return partOutcome{}, err
+		}
+		done = append(done, res)
 	}
-	if done, err = needsFileRound(done, spec, packet, in, deps); err != nil {
-		return partOutcome{}, err
+	out := partOutcome{}
+	for _, d := range done {
+		out.sessions = append(out.sessions, publicSummary(d))
 	}
-	out := partOutcome{sessions: []ledger.Object{publicSummary(done)}}
-	if done.Get("status") != "ok" {
-		out.reason = done.Get("reason")
-		deps.note(append(ledger.Object{{Key: "event", Value: "review.unavailable"}, {Key: "reason", Value: out.reason}, {Key: "lens", Value: done.Get("lens")}}, rowExtra...))
-		return out, nil
+	for _, d := range done {
+		if d.Get("status") != "ok" {
+			out.reason = d.Get("reason")
+			deps.note(append(ledger.Object{{Key: "event", Value: "review.unavailable"}, {Key: "reason", Value: out.reason}, {Key: "lens", Value: d.Get("lens")}}, rowExtra...))
+			return out, nil
+		}
 	}
-	review := done.Get("review").(ledger.Object)
+	final := done[0]
+	if judge := p.plan.judge; judge != nil {
+		reports := map[string]any{}
+		for i, spec := range p.plan.reviewers {
+			reports[spec.slot] = done[i].Get("review")
+		}
+		jp, err := assembleJudgePacket(part, reports["A"], reports["B"], in.Cfg)
+		if err != nil {
+			return partOutcome{}, err
+		}
+		if final, err = runOneWith(*judge, jp.Text, jp, in, deps, schemaFallback); err != nil {
+			return partOutcome{}, err
+		}
+		out.sessions = append(out.sessions, publicSummary(final))
+		if final.Get("status") != "ok" {
+			out.reason = final.Get("reason")
+			deps.note(append(ledger.Object{{Key: "event", Value: "review.unavailable"}, {Key: "reason", Value: out.reason}, {Key: "lens", Value: "judge"}}, rowExtra...))
+			return out, nil
+		}
+	}
+	review := final.Get("review").(ledger.Object)
 	findings, _ := review.Get("findings").([]any)
 	out.reviewed, out.approved = true, review.Get("passed") == true
 	for _, f := range findings {

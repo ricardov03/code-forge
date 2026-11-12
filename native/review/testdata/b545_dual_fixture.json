@@ -1,0 +1,1076 @@
+{
+ "commit": {
+  "src.txt": "line 0 of the source text\nline 1 of the source text\nline 2 of the source text\nline 3 of the source text\nline 4 of the source text\nline 5 of the source text\nline 6 of the source text\nline 7 of the source text\nline 8 of the source text\nline 9 of the source text\nline 10 of the source text\nline 11 of the source text\nline 12 of the source text\nline 13 of the source text\nline 14 of the source text\nline 15 of the source text\nline 16 of the source text\nline 17 of the source text\nline 18 of the source text\nline 19 of the source text\nline 20 of the source text\nline 21 of the source text\nline 22 of the source text\nline 23 of the source text\nline 24 of the source text\nline 25 of the source text\nline 26 of the source text\nline 27 of the source text\nline 28 of the source text\nline 29 of the source text\nline 30 of the source text\nline 31 of the source text\nline 32 of the source text\nline 33 of the source text\nline 34 of the source text\nline 35 of the source text\nline 36 of the source text\nline 37 of the source text\nline 38 of the source text\nline 39 of the source text\n",
+  "doc.md": "# Doc\n\npara 0\npara 1\npara 2\npara 3\npara 4\npara 5\npara 6\npara 7\npara 8\npara 9\n"
+ },
+ "after": {
+  "src.txt": "line 0 of the source text\nline 1 of the source text\nline 2 of the source text\nline 3 of the source text\nline 4 of the source text\nline 5 CHANGED here\nline 6 CHANGED here\nline 7 of the source text\nline 8 of the source text\nline 9 of the source text\nline 10 of the source text\nline 11 of the source text\nline 12 of the source text\nline 13 of the source text\nline 14 of the source text\nline 15 of the source text\nline 16 of the source text\nline 17 of the source text\nline 18 of the source text\nline 19 of the source text\nline 20 of the source text\nline 21 of the source text\nline 22 of the source text\nline 23 of the source text\nline 24 of the source text\nline 25 of the source text\nline 26 of the source text\nline 27 of the source text\nline 28 of the source text\nline 29 of the source text\nline 30 CHANGED here\nline 31 of the source text\nline 32 of the source text\nline 33 of the source text\nline 34 of the source text\nline 35 of the source text\nline 36 of the source text\nline 37 of the source text\nline 38 of the source text\nline 39 of the source text\n",
+  "doc.md": "# Doc\n\npara 0\npara 1\npara 2\npara 3\npara 4 edited\npara 5\npara 6\npara 7\npara 8\npara 9\n"
+ },
+ "cases": [
+  {
+   "name": "dual-approve",
+   "file": "src.txt",
+   "risk": 2,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "a",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F1",
+        "file": "src.txt",
+        "line_start": 6,
+        "line_end": 6,
+        "severity": "nit",
+        "category": "docs",
+        "claim": "c",
+        "evidence": "e",
+        "fix": "x"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "b",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "judge ok",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F1",
+        "file": "src.txt",
+        "line_start": 6,
+        "line_end": 6,
+        "severity": "nit",
+        "category": "docs",
+        "claim": "c",
+        "evidence": "e",
+        "fix": "x"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "dual-judge-major",
+   "file": "src.txt",
+   "risk": 2.5,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "a",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": false,
+      "summary": "b",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F2",
+        "file": "src.txt",
+        "line_start": 31,
+        "line_end": 31,
+        "severity": "warning",
+        "category": "logic",
+        "claim": "c2",
+        "evidence": "e2",
+        "fix": "y"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": false,
+      "summary": "judge says",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F2",
+        "file": "src.txt",
+        "line_start": 31,
+        "line_end": 31,
+        "severity": "warning",
+        "category": "logic",
+        "claim": "c2",
+        "evidence": "e2",
+        "fix": "y"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "dual-lens-unavailable",
+   "file": "src.txt",
+   "risk": 2,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "a",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "exit",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 1
+    },
+    {
+     "status": "exit",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 1
+    }
+   ]
+  },
+  {
+   "name": "dual-judge-unavailable",
+   "file": "src.txt",
+   "risk": 3,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "a",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "b",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "exit",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 1
+    },
+    {
+     "status": "exit",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 1
+    }
+   ]
+  },
+  {
+   "name": "dual-judge-sees-diff",
+   "file": "src.txt",
+   "risk": 2,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "judge_sees_diff": true
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "a",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "b",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "j",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "dual-max-risk-single",
+   "file": "src.txt",
+   "risk": 2,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "single_reviewer_max_risk": 2
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "only",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "consensus-approve",
+   "file": "src.txt",
+   "risk": 2,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "multimodel": true,
+     "second_levels": {
+      "L2": {
+       "provider": "codex",
+       "model": "mc",
+       "fallback": [
+        {
+         "provider": "claude",
+         "model": "x"
+        },
+        {
+         "provider": "gemini",
+         "model": "g"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "a",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "codex",
+     "model": "mc",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "b",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "j",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "consensus-second-provider",
+   "file": "src.txt",
+   "risk": 3,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "multimodel": true,
+     "second_provider": "codex",
+     "second_levels": {
+      "L2": {
+       "model": "mc"
+      }
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "a",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "codex",
+     "model": "mc",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": false,
+      "summary": "b",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F2",
+        "file": "src.txt",
+        "line_start": 31,
+        "line_end": 31,
+        "severity": "warning",
+        "category": "logic",
+        "claim": "c2",
+        "evidence": "e2",
+        "fix": "y"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": false,
+      "summary": "j",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F2",
+        "file": "src.txt",
+        "line_start": 31,
+        "line_end": 31,
+        "severity": "warning",
+        "category": "logic",
+        "claim": "c2",
+        "evidence": "e2",
+        "fix": "y"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "consensus-lens-unavailable",
+   "file": "src.txt",
+   "risk": 2,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "multimodel": true,
+     "second_levels": {
+      "L2": {
+       "provider": "codex",
+       "model": "mc",
+       "fallback": [
+        {
+         "provider": "claude",
+         "model": "x"
+        },
+        {
+         "provider": "gemini",
+         "model": "g"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "a",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "exit",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 1
+    },
+    {
+     "status": "exit",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 1
+    }
+   ]
+  },
+  {
+   "name": "consensus-same-provider",
+   "file": "src.txt",
+   "risk": 2,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "multimodel": true,
+     "second_levels": {
+      "L2": {
+       "provider": "claude",
+       "model": "mc"
+      }
+     }
+    }
+   },
+   "script": []
+  },
+  {
+   "name": "consensus-no-second-provider",
+   "file": "src.txt",
+   "risk": 2,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "multimodel": true
+    }
+   },
+   "script": []
+  },
+  {
+   "name": "consensus-no-second-model",
+   "file": "src.txt",
+   "risk": 2,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "multimodel": true,
+     "second_provider": "codex"
+    }
+   },
+   "script": []
+  },
+  {
+   "name": "consensus-no-l3-refused",
+   "file": "src.txt",
+   "risk": 2,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    },
+    "review": {
+     "multimodel": true
+    }
+   },
+   "script": []
+  },
+  {
+   "name": "consensus-docs-kind-dual",
+   "file": "doc.md",
+   "risk": 2,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "multimodel": true,
+     "second_levels": {
+      "L2": {
+       "provider": "codex",
+       "model": "mc",
+       "fallback": [
+        {
+         "provider": "claude",
+         "model": "x"
+        },
+        {
+         "provider": "gemini",
+         "model": "g"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "a",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "b",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "j",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "consensus-docs-allowed",
+   "file": "doc.md",
+   "kind": "docs",
+   "risk": 2,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "multimodel": true,
+     "multimodel_for_docs": true,
+     "second_levels": {
+      "L2": {
+       "provider": "codex",
+       "model": "mc",
+       "fallback": [
+        {
+         "provider": "claude",
+         "model": "x"
+        },
+        {
+         "provider": "gemini",
+         "model": "g"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "a",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "codex",
+     "model": "mc",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "b",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "j",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "consensus-at-max-risk-single",
+   "file": "src.txt",
+   "risk": 1,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "multimodel": true
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "one",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  }
+ ]
+}

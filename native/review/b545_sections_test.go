@@ -18,8 +18,25 @@ import (
 // rows, packet text and the work dir match Node byte for byte (goldens:
 // Node's reviewFile on the same repository).
 func TestB545MarkdownSectionsMatchNode(t *testing.T) {
+	b545MatchNode(t, "b545_md_fixture.json", "b545_md_golden.json")
+}
+
+// TestB545DualConsensusMatchNode: risk 2+ runs two blind lenses (A, B) and an
+// L3 judge, and review.multimodel runs two full reviewers on two providers
+// (review.second_levels / second_provider, the second ladder without the
+// first provider) and the judge, like Node's reviewFile: the judge packet
+// (both reports, the hunk list, the diff with review.judge_sees_diff), a
+// failed lens ending the file before the judge, a failed judge, the four
+// consensus refusals before any session, single_reviewer_max_risk and the
+// docs-kind rule. Result, rows, packet text and work dir match Node (goldens:
+// Node's reviewFile on the same repository).
+func TestB545DualConsensusMatchNode(t *testing.T) {
+	b545MatchNode(t, "b545_dual_fixture.json", "b545_dual_golden.json")
+}
+
+func b545MatchNode(t *testing.T, fixtureName, goldenName string) {
 	useRepoLenses(t)
-	fxRaw := readOrdered(t, "b545_md_fixture.json")
+	fxRaw := readOrdered(t, fixtureName)
 	fx := fixture{Commit: map[string]string{}, After: map[string]string{}}
 	for key, dst := range map[string]map[string]string{"commit": fx.Commit, "after": fx.After} {
 		for _, f := range fxRaw.Get(key).(ledger.Object) {
@@ -27,7 +44,7 @@ func TestB545MarkdownSectionsMatchNode(t *testing.T) {
 		}
 	}
 	repo := buildRepo(t, fx)
-	golden := readOrdered(t, "b545_md_golden.json").Get("cases").(ledger.Object)
+	golden := readOrdered(t, goldenName).Get("cases").(ledger.Object)
 	cases := fxRaw.Get("cases").([]any)
 	if len(cases) != len(golden) {
 		t.Fatalf("cases %d, golden %d", len(cases), len(golden))
@@ -44,6 +61,9 @@ func TestB545MarkdownSectionsMatchNode(t *testing.T) {
 			work := filepath.Join(t.TempDir(), name)
 			in := Input{RepoRoot: repo, File: c.Get("file").(string), Cfg: plainCfg(t, c.Get("cfg")), Risk: &risk,
 				RulesDigest: "rule one\nrule two", FactsExcerpt: "facts here", WorkDir: work}
+			if k, ok := c.Get("kind").(string); ok {
+				in.Kind = k
+			}
 			if err := Check(in); err != nil {
 				t.Fatalf("Check refused a case Node reviews: %v", err)
 			}

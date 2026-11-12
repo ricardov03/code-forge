@@ -301,9 +301,10 @@ func TestReviewFileUnsupportedBeforeSpawn(t *testing.T) {
 		name string
 		in   Input
 	}{
-		{"dual-lens", Input{File: "notes.txt", Cfg: baseCfg(), Risk: f(2)}},
+		// B545: dual lenses and consensus run in Go (TestB545DualConsensusMatchNode); a judge
+		// with no L3 level configured stays with Node
+		{"dual-lens-no-L3", Input{File: "notes.txt", Cfg: baseCfg(), Risk: f(2)}},
 		{"risk-out-of-range", Input{File: "notes.txt", Cfg: baseCfg(), Risk: f(3.5)}},
-		{"consensus", Input{File: "notes.txt", Cfg: withReview(map[string]any{"multimodel": true}), Risk: f(3)}},
 		{"routes", Input{File: "notes.txt", Cfg: withReview(map[string]any{"routes": []any{"x"}}), Risk: f(1)}},
 		{"second-levels", Input{File: "notes.txt", Cfg: withReview(map[string]any{"second_levels": []any{"L3"}}), Risk: f(1)}},
 		{"fallback-ladder", Input{File: "notes.txt", Cfg: withL2(map[string]any{"provider": "claude", "model": "m2", "fallback": []any{"x"}}), Risk: f(1)}},
@@ -311,7 +312,6 @@ func TestReviewFileUnsupportedBeforeSpawn(t *testing.T) {
 		{"no-provider", Input{File: "notes.txt", Cfg: map[string]any{"levels": map[string]any{"L2": map[string]any{"model": "m2"}}}, Risk: f(1)}},
 		{"moved-code", Input{File: "notes.txt", Cfg: baseCfg(), Risk: f(1), HasPeerDiffs: true}},
 		{"peers-with-base", Input{File: "notes.txt", Cfg: baseCfg(), Risk: f(1), Base: "HEAD", Peers: []string{"big.txt"}}},
-		{"consensus-code-kind", Input{File: "notes.txt", Cfg: withReview(map[string]any{"multimodel": true, "single_reviewer_max_risk": 0.0}), Risk: f(2), Kind: "code"}},
 		{"deleted", Input{File: "same.txt", Cfg: baseCfg(), Risk: f(1)}},
 		{"test-file", Input{File: "pkg/thing_test.txt", Cfg: baseCfg(), Risk: f(1)}},
 		// B545: a Markdown file over the budget reviews by section (TestB545MarkdownSectionsMatchNode);

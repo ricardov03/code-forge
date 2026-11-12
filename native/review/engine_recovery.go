@@ -333,25 +333,31 @@ func SpawnChecks(in Input) ([]SpawnCheck, error) {
 	if err != nil || p.early != nil {
 		return nil, err
 	}
-	spec := p.spec
-	out := []SpawnCheck{{Level: spec.level, Role: spec.role, Cfg: in.Cfg}}
-	add := func(cfg map[string]any, own bool) {
-		lv, ok := resolveLevelOf(cfg, spec.level)
-		if !ok {
-			return
+	out := []SpawnCheck{}
+	for _, spec := range p.plan.specs() {
+		base := in.Cfg
+		if spec.cfg != nil {
+			base = spec.cfg
 		}
-		if own {
-			out = append(out, SpawnCheck{Level: spec.level, Role: spec.role, Cfg: cfg})
-		}
-		for _, e := range lv.entries() {
-			if !reviewClosedBook(e.provider, spec.role, openBookAllowed(cfg)) {
-				out = append(out, SpawnCheck{Level: spec.level, Role: spec.role, Cfg: pinLevel(cfg, spec.level, e, []any{})})
+		out = append(out, SpawnCheck{Level: spec.level, Role: spec.role, Cfg: base})
+		add := func(cfg map[string]any, own bool) {
+			lv, ok := resolveLevelOf(cfg, spec.level)
+			if !ok {
+				return
+			}
+			if own {
+				out = append(out, SpawnCheck{Level: spec.level, Role: spec.role, Cfg: cfg})
+			}
+			for _, e := range lv.entries() {
+				if !reviewClosedBook(e.provider, spec.role, openBookAllowed(cfg)) {
+					out = append(out, SpawnCheck{Level: spec.level, Role: spec.role, Cfg: pinLevel(cfg, spec.level, e, []any{})})
+				}
 			}
 		}
-	}
-	add(in.Cfg, false)
-	if second := secondLevelFor(in.Cfg, spec.level, nil, nil, spec.role); second.ok {
-		add(second.cfg, true)
+		add(base, false)
+		if second := secondLevelFor(base, spec.level, nil, nil, spec.role); second.ok {
+			add(second.cfg, true)
+		}
 	}
 	return out, nil
 }
@@ -371,7 +377,7 @@ type oneRun struct {
 }
 
 func (r *oneRun) rowExtra() ledger.Object {
-	return ledger.Object{{Key: "lens", Value: r.spec.lens}, {Key: "context_mode", Value: r.packet.ContextMode}, {Key: "ctx_tokens_in", Value: float64(r.packet.TokensIn)}}
+	return ledger.Object{{Key: "lens", Value: r.spec.lens}, {Key: "context_mode", Value: r.packet.contextValue()}, {Key: "ctx_tokens_in", Value: float64(r.packet.TokensIn)}}
 }
 
 // spawn is `truncateReviewFields(await deps.spawn(...))`; false when it threw.
@@ -900,7 +906,7 @@ func runOneWith(spec sessionSpec, text string, packet *Packet, in Input, deps De
 		}
 	}
 	meta := ledger.Object{{Key: "lens", Value: spec.lens}, {Key: "role", Value: spec.role}, {Key: "level", Value: spec.level}, {Key: "slot", Value: spec.slotValue()},
-		{Key: "context_mode", Value: packet.ContextMode}, {Key: "ctx_tokens_in", Value: float64(packet.TokensIn)},
+		{Key: "context_mode", Value: packet.contextValue()}, {Key: "ctx_tokens_in", Value: float64(packet.TokensIn)},
 		{Key: "provider", Value: orDefault(get(res, "provider"), nil)}, {Key: "model", Value: orDefault(get(res, "model"), nil)},
 		{Key: "fallback_step", Value: orDefault(get(res, "fallback_step"), 0.0)}, {Key: "attempts", Value: float64(r.attempts)}}
 	if cuts, ok := get(res, "truncated_fields").([]any); ok && len(cuts) > 0 {
