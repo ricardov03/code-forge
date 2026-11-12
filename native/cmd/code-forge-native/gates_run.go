@@ -210,10 +210,7 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 	}
 	nativeReportedKind = ""
 	normalized, _ := message.(string)
-	normalized = reviewWaitLogQuotes.ReplaceAllString(normalized, " ")
-	normalized = reviewWaitLogPlaceholders.ReplaceAllString(normalized, " ")
-	normalized = reviewWaitLogPaths.ReplaceAllString(normalized, " ")
-	normalized = strings.TrimSpace(reviewWaitLogWords.ReplaceAllString(normalized, " "))
+	normalized = errorLogNormalize(normalized)
 	if verbName == "block" && subName == "" {
 		normalized = landFingerprintMessage(blockString(message))
 	}

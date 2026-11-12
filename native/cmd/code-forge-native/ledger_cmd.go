@@ -1,21 +1,17 @@
 package main
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 
-	"github.com/ricardov03/code-forge/native/config"
+	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
@@ -23,9 +19,18 @@ const ledgerUsage = "usage: code-forge ledger calibration|outcome|tail --slug <s
 const ledgerTailUsage = "usage: code-forge ledger tail --slug <slug> [--n <count> | -n <count>]\n"
 
 var ledgerSurrogatePattern = regexp.MustCompile(`(?i)\\ud[89a-f][0-9a-f]{2}`)
-var ledgerBreadcrumbPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}(?: [a-z][a-z0-9-]{0,39})?$`)
 
 func init() { routes["ledger"] = runLedger }
+
+var ledgerSubUsage = map[string]string{
+	"calibration":    "usage: code-forge ledger calibration --slug <slug> [--question <id>]\n",
+	"outcome":        "usage: code-forge ledger outcome --scan-git --slug <slug> [--cwd <dir>] [--days <n>]\nusage: code-forge ledger outcome --pr <n> --ci red|green|reverted --slug <slug>\n",
+	"tail":           ledgerTailUsage,
+	"add":            "usage: code-forge ledger add coder --run <r> --block <b> --usd <n> [--note \"...\"]\n",
+	"outside-review": ledgerOutsideReviewUsage + "\n",
+}
+
+const ledgerOutsideReviewUsage = "usage: code-forge ledger outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]..."
 
 func ledgerHandover(args []string, reason handoverReason) int {
 	code, err := handover(append([]string{"ledger"}, args...), reason)
@@ -49,103 +54,251 @@ func ledgerFlag(args []string, flag string) (string, bool, bool) {
 	return "", false, true
 }
 
+// ledgerValue is Node's flagValue: a usable value, or "" with false.
+func ledgerValue(args []string, flag string) (string, bool) {
+	value, given, ok := ledgerFlag(args, flag)
+	return value, given && ok
+}
+
+// ledgerResult is a finished ledger command: what Node would print, or the
+// reason this case still runs in Node. Nothing is written before a hand-over.
+type ledgerResult struct {
+	code     int
+	out, err string
+	handover handoverReason
+	secret   string // a run key registered for redaction, as Node's loadKey does
+}
+
+func ledgerHandedOver(reason handoverReason) ledgerResult {
+	return ledgerResult{handover: reason}
+}
+
+func ledgerHelpFlag(s string) bool { return s == "--help" || s == "-h" }
+
+// runLedger follows the Node router: help is metadata (no breadcrumb, no
+// log); every other run notes a breadcrumb and logs a non-zero exit.
 func runLedger(args []string) int {
+	if len(args) > 0 && ledgerHelpFlag(args[0]) {
+		fmt.Fprint(os.Stdout, ledgerUsage)
+		return 0
+	}
+	if len(args) > 1 && ledgerHelpFlag(args[1]) {
+		if usage, ok := ledgerSubUsage[args[0]]; ok {
+			fmt.Fprint(os.Stdout, usage)
+			return 0
+		}
+	}
+	result := ledgerRun(args)
+	if result.handover == 0 && result.code != 0 && result.code != 2 && ledgerHintShown() {
+		// Node prints a once-a-day hint on a terminal; that memory stays in Node.
+		result = ledgerHandedOver(hLedgerErrorHint)
+	}
+	if result.handover != 0 {
+		return ledgerHandover(args, result.handover)
+	}
+	sub := ""
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, "-") {
+			if arg == "tail" || arg == "calibration" || arg == "outcome" {
+				sub = arg
+			}
+			break
+		}
+	}
+	crumb := "ledger"
+	if sub != "" {
+		crumb += " " + sub
+	}
+	before := gatesBreadcrumbName(crumb)
+	out, errText := ledgerRedact(result.out, result.secret), ledgerRedact(result.err, result.secret)
+	fmt.Fprint(os.Stdout, out)
+	fmt.Fprint(os.Stderr, errText)
+	if result.code != 0 {
+		var message any
+		if trimmed := strings.TrimFunc(errText, errorLogSpace); trimmed != "" {
+			message = trimmed
+		}
+		nativeVerbFailure("ledger", sub, args, result.code, message, before)
+	}
+	return result.code
+}
+
+// ledgerHintShown: Node's maybeHint could print on this run (stderr is a
+// terminal, the log is on, not an agent session).
+func ledgerHintShown() bool {
+	if !reviewWaitLogging() || os.Getenv("HOME") == "" || !humanask.IsTTY(os.Stderr) {
+		return false
+	}
+	for _, name := range []string{"CLAUDECODE", "CLAUDE_CODE", "CURSOR_AGENT", "AI_AGENT"} {
+		if os.Getenv(name) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// ledgerRedact is Node's redact for one registered secret: every occurrence,
+// overlapping ones merged, becomes one [REDACTED].
+func ledgerRedact(text, secret string) string {
+	if secret == "" {
+		return text
+	}
+	type span struct{ a, b int }
+	spans := []span{}
+	for at := 0; at < len(text); {
+		next := strings.Index(text[at:], secret)
+		if next < 0 {
+			break
+		}
+		spans = append(spans, span{at + next, at + next + len(secret)})
+		at += next + 1
+	}
+	if len(spans) == 0 {
+		return text
+	}
+	var out strings.Builder
+	cursor, start, end := 0, spans[0].a, spans[0].b
+	for _, s := range spans[1:] {
+		if s.a <= end {
+			if s.b > end {
+				end = s.b
+			}
+			continue
+		}
+		out.WriteString(text[cursor:start] + "[REDACTED]")
+		cursor, start, end = end, s.a, s.b
+	}
+	out.WriteString(text[cursor:start] + "[REDACTED]" + text[end:])
+	return out.String()
+}
+
+func ledgerRun(args []string) ledgerResult {
 	sub := ""
 	if len(args) > 0 {
 		sub = args[0]
 	}
-	// Keep unported subcommands intact, including their help and argument errors.
-	switch sub {
-	case "calibration", "outcome", "add", "outside-review":
-		return ledgerHandover(args, hLedgerUnportedSubcommand)
+	if sub == "add" {
+		return ledgerAdd(args[1:])
 	}
-	help := func(s string) bool { return s == "--help" || s == "-h" }
-	if help(sub) {
-		fmt.Fprint(os.Stdout, ledgerUsage)
-		return 0
+	if sub == "outside-review" {
+		return ledgerOutsideReview(args[1:])
 	}
-	if len(args) > 1 && help(args[1]) && sub == "tail" {
-		fmt.Fprint(os.Stdout, ledgerTailUsage)
-		return 0
+	usage := ledgerResult{code: 2, err: ledgerUsage}
+	slug, ok := ledgerValue(args, "--slug")
+	if !ok || slug == "" {
+		return usage
 	}
-	code, output, message := 2, "", ledgerUsage
-	slug, _, validSlug := ledgerFlag(args, "--slug")
-	if validSlug && slug != "" && sub == "tail" {
-		long, hasLong, longOK := ledgerFlag(args, "--n")
-		short, hasShort, shortOK := ledgerFlag(args, "-n")
-		switch {
-		case !longOK:
-			message = "ledger tail: --n requires a value\n"
-		case !shortOK:
-			message = "ledger tail: -n requires a value\n"
-		case hasLong && hasShort:
-			message = "ledger tail: give the count once, as --n <count> or -n <count>\n"
-		default:
-			count := "20"
-			if hasLong {
-				count = long
-			} else if hasShort {
-				count = short
-			}
-			if !regexp.MustCompile(`^[0-9]+$`).MatchString(count) {
-				message = "ledger tail: --n/-n must be a non-negative integer, got \"" + count + "\"\n"
-			} else {
-				n, _ := strconv.ParseFloat(count, 64) // JS parseInt also permits +Infinity.
-				var supported bool
-				code, output, message, supported = ledgerTail(slug, n)
-				if !supported {
-					return ledgerHandover(args, hLedgerTailFormat)
-				}
-			}
+	failed := func(message string) ledgerResult {
+		return ledgerResult{code: 1, err: "ledger " + sub + ": " + message + "\n"}
+	}
+	switch {
+	case sub == "calibration":
+		return ledgerCalibration(args, slug, failed)
+	case sub == "outcome" && ledgerHas(args, "--scan-git"):
+		return ledgerScanGit(args, slug, failed)
+	case sub == "outcome" && ledgerHasValue(args, "--pr") && ledgerHasValue(args, "--ci"):
+		return ledgerCIOutcome(args, slug, failed)
+	case sub == "tail":
+		return ledgerTailCommand(args, slug)
+	}
+	return usage
+}
+
+func ledgerHas(args []string, flag string) bool {
+	for _, arg := range args {
+		if arg == flag {
+			return true
 		}
 	}
-	// Resolve all fallback decisions before emitting output or modifying state.
-	if !ledgerLoggingOff() {
-		if !ledgerLog(args, code, message) {
-			return ledgerHandover(args, hLedgerErrorLog)
+	return false
+}
+
+func ledgerHasValue(args []string, flag string) bool {
+	value, ok := ledgerValue(args, flag)
+	return ok && value != ""
+}
+
+func ledgerTailCommand(args []string, slug string) ledgerResult {
+	long, hasLong, longOK := ledgerFlag(args, "--n")
+	short, hasShort, shortOK := ledgerFlag(args, "-n")
+	switch {
+	case !longOK:
+		return ledgerResult{code: 2, err: "ledger tail: --n requires a value\n"}
+	case !shortOK:
+		return ledgerResult{code: 2, err: "ledger tail: -n requires a value\n"}
+	case hasLong && hasShort:
+		return ledgerResult{code: 2, err: "ledger tail: give the count once, as --n <count> or -n <count>\n"}
+	}
+	count := "20"
+	if hasLong {
+		count = long
+	} else if hasShort {
+		count = short
+	}
+	if !regexp.MustCompile(`^[0-9]+$`).MatchString(count) {
+		return ledgerResult{code: 2, err: "ledger tail: --n/-n must be a non-negative integer, got \"" + count + "\"\n"}
+	}
+	n, _ := strconv.ParseFloat(count, 64) // JS parseInt also permits +Infinity.
+	code, output, message, supported := ledgerTail(slug, n)
+	if !supported {
+		return ledgerHandedOver(hLedgerTailFormat)
+	}
+	return ledgerResult{code: code, out: output, err: message}
+}
+
+// ledgerMissing is Node's readExistingRows check before reading: a bad slug or
+// an absent ledger gives an error message; ok false means hand over.
+func ledgerMissing(slug string) (dir, message string, ok bool) {
+	if !regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`).MatchString(slug) {
+		return "", ledgerSlugError(slug), true
+	}
+	home := os.Getenv("HOME")
+	if home == "" {
+		return "", "", false
+	}
+	dir = filepath.Join(home, ".code-forge", "ledger")
+	_, err := os.Stat(filepath.Join(dir, slug+".jsonl"))
+	if err == nil {
+		return dir, "", true
+	}
+	if !os.IsNotExist(err) {
+		return "", "", false
+	}
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return "", "", false
+	}
+	known := map[string]bool{}
+	pattern := regexp.MustCompile(`^([a-z0-9][a-z0-9-]*)(?:\.[0-9]+)?\.jsonl$`)
+	for _, entry := range entries {
+		if match := pattern.FindStringSubmatch(entry.Name()); entry.Type().IsRegular() && match != nil {
+			known[match[1]] = true
 		}
 	}
-	fmt.Fprint(os.Stdout, output)
-	fmt.Fprint(os.Stderr, message)
-	return code
+	slugs := []string{}
+	for name := range known {
+		slugs = append(slugs, name)
+	}
+	sort.Strings(slugs)
+	names := strings.Join(slugs, ", ")
+	if names == "" {
+		names = "none"
+	}
+	return "", fmt.Sprintf("no ledger for slug \"%s\"; known slugs: %s", slug, names), true
+}
+
+func ledgerSlugError(slug string) string {
+	quoted, _ := ledger.Stringify(slug, false)
+	return fmt.Sprintf("ledgerPath: slug must match /^[a-z0-9][a-z0-9-]*$/ (got %s)", quoted)
 }
 
 func ledgerTail(slug string, n float64) (int, string, string, bool) {
-	if !regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`).MatchString(slug) {
-		quoted, _ := ledger.Stringify(slug, false)
-		return 1, "", fmt.Sprintf("ledger tail: ledgerPath: slug must match /^[a-z0-9][a-z0-9-]*$/ (got %s)\n", quoted), true
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
+	dir, message, ok := ledgerMissing(slug)
+	if !ok {
 		return 0, "", "", false
 	}
-	dir := filepath.Join(home, ".code-forge", "ledger")
-	_, err = os.Stat(filepath.Join(dir, slug+".jsonl"))
-	if os.IsNotExist(err) {
-		entries, readErr := os.ReadDir(dir)
-		if readErr != nil && !os.IsNotExist(readErr) {
-			return 0, "", "", false
-		}
-		known := map[string]bool{}
-		pattern := regexp.MustCompile(`^([a-z0-9][a-z0-9-]*)(?:\.[0-9]+)?\.jsonl$`)
-		for _, entry := range entries {
-			if match := pattern.FindStringSubmatch(entry.Name()); entry.Type().IsRegular() && match != nil {
-				known[match[1]] = true
-			}
-		}
-		slugs := []string{}
-		for name := range known {
-			slugs = append(slugs, name)
-		}
-		sort.Strings(slugs)
-		names := strings.Join(slugs, ", ")
-		if names == "" {
-			names = "none"
-		}
-		return 1, "", fmt.Sprintf("ledger tail: no ledger for slug \"%s\"; known slugs: %s\n", slug, names), true
-	}
-	if err != nil {
-		return 0, "", "", false
+	if message != "" {
+		return 1, "", "ledger tail: " + message + "\n", true
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -207,223 +360,4 @@ func ledgerTail(slug string, n float64) (int, string, string, bool) {
 		start = len(rows) - int(n)
 	}
 	return 0, strings.Join(rows[start:], ""), "", true
-}
-
-func ledgerLoggingOff() bool {
-	flag := os.Getenv("CODE_FORGE_NO_ERROR_LOG")
-	return flag != "" && flag != "0"
-}
-
-// Node's error entry includes its runtime version. Read installed headers rather
-// than starting Node; installations without matching metadata retain Node's logger.
-func ledgerNodeVersion() string {
-	node := os.Getenv("CODE_FORGE_NODE")
-	if node == "" {
-		node = "node"
-	}
-	file, err := exec.LookPath(node)
-	if err != nil {
-		file, err = exec.LookPath("node")
-	}
-	if err != nil {
-		return ""
-	}
-	file, err = filepath.EvalSymlinks(file)
-	if err != nil {
-		return ""
-	}
-	header, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "include", "node", "node_version.h"))
-	if err != nil {
-		return ""
-	}
-	parts := []string{}
-	for _, part := range []string{"MAJOR", "MINOR", "PATCH"} {
-		match := regexp.MustCompile(`(?m)^#define NODE_` + part + `_VERSION ([0-9]+)`).FindSubmatch(header)
-		if match == nil {
-			return ""
-		}
-		parts = append(parts, string(match[1]))
-	}
-	return "v" + strings.Join(parts, ".")
-}
-
-// Logging is best effort, like the Node router. Complex scrub contexts stay with
-// Node until its general-purpose telemetry is ported; no state is touched first.
-func ledgerLog(args []string, code int, message string) bool {
-	home := os.Getenv("HOME")
-	if home == "" {
-		return true
-	}
-	nodeVersion := ""
-	cwd, _ := os.Getwd()
-	slug := ""
-	if code != 0 {
-		nodeVersion = ledgerNodeVersion()
-		if nodeVersion == "" || !regexp.MustCompile(`^[A-Za-z0-9 \t\n.,:;|()/<>?\[\]"_=*^$-]*$`).MatchString(message) {
-			return false
-		}
-		// Preserve Node's path/reference/id scrubbing for contexts outside this
-		// port, rather than publishing an incompletely scrubbed error entry.
-		if strings.Contains(message, "op://") || regexp.MustCompile(`[a-z0-9]{26}`).MatchString(message) ||
-			len(home) >= 2 && strings.Contains(message, home) || len(cwd) >= 2 && strings.Contains(message, cwd) {
-			return false
-		}
-		if cfg, err := config.LoadFile(filepath.Join(cwd, config.Filename)); err == nil {
-			if project, ok := cfg["project"].(map[string]any); ok {
-				slug, _ = project["slug"].(string)
-			}
-		} else if failure, ok := err.(*config.Error); ok && failure.Kind == "migrate-error" {
-			return false
-		}
-	}
-	sub := ""
-	for _, arg := range args {
-		if !strings.HasPrefix(arg, "-") {
-			if arg == "tail" || arg == "calibration" || arg == "outcome" {
-				sub = arg
-			}
-			break
-		}
-	}
-	dir := filepath.Join(home, ".code-forge", "logs")
-	crumbFile := filepath.Join(dir, "breadcrumbs.json")
-	before := []string{}
-	var old []any
-	if data, err := os.ReadFile(crumbFile); err == nil && json.Unmarshal(data, &old) == nil {
-		for _, v := range old {
-			if s, ok := v.(string); ok && ledgerBreadcrumbPattern.MatchString(s) {
-				before = append(before, s)
-			}
-		}
-	}
-	if len(before) > 5 {
-		before = before[len(before)-5:]
-	}
-	crumb := "ledger"
-	if sub != "" {
-		crumb += " " + sub
-	}
-	next := append(append([]string{}, before...), crumb)
-	if len(next) > 5 {
-		next = next[len(next)-5:]
-	}
-	if os.MkdirAll(dir, 0700) == nil {
-		_ = os.Chmod(dir, 0700)
-		data, _ := json.Marshal(next)
-		ledgerLogReplace(crumbFile, append(data, '\n'))
-	}
-	if code == 0 {
-		return true
-	}
-	// For the supported ASCII messages only project names can need scrubbing.
-	cleaned := []any{}
-	count := 0
-	clean := func(s string) string {
-		if slug == "" {
-			return s
-		}
-		re := regexp.MustCompile(regexp.QuoteMeta(slug))
-		indices := re.FindAllStringIndex(s, -1)
-		var out strings.Builder
-		cursor := 0
-		word := func(c byte) bool {
-			return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
-		}
-		for _, span := range indices {
-			a, b := span[0], span[1]
-			if a > 0 && (word(s[a-1]) || s[a-1] == '<') || b < len(s) && (word(s[b]) || s[b] == '>') || strings.HasPrefix(s[b:], "://") {
-				continue
-			}
-			out.WriteString(s[cursor:a])
-			out.WriteString("<slug>")
-			cursor = b
-			count++
-		}
-		out.WriteString(s[cursor:])
-		return out.String()
-	}
-	text := clean(strings.TrimSpace(message))
-	if len(text) > 2048 {
-		text = text[:2048]
-	}
-	flags := []string{}
-	afterLong := false
-	longFlag := regexp.MustCompile(`^--([A-Za-z][A-Za-z0-9-]{0,39})(=|$)`)
-	shortFlag := regexp.MustCompile(`^-([A-Za-z])`)
-	for _, arg := range args {
-		if arg == "--" {
-			break
-		}
-		if m := longFlag.FindStringSubmatch(arg); m != nil {
-			flags = append(flags, clean("--"+m[1]))
-			afterLong = m[2] == ""
-			continue
-		}
-		if m := shortFlag.FindStringSubmatch(arg); m != nil && !afterLong {
-			flags = append(flags, clean("-"+m[1]))
-		}
-		afterLong = false
-	}
-	verb := clean("ledger")
-	if count > 0 {
-		cleaned = append(cleaned, ledger.Object{{Key: "rule", Value: "project_name"}, {Key: "count", Value: count}})
-	}
-	kind := "error"
-	if code == 2 {
-		kind = "usage"
-	}
-	normal := regexp.MustCompile(`"[^"\n]*"|<[^<>\n]*>|\S*/\S*`).ReplaceAllString(text, " ")
-	normal = strings.Join(strings.Fields(normal), " ")
-	fp := fmt.Sprintf("%x", sha256.Sum256([]byte(verb+"\n"+sub+"\n"+kind+"\n"+normal)))[:12]
-	var subValue any
-	if sub != "" {
-		subValue = sub
-	}
-	arch := runtime.GOARCH
-	if arch == "amd64" {
-		arch = "x64"
-	}
-	entry := ledger.Object{
-		{Key: "ts", Value: time.Now().UTC().Format("2006-01-02T15:04:05.000Z")},
-		{Key: "version", Value: version}, {Key: "node", Value: nodeVersion},
-		{Key: "platform", Value: runtime.GOOS}, {Key: "arch", Value: arch},
-		{Key: "verb", Value: verb}, {Key: "sub", Value: subValue}, {Key: "flags", Value: flags},
-		{Key: "exit", Value: code}, {Key: "kind", Value: kind}, {Key: "message", Value: text},
-		{Key: "stack", Value: nil}, {Key: "cleaned", Value: cleaned}, {Key: "fp", Value: fp}, {Key: "before", Value: before},
-	}
-	data, err := ledger.Stringify(entry, false)
-	if err != nil {
-		return true
-	}
-	file := filepath.Join(dir, "errors.jsonl")
-	f, err := os.OpenFile(file, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		return true
-	}
-	_, err = f.Write(append(data, '\n'))
-	_ = f.Close()
-	if err == nil {
-		if data, err := os.ReadFile(file); err == nil && len(data) > 1024*1024 {
-			lines := strings.FieldsFunc(string(data), func(r rune) bool { return r == '\n' })
-			used, first := 0, len(lines)
-			for first > 0 {
-				size := len(lines[first-1]) + 1
-				if first < len(lines) && used+size > len(data)/2 {
-					break
-				}
-				first--
-				used += size
-			}
-			ledgerLogReplace(file, []byte(strings.Join(lines[first:], "\n")+"\n"))
-		}
-	}
-	return true
-}
-
-func ledgerLogReplace(file string, data []byte) {
-	tmp := fmt.Sprintf("%s.tmp-%d", file, os.Getpid())
-	if os.WriteFile(tmp, data, 0600) == nil {
-		_ = os.Rename(tmp, file)
-	}
-	_ = os.Remove(tmp)
 }

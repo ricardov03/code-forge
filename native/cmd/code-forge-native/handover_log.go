@@ -45,6 +45,13 @@ const (
 	hLedgerUnportedSubcommand
 	hLedgerTailFormat
 	hLedgerErrorLog
+	hLedgerRowsFormat
+	hLedgerRunRecord
+	hLedgerGit
+	hLedgerJsValue
+	hLedgerErrorHint
+	hLogsReport
+	hLogsClearPrompt
 	hOpenErrorLog
 	hOpenHelp
 	hOpenUnsupportedFlag
@@ -250,6 +257,13 @@ var handoverReasons = [...]string{
 	hLedgerUnportedSubcommand:  "ledger-unported-subcommand",
 	hLedgerTailFormat:          "ledger-tail-format",
 	hLedgerErrorLog:            "ledger-error-log",
+	hLedgerRowsFormat:          "ledger-rows-format",
+	hLedgerRunRecord:           "ledger-run-record",
+	hLedgerGit:                 "ledger-git",
+	hLedgerJsValue:             "ledger-js-value",
+	hLedgerErrorHint:           "ledger-error-hint",
+	hLogsReport:                "logs-report",
+	hLogsClearPrompt:           "logs-clear-prompt",
 	hOpenErrorLog:              "open-error-log",
 	hOpenHelp:                  "open-help",
 	hOpenUnsupportedFlag:       "open-unsupported-flag",
