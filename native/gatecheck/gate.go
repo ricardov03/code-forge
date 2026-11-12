@@ -87,6 +87,19 @@ func plainValue(v any) bool {
 	return true
 }
 
+// LandThrows is true when Node's closeBlockers throws building the fix line
+// of a late or cap blocker: the row's own file is not text, is truthy and
+// prints with a character Node's command quoting cannot handle, so
+// landCommand calls replaceAll on a value that has none (B590).
+func LandThrows(b Blocker) bool {
+	switch b.Code {
+	case "not_approved", "late_unruled", "review_cap", "autopilot_waiver_invalid":
+	default:
+		return false
+	}
+	return b.Raw != nil && b.Raw.HasFile && !quotableFile(b.Raw.File)
+}
+
 var shellWord = regexp.MustCompile(`^[\w./:@=-]+$`)
 
 // quotableFile: Node's landCommand calls replaceAll on a value that fails

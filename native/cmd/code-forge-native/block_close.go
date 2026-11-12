@@ -324,17 +324,9 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	if record.Get("status") != "active" {
 		return fail(&state.Error{Code: "run-ended", Message: "run " + run + " has ended"})
 	}
-	// Node's checks read only this block's rows; another block's row never
-	// sends the close to Node (B451).
-	mineRows := []gatecheck.Row{}
-	for _, r := range rows {
-		if r["block"] == id {
-			mineRows = append(mineRows, r)
-		}
-	}
-	if !gatecheck.Supported(mineRows) {
-		return fallback(hCloseGatesFormat)
-	}
+	// B590: the close reads object, array and unquotable late and cap
+	// values as Node does (gatecheck prints them in their JavaScript form);
+	// a fix line Node cannot build is Node's own thrown error below.
 	key, err := blockclose.ReadKey(home, run)
 	if err != nil {
 		return fail(err)
@@ -535,10 +527,29 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 		closeRows = append(closeRows, r)
 	}
+	routineIndex := len(checks)
 	if routineGrant != nil {
 		problem := closeRoutineProblem(external, run, id, rows, key, kept, gate, hits)
 		if problem != "" {
 			checks = append(checks, closeCheck{problem, []gatecheck.Blocker{{Code: "close-not-routine", Detail: problem}}})
+		}
+	}
+	// B590: Node prints these warnings each time it loads the gate (loadGate),
+	// unless an earlier check of that closeBlock pass already failed.
+	loadWarnings := func() {
+		if len(reviewed) > 0 && !slices.ContainsFunc(changed, func(file string) bool { return gatecheck.Owns(prefix, entry, file) }) {
+			where, likely := "the workspace", "committed before block open or done in another worktree"
+			if inTree {
+				where = "the worktree " + blockString(blockObject(entry.Get("worktree")).Get("path"))
+				likely = "done outside the block's worktree (in the main checkout or another tree)"
+			}
+			fmt.Fprintf(stderr, "WARN block %s: no owned file differs from the block base in %s, but %d owned file(s) have review rows — the work was likely %s; they are checked at their content in %s\n", id, where, len(reviewed), likely, where)
+		}
+		if !scopeChecked {
+			fmt.Fprintf(stderr, "WARN block %s: opened before code-forge recorded the tree at block open; unowned changes were not checked\n", id)
+		}
+		for _, w := range scopeWarnings {
+			fmt.Fprint(stderr, w)
 		}
 	}
 	event, reason := blockclose.Pin(record, live, statusStart)
@@ -654,16 +665,54 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	var result blockclose.Result
 	if routineGrant != nil {
 		preview := blockclose.Result{Status: "open", Blockers: []gatecheck.Blocker{}}
+		// B590: Node's dry-run preview loads the gate for the review check and
+		// again for the routine-policy check (its last check); each load warns
+		// only while no earlier check of the preview has failed.
+		failed := event != ""
+		for i, check := range checks[:routineIndex] {
+			if i == gateIndex && !failed {
+				loadWarnings()
+			}
+			failed = failed || check.Reason != ""
+		}
+		if !failed {
+			loadWarnings()
+		}
+		// B590: Node's closeBlock dry run joins every failure with "; " (the
+		// pin, then the tamper check, then each failed check, then orphans) and
+		// keeps every blocker; it stops nothing.
+		failures := []string{}
+		if event != "" {
+			failures = append(failures, reason)
+			preview.Blockers = append(preview.Blockers, gatecheck.Blocker{Code: event, Detail: reason})
+			if event != "ledger.tamper" {
+				if why := blockclose.Tamper(run, id, rows, key); why != "" {
+					failures = append(failures, why)
+					preview.Blockers = append(preview.Blockers, gatecheck.Blocker{Code: "ledger.tamper", Detail: why})
+				}
+			}
+		}
 		for _, check := range checks {
-			if preview.Reason == "" && check.Reason != "" {
-				preview.Reason = check.Reason
+			if check.Reason != "" {
+				failures = append(failures, check.Reason)
 			}
 			preview.Blockers = append(preview.Blockers, check.Blockers...)
 		}
-		if event != "" {
-			preview.Reason, preview.Blockers = reason, []gatecheck.Blocker{}
+		orphans, _ := record.Get("orphans").([]any)
+		names := []string{}
+		for _, v := range orphans {
+			file := blockString(v)
+			names = append(names, file)
+			preview.Blockers = append(preview.Blockers, gatecheck.Blocker{Code: "unowned_change", File: file, Detail: "orphan in run registry: " + file})
 		}
+		if len(names) > 0 {
+			failures = append(failures, "orphans: "+strings.Join(names, ", "))
+		}
+		preview.Reason = strings.Join(failures, "; ")
 		if preview.Reason != "" {
+			if closeLandThrows(preview.Blockers, stderr) {
+				return 1
+			}
 			blockers := closeBlockersJSON(preview.Blockers, id, run, flags, entry)
 			if flags["json"] == true {
 				out := ledger.Object{{Key: "block", Value: id}, {Key: "ok", Value: false}, {Key: "reason", Value: preview.Reason}, {Key: "blockers", Value: blockers}}
@@ -709,19 +758,11 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			fmt.Fprintf(stderr, "WARN block %s: no coder transcript found (--transcript, run record, .code-forge/runs/%s/%s.log); the transcript grep did not run\n", id, run, id)
 		}
 		if !collectOnly {
-			if len(reviewed) > 0 && !slices.ContainsFunc(changed, func(file string) bool { return gatecheck.Owns(prefix, entry, file) }) {
-				where, likely := "the workspace", "committed before block open or done in another worktree"
-				if inTree {
-					where = "the worktree " + blockString(blockObject(entry.Get("worktree")).Get("path"))
-					likely = "done outside the block's worktree (in the main checkout or another tree)"
-				}
-				fmt.Fprintf(stderr, "WARN block %s: no owned file differs from the block base in %s, but %d owned file(s) have review rows — the work was likely %s; they are checked at their content in %s\n", id, where, len(reviewed), likely, where)
-			}
-			if !scopeChecked {
-				fmt.Fprintf(stderr, "WARN block %s: opened before code-forge recorded the tree at block open; unowned changes were not checked\n", id)
-			}
-			for _, w := range scopeWarnings {
-				fmt.Fprint(stderr, w)
+			loadWarnings()
+			if routineGrant != nil {
+				// B590: the real pass's routine-policy check loads the gate
+				// again (loadGate({readOnly: true})) after the passed review.
+				loadWarnings()
 			}
 		}
 		result = blockclose.Result{Status: "open", Blockers: []gatecheck.Blocker{}}
@@ -749,6 +790,9 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 	}
 	jsonFlag := flags["json"] == true
+	if closeLandThrows(result.Blockers, stderr) {
+		return 1
+	}
 	blockers := closeBlockersJSON(result.Blockers, id, run, flags, entry)
 	if !result.OK && !jsonFlag {
 		for _, b := range blockers {
@@ -1460,6 +1504,20 @@ func closeDash(v any) any {
 	}
 	return v
 }
+
+// closeLandThrows prints Node's error when closeBlockers throws building a
+// late or cap fix line (landCommand on a file that is not text); Node's
+// refused close wrote nothing and the command exits 1 (B590).
+func closeLandThrows(problems []gatecheck.Blocker, stderr io.Writer) bool {
+	for _, p := range problems {
+		if gatecheck.LandThrows(p) {
+			fmt.Fprintln(stderr, "block close: arg.replaceAll is not a function")
+			return true
+		}
+	}
+	return false
+}
+
 func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[string]any, entry ledger.Object) []any {
 	out := []any{}
 	seen := map[string]bool{}

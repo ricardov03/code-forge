@@ -15,7 +15,7 @@ import (
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
-var transcriptTokens = regexp.MustCompile(">>?|[^\\s\\x0b'\"`;|&(),{}\\[\\]>]+")
+var transcriptTokens = regexp.MustCompile(">>?|[^" + jsSpaceClass + "'\"`;|&(),{}\\[\\]>]+")
 
 // Transcript handles the plain-text grep, Claude Code JSONL logs and Codex exec --json logs with
 // Node's list order and hit rules: the git/gh/rm rules, the production marker,
@@ -83,10 +83,8 @@ func transcriptLines(text string, fn func(lineNo int, scans []transcriptScan)) b
 		}
 		if !isCodex {
 			codex = nil
-			// Plain text is split on JavaScript whitespace.
-			if !transcriptJSSafe(text) {
-				return false
-			}
+			// Plain text is split on JavaScript whitespace (jsSpaceClass,
+			// jsSpaceAt; B590).
 		}
 	}
 	type scanned struct {
@@ -261,9 +259,6 @@ func codexLines(lines []string) (out []*codexLine, isCodex, ok bool) {
 		switch kind {
 		case "command_execution":
 			if command, isStr := jsonString(item["command"]); isStr {
-				if !transcriptJSSafe(command) {
-					return nil, false, false
-				}
 				l.command = transcriptCommandText(command, true)
 				l.path, l.words = transcriptPathText(command)
 			} else {
@@ -400,8 +395,8 @@ func marshalOrdered(v any) ([]byte, error) {
 
 var (
 	reviewsWritePaths = []*regexp.Regexp{
-		regexp.MustCompile(`(?:^|[/=:\s\x0b'"])` + regexp.QuoteMeta(".code-forge/reviews") + `(?:/|$|[\s\x0b'";)])`),
-		regexp.MustCompile(`(?:^|[/=:\s\x0b'"])` + regexp.QuoteMeta(".code-forge/queue/") + `[^/\s\x0b]*` + regexp.QuoteMeta(".done") + `(?:/|$|[\s\x0b'";)])`),
+		regexp.MustCompile(`(?:^|[/=:\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}'"])` + regexp.QuoteMeta(".code-forge/reviews") + `(?:/|$|[\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}'";)])`),
+		regexp.MustCompile(`(?:^|[/=:\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}'"])` + regexp.QuoteMeta(".code-forge/queue/") + `[^/\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]*` + regexp.QuoteMeta(".done") + `(?:/|$|[\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}'";)])`),
 	}
 	writeVerbs        = []string{"cp", "mv", "tee", "touch", "rm", "ln", "install", "truncate", "dd", "rsync", "chmod", "chown", "unlink", "mkdir", "rmdir", ">", ">>", "Write", "Edit", "MultiEdit", "NotebookEdit"}
 	writeWrappers     = []string{"sudo", "env", "xargs", "nice", "timeout", "command", "nohup"}
@@ -464,21 +459,6 @@ func isWriteCommand(argv []string) bool {
 		}
 	}
 	return false
-}
-
-// transcriptJSSafe: no rune JavaScript's \s treats as whitespace and Go's does not (and no U+0085,
-// which Go trims and JavaScript does not), so both split the text into the same tokens.
-func transcriptJSSafe(text string) bool {
-	for _, r := range text {
-		if r < 0x80 {
-			continue
-		}
-		switch {
-		case r == 0x85, r == 0xa0, r == 0x1680, r >= 0x2000 && r <= 0x200a, r == 0x2028, r == 0x2029, r == 0x202f, r == 0x205f, r == 0x3000, r == 0xfeff:
-			return false
-		}
-	}
-	return true
 }
 
 var transcriptOrder = []string{"gh-pr-ready", "gh-pr-merge", "gh-pr-close", "gh-pr-base-retarget", "git-push-force", "git-reset-hard", "git-checkout-discard", "git-restore", "git-clean", "git-stash", "git-branch-force-delete", "git-branch-force-delete-long", "git-rm", "rm-rf", "production-marker", "code-forge-runs-access", "code-forge-worker-from-coder", "code-forge-reviews-write",
@@ -734,8 +714,8 @@ func newRunsMatcher(home string) runsMatcher {
 	homes := strings.Join([]string{"~", `\$HOME`, `\$\{HOME\}`, regexp.QuoteMeta(home)}, "|")
 	return runsMatcher{
 		enabled:  true,
-		absolute: regexp.MustCompile(`(?:^|[=:\s\x0b'"])(?:` + homes + `)/` + glob + `(?:/|$|[\s\x0b'";)])`),
-		relative: regexp.MustCompile(`(?:^|[=:(\s\x0b'"])(?:\./)?` + glob + `(?:/|$|[\s\x0b'";)])`),
+		absolute: regexp.MustCompile(`(?:^|[=:\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}'"])(?:` + homes + `)/` + glob + `(?:/|$|[\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}'";)])`),
+		relative: regexp.MustCompile(`(?:^|[=:(\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}'"])(?:\./)?` + glob + `(?:/|$|[\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}'";)])`),
 	}
 }
 
@@ -785,7 +765,7 @@ func claudeEvents(lines []string) ([]*claudeEvent, bool) {
 	first := ""
 	seen := 0
 	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
+		trimmed := jsTrim(line)
 		if trimmed == "" {
 			continue
 		}
@@ -1053,7 +1033,7 @@ func jsNumber(f float64) string {
 }
 
 func jsQuote(b *strings.Builder, s string) bool {
-	if !utf8.ValidString(s) || !transcriptJSSafe(s) {
+	if !utf8.ValidString(s) {
 		return false
 	}
 	b.WriteByte('"')
@@ -1086,8 +1066,38 @@ func jsQuote(b *strings.Builder, s string) bool {
 	return true
 }
 
-func shellSpace(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r'
+// jsSpaceClass is JavaScript's \s as a Go character-class body (Go's \s
+// lacks \v and the Unicode spaces); B590.
+const jsSpaceClass = `\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}`
+
+// jsSpaceAt is the byte width of the JavaScript whitespace character at
+// s[i] (/\s/ on that character), or 0 (B590).
+func jsSpaceAt(s string, i int) int {
+	c := s[i]
+	if c < 0x80 {
+		if c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r' {
+			return 1
+		}
+		return 0
+	}
+	r, w := utf8.DecodeRuneInString(s[i:])
+	if jsSpaceRune(r) {
+		return w
+	}
+	return 0
+}
+
+func jsSpaceRune(r rune) bool {
+	switch {
+	case r == ' ', r >= '\t' && r <= '\r', r == 0xa0, r == 0x1680, r >= 0x2000 && r <= 0x200a, r == 0x2028, r == 0x2029, r == 0x202f, r == 0x205f, r == 0x3000, r == 0xfeff:
+		return true
+	}
+	return false
+}
+
+// jsFields is s.split(/\s+/).filter(Boolean).
+func jsFields(s string) []string {
+	return strings.FieldsFunc(s, jsSpaceRune)
 }
 
 var (
@@ -1195,7 +1205,7 @@ func transcriptPathText(command string) (string, []string) {
 						if writesHeredoc(doc.cmd) && !(doc.expands && substitutes(body)) {
 							inert = append(inert, span{start, i})
 						} else {
-							bodyWords = append(bodyWords, strings.Fields(body)...)
+							bodyWords = append(bodyWords, jsFields(body)...)
 						}
 						i = min(end+1, n)
 						if end == n {
@@ -1216,8 +1226,8 @@ func transcriptPathText(command string) (string, []string) {
 			heredocs = nil
 			continue
 		}
-		if shellSpace(ch) {
-			i++
+		if w := jsSpaceAt(command, i); w > 0 {
+			i += w
 			continue
 		}
 		if ch == '#' {
@@ -1270,7 +1280,7 @@ func transcriptPathText(command string) (string, []string) {
 		var parts strings.Builder
 		quotes := 0
 		unquoted, escaped, subst := false, false, false
-		for i < n && !shellSpace(command[i]) && strings.IndexByte(";|&()<>", command[i]) < 0 {
+		for i < n && jsSpaceAt(command, i) == 0 && strings.IndexByte(";|&()<>", command[i]) < 0 {
 			c := command[i]
 			i++
 			if c == '\'' || c == '"' {
@@ -1443,12 +1453,12 @@ var CoderRules = []Rule{
 }
 
 var (
-	shellWrapperRe   = regexp.MustCompile(`^[\s\x0b]*(?:[^\s\x0b'"\;|&()<>` + "`" + `$]+/)?(?:sh|bash|zsh|dash|ksh)(?:[ \t]+-[li]+)*[ \t]+-[li]*c[ \t]+(['"])`)
+	shellWrapperRe   = regexp.MustCompile(`^[\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]*(?:[^\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}'"\;|&()<>` + "`" + `$]+/)?(?:sh|bash|zsh|dash|ksh)(?:[ \t]+-[li]+)*[ \t]+-[li]*c[ \t]+(['"])`)
 	spawnWordRe      = regexp.MustCompile(`\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|system|popen|subprocess|child_process|Popen)\b`)
 	interpreterRe    = regexp.MustCompile(`^(node|python|python3|ruby|perl)(?:\d+(?:\.\d+)*)?$`)
 	rubyPerlSpawnRe  = regexp.MustCompile("`|\\$\\(|%x")
 	perlQxRe         = regexp.MustCompile(`\bqx\b`)
-	dynamicLookupRe  = regexp.MustCompile(`\b(?:getattr|__import__|importlib|eval|exec|compile|globals|locals|vars|__builtins__|operator[\s\x0b]*\.[\s\x0b]*attrgetter|setattr)\b`)
+	dynamicLookupRe  = regexp.MustCompile(`\b(?:getattr|__import__|importlib|eval|exec|compile|globals|locals|vars|__builtins__|operator[\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]*\.[\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]*attrgetter|setattr)\b`)
 	pyStringPrefixRe = regexp.MustCompile(`^(?i:r|u|b|br|rb)$`)
 	envAssignRe      = regexp.MustCompile(`^[A-Za-z_][A-Za-z_0-9]*=`)
 )
@@ -1475,8 +1485,8 @@ func pythonSpawnText(body string) string {
 		jsonArgument := false
 		if strings.HasPrefix(body[i:], "json.loads(") && (i == 0 || !(wordByte(body[i-1]) || body[i-1] == '.')) {
 			i += len("json.loads(")
-			for i < len(body) && shellSpace(body[i]) {
-				i++
+			for i < len(body) && jsSpaceAt(body, i) > 0 {
+				i += jsSpaceAt(body, i)
 			}
 			jsonArgument = true
 		}
@@ -1522,8 +1532,8 @@ func pythonSpawnText(body string) string {
 			continue
 		}
 		next := i
-		for next < len(body) && shellSpace(body[next]) {
-			next++
+		for next < len(body) && jsSpaceAt(body, next) > 0 {
+			next += jsSpaceAt(body, next)
 		}
 		if next >= len(body) || body[next] != ')' {
 			continue
@@ -1569,8 +1579,8 @@ func hasSpawn(body, language string, shellExpands bool) bool {
 		language == "perl" && perlQxRe.MatchString(body)
 }
 
-func shellBreak(c byte) bool {
-	return shellSpace(c) || strings.IndexByte(";|&()<>", c) >= 0
+func shellBreak(s string, i int) bool {
+	return jsSpaceAt(s, i) > 0 || strings.IndexByte(";|&()<>", s[i]) >= 0
 }
 
 // transcriptCommandText is Node's transcriptCommandText: one sh/bash -c wrapper decoded, and
@@ -1596,7 +1606,7 @@ func transcriptCommandText(command string, unwrapShell bool) string {
 						i++
 						continue
 					}
-					if quote != open || strings.TrimSpace(command[i:]) != "" {
+					if quote != open || jsTrim(command[i:]) != "" {
 						return command
 					}
 					return command[:m[1]-1] + transcriptCommandText(parts.String(), false)
@@ -1671,8 +1681,8 @@ func transcriptCommandText(command string, unwrapShell bool) string {
 			state, evalNext, redirect = "command", false, ""
 			continue
 		}
-		if shellSpace(char) {
-			i++
+		if w := jsSpaceAt(command, i); w > 0 {
+			i += w
 			continue
 		}
 		if char == '#' {
@@ -1709,7 +1719,7 @@ func transcriptCommandText(command string, unwrapShell bool) string {
 		var parts strings.Builder
 		quotes, quote := 0, byte(0)
 		escaped, unquoted := false, false
-		for i < len(command) && !shellBreak(command[i]) {
+		for i < len(command) && !shellBreak(command, i) {
 			next := command[i]
 			i++
 			if next == '\'' || next == '"' {
