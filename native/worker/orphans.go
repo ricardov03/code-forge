@@ -15,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/ricardov03/code-forge/native/procguard"
 )
 
 // ProcInfo is one `ps` row.
@@ -167,7 +169,7 @@ func (s *OrphanSweep) defaults() {
 		s.Alive = IsAlive
 	}
 	if s.Kill == nil {
-		s.Kill = func(pid int, sig syscall.Signal) error { return syscall.Kill(pid, sig) }
+		s.Kill = procguard.Kill
 	}
 	if s.Self == 0 {
 		s.Self, s.Parent, s.UID = os.Getpid(), os.Getppid(), os.Getuid()

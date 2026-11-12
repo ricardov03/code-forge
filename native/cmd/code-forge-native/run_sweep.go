@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/procguard"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -347,7 +348,7 @@ func runWorkerRunEnded(home, runID string) bool {
 // Seams for tests: signals, process groups, the clock and the grace between
 // SIGTERM and SIGKILL (reaper.mjs DEFAULT_GRACE_MS, POLL_MS).
 var (
-	runSignal        = func(pid int, sig syscall.Signal) error { return syscall.Kill(pid, sig) }
+	runSignal        = procguard.Kill
 	runGroupMembers  = runPsGroupMembers
 	runSweepNow      = time.Now
 	runSweepSleep    = time.Sleep

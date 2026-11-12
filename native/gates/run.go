@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/procguard"
 	"io"
 	"math"
 	"os"
@@ -939,7 +940,7 @@ func stopRemaining(pgid int) {
 	sent := map[int]string{}
 	for pid, start := range members {
 		if alive(pid, start) {
-			_ = syscall.Kill(pid, syscall.SIGTERM)
+			_ = procguard.Kill(pid, syscall.SIGTERM)
 			sent[pid] = start
 		}
 	}
@@ -958,7 +959,7 @@ func stopRemaining(pgid int) {
 	wait(time.Now().Add(2 * time.Second))
 	for pid, start := range sent {
 		if alive(pid, start) {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
+			_ = procguard.Kill(pid, syscall.SIGKILL)
 		}
 	}
 	wait(time.Now().Add(2 * time.Second))

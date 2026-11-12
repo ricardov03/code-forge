@@ -17,6 +17,7 @@ import (
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/procguard"
 	"github.com/ricardov03/code-forge/native/runstatus"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -56,7 +57,7 @@ var (
 		}
 		return filelock.ProcessStartTime(int(pid))
 	}
-	runKill = func(pid int) error { return syscall.Kill(pid, syscall.SIGTERM) }
+	runKill = func(pid int) error { return procguard.Kill(pid, syscall.SIGTERM) }
 )
 
 type runFlags struct {

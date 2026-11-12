@@ -53,7 +53,7 @@ func doctorConfiguredProviders(cfg map[string]any) []string {
 		raw := levels[name]
 		level, ok := raw.(map[string]any)
 		if !ok {
-			if raw != nil && raw != false && raw != "" && raw != float64(0) {
+			if runTruthy(raw) { // JavaScript truthiness: NaN is falsy (B530)
 				add(cfg["provider"]) // a truthy non-mapping has no provider or fallback
 			}
 			continue

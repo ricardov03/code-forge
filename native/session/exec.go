@@ -15,6 +15,7 @@ import (
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/procguard"
 )
 
 // Port of src/util/exec.mjs for one foreground session: argv only (never a
@@ -281,7 +282,7 @@ func stopMembers(pgid int) {
 	if pgid <= 0 || syscall.Kill(-pgid, 0) != nil {
 		return
 	}
-	_ = syscall.Kill(-pgid, syscall.SIGTERM)
+	_ = procguard.Kill(-pgid, syscall.SIGTERM)
 	deadline := time.Now().Add(KillGraceMs * time.Millisecond)
 	for time.Now().Before(deadline) {
 		if syscall.Kill(-pgid, 0) != nil {
@@ -289,7 +290,7 @@ func stopMembers(pgid int) {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	_ = procguard.Kill(-pgid, syscall.SIGKILL)
 }
 
 func msDuration(ms float64) time.Duration {

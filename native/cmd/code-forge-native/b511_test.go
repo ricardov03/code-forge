@@ -29,7 +29,9 @@ func b511BuildNative(t *testing.T) string {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "code-forge-native")
-	cmd := exec.Command("go", "build", "-o", out, ".")
+	// B529: a binary built for a test refuses every signal to a process the
+	// test did not start, even when it runs with an environment of its own.
+	cmd := exec.Command("go", "build", "-ldflags", "-X github.com/ricardov03/code-forge/native/procguard.builtForTest=1", "-o", out, ".")
 	cmd.Dir = pkg
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if text, err := cmd.CombinedOutput(); err != nil {

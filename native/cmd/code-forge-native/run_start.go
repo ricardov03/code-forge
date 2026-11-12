@@ -19,6 +19,7 @@ import (
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/procguard"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -297,7 +298,7 @@ func runLaunchWorker(runID, workspace, binary string) (int, string, error) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if pid != 0 {
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = procguard.Kill(-pid, syscall.SIGKILL)
 	}
 	if other, _ := runLiveWorker(repoRoot, 0, false); other != nil {
 		if run, _ := other.Get("run").(string); run != runID {
