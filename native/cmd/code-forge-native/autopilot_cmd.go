@@ -172,8 +172,10 @@ func runAutopilot(args []string) int {
 			flags, parseErr = autopilotParse(sub, args[1:])
 			if parseErr == nil {
 				var reason handoverReason
+				autopilotRestored, autopilotLate = nil, 0
 				plan, reason = autopilotPlan(home, sub, flags)
 				if plan == nil {
+					autopilotRestoredFirst(home, true)
 					return autopilotHandover(args, reason)
 				}
 			}
@@ -194,7 +196,13 @@ func runAutopilot(args []string) int {
 	case parseErr != nil:
 		code = autopilotReport(o, sub, parseErr)
 	default:
+		if text := autopilotRestoredFirst(home, false); text != "" {
+			o.err(text)
+		}
 		code = plan(o)
+		if reason := autopilotLate; reason != 0 {
+			return autopilotHandover(args, reason) // nothing was written after the restore
+		}
 	}
 	if code != 0 {
 		var message any
@@ -289,16 +297,29 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 	if _, ok := record.Get("workspace").(string); !ok {
 		return nil, hAutopilotRecord
 	}
-	// checkApprovals: an approval whose window is over is restored by Node
-	// (the YAML edit and reload); one that is not due yet changes nothing.
+	// checkApprovals: an approval whose window is over is restored first
+	// (autopilot_restore.go); one that is not due yet changes nothing.
 	switch err := autopilot.Approvals(record, now); {
 	case errors.Is(err, autopilot.ErrApprovalDue):
-		return nil, hAutopilotRestore
+		check, restoreErr, reason := autopilotRestore(home, runID, record, now)
+		if reason != 0 {
+			return nil, reason
+		}
+		autopilotRestored = check
+		if restoreErr != nil {
+			// Node's check throws: no lines, the error only
+			autopilotRestored = &autopilotCheck{runID: runID, keyRead: check.keyRead}
+			return func(o *runOut) int { return autopilotReport(o, sub, restoreErr) }, 0
+		}
+		// the subcommand reads the record the check left
+		if record, err = state.ReadRun(home, runID); err != nil {
+			return nil, hAutopilotRecord
+		}
 	case err != nil:
 		return nil, hAutopilotShape
 	}
 	if sub == "approve" {
-		return autopilotApprovePlan(runID, record, flags, now)
+		return autopilotApprovePlan(home, runID, record, flags, now)
 	}
 	read, err := autopilot.ReadGrant(record, now)
 	if err != nil {

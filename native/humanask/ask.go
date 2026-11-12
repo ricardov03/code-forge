@@ -103,29 +103,16 @@ func Ask(input io.Reader, output io.Writer, message string, options Options) (Re
 		if state == "cancel" {
 			symbol, color = cancel, "31"
 		}
-		// Clack wraps the message with a three-column prefix on every line.
-		width := options.Width - 3
+		// Clack's wrapTextWithPrefix wraps at the terminal width minus the
+		// JS length of the styled guide prefix (gray bar + two spaces), counted
+		// with its color codes.
+		width := options.Width - len([]rune(gray)) - 2
 		if width < 1 {
 			width = 77
 		}
 		lines := []string{}
-		for _, part := range strings.Split(message, "\n") {
-			runes := []rune(part)
-			for len(runes) > width {
-				cut := width
-				for i := width; i > 0; i-- {
-					if runes[i] == ' ' {
-						cut = i
-						break
-					}
-				}
-				lines = append(lines, string(runes[:cut]))
-				runes = runes[cut:]
-				if len(runes) > 0 && runes[0] == ' ' {
-					runes = runes[1:]
-				}
-			}
-			lines = append(lines, string(runes))
+		for _, part := range strings.Split(strings.ReplaceAll(message, "\r\n", "\n"), "\n") {
+			lines = append(lines, wrapHard(part, width)...)
 		}
 		for i := range lines {
 			if i == 0 {
@@ -235,4 +222,55 @@ func Ask(input io.Reader, output io.Writer, message string, options Options) (Re
 			render(frame("active"))
 		}
 	}
+}
+
+// wrapHard is fast-wrap-ansi's exec with {hard: true, trim: false} for text
+// of one-column characters: split on single spaces, keep every space, start a
+// new row when a word does not fit, and cut words longer than a row.
+func wrapHard(text string, columns int) []string {
+	rows := []string{""}
+	rowLength := 0
+	for index, word := range strings.Split(text, " ") {
+		if index != 0 {
+			if rowLength >= columns {
+				rows = append(rows, "")
+				rowLength = 0
+			}
+			rows[len(rows)-1] += " "
+			rowLength++
+		}
+		chars := []rune(word)
+		wordLength := len(chars)
+		if wordLength > columns {
+			remaining := columns - rowLength
+			breaksThisLine := 1 + (wordLength-remaining-1)/columns
+			breaksNextLine := (wordLength - 1) / columns
+			if breaksNextLine < breaksThisLine {
+				rows = append(rows, "")
+			}
+			visible := len([]rune(rows[len(rows)-1]))
+			for i, char := range chars {
+				if visible+1 <= columns {
+					rows[len(rows)-1] += string(char)
+				} else {
+					rows = append(rows, string(char))
+					visible = 0
+				}
+				visible++
+				if visible == columns && i < len(chars)-1 {
+					rows = append(rows, "")
+					visible = 0
+				}
+			}
+			rowLength = len([]rune(rows[len(rows)-1]))
+			continue
+		}
+		if rowLength+wordLength > columns && rowLength > 0 && wordLength > 0 {
+			rows = append(rows, "")
+			rowLength = 0
+		}
+		rows[len(rows)-1] += word
+		rowLength += wordLength
+	}
+	return rows
 }

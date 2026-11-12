@@ -80,13 +80,15 @@ func TestAutopilotVerbQuietApprovals(t *testing.T) {
 	}
 }
 
-// B484: an approval due now (the restore edits .code-forge.yml and reloads
-// the run) and an entry Node reads differently keep their hand-over.
+// B484: an approval due now whose restore edits .code-forge.yml and reloads
+// the active run (B490: autopilot-restore-reload) and an entry Node reads
+// differently keep their hand-over.
 func TestAutopilotVerbApprovalRestoreHandsOver(t *testing.T) {
 	f := newAutopilotFixture(t)
 	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
 	t.Setenv("CODE_FORGE_NATIVE", "1")
-	f.record(t, "r-due", "active", `,"autopilot_approvals":[{"approval_id":"x","status":"active","until":"2026-11-11T10:00:00.000Z"}]`)
+	apWriteConfig(t, f, "review:\n  max_rounds_per_file: 4\n")
+	f.record(t, "r-due", "active", `,"autopilot_approvals":[`+strings.Replace(apApproval("x", "review.max_rounds_per_file", ""), "09:00:00", "10:00:00", 1)+`]`)
 	f.record(t, "r-null", "active", `,"autopilot_approvals":[null]`)
 	f.record(t, "r-odd", "active", `,"autopilot_approvals":[{"approval_id":"x","status":"active","until":"2026-11-11 12:00"}]`)
 	cases := [][]string{{"status", "--run", "r-due"}, {"stop", "--run", "r-due"}, {"status", "--run", "r-null"}, {"status", "--run", "r-odd"}}
@@ -95,7 +97,7 @@ func TestAutopilotVerbApprovalRestoreHandsOver(t *testing.T) {
 			t.Fatalf("%v = %d %q, want hand-over", args, code, out)
 		}
 	}
-	want := []string{"autopilot-restore", "autopilot-restore", "autopilot-shape", "autopilot-shape"}
+	want := []string{"autopilot-restore-reload", "autopilot-restore-reload", "autopilot-shape", "autopilot-shape"}
 	got := apHandoverReasons(t, f)
 	if len(got) != len(want) {
 		t.Fatalf("reasons = %v, want %v", got, want)
@@ -161,7 +163,7 @@ func TestAutopilotVerbApprove(t *testing.T) {
 	if reasons := apHandoverReasons(t, f); len(reasons) != 0 {
 		t.Fatalf("handed over: %v", reasons)
 	}
-	// at a terminal (and for an active approval Node reads differently) Node runs it
+	// an active approval Node reads differently: Node runs it
 	f.record(t, "r-oddkey", "active", `,"autopilot_approvals":[{"approval_id":"apr-1","status":"active","until":"2026-11-11T12:00:00.000Z"}]`)
 	if code, out, _ := autopilotCall(t, "approve", "--run", "r-oddkey", "--key", "review.max_rounds_per_file", "--value", "4", "--until", until); code != 127 || out != "" {
 		t.Fatalf("odd approval key = %d %q, want hand-over", code, out)
@@ -174,7 +176,9 @@ func TestAutopilotVerbApprove(t *testing.T) {
 	if code, _, errText := autopilotCall(t, "approve", "--run", "r-end", "--key", "x.y", "--value", "4", "--until", until); code != 1 || errText != "autopilot approve: run r-end has ended\n" {
 		t.Fatalf("terminal ended run = %d %q", code, errText)
 	}
-	if reasons := apHandoverReasons(t, f); len(reasons) != 2 || reasons[0] != "autopilot-shape" || reasons[1] != "autopilot-approve" {
+	// B490: with no .code-forge.yml Go asks the owner itself; a stdout that
+	// is not a terminal leaves the prompt to Node
+	if reasons := apHandoverReasons(t, f); len(reasons) != 2 || reasons[0] != "autopilot-shape" || reasons[1] != "autopilot-prompt" {
 		t.Fatalf("reasons = %v", reasons)
 	}
 }

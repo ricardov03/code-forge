@@ -158,6 +158,20 @@ func Approvals(record ledger.Object, now time.Time) error {
 	return nil
 }
 
+// ApprovalDue is checkApprovals' due test for one entry: an active approval
+// whose until is at or before now. ok is false for an until Go does not date
+// the way Date.parse does (a missing or null until is never due).
+func ApprovalDue(a ledger.Object, now time.Time) (due, ok bool) {
+	if a.Get("status") != "active" || a.Get("until") == nil {
+		return false, true
+	}
+	t, ok := timestamp(a.Get("until"))
+	if !ok {
+		return false, false
+	}
+	return !now.Before(t), true
+}
+
 // ReadGrant is Read without the approvals check: Node's checkExpiry never
 // reads approvals (checkApprovals ran once, at the start of the command).
 func ReadGrant(record ledger.Object, now time.Time) (Result, error) {

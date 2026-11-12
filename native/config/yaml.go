@@ -535,3 +535,10 @@ func flowError(open rune, line, column int) error {
 	}
 	return yamlError("BAD_INDENT", "Flow "+kind+" in block collection must be sufficiently indented and end with a "+close, line, column)
 }
+
+// ParseYAML is the yaml package's parse() (Node's loadProjectConfig read):
+// the document's JavaScript value, non-finite numbers kept as they are. A
+// nil value is an empty document.
+func ParseYAML(source string) (any, error) {
+	return parseYAML(source)
+}

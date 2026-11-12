@@ -349,7 +349,8 @@ func TestAutopilotVerbHandsOver(t *testing.T) {
 	t.Setenv("CODE_FORGE_NATIVE", "1")
 	f.record(t, "r-a", "active", "")
 	f.record(t, "r-nolink", "active", grantJSON("active", "2026-11-11T12:30:00.000Z", "null", "null"))
-	f.record(t, "r-appr", "active", `,"autopilot_approvals":[{"approval_id":"x","status":"active","until":"2026-11-11T09:00:00.000Z"}]`)
+	apWriteConfig(t, f, "review:\n  max_rounds_per_file: 4\n")
+	f.record(t, "r-appr", "active", `,"autopilot_approvals":[`+apApproval("x", "review.max_rounds_per_file", "")+`]`)
 	f.record(t, "r-shape", "active", `,"autopilot":{"grant_id":"g","status":"weird"}`)
 	if err := os.WriteFile(filepath.Join(f.home, ".code-forge", "runs", "r-bad.json"), []byte("{not json"), 0600); err != nil {
 		t.Fatal(err)
@@ -362,7 +363,7 @@ func TestAutopilotVerbHandsOver(t *testing.T) {
 	}{
 		{[]string{"ask", "--run", "r-nolink", "--scope", "round:extra", "--question", "q"}, "autopilot-ask"},
 		{[]string{"waive", "--run", "r-a"}, "autopilot-action"},
-		{[]string{"status", "--run", "r-appr"}, "autopilot-restore"},
+		{[]string{"status", "--run", "r-appr"}, "autopilot-restore-reload"},
 		{[]string{"start", "--run", "r-shape", "--yes"}, "autopilot-shape"},
 		{[]string{"stop", "--run", "r-bad"}, "autopilot-record"},
 		{[]string{"status", "--run", "r-ledger"}, "autopilot-ledger"},
