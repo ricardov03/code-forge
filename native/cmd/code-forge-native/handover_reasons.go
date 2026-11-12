@@ -302,6 +302,11 @@ const (
 	hInitConfigSyntax
 	hInitAnswers
 	hInitOutput
+	hDoctorFullInvalidConfig
+	hDoctorFullLiveWorker
+	hDoctorNativeBinary
+	hDoctorWorkerRegistry
+	hDoctorReviewStateRecord
 )
 
 var handoverReasons = [...]string{
@@ -598,4 +603,9 @@ var handoverReasons = [...]string{
 	hInitConfigSyntax:          "init-config-syntax",
 	hInitAnswers:               "init-answers",
 	hInitOutput:                "init-output",
+	hDoctorFullInvalidConfig:   "doctor-full-invalid-config",
+	hDoctorFullLiveWorker:      "doctor-full-live-worker",
+	hDoctorNativeBinary:        "doctor-native-binary",
+	hDoctorWorkerRegistry:      "doctor-worker-registry",
+	hDoctorReviewStateRecord:   "doctor-review-state-record",
 }
