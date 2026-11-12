@@ -416,3 +416,8 @@ status and block waits with Node and check fallback when the daemon fails.
 
 `parity-gates-custom` waits for all fixture files to be written before starting Go.
 This prevents random failures under load from reading a partial fixture.
+
+New hand-over reasons go at the end only: one constant at the end of the
+`const` block and one entry at the end of the `handoverReasons` array in
+`native/cmd/code-forge-native/handover_log.go`. `.gitattributes` merges that
+file with `merge=union`, so two such appends land without a conflict (B510).
