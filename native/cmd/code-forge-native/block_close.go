@@ -410,6 +410,13 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		return fallback(hCloseReportRedaction)
 	}
 	checks, closeRows := []closeCheck{}, []ledger.Object{}
+	// B493: Node's B64b hook check runs first: a coder transcript that runs the
+	// on_block_end hook's command refuses the close and leaves no row.
+	if check, ok := closeHookCheck(cfg, transcript); !ok {
+		return fallback(hReadyHookCommand)
+	} else if check.Reason != "" {
+		checks = append(checks, check)
+	}
 	if external != "" {
 		closeRows = append(closeRows, ledger.Object{{Key: "event", Value: "gate.reviews_waived"}, {Key: "block", Value: id}, {Key: "by", Value: "config"}, {Key: "reviewer", Value: external}})
 	}

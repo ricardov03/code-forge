@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -244,4 +246,128 @@ func TestB493CloseAutoClaimWithAutopilotGrant(t *testing.T) {
 			t.Fatalf("exit=%d reason=%v\nstdout %q\nstderr %q", code, reason, out, errs)
 		}
 	})
+}
+
+// b493HookFixture is a reviewed block whose run config sets hooks.on_block_end
+// to argv; the coder transcript is text.
+func b493HookFixture(t *testing.T, argv []any, text string) *closeReviewFixture {
+	t.Helper()
+	f := newCloseReviewFixture(t, 1)
+	b493Approve(t, f)
+	b493SetConfig(t, f, ledger.Object{{Key: "review", Value: ledger.Object{{Key: "close_wait_s", Value: 1}}},
+		{Key: "context", Value: ledger.Object{{Key: "require_coder_tests", Value: true}}},
+		{Key: "hooks", Value: ledger.Object{{Key: "on_block_end", Value: ledger.Object{{Key: "argv", Value: argv}}}}}})
+	if err := os.WriteFile(f.transcript, []byte(text), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+// b493Ready runs `block ready` through the public router in a fresh process
+// (TestGatesProcess) with Node unavailable: a hand-over cannot pass.
+func b493Ready(t *testing.T, f *closeReviewFixture, extra ...string) (int, string, string) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(append([]string{"block", "ready", "B1", "--run", "r-close-fixture", "--report", f.report, "--transcript", f.transcript}, extra...))
+	cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
+	cmd.Dir = f.top
+	cmd.Env = append(os.Environ(), "HOME="+f.home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_HANDOVER_LOG=0", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_ARGS="+string(encoded))
+	var out, errOut strings.Builder
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	code := 0
+	if err := cmd.Run(); err != nil {
+		e, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatal(err)
+		}
+		code = e.ExitCode()
+	}
+	return code, out.String(), errOut.String()
+}
+
+// B493: a coder transcript that runs the on_block_end hook's command is Node's
+// B64b rule_break (first close check) in Go's `block ready` and `block close`;
+// the bytes are Node's (CODE_FORGE_NATIVE=0 on the same fixtures). Before B493
+// ready handed over and close skipped the check and closed the block.
+func TestB493HookCommandInTranscript(t *testing.T) {
+	fix := func(home string) string {
+		return "code-forge block close B1 --run r-close-fixture --decide --reason '<reason>' --report " + home + "/report.txt --transcript " + home + "/transcript.txt"
+	}
+	cases := []struct {
+		name string
+		argv []any
+		text string
+		line string // "" when the block is ready and closes
+	}{
+		{"hit", []any{"/usr/local/bin/notify-hook"}, "$ ls\n$ notify-hook --x\nok\n", "2"},
+		{"mentioned", []any{"/usr/local/bin/notify-hook"}, "$ echo notify-hook is mentioned\n", "1"},
+		{"quoted", []any{"/usr/local/bin/notify-hook"}, "$ 'notify-hook' now\n", "1"},
+		{"npx exe", []any{"/usr/local/bin/notify-hook"}, "$ npx -y notify-hook.EXE\n", "1"},
+		{"first argument", []any{"notify-hook", "--done"}, "$ notify-hook --done\n$ notify-hook other\n", "1"},
+		{"git global options", []any{"git", " push "}, "$ git status\n$ git -C /x --no-pager push origin\n", "2"},
+		{"other argument", []any{"notify-hook", "--done"}, "$ notify-hook other --done\n", ""},
+		{"escape", []any{"/usr/local/bin/notify-hook"}, "$ notify\\x2dhook\n", ""},
+		{"clean", []any{"/usr/local/bin/notify-hook"}, "$ ls\n$ go test ./...\n", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := b493HookFixture(t, c.argv, c.text)
+			detail := "transcript line " + c.line + ": code-forge-on-block-end-hook"
+			code, out, errs := b493Ready(t, f)
+			want, wantErr, wantCode := "rule_break - "+detail+"\n  fix: "+fix(f.home)+"\nblock B1 not ready: 1 blockers\n", "", 1
+			if c.line == "" {
+				want, wantErr, wantCode = "block B1 ready\n", b493OpenedWarn, 0
+			}
+			if code != wantCode || out != want || errs != wantErr {
+				t.Fatalf("ready: exit=%d\nout=%q\nerr=%q", code, out, errs)
+			}
+			code, out, _ = b493Ready(t, f, "--json")
+			wantJSON := `{"block":"B1","ready":true,"blockers":[]}` + "\n"
+			if c.line != "" {
+				wantJSON = `{"block":"B1","ready":false,"blockers":[{"code":"rule_break","file":null,"detail":"` + detail + `","fix":"` + fix(f.home) + `"}]}` + "\n"
+			}
+			if code != wantCode || out != wantJSON {
+				t.Fatalf("ready --json: exit=%d\nout=%q", code, out)
+			}
+			before := b493LedgerLines(t, f)
+			code, out, errs, reason := b493Close(f, "--json")
+			if c.line == "" {
+				if reason != 0 || code != 0 || !strings.Contains(out, `"status":"closed"`) {
+					t.Fatalf("close: exit=%d reason=%v\nout=%q\nerr=%q", code, reason, out, errs)
+				}
+				return
+			}
+			want = `{"block":"B1","ok":false,"reason":"rule_break ` + detail + `","blockers":[{"code":"rule_break","file":null,"detail":"` + detail + `","fix":"` + fix(f.home) + `"}]}` + "\n"
+			if reason != 0 || code != 1 || out != want || errs != "block B1 open: rule_break "+detail+"\n" {
+				t.Fatalf("close: exit=%d reason=%v\nout=%q\nerr=%q", code, reason, out, errs)
+			}
+			if after := b493LedgerLines(t, f); after != before {
+				t.Fatalf("close refusal wrote rows:\n%s", after[len(before):])
+			}
+			code, out, _, _ = b493Close(f)
+			if code != 1 || out != "rule_break - "+detail+"\n  fix: "+fix(f.home)+"\n" {
+				t.Fatalf("close text: exit=%d out=%q", code, out)
+			}
+		})
+	}
+}
+
+func b493LedgerLines(t *testing.T, f *closeReviewFixture) string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(f.home, ".code-forge/ledger/*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := ""
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		all += string(data)
+	}
+	return all
 }

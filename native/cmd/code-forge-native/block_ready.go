@@ -25,33 +25,6 @@ func init() { blockSubs["ready"] = runBlockReady }
 // readyNow is the clock of the routine-close preview (a test seam).
 var readyNow = time.Now
 
-// readyHookMayHit is false only when Node's hook entry cannot match any line
-// of the transcript: no entry (hookForbidden's floor) or the command name is
-// absent even after quotes and backslashes are dropped, with no escape that
-// could spell it.
-func readyHookMayHit(argv []string, transcript string) bool {
-	first := strings.TrimSpace(argv[0])
-	if first == "" || strings.HasSuffix(first, "/") || strings.HasSuffix(first, "\\") {
-		return false
-	}
-	name := first
-	if i := strings.LastIndex(name, "/"); i >= 0 {
-		name = name[i+1:]
-	}
-	if len(name) >= 4 && strings.EqualFold(name[len(name)-4:], ".exe") {
-		name = name[:len(name)-4]
-	}
-	name = strings.TrimSpace(name)
-	if name == "" || name == "." || name == ".." || transcript == "" {
-		return false
-	}
-	if regexp.MustCompile(`\\[uUxX0-7]`).MatchString(transcript) {
-		return true
-	}
-	plain := strings.NewReplacer("'", "", "\"", "", "\\", "", "`", "").Replace(transcript)
-	return strings.Contains(strings.ToLower(plain), strings.ToLower(name))
-}
-
 func runBlockReady(args []string) int {
 	// B392: --preflight lists the close blockers a gate cannot fix, before any gate.
 	if i := slices.Index(args, "--preflight"); i >= 0 {
@@ -126,10 +99,9 @@ func runBlockReady(args []string) int {
 	if !supported {
 		return p.fallback()
 	}
-	// B449: Node's hook check (rule_break on the on_block_end command) adds a
-	// blocker only for a transcript that names the hook's command; such a
-	// transcript stays with Node.
-	if hook := blockend.FromConfig(cfg); hook != nil && readyHookMayHit(hook.Argv, transcript) {
+	// B493: Node's B64b hook check is the first close check.
+	hookCheck, ok := closeHookCheck(cfg, transcript)
+	if !ok {
 		return p.fallback()
 	}
 	highPaths, ok := closeHighPaths(workspace, base)
@@ -184,6 +156,7 @@ func runBlockReady(args []string) int {
 		reportErr = e
 		reportText = string(data)
 	}
+	blockers = append(blockers, hookCheck.Blockers...)
 	if blockMap(cfg["context"])["require_coder_tests"] == true {
 		_, why, supported := closeCoderTests(p.flags["report"], p.id, []byte(reportText), reportErr)
 		if !supported {
@@ -312,4 +285,19 @@ func runBlockReady(args []string) int {
 	}
 	nativeVerbFailure("block", "", append([]string{"ready"}, args...), 1, nil, before)
 	return 1
+}
+
+// closeHookCheck is Node's B64b extra check: with hooks.on_block_end set, the
+// transcript lines that run the hook's command are rule_break blockers; the
+// reason names the first. ok false: text Go cannot scan like Node.
+func closeHookCheck(cfg map[string]any, transcript string) (closeCheck, bool) {
+	hook := blockend.FromConfig(cfg)
+	if hook == nil {
+		return closeCheck{}, true
+	}
+	hits, ok := gatecheck.HookTranscript(hook.Argv, transcript)
+	if !ok || len(hits) == 0 {
+		return closeCheck{}, ok
+	}
+	return closeCheck{"rule_break " + hits[0].Detail, hits}, true
 }

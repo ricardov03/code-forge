@@ -24,8 +24,53 @@ var transcriptTokens = regexp.MustCompile(">>?|[^\\s\\x0b'\"`;|&(),{}\\[\\]>]+")
 // differently (JavaScript-only whitespace) stays with Node's scanner. Returning unsupported happens
 // before any close warning is published.
 func Transcript(text string) ([]Blocker, bool) {
-	if !utf8.ValidString(text) {
+	runs := runsMatcher{}
+	if strings.Contains(text, ".code-forge") && utf8.ValidString(text) {
+		home := os.Getenv("HOME")
+		if home == "" {
+			return nil, false
+		}
+		runs = newRunsMatcher(home)
+	}
+	hits := []Blocker{}
+	ok := transcriptLines(text, func(lineNo int, scans []transcriptScan) {
+		ids := map[string]bool{}
+		for _, s := range scans {
+			for id := range transcriptCommandIDs(s.command) {
+				ids[id] = true
+			}
+			if runs.enabled && (runs.anyToken(s.path) || runs.anyRelative(s.words)) {
+				ids["code-forge-runs-access"] = true
+			}
+			if reviewsWrite(s.path) {
+				ids["code-forge-reviews-write"] = true
+			}
+		}
+		for _, id := range transcriptOrder {
+			if ids[id] {
+				hits = append(hits, Blocker{Code: "rule_break", Detail: "transcript line " + strconv.Itoa(lineNo+1) + ": " + id})
+			}
+		}
+	})
+	if !ok {
 		return nil, false
+	}
+	return hits, true
+}
+
+// transcriptScan is one text Node's scanTranscript reads on a line: the command text, the text
+// path rules scan and the words where a home-relative spelling counts.
+type transcriptScan struct {
+	command, path string
+	words         []string
+}
+
+// transcriptLines walks the transcript in Node's scanTranscript line modes (plain text with its
+// unescaped variant, Claude Code JSONL, Codex exec --json) and hands each scanned line's texts to
+// fn. false: text Go cannot read or split exactly like Node.
+func transcriptLines(text string, fn func(lineNo int, scans []transcriptScan)) bool {
+	if !utf8.ValidString(text) {
+		return false
 	}
 	lines := strings.Split(text, "\n")
 	events, claude := claudeEvents(lines)
@@ -34,38 +79,22 @@ func Transcript(text string) ([]Blocker, bool) {
 		var isCodex, ok bool
 		codex, isCodex, ok = codexLines(lines)
 		if !ok {
-			return nil, false
+			return false
 		}
 		if !isCodex {
 			codex = nil
 			// Plain text is split on JavaScript whitespace.
 			if !transcriptJSSafe(text) {
-				return nil, false
+				return false
 			}
 		}
 	}
-	runs := runsMatcher{}
-	if strings.Contains(text, ".code-forge") {
-		home := os.Getenv("HOME")
-		if home == "" {
-			return nil, false
-		}
-		runs = newRunsMatcher(home)
+	type scanned struct {
+		line  int
+		scans []transcriptScan
 	}
-	hits := []Blocker{}
+	all := []scanned{}
 	for lineNo, line := range lines {
-		ids := map[string]bool{}
-		scan := func(command, pathText string, words []string) {
-			for id := range transcriptCommandIDs(command) {
-				ids[id] = true
-			}
-			if runs.enabled && (runs.anyToken(pathText) || runs.anyRelative(words)) {
-				ids["code-forge-runs-access"] = true
-			}
-			if reviewsWrite(pathText) {
-				ids["code-forge-reviews-write"] = true
-			}
-		}
 		switch {
 		case claude:
 			ev := events[lineNo]
@@ -74,34 +103,98 @@ func Transcript(text string) ([]Blocker, bool) {
 			}
 			l, ok := claudeAssistantLine(ev.message)
 			if !ok {
-				return nil, false
+				return false
 			}
 			if !l.found {
 				continue
 			}
-			scan(l.command, l.path, l.words)
+			all = append(all, scanned{lineNo, []transcriptScan{{l.command, l.path, l.words}}})
 		case codex != nil:
 			l := codex[lineNo]
 			if l == nil {
 				continue
 			}
-			scan(l.command, l.path, l.words)
+			all = append(all, scanned{lineNo, []transcriptScan{{l.command, l.path, l.words}}})
 		default:
-			commands := []string{line}
+			scans := []transcriptScan{{line, line, nil}}
 			if variant := transcriptUnescaped(line); variant != line {
-				commands = append(commands, variant)
+				scans = append(scans, transcriptScan{variant, variant, nil})
 			}
-			for _, c := range commands {
-				scan(c, c, nil)
+			all = append(all, scanned{lineNo, scans})
+		}
+	}
+	for _, s := range all {
+		fn(s.line, s.scans)
+	}
+	return true
+}
+
+// HookTranscript is Node's B64b hook check: scanTranscript(text, hookForbidden(argv)). A coder
+// transcript line where a command named like the on_block_end hook's command (and its first
+// argument, when there is one) runs is a rule_break with id code-forge-on-block-end-hook.
+// false: text Go cannot read or split exactly like Node.
+func HookTranscript(argv []string, text string) ([]Blocker, bool) {
+	prefix := hookPrefix(argv)
+	hits := []Blocker{}
+	ok := transcriptLines(text, func(lineNo int, scans []transcriptScan) {
+		if prefix == nil {
+			return
+		}
+		for _, s := range scans {
+			if hookHit(prefix, transcriptTokens.FindAllString(s.command, -1)) {
+				hits = append(hits, Blocker{Code: "rule_break", Detail: "transcript line " + strconv.Itoa(lineNo+1) + ": code-forge-on-block-end-hook"})
+				return
 			}
 		}
-		for _, id := range transcriptOrder {
-			if ids[id] {
-				hits = append(hits, Blocker{Code: "rule_break", Detail: "transcript line " + strconv.Itoa(lineNo+1) + ": " + id})
+	})
+	if !ok {
+		return nil, false
+	}
+	return hits, true
+}
+
+// hookPrefix is hookForbidden's prefix tokens: the command name and the trimmed first argument;
+// nil when Node builds no entry.
+func hookPrefix(argv []string) []string {
+	if len(argv) == 0 || slices.Contains(argv, "") {
+		return nil
+	}
+	first := jsTrim(argv[0])
+	if first == "" || strings.HasSuffix(first, "/") || strings.HasSuffix(first, "\\") {
+		return nil
+	}
+	name := jsTrim(commandName(first))
+	if name == "" || name == "." || name == ".." {
+		return nil
+	}
+	if len(argv) > 1 {
+		if arg := jsTrim(argv[1]); arg != "" {
+			return []string{name, arg}
+		}
+	}
+	return []string{name}
+}
+
+// hookHit is the scan's window loop for the one prefix entry: a window starts where the token's
+// command name is the prefix's first word (the npx/node starts and code-forge tokens never read
+// as another name), git reads every global-option tail.
+func hookHit(prefix, tokens []string) bool {
+	for i, token := range tokens {
+		if commandName(token) != prefix[0] {
+			continue
+		}
+		window := tokens[i:min(len(tokens), i+64)]
+		readings := [][]string{append([]string{prefix[0]}, window[1:]...)}
+		if prefix[0] == "git" {
+			readings = gitReadings(window)
+		}
+		for _, r := range readings {
+			if len(r) >= len(prefix) && slices.Equal(r[:len(prefix)], prefix) {
+				return true
 			}
 		}
 	}
-	return hits, true
+	return false
 }
 
 // codexLine is one Codex item line as Node's scanTranscript reads it: the command text, the text

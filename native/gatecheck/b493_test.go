@@ -106,3 +106,39 @@ func TestB493AckDigestNonASCII(t *testing.T) {
 		t.Fatalf("an unsigned matching digest does not ack: %v %v", acked, known)
 	}
 }
+
+// B493: Node's scanTranscript(text, hookForbidden(argv)) — the hook command
+// (basename, no .exe) and its trimmed first argument as a prefix at any
+// command start; git reads its global options.
+func TestB493HookTranscript(t *testing.T) {
+	hook := "code-forge-on-block-end-hook"
+	cases := []struct {
+		argv  []string
+		text  string
+		lines []string
+	}{
+		{[]string{"/usr/local/bin/notify-hook"}, "$ ls\n$ notify-hook --x\n$ y && notify-hook\n", []string{"2", "3"}},
+		{[]string{"/usr/local/bin/notify-hook"}, "$ echo notify-hook is mentioned\n", []string{"1"}},
+		{[]string{"/usr/local/bin/notify-hook"}, "$ npx -y notify-hook.EXE\n", []string{"1"}},
+		{[]string{"/usr/local/bin/notify-hook"}, "$ notify\\x2dhook\n$ notify-hooks\n", nil},
+		{[]string{"notify-hook", " --done "}, "$ notify-hook --done\n$ notify-hook other --done\n", []string{"1"}},
+		{[]string{"git", "push"}, "$ git status\n$ git -C /x --no-pager push origin\n", []string{"2"}},
+		{[]string{"dir/"}, "$ dir/\n", nil},
+		{[]string{".."}, "$ ..\n", nil},
+		{[]string{"notify-hook", ""}, "$ notify-hook\n", nil},
+		{[]string{"notify-hook"}, `{"type":"thread.started"}` + "\n" + `{"type":"item.completed","item":{"type":"command_execution","command":"bash -lc 'notify-hook now'"}}` + "\n", []string{"2"}},
+	}
+	for i, c := range cases {
+		hits, ok := HookTranscript(c.argv, c.text)
+		got := []string{}
+		for _, h := range hits {
+			if h.Code != "rule_break" || !strings.HasSuffix(h.Detail, ": "+hook) {
+				t.Fatalf("case %d: blocker %+v", i, h)
+			}
+			got = append(got, strings.TrimSuffix(strings.TrimPrefix(h.Detail, "transcript line "), ": "+hook))
+		}
+		if !ok || strings.Join(got, ",") != strings.Join(c.lines, ",") {
+			t.Fatalf("case %d: ok=%v lines=%v want %v", i, ok, got, c.lines)
+		}
+	}
+}
