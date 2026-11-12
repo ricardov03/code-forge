@@ -284,11 +284,9 @@ func TestB527InitHandOvers(t *testing.T) {
 		noRoot bool
 		reason string
 	}{
-		{"jev key", []string{"--skip-doctor"}, "", "", false, "init-jev-key"},
+		{"jev key", []string{"--skip-doctor"}, "", "", false, "init-jev-keychain"},
 		{"jev item id", []string{"--skip-doctor", "--jev-ref", "abcdefghijklmnopqrstuvwxyz"}, "", "", false, "init-jev-op"},
-		{"tools", []string{"--skip-doctor", "--no-jev", "--tools", "recommended"}, "", "", false, "init-tools"},
-		{"models", []string{"--skip-doctor", "--no-jev", "--refresh-models"}, "", "", false, "init-models"},
-		{"doctor", []string{"--no-jev"}, "", "", false, "init-doctor"},
+		{"doctor reads the keychain", []string{"--no-jev"}, "", "", false, "doctor-key-store"},
 		{"links", []string{"--skip-doctor", "--no-jev", "--harness", "claude"}, "", "", true, "init-links"},
 		{"config anchor", []string{"--skip-doctor", "--no-jev"}, "version: 1\nx: &a [1]\ny: *a\n", "", false, "init-config-shape"},
 		{"config gate shape", []string{"--skip-doctor", "--no-jev"}, "version: 1\ngates:\n  test: 5\n", "", false, "init-config-shape"},

@@ -114,35 +114,18 @@ func prepareDoctor(args []string) (func(stdout, stderr io.Writer) int, handoverR
 	if home == "" {
 		return nil, hDoctorNoHome, false // Node falls back to the passwd entry
 	}
-	now := doctorNow()
 	rows, cfg, reason := doctorConfigRow(cwd)
 	if reason != 0 {
 		return nil, reason, false
 	}
-	rows = append(rows, doctorLinksRow(home))
-	resolveKeys, reason := doctorKeysRow(cfg, home, now)
+	quick, reason := doctorQuickPlan(rows, cfg, home, doctorNow())
 	if reason != 0 {
 		return nil, reason, false
-	}
-	keysAt := len(rows)
-	rows = append(rows, doctorRow{})
-	if cfg != nil {
-		if slug := cfg["project"]; slug != nil {
-			lines, ok := doctorReviewerLines(cfg, home, now)
-			if !ok {
-				return nil, hDoctorLedgerShape, false
-			}
-			for i, line := range lines {
-				at := strings.Index(line, ": ")
-				rows = append(rows, doctorRow{"reviewer." + strconv.Itoa(i), "INFO", line[:at], line[at+2:]})
-			}
-		}
 	}
 	jsonOut := flags["json"] == true
 	return func(stdout, stderr io.Writer) int {
 		nativeReportedKind = ""
-		keyRow, secrets := resolveKeys()
-		rows[keysAt] = keyRow
+		rows, secrets := quick.run()
 		redactOne := func(text string) string { return redactSecret(text, secrets...) }
 		var out string
 		if jsonOut {
@@ -163,6 +146,49 @@ func prepareDoctor(args []string) (func(stdout, stderr io.Writer) int, handoverR
 		nativeReportedKind = "" // takeErrorKind runs on every exit
 		return 0
 	}, 0, true
+}
+
+// doctorQuick is runDoctor({cwd, quick: true}) decided before it runs: the
+// config row, then at run time the links row and the keys row, then the
+// reviewer performance rows. B548: init's doctor step runs it too, after its
+// writes, so the links row is read when it runs.
+type doctorQuick struct {
+	rows    []doctorRow // the config row(s), then the reviewer rows
+	head    int         // where the links and keys rows go
+	home    string
+	resolve func() (doctorRow, []string)
+}
+
+// doctorQuickPlan takes the config row(s) and the config they loaded; a
+// reason means Node serves the run.
+func doctorQuickPlan(configRows []doctorRow, cfg map[string]any, home string, now float64) (*doctorQuick, handoverReason) {
+	resolve, reason := doctorKeysRow(cfg, home, now)
+	if reason != 0 {
+		return nil, reason
+	}
+	q := &doctorQuick{rows: append([]doctorRow{}, configRows...), head: len(configRows), home: home, resolve: resolve}
+	if cfg != nil {
+		if slug := cfg["project"]; slug != nil {
+			lines, ok := doctorReviewerLines(cfg, home, now)
+			if !ok {
+				return nil, hDoctorLedgerShape
+			}
+			for i, line := range lines {
+				at := strings.Index(line, ": ")
+				q.rows = append(q.rows, doctorRow{"reviewer." + strconv.Itoa(i), "INFO", line[:at], line[at+2:]})
+			}
+		}
+	}
+	return q, 0
+}
+
+// run gives every row in print order and the values Node registers for
+// redaction.
+func (q *doctorQuick) run() ([]doctorRow, []string) {
+	links := doctorLinksRow(q.home)
+	keyRow, secrets := q.resolve()
+	rows := append(append(append([]doctorRow{}, q.rows[:q.head]...), links, keyRow), q.rows[q.head:]...)
+	return rows, secrets
 }
 
 func doctorCounts(rows []doctorRow) map[string]int {
@@ -238,6 +264,12 @@ func redactSecret(text string, secrets ...string) string {
 // never report a missing CLI.
 func doctorConfigRow(cwd string) ([]doctorRow, map[string]any, handoverReason) {
 	cfg, order, err := config.LoadOrdered(cwd)
+	return doctorConfigJudge(cfg, order, err)
+}
+
+// doctorConfigJudge is checkConfig on a config already loaded (B548: init
+// judges the text it is about to write).
+func doctorConfigJudge(cfg map[string]any, order config.Ordered, err error) ([]doctorRow, map[string]any, handoverReason) {
 	if err != nil {
 		if yamlSyntaxError(err) {
 			return nil, nil, hConfigParseError

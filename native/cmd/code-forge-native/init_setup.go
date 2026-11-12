@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -1150,14 +1149,28 @@ func initSetupFinish(st initSetupState, parsed initParsed, jsonMode bool, wiz *i
 		lines = append(lines, wiz.said...)
 		printed = wiz.printed
 	}
+	// the Jev key read from the store (B548): its side effect and the values
+	// Node registers for redaction reach the run on every exit
+	var pre func()
+	var secrets []string
 	fail := func(code int, message string) (initSetupResult, handoverReason) {
-		return initSetupResult{home: home, jsonMode: jsonMode, lines: lines, shown: len(summaryLines), printed: printed, code: code, err: message, settings: settings, blank: blank}, 0
+		return initSetupResult{home: home, jsonMode: jsonMode, lines: lines, shown: len(summaryLines), printed: printed, code: code, err: message, settings: settings, blank: blank, pre: pre, secrets: secrets}, 0
 	}
 
 	jevRef, jevSource := "", "none"
+	var missing []string
 	switch v.jevMode {
 	case "auto":
-		return initSetupResult{}, hInitJevKey
+		auto, reason := initJevAutoPlan(home)
+		if reason != 0 {
+			return initSetupResult{}, reason
+		}
+		pre, secrets = auto.pre, auto.secrets
+		if auto.found {
+			jevRef, jevSource = auto.ref, auto.source
+		} else {
+			missing = append(missing, "keys.jev (pass --jev-ref, --jev-env or --no-jev)")
+		}
 	case "ref":
 		jevRef = v.jevRef
 		if !strings.HasPrefix(jevRef, "env:") && !initOpRef.MatchString(jevRef) && jevRef != "user" && !strings.HasPrefix(jevRef, "keychain:") {
@@ -1173,7 +1186,10 @@ func initSetupFinish(st initSetupState, parsed initParsed, jsonMode bool, wiz *i
 		}
 	}
 	if v.multimodel && v.secondProvider == "" {
-		return fail(2, "missing required answers, nothing written:\n  review.second_provider (pass --second-provider)")
+		missing = append(missing, "review.second_provider (pass --second-provider)")
+	}
+	if len(missing) > 0 {
+		return fail(2, "missing required answers, nothing written:\n  "+strings.Join(missing, "\n  "))
 	}
 	lines = append(lines, "keys: jev from "+jevSource)
 	if v.multimodel {
@@ -1248,20 +1264,22 @@ func initSetupFinish(st initSetupState, parsed initParsed, jsonMode bool, wiz *i
 		}
 	}
 
-	// steps after the write that Go does not serve hand over now; the
-	// wizard checked the tools and the model cache before its first prompt
+	// the steps after the write (B548): a cache Go cannot write like Node,
+	// or a doctor row Go cannot give like Node, hands over now; the wizard
+	// said its tool lines before its first prompt
 	var after []string
-	if v.tools == "recommended" {
-		if wiz == nil {
-			return initSetupResult{}, hInitTools
-		}
+	if v.tools == "recommended" && wiz != nil {
 		after = initWizToolLines(ctx)
 	}
-	if v.refreshModels && wiz == nil {
+	if v.refreshModels && !modelsCacheWritable(home) {
 		return initSetupResult{}, hInitModels
 	}
+	var doctor *doctorQuick
 	if v.doctor {
-		return initSetupResult{}, hInitDoctor
+		var reason handoverReason
+		if doctor, reason = initDoctorPlan(cwd, home, writeConfig, cfg, order); reason != 0 {
+			return initSetupResult{}, reason
+		}
 	}
 	var links []initLinkStep
 	source, version := "", ""
@@ -1321,10 +1339,12 @@ func initSetupFinish(st initSetupState, parsed initParsed, jsonMode bool, wiz *i
 
 	return initSetupResult{
 		home: home, jsonMode: jsonMode, lines: lines, shown: len(summaryLines), printed: printed, settings: settings, blank: blank,
-		after: after, refreshModels: v.refreshModels && wiz != nil, existingFile: existingFile, changeCount: changeCount,
+		after: after, refreshModels: v.refreshModels, existingFile: existingFile, changeCount: changeCount,
 		configFile: configFile, configText: text, writeConfig: writeConfig,
 		links: links, source: source, version: version, scope: v.scope, method: v.method, harnessCount: len(v.harnesses),
 		userFile: userFile, userText: userText, engineStop: engineStop, engine: merged.Get("engine"),
+		pre: pre, secrets: secrets, tools: v.tools == "recommended" && wiz == nil, solo: ctx.solo, yesTools: initYesTools(parsed),
+		doctor: doctor,
 	}, 0
 }
 
@@ -1357,6 +1377,13 @@ type initSetupResult struct {
 	userText      string
 	engineStop    bool
 	engine        any
+	// B548: the steps after the write
+	pre      func()   // the key store's side effect, run first
+	secrets  []string // the values Node registered for redaction
+	tools    bool     // step 1: --tools recommended (no wizard)
+	solo     bool
+	yesTools []string
+	doctor   *doctorQuick // step 9, nil with --skip-doctor
 }
 
 func initWriteText(file, text string) error {
@@ -1370,7 +1397,17 @@ func initWriteText(file, text string) error {
 // then finish (the log, the JSON line or the text lines).
 func initSetupRun(r initSetupResult) func(stdout, stderr io.Writer) int {
 	return func(stdout, stderr io.Writer) int {
-		lines := r.lines
+		if r.pre != nil {
+			r.pre()
+		}
+		secrets := r.secrets
+		// every line said after the summary passes through redact
+		lines := append([]string{}, r.lines...)
+		for i := r.shown; i < len(lines); i++ {
+			lines[i] = redactSecret(lines[i], secrets...)
+		}
+		say := func(line string) { lines = append(lines, redactSecret(line, secrets...)) }
+		var doctor any
 		printed := r.printed
 		if !r.jsonMode && r.shown > printed {
 			_, _ = io.WriteString(stdout, strings.Join(lines[printed:r.shown], "\n")+"\n")
@@ -1391,18 +1428,25 @@ func initSetupRun(r initSetupResult) func(stdout, stderr io.Writer) int {
 						return err
 					}
 					wrote = append(wrote, r.configFile)
-					lines = append(lines, config.Filename+": written")
+					say(config.Filename + ": written")
 				}
-				lines = append(lines, r.after...)
+				if r.tools {
+					for _, line := range initToolLines(r.solo, r.yesTools) {
+						say(line)
+					}
+				}
+				for _, line := range r.after {
+					say(line)
+				}
 				if r.refreshModels {
-					res, err := config.RefreshFromCLICaches(r.home)
+					line, err := initModelsLine(r.home)
 					if err != nil {
 						return err
 					}
-					lines = append(lines, "models: "+strconv.Itoa(len(res.SourcesRead))+" CLI cache(s) read")
+					say(line)
 				}
 				if r.harnessCount > 0 && len(r.links) == 0 {
-					lines = append(lines, "links: skill source missing ("+r.source+"); no harness linked")
+					say("links: skill source missing (" + r.source + "); no harness linked")
 				}
 				for _, l := range r.links {
 					if err := upgradeLink(r.source, l.target, r.method); err != nil {
@@ -1423,7 +1467,7 @@ func initSetupRun(r initSetupResult) func(stdout, stderr io.Writer) int {
 					writeInstallsFile(file, rows)
 					harnesses = append(harnesses, l.id)
 					wrote = append(wrote, l.target)
-					lines = append(lines, "link "+l.id+": "+r.method+" "+l.target)
+					say("link " + l.id + ": " + r.method + " " + l.target)
 				}
 				if r.userText != "" {
 					if err := initWriteText(r.userFile, r.userText); err != nil {
@@ -1437,19 +1481,31 @@ func initSetupRun(r initSetupResult) func(stdout, stderr io.Writer) int {
 				code, failure = 1, "unexpected error: "+step.Error()
 			} else if r.engineStop {
 				_, _ = io.WriteString(stderr, initNoEngineStop+"\n")
-				lines = append(lines, "engine: no Solo and no subagent tool in this harness (see the stop text)")
+				say("engine: no Solo and no subagent tool in this harness (see the stop text)")
 			} else {
 				engine, _ := ledger.Stringify(r.engine, false)
 				if s, ok := r.engine.(string); ok {
-					lines = append(lines, "engine: "+s)
+					say("engine: " + s)
 				} else {
-					lines = append(lines, "engine: "+string(engine))
+					say("engine: " + string(engine))
 				}
 			}
 		}
+		if failure == "" && r.doctor != nil {
+			rows, more := r.doctor.run()
+			secrets = append(append([]string{}, secrets...), more...)
+			for _, row := range rows {
+				say("doctor " + row.status + " " + row.label + ": " + row.detail)
+			}
+			summary, ok := initDoctorCounts(rows)
+			doctor = summary
+			if !ok {
+				code = 1
+			}
+		}
 		if failure != "" {
-			lines = append(lines, "error: "+failure)
-			_, _ = io.WriteString(stderr, "init: "+failure+"\n")
+			say("error: " + failure)
+			_, _ = io.WriteString(stderr, redactSecret("init: "+failure+"\n", secrets...))
 		}
 		var log any
 		file := filepath.Join(r.home, ".code-forge", "logs", initLogName(initNow()))
@@ -1465,7 +1521,7 @@ func initSetupRun(r initSetupResult) func(stdout, stderr io.Writer) int {
 			if failure == "" {
 				body = ledger.Object{
 					{Key: "ok", Value: code == 0}, {Key: "wrote", Value: wrote}, {Key: "harnesses", Value: harnesses},
-					{Key: "engine_stop", Value: r.engineStop}, {Key: "doctor", Value: nil}, {Key: "settings", Value: r.settings},
+					{Key: "engine_stop", Value: r.engineStop}, {Key: "doctor", Value: doctor}, {Key: "settings", Value: r.settings},
 					{Key: "blank", Value: initAnyList(r.blank)}, {Key: "log", Value: log}, {Key: "log_tail", Value: initAnyList(tail)},
 				}
 			} else {
@@ -1475,7 +1531,7 @@ func initSetupRun(r initSetupResult) func(stdout, stderr io.Writer) int {
 				}
 			}
 			data, _ := ledger.Stringify(body, false)
-			_, _ = stdout.Write(append(data, '\n'))
+			_, _ = io.WriteString(stdout, redactSecret(string(data), secrets...)+"\n")
 		} else if failure == "" {
 			rest := lines[printed:]
 			out := ""

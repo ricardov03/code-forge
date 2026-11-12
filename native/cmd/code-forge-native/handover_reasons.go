@@ -336,6 +336,7 @@ const (
 	hInitWizardEOF
 	hInitWizardTools
 	hInitWizardModels
+	hInitJevKeychain
 )
 
 var handoverReasons = [...]string{
@@ -668,4 +669,7 @@ var handoverReasons = [...]string{
 	hInitWizardEOF:               "init-wizard-eof",
 	hInitWizardTools:             "init-wizard-tools",
 	hInitWizardModels:            "init-wizard-models",
+
+	// B548
+	hInitJevKeychain: "init-jev-keychain",
 }

@@ -182,8 +182,8 @@ func TestB458HandOvers(t *testing.T) {
 		args   []string
 		reason string
 	}{
-		{[]string{"init"}, "init-jev-key"},
-		{[]string{"init", "--no-interaction"}, "init-jev-key"},
+		{[]string{"init"}, "init-jev-keychain"},
+		{[]string{"init", "--no-interaction"}, "init-jev-keychain"},
 		{[]string{"facts", "--brief", "b.md"}, "facts-session"},
 		{[]string{"author", "--job", "plan", "--brief", "b.md"}, "author-session"},
 		{[]string{"s2", "--packet", "p.json"}, "system-two-session"},
