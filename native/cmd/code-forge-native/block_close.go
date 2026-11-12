@@ -21,7 +21,6 @@ import (
 	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
-	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/queue"
 	"github.com/ricardov03/code-forge/native/runstatus"
@@ -130,10 +129,10 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 				decideGrant = grant
 			}
 		}
-		if !humanask.Available() && !active {
+		if !humanTTY() && !active {
 			return humanNoTTY(stderr, "close")
 		}
-		if active && humanask.Available() {
+		if active && humanTTY() {
 			// The owner at a terminal is not the autopilot; keep their decide
 			// apart from the grant as before.
 			return fail(&state.Error{Code: "autopilot-active", Message: "block close --decide is refused while an autopilot grant is active"})
@@ -168,11 +167,6 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 	}
 	if requireHuman && step != nil && handover == nil {
-		return fallback(hCloseHuman)
-	}
-	// Auto-claim's speculative close must not sign claims before a human can
-	// cancel the ordinary require_human prompt. Retain that composed boundary.
-	if !deciding && requireHuman && flags["auto-claim"] == true && humanask.Available() {
 		return fallback(hCloseHuman)
 	}
 	if !deciding && !requireHuman && flags["no-require-reviews"] != true && (step == nil || !step.preflight) {
@@ -278,7 +272,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			}
 			routineGrant = grant.Grant
 		} else {
-			if !humanask.Available() {
+			if !humanTTY() {
 				return humanNoTTY(stderr, "close")
 			}
 			if !confirmed && (step == nil || !step.preflight) {

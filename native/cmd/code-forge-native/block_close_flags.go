@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/autopilot"
 	"github.com/ricardov03/code-forge/native/gitx"
-	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/queue"
@@ -69,7 +69,7 @@ func closeFlags(args []string) (map[string]any, []string, string) {
 }
 
 func closeMayHaveTerminal() bool {
-	return humanask.Available()
+	return humanTTY()
 }
 
 func closeWithFlags(args []string) int {
@@ -213,6 +213,26 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 			print = os.Stderr
 		}
 	}
+	// B493: under close.require_human with no active grant, Node asks the owner
+	// at the terminal before the claims; a cancel records nothing. The close
+	// after the claims is then the confirmed one.
+	asked := false
+	if flags["decide"] != true {
+		if cfg, ok := blockSnapshot(record); ok && blockMap(cfg["close"])["require_human"] == true {
+			grant, _ := autopilot.Read(record, time.Now())
+			active := false
+			if grant.Grant != nil {
+				s, _ := autopilot.GrantState(grant.Grant, time.Now())
+				active = s == "active"
+			}
+			if !active {
+				if code := humanConfirm(stderr, "close", id, fmt.Sprintf("Close block %s of run %s? Only the owner may say yes.", id, run)); code != 0 {
+					return code
+				}
+				asked = true
+			}
+		}
+	}
 	// B493: Node runs the lazy grant expiry check before the claims, so an
 	// expired grant's autopilot.expire row precedes the block.claim rows. The
 	// close's own later check is then a no-op.
@@ -261,7 +281,12 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 		}
 		return fail(fmt.Errorf("auto-claim review refused %s: %s", file.Get("file"), detail))
 	}
-	code := closeStep(step)
+	code := 0
+	if asked {
+		code = blockCloseHumanStep(args, step, reason, true, endHook...)
+	} else {
+		code = closeStep(step)
+	}
 	if code == landHandover {
 		return fail(fmt.Errorf("auto-claim review failed"))
 	}

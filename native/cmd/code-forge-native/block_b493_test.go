@@ -15,6 +15,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/canon"
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/ticket"
@@ -370,4 +371,101 @@ func b493LedgerLines(t *testing.T, f *closeReviewFixture) string {
 		all += string(data)
 	}
 	return all
+}
+
+func b493HumanSeam(t *testing.T, tty bool, answer humanask.Result) *[]string {
+	t.Helper()
+	asked := []string{}
+	oldTTY, oldAsk := humanTTY, humanAsk
+	humanTTY = func() bool { return tty }
+	humanAsk = func(message string) (humanask.Result, error) {
+		asked = append(asked, message)
+		if !tty {
+			return humanask.NoTTY, nil
+		}
+		return answer, nil
+	}
+	t.Cleanup(func() { humanTTY, humanAsk = oldTTY, oldAsk })
+	return &asked
+}
+
+func b493RequireHumanFixture(t *testing.T, until string) *closeReviewFixture {
+	t.Helper()
+	f := b493AutoClaimFixture(t, until)
+	b493SetConfig(t, f, ledger.Object{{Key: "review", Value: ledger.Object{{Key: "close_wait_s", Value: 1}}}, {Key: "context", Value: ledger.Object{{Key: "require_coder_tests", Value: true}}}, {Key: "close", Value: ledger.Object{{Key: "require_human", Value: true}}}})
+	if until == "" {
+		record, err := state.ReadRun(f.home, "r-close-fixture")
+		if err != nil {
+			t.Fatal(err)
+		}
+		record.Delete("autopilot")
+		if err := state.SaveRun(f.home, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return f
+}
+
+func b493Events(t *testing.T, f *closeReviewFixture) string {
+	t.Helper()
+	all, err := ledger.ReadAllRows(filepath.Join(f.home, ".code-forge/ledger"), "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := []string{}
+	for _, v := range all {
+		if e := v.(map[string]any)["event"].(string); e == "autopilot.expire" || e == "block.claim" || e == "block.close" {
+			events = append(events, e)
+		}
+	}
+	return strings.Join(events, ",")
+}
+
+// TestB493CloseAutoClaimRequireHuman: --auto-claim under close.require_human
+// asks the owner at the terminal before the claims, as Node does. With an
+// expired grant Node writes no autopilot.expire row on this path.
+func TestB493CloseAutoClaimRequireHuman(t *testing.T) {
+	const stdout = "block B1 auto-claimed extra.txt\nreviewed extra.txt ticket 0a276b0b4e62b3cc2d085cb0\nreviewed file0.txt ticket b82733d3089a96c3991c870e\nblock B1 closed\n"
+	const question = "Close block B1 of run r-close-fixture? Only the owner may say yes."
+	for _, tc := range []struct {
+		name, until, events string
+	}{{"no grant", "", "block.claim,block.close"}, {"expired grant", "2020-01-01T00:00:00.000Z", "block.claim,block.close"}} {
+		t.Run("yes "+tc.name, func(t *testing.T) {
+			f := b493RequireHumanFixture(t, tc.until)
+			asked := b493HumanSeam(t, true, humanask.Confirmed)
+			code, out, errs, reason := b493CloseAutoClaim(f)
+			if code != 0 || out != stdout || errs != "" {
+				t.Fatalf("exit=%d reason=%v\nstdout %q\nstderr %q", code, reason, out, errs)
+			}
+			if strings.Join(*asked, "|") != question {
+				t.Fatalf("asked %q", *asked)
+			}
+			if got := b493Events(t, f); got != tc.events {
+				t.Fatalf("rows %s, want %s", got, tc.events)
+			}
+		})
+	}
+	t.Run("no", func(t *testing.T) {
+		f := b493RequireHumanFixture(t, "")
+		asked := b493HumanSeam(t, true, humanask.Cancelled)
+		code, out, errs, reason := b493CloseAutoClaim(f)
+		if code != 1 || out != "" || errs != "block B1 close: cancelled — nothing was recorded\n" {
+			t.Fatalf("exit=%d reason=%v\nstdout %q\nstderr %q", code, reason, out, errs)
+		}
+		if len(*asked) != 1 {
+			t.Fatalf("asked %q", *asked)
+		}
+		if got := b493Events(t, f); got != "" {
+			t.Fatalf("rows %s after a cancel", got)
+		}
+	})
+	t.Run("yes json", func(t *testing.T) {
+		f := b493RequireHumanFixture(t, "")
+		b493HumanSeam(t, true, humanask.Confirmed)
+		code, out, errs, reason := b493CloseAutoClaim(f, "--json")
+		want := `{"block":"B1","event":"closed","status":"closed","reason":null,"close_event":null,"reviewed":[{"file":"extra.txt","ticket":"0a276b0b4e62b3cc2d085cb0","via":"approved"},{"file":"file0.txt","ticket":"b82733d3089a96c3991c870e","via":"approved"}]}` + "\n"
+		if code != 0 || out != want || errs != "block B1 auto-claimed extra.txt\n" {
+			t.Fatalf("exit=%d reason=%v\nstdout %q\nstderr %q", code, reason, out, errs)
+		}
+	})
 }

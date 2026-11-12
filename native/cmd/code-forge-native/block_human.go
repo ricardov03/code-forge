@@ -28,8 +28,16 @@ func humanNoTTY(stderr io.Writer, sub string) int {
 	fmt.Fprintf(stderr, "block %s needs the human at a terminal to confirm; nothing was recorded (there is no --yes)\n", sub)
 	return 2
 }
+
+// humanTTY and humanAsk are the terminal seam of the block verbs' owner
+// prompts (tests answer them; production asks the real terminal).
+var (
+	humanTTY = humanask.Available
+	humanAsk = humanask.Confirm
+)
+
 func humanConfirm(stderr io.Writer, sub, id, message string) int {
-	result, err := humanask.Confirm(message)
+	result, err := humanAsk(message)
 	if result == humanask.NoTTY {
 		return humanNoTTY(stderr, sub)
 	}
@@ -206,7 +214,7 @@ func blockHumanPass(args []string, stdout, stderr io.Writer, delegated *bool, en
 		}
 		proof = text
 	}
-	if !humanask.Available() {
+	if !humanTTY() {
 		return humanNoTTY(stderr, "human-pass")
 	}
 	entry := blockObject(blockObject(record.Get("blocks")).Get(id))
