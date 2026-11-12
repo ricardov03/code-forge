@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "run_id": "r-fix",
+  "project": "ws",
+  "workspace": "@WORKSPACE@",
+  "engine": "auto",
+  "provider": "anthropic",
+  "levels": {
+    "L0": {
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "L1": {
+      "model": "claude-sonnet-5"
+    },
+    "L2": {
+      "model": "claude-opus-5-5"
+    },
+    "L3": {
+      "model": "claude-fable-5-1"
+    }
+  },
+  "fallback_mode": "rules",
+  "started_at": "2026-11-11T00:00:00.000Z",
+  "orchestrator_pid": 1234,
+  "solo_pid": null,
+  "worker": null,
+  "workers": [],
+  "status": "active",
+  "blocks": {},
+  "orphans": [],
+  "config": {
+    "hash": "54ff64d88fef278f362f78fde3eaf4c7318e76f9bcc8ed79788859d5482a096a",
+    "snapshots": {
+      "54ff64d88fef278f362f78fde3eaf4c7318e76f9bcc8ed79788859d5482a096a": {
+        "provider": "anthropic",
+        "levels": {
+          "L0": {
+            "model": "claude-haiku-4-5-20251001"
+          },
+          "L1": {
+            "model": "claude-sonnet-5"
+          },
+          "L2": {
+            "model": "claude-opus-5-5"
+          },
+          "L3": {
+            "model": "claude-fable-5-1"
+          }
+        },
+        "review": {
+          "max_rounds_per_file": 4,
+          "session_timeout_s": 900
+        },
+        "version": 1
+      },
+      "56bc3a37173fa0d2072c24a166edfcf75fcbf1f97570888ef12176639edbe464": {
+        "provider": "anthropic",
+        "levels": {
+          "L0": {
+            "model": "claude-haiku-4-5-20251001"
+          },
+          "L1": {
+            "model": "claude-sonnet-5"
+          },
+          "L2": {
+            "model": "claude-opus-5-5"
+          },
+          "L3": {
+            "model": "claude-fable-5-1"
+          }
+        },
+        "review": {
+          "max_rounds_per_file": 3
+        },
+        "version": 1
+      }
+    },
+    "pins": {
+      "cccccccccccccccccccccccc": "56bc3a37173fa0d2072c24a166edfcf75fcbf1f97570888ef12176639edbe464",
+      "bbbbbbbbbbbbbbbbbbbbbbbb": "56bc3a37173fa0d2072c24a166edfcf75fcbf1f97570888ef12176639edbe464",
+      "aaaaaaaaaaaaaaaaaaaaaaaa": "56bc3a37173fa0d2072c24a166edfcf75fcbf1f97570888ef12176639edbe464"
+    },
+    "reloaded_at": "@NOW@"
+  }
+}

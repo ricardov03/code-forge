@@ -284,6 +284,17 @@ const (
 	hDoctorLiveProbes
 	hDoctorFullNoConfig
 	hRouterHintState
+	hRunUnportedSubcommand
+	hRunReloadRecordUnreadable
+	hRunReloadWorkspace
+	hRunReloadYAMLTag
+	hRunReloadConfigError
+	hRunReloadSchemaIssues
+	hRunReloadSecretValues
+	hRunReloadSandboxDirs
+	hRunReloadRecordShape
+	hRunReloadAutopilotGrant
+	hRunReloadReviewShape
 )
 
 var handoverReasons = [...]string{
@@ -562,4 +573,15 @@ var handoverReasons = [...]string{
 	hDoctorLiveProbes:          "doctor-live-probes",
 	hDoctorFullNoConfig:        "doctor-full-no-config",
 	hRouterHintState:           "router-hint-state",
+	hRunUnportedSubcommand:     "run-unported-subcommand",
+	hRunReloadRecordUnreadable: "run-reload-record-unreadable",
+	hRunReloadWorkspace:        "run-reload-workspace",
+	hRunReloadYAMLTag:          "run-reload-yaml-tag",
+	hRunReloadConfigError:      "run-reload-config-error",
+	hRunReloadSchemaIssues:     "run-reload-schema-issues",
+	hRunReloadSecretValues:     "run-reload-secret-values",
+	hRunReloadSandboxDirs:      "run-reload-sandbox-dirs",
+	hRunReloadRecordShape:      "run-reload-record-shape",
+	hRunReloadAutopilotGrant:   "run-reload-autopilot-grant",
+	hRunReloadReviewShape:      "run-reload-review-shape",
 }
