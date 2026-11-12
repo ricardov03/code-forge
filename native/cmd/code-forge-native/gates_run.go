@@ -205,6 +205,10 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 	if code == 2 {
 		kind = "usage"
 	}
+	if nativeReportedKind != "" {
+		kind = nativeReportedKind // takeErrorKind: a verb-reported kind wins (B27)
+	}
+	nativeReportedKind = ""
 	normalized, _ := message.(string)
 	normalized = reviewWaitLogQuotes.ReplaceAllString(normalized, " ")
 	normalized = reviewWaitLogPlaceholders.ReplaceAllString(normalized, " ")
@@ -235,6 +239,16 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 	if err != nil {
 		return
 	}
+	appendErrorLogLine(data)
+}
+
+// nativeReportedKind is reportErrorKind in src/util/error-kind.mjs: the kind
+// the error log takes when the verb then fails.
+var nativeReportedKind string
+
+// appendErrorLogLine is appendLine in src/util/error-log.mjs: one line on
+// ~/.code-forge/logs/errors.jsonl, cut to its newer half past 1 MB.
+func appendErrorLogLine(data []byte) {
 	file := filepath.Join(os.Getenv("HOME"), ".code-forge", "logs", "errors.jsonl")
 	if os.MkdirAll(filepath.Dir(file), 0700) != nil {
 		return

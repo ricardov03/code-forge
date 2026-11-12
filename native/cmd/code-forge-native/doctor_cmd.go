@@ -108,11 +108,12 @@ func prepareDoctor(args []string) (func(stdout, stderr io.Writer) int, handoverR
 		return nil, reason, false
 	}
 	rows = append(rows, doctorLinksRow(home))
-	keyRow, secret, reason := doctorKeysRow(cfg, home, now)
+	resolveKeys, reason := doctorKeysRow(cfg, home, now)
 	if reason != 0 {
 		return nil, reason, false
 	}
-	rows = append(rows, keyRow)
+	keysAt := len(rows)
+	rows = append(rows, doctorRow{})
 	if cfg != nil {
 		if slug := cfg["project"]; slug != nil {
 			lines, ok := doctorReviewerLines(cfg, home, now)
@@ -127,7 +128,10 @@ func prepareDoctor(args []string) (func(stdout, stderr io.Writer) int, handoverR
 	}
 	jsonOut := flags["json"] == true
 	return func(stdout, stderr io.Writer) int {
-		redactOne := func(text string) string { return redactSecret(text, secret) }
+		nativeReportedKind = ""
+		keyRow, secrets := resolveKeys()
+		rows[keysAt] = keyRow
+		redactOne := func(text string) string { return redactSecret(text, secrets...) }
 		var out string
 		if jsonOut {
 			out = redactOne(doctorJSON(rows)) + "\n"
@@ -144,6 +148,7 @@ func prepareDoctor(args []string) (func(stdout, stderr io.Writer) int, handoverR
 		if c["FAIL"] > 0 {
 			return 1
 		}
+		nativeReportedKind = "" // takeErrorKind runs on every exit
 		return 0
 	}, 0, true
 }
@@ -171,30 +176,34 @@ func doctorJSON(rows []doctorRow) string {
 	return string(data)
 }
 
-// redactSecret is redactString in src/util/redact.mjs with one registered
-// secret: every occurrence (overlaps merged) becomes one [REDACTED].
-func redactSecret(text, secret string) string {
-	if secret == "" {
-		return text
-	}
-	units, sec := utf16.Encode([]rune(text)), utf16.Encode([]rune(secret))
+// redactSecret is redactString in src/util/redact.mjs over the registered
+// secrets: every occurrence (overlaps merged) becomes one [REDACTED].
+func redactSecret(text string, secrets ...string) string {
+	units := utf16.Encode([]rune(text))
 	type span struct{ start, end int }
 	var ranges []span
-	for at := 0; at+len(sec) <= len(units); at++ {
-		match := true
-		for j := range sec {
-			if units[at+j] != sec[j] {
-				match = false
-				break
-			}
+	for _, secret := range secrets {
+		if secret == "" {
+			continue
 		}
-		if match {
-			ranges = append(ranges, span{at, at + len(sec)})
+		sec := utf16.Encode([]rune(secret))
+		for at := 0; at+len(sec) <= len(units); at++ {
+			match := true
+			for j := range sec {
+				if units[at+j] != sec[j] {
+					match = false
+					break
+				}
+			}
+			if match {
+				ranges = append(ranges, span{at, at + len(sec)})
+			}
 		}
 	}
 	if len(ranges) == 0 {
 		return text
 	}
+	sort.SliceStable(ranges, func(i, j int) bool { return ranges[i].start < ranges[j].start })
 	var out []uint16
 	cursor, start, end := 0, ranges[0].start, ranges[0].end
 	mask := utf16.Encode([]rune("[REDACTED]"))
@@ -274,10 +283,14 @@ var (
 
 // doctorKeysRow is checkKeys with resolveKey (src/keys/store.mjs) for the
 // cases Go serves: the env variable, or the 0600 file store pinned by
-// CODE_FORGE_KEY_BACKEND=file holding a live entry or nothing. The keychain
-// chain, a 1Password read and an entry the read would delete or rewrite hand
-// over. It returns the resolved value too: Node registers it for redaction.
-func doctorKeysRow(cfg map[string]any, home string, now float64) (doctorRow, string, handoverReason) {
+// CODE_FORGE_KEY_BACKEND=file, including (B483) an expired entry it deletes,
+// an entry it cuts to the cache hours and an op:// read it caches. The
+// keychain chain hands over. The returned resolver runs the side effects and
+// gives the row with every value Node registers for redaction.
+func doctorKeysRow(cfg map[string]any, home string, now float64) (func() (doctorRow, []string), handoverReason) {
+	fixed := func(row doctorRow, secrets ...string) func() (doctorRow, []string) {
+		return func() (doctorRow, []string) { return row, secrets }
+	}
 	var ref string
 	hasRef := false
 	if cfg != nil {
@@ -306,12 +319,12 @@ func doctorKeysRow(cfg map[string]any, home string, now float64) (doctorRow, str
 	if hasRef && strings.HasPrefix(ref, "keychain:") {
 		storeName = ref[9:]
 		if !keyNamePattern.MatchString(storeName) {
-			return failed, "", 0
+			return fixed(failed), 0
 		}
 	}
 	if hasRef && strings.HasPrefix(ref, "op://") {
 		if !opRefPattern.MatchString(ref) {
-			return failed, "", 0
+			return fixed(failed), 0
 		}
 		opRef = ref
 	}
@@ -320,17 +333,31 @@ func doctorKeysRow(cfg map[string]any, home string, now float64) (doctorRow, str
 		suffix = fmt.Sprintf(" (cache %d h)", int(hours))
 	}
 	if value := os.Getenv(envName); envName != "" && value != "" {
-		return doctorRow{"keys", "OK", "keys", "jev key from env, no expiry" + suffix}, value, 0
+		return fixed(doctorRow{"keys", "OK", "keys", "jev key from env, no expiry" + suffix}, value), 0
 	}
 	if os.Getenv("CODE_FORGE_KEY_BACKEND") != "file" {
-		return doctorRow{}, "", hDoctorKeyStore
+		return nil, hDoctorKeyStore
 	}
-	why := ""
-	raw, err := os.ReadFile(filepath.Join(home, ".code-forge", "store", storeName+".key"))
+	okRow := func(source string, exp *float64) doctorRow {
+		if exp != nil && *exp-now < 3_600_000 {
+			minutes := math.Max(1, math.Floor((*exp-now)/60_000))
+			return doctorRow{"keys", "WARN", "keys", fmt.Sprintf("jev key from %s expires in %d min; re-link with code-forge keys set jev --op <ref from keys.jev>", source, int(minutes))}
+		}
+		when := "no expiry"
+		if exp != nil {
+			when = "expires " + time.UnixMilli(int64(math.Trunc(*exp))).UTC().Format("2006-01-02T15:04:05.000Z")
+		}
+		return doctorRow{"keys", "OK", "keys", "jev key from " + source + ", " + when + suffix}
+	}
+	latest := now + hours*3_600_000
+	keyFile := filepath.Join(home, ".code-forge", "store", storeName+".key")
+	var reasons, secrets []string
+	var before func()
+	raw, err := os.ReadFile(keyFile)
 	switch {
 	case err == nil:
 		if !utf8.Valid(raw) {
-			return doctorRow{}, "", hDoctorKeyStore
+			return nil, hDoctorKeyStore
 		}
 		text := strings.TrimSuffix(string(raw), "\n")
 		if text == "" {
@@ -338,28 +365,78 @@ func doctorKeysRow(cfg map[string]any, home string, now float64) (doctorRow, str
 		}
 		value, exp, ok := decodeKeyEntry(text)
 		if !ok {
-			return doctorRow{}, "", hDoctorKeyStore
+			return nil, hDoctorKeyStore
 		}
-		if exp != nil && (*exp <= now || *exp > now+hours*3_600_000) {
-			return doctorRow{}, "", hDoctorKeyRefresh
+		secrets = append(secrets, value)
+		switch {
+		case exp != nil && *exp <= now:
+			// dropped as expired: the file goes, then its index row
+			if !keyIndexReadable(home, storeName, false) {
+				return nil, hDoctorKeyRefresh
+			}
+			before = func() {
+				if err := os.Remove(keyFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+					reasons = append(reasons, "key store error")
+				}
+				if updateKeyIndex(home, func(index *ledger.Object) { index.Delete(storeName) }) != nil {
+					reasons = append(reasons, "key store error")
+				}
+			}
+		case exp != nil && *exp > latest:
+			// D2: the shorter expiry applies now; the index row moves only when it exists
+			if !keyIndexReadable(home, storeName, true) {
+				return nil, hDoctorKeyRefresh
+			}
+			return func() (doctorRow, []string) {
+				if writePrivateFile(keyFile, encodeKeyEntry(value, latest)) == nil {
+					_ = updateKeyIndex(home, func(index *ledger.Object) {
+						if row, ok := index.Get(storeName).(ledger.Object); ok {
+							row = row.Clone()
+							row.Set("backend", "file")
+							row.Set("exp", latest)
+							index.Set(storeName, row)
+						}
+					})
+				}
+				return okRow("file", &latest), secrets
+			}, 0
+		default:
+			return fixed(okRow("file", exp), value), 0
 		}
-		if exp != nil && *exp-now < 3_600_000 {
-			minutes := math.Max(1, math.Floor((*exp-now)/60_000))
-			return doctorRow{"keys", "WARN", "keys", fmt.Sprintf("jev key from file expires in %d min; re-link with code-forge keys set jev --op <ref from keys.jev>", int(minutes))}, value, 0
-		}
-		when := "no expiry"
-		if exp != nil {
-			when = "expires " + time.UnixMilli(int64(math.Trunc(*exp))).UTC().Format("2006-01-02T15:04:05.000Z")
-		}
-		return doctorRow{"keys", "OK", "keys", "jev key from file, " + when + suffix}, value, 0
 	case errors.Is(err, os.ErrNotExist):
 	default:
-		why = " (key store error)"
+		reasons = append(reasons, "key store error")
 	}
-	if opRef != "" {
-		return doctorRow{}, "", hDoctorKeyRefresh
+	if opRef == "" {
+		if before == nil {
+			return fixed(doctorRow{"keys", "WARN", "keys", "jev key not resolved" + keyReasons(reasons) + "; System 1 falls back to rules"}, secrets...), 0
+		}
+		return func() (doctorRow, []string) {
+			before()
+			return doctorRow{"keys", "WARN", "keys", "jev key not resolved" + keyReasons(reasons) + "; System 1 falls back to rules"}, secrets
+		}, 0
 	}
-	return doctorRow{"keys", "WARN", "keys", "jev key not resolved" + why + "; System 1 falls back to rules"}, "", 0
+	if before == nil && !keyIndexReadable(home, storeName, false) {
+		return nil, hDoctorKeyRefresh
+	}
+	return func() (doctorRow, []string) {
+		if before != nil {
+			before()
+		}
+		value, kind := opRead(opRef)
+		if kind != "" {
+			reasons = append(reasons, opMessages[kind])
+			return doctorRow{"keys", "WARN", "keys", "jev key not resolved" + keyReasons(reasons) + "; System 1 falls back to rules"}, secrets
+		}
+		secrets = append(secrets, value)
+		exp := latest
+		if writePrivateFile(keyFile, encodeKeyEntry(value, exp)) == nil {
+			_ = updateKeyIndex(home, func(index *ledger.Object) {
+				index.Set(storeName, ledger.Object{{Key: "source", Value: "op"}, {Key: "backend", Value: "file"}, {Key: "exp", Value: exp}, {Key: "ref", Value: opRef}})
+			})
+		}
+		return okRow("op", &exp), secrets
+	}, 0
 }
 
 // decodeKeyEntry is decodeEntry: our {v, exp} JSON, else the raw text with no

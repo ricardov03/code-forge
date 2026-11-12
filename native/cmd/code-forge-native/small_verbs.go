@@ -56,6 +56,7 @@ func (v smallVerb) run(args []string) int {
 		name += " " + sub
 	}
 	before := gatesBreadcrumbName(name)
+	smallVerbBefore = before
 	stderr := &contextErrWriter{}
 	code := body(os.Stdout, stderr)
 	if code != 0 {
@@ -67,6 +68,10 @@ func (v smallVerb) run(args []string) int {
 	}
 	return code
 }
+
+// smallVerbBefore is the breadcrumb list of the running small verb, for a
+// warning line it logs (logWarning's before).
+var smallVerbBefore = []any{}
 
 func smallVerbHandover(verb string, args []string, reason handoverReason) int {
 	code, err := handover(append([]string{verb}, args...), reason)

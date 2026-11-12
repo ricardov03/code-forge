@@ -175,15 +175,6 @@ func TestB474DoctorHandsOverUnportedCases(t *testing.T) {
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
 	expectHandover(t, "doctor-key-store", "doctor", "--quick")
 
-	home, _ := b474Project(t, plain, 1_000_000)
-	writeHomeFile(t, home, ".code-forge/store/jev.key", `{"v":"k1","exp":1000}`)
-	expectHandover(t, "doctor-key-refresh", "doctor", "--quick")
-	writeHomeFile(t, home, ".code-forge/store/jev.key", `{"v":"k1","exp":999000000}`)
-	expectHandover(t, "doctor-key-refresh", "doctor", "--quick")
-
-	b474Project(t, "provider: anthropic\nkeys: {jev: 'op://vault/item/field'}\n"+b474Levels, 0)
-	expectHandover(t, "doctor-key-refresh", "doctor", "--quick")
-
 	for _, c := range []struct{ config, reason string }{
 		{"provider: anthropic\nbogus: 1\n" + b474Levels, "doctor-config-schema"},
 		{"provider: anthropic\ngates: {test: [npm, sk-abcdefghijklmnopqrstu]}\n" + b474Levels, "doctor-config-secrets"},
@@ -194,7 +185,7 @@ func TestB474DoctorHandsOverUnportedCases(t *testing.T) {
 		expectHandover(t, c.reason, "doctor", "--quick")
 	}
 
-	home, _ = b474Project(t, "provider: anthropic\nproject: {slug: demo}\n"+b474Levels, 0)
+	home, _ := b474Project(t, "provider: anthropic\nproject: {slug: demo}\n"+b474Levels, 0)
 	writeHomeFile(t, home, ".code-forge/ledger/demo.jsonl", `{"event":"session","role":"reviewer","model":"m","ts":"yesterday"}`+"\n")
 	expectHandover(t, "doctor-ledger-shape", "doctor", "--quick")
 }
