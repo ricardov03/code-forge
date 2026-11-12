@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/autopilot"
+	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/runstatus"
 	"github.com/ricardov03/code-forge/native/state"
@@ -60,9 +61,12 @@ var autopilotSpecs = map[string][2][]string{
 
 // Seams for tests: the clock, the terminal probe and the grant id.
 var (
-	autopilotNow     = time.Now
-	autopilotIsTTY   = stdinIsTerminal
-	autopilotGrantID = func() (string, error) {
+	autopilotNow   = time.Now
+	autopilotIsTTY = stdinIsTerminal
+	// autopilotPromptable: both descriptors are terminals (humanask renders there).
+	autopilotPromptable = humanask.Available
+	autopilotConfirm    = humanask.Confirm
+	autopilotGrantID    = func() (string, error) {
 		b := make([]byte, 4)
 		if _, err := rand.Read(b); err != nil {
 			return "", err
@@ -234,8 +238,8 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 	case "binnacle", "log":
 		return nil, hAutopilotBinnacle
 	}
-	if sub == "start" && !flags.bools["yes"] && autopilotIsTTY() {
-		return nil, hAutopilotPrompt // the owner's confirmation prompt stays with Node
+	if sub == "start" && !flags.bools["yes"] && autopilotIsTTY() && !autopilotPromptable() {
+		return nil, hAutopilotPrompt // stdin is a terminal but stdout is not: clack's output stays with Node
 	}
 	runID := flags.values["run"]
 	now := autopilotNow().Truncate(time.Millisecond) // a JavaScript Date holds ms
@@ -810,9 +814,27 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 	if before.State == "active" {
 		return autopilotReport(o, "start", &runFail{autopilot.ActiveGrantMessage(runID, autopilotText(before.Grant.Get("until"))), false})
 	}
+	startedAt := now
 	if !flags.bools["yes"] {
-		o.err("autopilot start: no terminal to confirm; the owner starts autopilot — pass --yes to start it without a prompt\n")
-		return 2
+		if !autopilotIsTTY() {
+			o.err("autopilot start: no terminal to confirm; the owner starts autopilot — pass --yes to start it without a prompt\n")
+			return 2
+		}
+		answer, err := autopilotConfirm("Start autopilot for run " + runID + " until " + in.until + "?")
+		if err != nil {
+			o.err("autopilot start: " + err.Error() + "\n") // Node's catch: a failed prompt is exit 1
+			return 1
+		}
+		if answer != humanask.Confirmed {
+			o.out("cancelled — no grant\n")
+			return 1
+		}
+		// the prompt may have waited: --until is checked again (future, at most 24 h) against now
+		startedAt = autopilotNow().Truncate(time.Millisecond)
+		if in, err = autopilotValidate(flags, startedAt); err != nil {
+			return autopilotReport(o, "start", err)
+		}
+		now = startedAt
 	}
 	// startGrant: the expiry check again, then under the run lock.
 	if _, err := autopilot.CheckExpiry(home, runID, now); err != nil {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/sign"
 )
 
@@ -73,10 +74,16 @@ func newAutopilotFixture(t *testing.T) runFixture {
 	t.Helper()
 	f := newRunFixture(t)
 	nowBefore, ttyBefore, idBefore := autopilotNow, autopilotIsTTY, autopilotGrantID
+	promptableBefore, confirmBefore := autopilotPromptable, autopilotConfirm
 	autopilotNow = func() time.Time { return autopilotTestNow }
 	autopilotIsTTY = func() bool { return false }
 	autopilotGrantID = func() (string, error) { return "ap-1234abcd", nil }
-	t.Cleanup(func() { autopilotNow, autopilotIsTTY, autopilotGrantID = nowBefore, ttyBefore, idBefore })
+	autopilotPromptable = func() bool { return false }
+	autopilotConfirm = func(string) (humanask.Result, error) { t.Fatal("unexpected prompt"); return humanask.NoTTY, nil }
+	t.Cleanup(func() {
+		autopilotNow, autopilotIsTTY, autopilotGrantID = nowBefore, ttyBefore, idBefore
+		autopilotPromptable, autopilotConfirm = promptableBefore, confirmBefore
+	})
 	return f
 }
 
