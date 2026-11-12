@@ -201,7 +201,7 @@ func proofAcquireLock(home, runID, blockID string) (any, error) {
 				return nil
 			}
 			return &proofError{"proof.busy", "proof.busy: block " + fmt.Sprint(held.Get("block")) + " holds the proof lock"}
-		} else if jsTruthy(record.Get("proof_lock")) {
+		} else if pcJSTruthy(record.Get("proof_lock")) {
 			return errors.New("proof_lock is not an object")
 		}
 		running := []string{}
@@ -235,7 +235,7 @@ func proofReleaseLock(home, runID, blockID string) error {
 			return err
 		}
 		value := record.Get("proof_lock")
-		if !jsTruthy(value) {
+		if !pcJSTruthy(value) {
 			return &proofError{"not-locked", "run " + runID + " has no proof lock"}
 		}
 		held, ok := value.(ledger.Object)

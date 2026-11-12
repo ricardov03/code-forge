@@ -83,7 +83,7 @@ func proofConfigUnported(cfg map[string]any) bool {
 
 func jsObject(value any) map[string]any { out, _ := value.(map[string]any); return out }
 
-func jsTruthy(value any) bool {
+func pcJSTruthy(value any) bool {
 	switch v := value.(type) {
 	case nil:
 		return false
@@ -97,7 +97,7 @@ func jsTruthy(value any) bool {
 	return true
 }
 
-func jsInteger(value any) (float64, bool) {
+func pcJSInteger(value any) (float64, bool) {
 	n, ok := value.(float64)
 	return n, ok && !math.IsInf(n, 0) && math.Trunc(n) == n
 }
@@ -181,7 +181,7 @@ var proofDomainRules = []struct {
 	}},
 	{"multimodel-missing-second-provider", func(cfg map[string]any) int {
 		review := jsObject(cfg["review"])
-		if review["multimodel"] == true && !jsTruthy(review["second_provider"]) {
+		if review["multimodel"] == true && !pcJSTruthy(review["second_provider"]) {
 			return 1
 		}
 		return 0
@@ -191,7 +191,7 @@ var proofDomainRules = []struct {
 			return 0
 		}
 		primary, second := proofEffectiveLevel(cfg, "L2"), proofSecondL2Provider(cfg)
-		if primary != nil && jsTruthy(second) && second == any(primary.provider) {
+		if primary != nil && pcJSTruthy(second) && second == any(primary.provider) {
 			return 1
 		}
 		return 0
@@ -205,7 +205,7 @@ var proofDomainRules = []struct {
 			return 0
 		}
 		first, second := proofEffectiveLevel(cfg, "L2"), proofSecondL2Provider(cfg)
-		if (first != nil && first.provider == judge.provider) || (jsTruthy(second) && second == any(judge.provider)) {
+		if (first != nil && first.provider == judge.provider) || (pcJSTruthy(second) && second == any(judge.provider)) {
 			return 1
 		}
 		return 0
@@ -257,7 +257,7 @@ var proofDomainRules = []struct {
 				n++
 				continue
 			}
-			if lines, ok := jsInteger(rule["min_lines"]); ok {
+			if lines, ok := pcJSInteger(rule["min_lines"]); ok {
 				key := fmt.Sprint(level, "\x00", lines)
 				if seen[key] {
 					n++
@@ -499,12 +499,12 @@ func proofGateIssues(cfg map[string]any) int {
 		}
 	}
 	if value, present := gates["repeat_new_tests"]; present {
-		if v, ok := jsInteger(value); !ok || v < 2 || v > 10 {
+		if v, ok := pcJSInteger(value); !ok || v < 2 || v > 10 {
 			n++
 		}
 	}
 	if value, present := gates["timeout_s"]; present {
-		if v, ok := jsInteger(value); !ok || v < 30 || v > 7200 {
+		if v, ok := pcJSInteger(value); !ok || v < 30 || v > 7200 {
 			n++
 		}
 	}
