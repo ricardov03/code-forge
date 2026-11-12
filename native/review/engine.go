@@ -2,13 +2,11 @@ package review
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
 	"math"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -95,7 +93,20 @@ type GapError struct{ Case string }
 
 func (e *GapError) Error() string { return "review: " + e.Case + " is not ported to Go" }
 
-type sessionSpec struct{ lens, role, level string }
+type sessionSpec struct {
+	lens, role, level string
+	// cfg is planSessions' per-session config (consensus slot B); nil: the
+	// run's config.
+	cfg  map[string]any
+	slot string // "" is null
+}
+
+func (s sessionSpec) slotValue() any {
+	if s.slot == "" {
+		return nil
+	}
+	return s.slot
+}
 
 func numberIn(v any) (float64, bool) {
 	n, ok := v.(float64)
@@ -129,10 +140,10 @@ func planSpec(risk float64, cfg map[string]any, kind string) (sessionSpec, strin
 		return sessionSpec{}, "", errConsensus
 	}
 	if risk < 1 {
-		return sessionSpec{"quick", "reviewer", "L2"}, "quick", nil
+		return sessionSpec{lens: "quick", role: "reviewer", level: "L2"}, "quick", nil
 	}
 	if risk < 2 || single {
-		return sessionSpec{"full", "reviewer", "L2"}, "full", nil
+		return sessionSpec{lens: "full", role: "reviewer", level: "L2"}, "full", nil
 	}
 	return sessionSpec{}, "", unsupported("the dual-lens review with a judge is not ported")
 }
@@ -146,6 +157,8 @@ func testLike(file string) bool {
 	return strings.Contains(low, "test") || strings.Contains(low, "spec")
 }
 
+// preSpawnGuards is the recheck session's guard (recheck.go): its ladder,
+// routes recovery and second level are not ported (B538 ports them for File).
 func preSpawnGuards(in Input) error {
 	review := section(in.Cfg, "review")
 	if routes, ok := review["routes"].([]any); ok && len(routes) > 0 {
@@ -237,7 +250,7 @@ func prepare(in Input) (*prepared, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := preSpawnGuards(in); err != nil {
+	if err := levelGuards(in.Cfg, spec.level); err != nil {
 		return nil, err
 	}
 	head := ledger.Object{{Key: "engine", Value: "adaptive"}, {Key: "depth", Value: depth}, {Key: "risk", Value: risk}, {Key: "file", Value: diff.File}}
@@ -346,7 +359,7 @@ func File(in Input, deps Deps) (ledger.Object, error) {
 	plan := ledger.Object{{Key: "event", Value: "review.plan"}, {Key: "depth_unconstrained", Value: depth}, {Key: "depth_chosen", Value: depth},
 		{Key: "degrade_step", Value: 0.0}, {Key: "risk", Value: risk}, {Key: "context_mode", Value: packet.ContextMode}, {Key: "forecast_tokens", Value: float64(packet.TokensIn)}}
 	deps.note(append(plan, stepUp...))
-	done, err := runOne(spec, packet.Text, packet, in, deps)
+	done, err := runOneWith(spec, packet.Text, packet, in, deps, true)
 	if err != nil {
 		return nil, err
 	}
@@ -436,114 +449,8 @@ func schemaInvalidRow(spec sessionSpec, res ledger.Object, hash string, second b
 	return row
 }
 
-func runOne(spec sessionSpec, text string, packet *Packet, in Input, deps Deps) (ledger.Object, error) {
-	suffix, err := randomHex(deps.Rand)
-	if err != nil {
-		return nil, err
-	}
-	promptPath := filepath.Join(in.WorkDir, spec.lens+"-"+suffix+".md")
-	if err := os.WriteFile(promptPath, []byte(text), 0o600); err != nil {
-		return nil, err
-	}
-	defer os.Remove(promptPath)
-	sum := sha256.Sum256([]byte(text))
-	hash := hex.EncodeToString(sum[:])
-	rowExtra := ledger.Object{{Key: "lens", Value: spec.lens}, {Key: "context_mode", Value: packet.ContextMode}, {Key: "ctx_tokens_in", Value: float64(packet.TokensIn)}}
-	spawnWith := func(cfg map[string]any) (ledger.Object, bool) {
-		res, err := deps.Spawn(SpawnOpts{Level: spec.level, Role: spec.role, PromptPath: promptPath, RowExtra: rowExtra.Clone(), Cfg: cfg})
-		if err != nil {
-			return nil, false
-		}
-		out, _ := TruncateReviewFields(res)
-		return out, true
-	}
-	// spawnWithTimeoutRetry with no ladder; tryNext('timeout') counts timeouts
-	// per provider/model and acts (timeoutFallbackFor) at the second one.
-	timeouts := map[string]int{}
-	var res, broken, fellBackTo ledger.Object
-	attempts := 0
-	for {
-		attempts++
-		out, ok := spawnWith(in.Cfg)
-		if !ok {
-			res = nil
-			break
-		}
-		res = out
-		if res == nil || res.Get("status") != "timeout" {
-			break // at-capacity without a ladder returns as is, like any result
-		}
-		retried := attempts <= timeoutRetries
-		deps.note(timeoutRow(spec, res, attempts, retried, hash))
-		if deps.WriteRow != nil {
-			taken, err := timeoutTry(spec, res, hash, timeouts, in, deps, func(cfg map[string]any) ledger.Object {
-				out, _ := spawnWith(cfg)
-				return out
-			})
-			if err != nil {
-				return nil, err
-			}
-			if taken != nil {
-				broken, res, fellBackTo = res, taken.res, taken.to
-				attempts++
-				break
-			}
-		}
-		if !retried {
-			break
-		}
-		if deps.Warn != nil {
-			deps.Warn("review_retry", "a review session timed out; it was retried once")
-		}
-	}
-	var verdict Verdict
-	var tokensIn, tokensOut any
-	if fellBackTo != nil {
-		// B91: the second timeout's one other model ran; a schema miss of it is
-		// logged, never counted, never tried again
-		verdict = ValidateReview(res, packet.HunkHeaders, MinTokensOut(in.Cfg))
-		tokensIn = addTokens(orDefault(get(usageOf(broken), "tokens_in"), nil), get(usageOf(res), "tokens_in"))
-		tokensOut = addTokens(orDefault(get(usageOf(broken), "tokens_out"), nil), get(usageOf(res), "tokens_out"))
-		if !verdict.OK && verdict.Reason == "schema" {
-			deps.note(schemaInvalidRow(spec, res, hash, true))
-		}
-	} else {
-		tokensIn = orDefault(get(usageOf(res), "tokens_in"), nil)
-		tokensOut = orDefault(get(usageOf(res), "tokens_out"), nil)
-		verdict = ValidateReview(res, packet.HunkHeaders, MinTokensOut(in.Cfg))
-		if !verdict.OK && verdict.Reason == "schema" && deps.WriteRow != nil {
-			afterSchemaMiss(spec, res, hash, deps)
-		}
-	}
-	meta := ledger.Object{{Key: "lens", Value: spec.lens}, {Key: "role", Value: spec.role}, {Key: "level", Value: spec.level}, {Key: "slot", Value: nil},
-		{Key: "context_mode", Value: packet.ContextMode}, {Key: "ctx_tokens_in", Value: float64(packet.TokensIn)},
-		{Key: "provider", Value: orDefault(get(res, "provider"), nil)}, {Key: "model", Value: orDefault(get(res, "model"), nil)},
-		{Key: "fallback_step", Value: orDefault(get(res, "fallback_step"), 0.0)}, {Key: "attempts", Value: float64(attempts)}}
-	if cuts, ok := get(res, "truncated_fields").([]any); ok && len(cuts) > 0 {
-		meta.Set("truncated_fields", cuts)
-	}
-	if verdict.PassedCoerced {
-		meta.Set("passed_coerced", true)
-	}
-	if fellBackTo != nil {
-		meta.Set("schema_fallback", fellBackTo)
-	}
-	meta.Set("tokens_in", tokensIn)
-	meta.Set("tokens_out", tokensOut)
-	if !verdict.OK {
-		meta.Set("status", "unavailable")
-		meta.Set("reason", verdict.Reason)
-		meta.Set("review", nil)
-		return meta, nil
-	}
-	meta.Set("status", "ok")
-	meta.Set("reason", nil)
-	meta.Set("review", verdict.Review)
-	return meta, nil
-}
-
 // timeoutRow is spawnWithTimeoutRetry's review.session_timeout note (with
-// the packet hash, never second_level: the second level is not ported).
+// the packet hash; Node's note has no second_level field).
 func timeoutRow(spec sessionSpec, res ledger.Object, attempts int, retried bool, hash string) ledger.Object {
 	note := ledger.Object{{Key: "event", Value: "review.session_timeout"}, {Key: "lens", Value: spec.lens}, {Key: "role", Value: spec.role},
 		{Key: "level", Value: spec.level}, {Key: "provider", Value: orDefault(res.Get("provider"), nil)}, {Key: "model", Value: orDefault(res.Get("model"), nil)},
@@ -576,84 +483,9 @@ func timeoutRow(spec sessionSpec, res ledger.Object, attempts int, retried bool,
 }
 
 type brokenTry struct {
-	res ledger.Object
-	to  ledger.Object
-}
-
-// timeoutTry is runOne's tryNext(res, 'timeout') with no second level: nil
-// below the second timeout of one provider/model, when the packet already
-// fell back, when timeoutFallbackFor names no other model or when its mark
-// cannot be written.
-func timeoutTry(spec sessionSpec, res ledger.Object, hash string, timeouts map[string]int, in Input, deps Deps, spawn func(map[string]any) ledger.Object) (*brokenTry, error) {
-	provider, model := res.Get("provider"), res.Get("model")
-	if provider == nil || model == nil {
-		level := section(in.Cfg, "levels")["L2"].(map[string]any)
-		if provider == nil {
-			provider = orDefault(level["provider"], in.Cfg["provider"])
-		}
-		if model == nil {
-			model = level["model"]
-		}
-	}
-	key := jsString(provider, true) + "\x00" + jsString(model, true)
-	timeouts[key]++
-	count := timeouts[key]
-	if count < 2 {
-		return nil, nil
-	}
-	if deps.TimeoutFallback == nil {
-		return nil, &GapError{"timeout-fallback"}
-	}
-	rows := []any{}
-	var routingError any
-	readErr := func() error {
-		if deps.SchemaHistory != nil {
-			_, fellBack, err := deps.SchemaHistory(hash, spec.level, spec.role)
-			if err != nil {
-				return err
-			}
-			if fellBack {
-				return errFellBack
-			}
-		}
-		if deps.ReadRows != nil {
-			got, err := deps.ReadRows()
-			if err != nil {
-				return err
-			}
-			if got != nil {
-				rows = got
-			}
-		}
-		return nil
-	}()
-	if readErr == errFellBack {
-		return nil, nil
-	}
-	if readErr != nil {
-		// a read failure must not strand the ticket: the local count still
-		// proves two timeouts; the degraded choice is recorded
-		rows, routingError = []any{}, "ledger-read-failed"
-	}
-	fb, err := deps.TimeoutFallback(TimeoutFallbackInput{Cfg: in.Cfg, Level: spec.level, Role: spec.role, FromProvider: provider, FromModel: model, Rows: rows, TicketID: hash})
-	if err != nil {
-		return nil, &GapError{"timeout-fallback"}
-	}
-	if fb == nil {
-		return nil, nil
-	}
-	mark := ledger.Object{{Key: "event", Value: "review.schema_fallback"}, {Key: "lens", Value: spec.lens}, {Key: "role", Value: spec.role}, {Key: "level", Value: spec.level},
-		{Key: "packet_hash", Value: hash}, {Key: "from_provider", Value: provider}, {Key: "from_model", Value: model}, {Key: "to", Value: "review.timeout_fallback"},
-		{Key: "to_provider", Value: fb.Provider}, {Key: "to_model", Value: fb.Model}, {Key: "attempts", Value: float64(count)},
-		{Key: "trigger", Value: "timeout"}, {Key: "reason", Value: "repeated-timeout"}, {Key: "routing_reason", Value: fb.Reason}}
-	if routingError != nil {
-		mark.Set("routing_error", routingError)
-	}
-	if err := deps.WriteRow(mark); err != nil {
-		return nil, nil // never run a recovery that could not be recorded
-	}
-	to := ledger.Object{{Key: "level", Value: "review.timeout_fallback"}, {Key: "provider", Value: fb.Provider}, {Key: "model", Value: fb.Model}}
-	return &brokenTry{res: spawn(fb.Cfg), to: to}, nil
+	res      ledger.Object
+	attempts int
+	to       ledger.Object
 }
 
 var errFellBack = errors.New("fell back")
@@ -716,7 +548,7 @@ func needsFileRound(summary ledger.Object, spec sessionSpec, packet *Packet, in 
 		out.Set("review", nil)
 		return out, nil
 	}
-	out, err := runOne(spec, packet.Text+extra, packet, in, deps)
+	out, err := runOneWith(spec, packet.Text+extra, packet, in, deps, true)
 	if err != nil {
 		return nil, err
 	}

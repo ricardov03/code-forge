@@ -335,12 +335,16 @@ func (w *TicketRunner) planEngineDry(t ledger.Object, rec ledger.Object, cfg map
 			return nil, nil, unsupported("the recheck session: " + err.Error())
 		}
 	} else if spawns {
-		level, role, ok, err := review.SpawnLevel(in)
+		// B538: every config the session may spawn on (the level, its pinned
+		// ladder entries, the second level and its entries)
+		checks, err := review.SpawnChecks(in)
 		if err != nil {
 			return nil, nil, err
 		}
-		if ok {
-			if err := session.CheckReview(sopts, level, role); err != nil {
+		for _, c := range checks {
+			o := sopts
+			o.Cfg = c.Cfg
+			if err := session.CheckReview(o, c.Level, c.Role); err != nil {
 				return nil, nil, unsupported("the review session: " + err.Error())
 			}
 		}

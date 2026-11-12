@@ -1,0 +1,1408 @@
+{
+ "cases": [
+  {
+   "name": "ladder-schema-recovers",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "provider": "claude",
+        "model": "m2c",
+        "effort": "high"
+       }
+      ]
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2b",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "ladder-schema-retry-ok",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "provider": "claude",
+        "model": "m2c",
+        "effort": "high"
+       }
+      ]
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "ladder-schema-all-bad",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "provider": "claude",
+        "model": "m2c",
+        "effort": "high"
+       }
+      ]
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2b",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2b",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2c",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2c",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "ladder-timeout-next",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "provider": "claude",
+        "model": "m2c",
+        "effort": "high"
+       }
+      ]
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2b",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "ladder-capacity-next",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "provider": "claude",
+        "model": "m2c",
+        "effort": "high"
+       }
+      ]
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "unavailable",
+     "reason": "at-capacity",
+     "provider": "claude",
+     "model": "m2"
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2b",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "ladder-timeout-all",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "provider": "claude",
+        "model": "m2c",
+        "effort": "high"
+       }
+      ]
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2b",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2c",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ladder-throw",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "provider": "claude",
+        "model": "m2c",
+        "effort": "high"
+       }
+      ]
+     }
+    }
+   },
+   "script": [
+    "throw"
+   ]
+  },
+  {
+   "name": "ladder-closed-book",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "provider": "openai",
+        "model": "gx"
+       },
+       {
+        "model": "m2b",
+        "effort": "low"
+       }
+      ]
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2b",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "ladder-nowriter",
+   "writer": false,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "provider": "claude",
+        "model": "m2c",
+        "effort": "high"
+       }
+      ]
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2b",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "routes-ok",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "effort": "medium",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "model": "m2c"
+       }
+      ]
+     }
+    },
+    "review": {
+     "routes": [
+      {
+       "min_lines": 0,
+       "model": "m2"
+      }
+     ]
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "routes-schema-next",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "effort": "medium",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "model": "m2c"
+       }
+      ]
+     }
+    },
+    "review": {
+     "routes": [
+      {
+       "min_lines": 0,
+       "model": "m2"
+      }
+     ]
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2b",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "routes-timeout-next",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "effort": "medium",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "model": "m2c"
+       }
+      ]
+     }
+    },
+    "review": {
+     "routes": [
+      {
+       "min_lines": 0,
+       "model": "m2"
+      }
+     ]
+    }
+   },
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2b",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "routes-all-fail",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "effort": "medium",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "model": "m2c"
+       }
+      ]
+     }
+    },
+    "review": {
+     "routes": [
+      {
+       "min_lines": 0,
+       "model": "m2"
+      }
+     ]
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    "throw",
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2c",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "routes-quality",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "effort": "medium",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "model": "m2c"
+       }
+      ]
+     }
+    },
+    "review": {
+     "routes": [
+      {
+       "min_lines": 0,
+       "model": "m2"
+      }
+     ]
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": [],
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-schema",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "model": "s2",
+       "provider": "claude"
+      }
+     }
+    }
+   },
+   "history": {
+    "failures": 1,
+    "fellBack": false
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "s2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-schema-again",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "model": "s2"
+      }
+     },
+     "second_provider": "claude"
+    }
+   },
+   "history": {
+    "failures": 1,
+    "fellBack": false
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "s2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-timeout",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "model": "s2",
+       "provider": "claude",
+       "effort": "high"
+      }
+     }
+    }
+   },
+   "history": {
+    "failures": 2,
+    "fellBack": false
+   },
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "s2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-timeout-low",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "model": "s2",
+       "provider": "claude"
+      }
+     }
+    }
+   },
+   "history": {
+    "failures": 0,
+    "fellBack": false
+   },
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "second-same-model",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "model": "m2",
+       "provider": "claude"
+      }
+     }
+    }
+   },
+   "history": {
+    "failures": 1,
+    "fellBack": false
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-closed-book",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "model": "gx",
+       "provider": "openai"
+      }
+     }
+    }
+   },
+   "history": {
+    "failures": 1,
+    "fellBack": false
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-ladder",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "model": "m2",
+       "provider": "claude",
+       "fallback": [
+        {
+         "model": "s3",
+         "effort": "low"
+        },
+        {
+         "model": "s4"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "history": {
+    "failures": 1,
+    "fellBack": false
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "s3",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "s4",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-history-none",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "model": "s2",
+       "provider": "claude"
+      }
+     }
+    }
+   },
+   "history": {
+    "failures": 0,
+    "fellBack": false
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-fellback",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "model": "s2",
+       "provider": "claude"
+      }
+     }
+    }
+   },
+   "history": {
+    "failures": 3,
+    "fellBack": true
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-no-history",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "model": "s2",
+       "provider": "claude"
+      }
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-mark-fails",
+   "failEvent": "review.schema_fallback",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "model": "s2",
+       "provider": "claude"
+      }
+     }
+    }
+   },
+   "history": {
+    "failures": 1,
+    "fellBack": false
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  }
+ ]
+}

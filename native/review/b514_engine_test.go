@@ -17,10 +17,16 @@ import (
 // ledger rows, session calls (packet text, config), warnings and seam calls,
 // byte for byte (goldens: Node's reviewFile on the same repository).
 func TestB514ReviewFileMatchesNode(t *testing.T) {
+	matchEngineGolden(t, "b514_engine_fixture.json", "b514_engine_golden.json")
+}
+
+// matchEngineGolden runs each fixture case through File with a fake session
+// and compares it with Node's golden (B514, B538).
+func matchEngineGolden(t *testing.T, fixture, goldenFile string) {
 	useRepoLenses(t)
 	repo := buildRepo(t, readFixture(t, "packet_fixture.json"))
-	cases := readOrdered(t, "b514_engine_fixture.json").Get("cases").([]any)
-	golden := readOrdered(t, "b514_engine_golden.json").Get("cases").(ledger.Object)
+	cases := readOrdered(t, fixture).Get("cases").([]any)
+	golden := readOrdered(t, goldenFile).Get("cases").(ledger.Object)
 	if len(cases) != len(golden) {
 		t.Fatalf("cases %d, golden %d", len(cases), len(golden))
 	}

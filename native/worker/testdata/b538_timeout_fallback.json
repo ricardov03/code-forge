@@ -1,0 +1,609 @@
+{
+ "cases": [
+  {
+   "name": "ladder",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "provider": "claude",
+        "model": "m2c",
+        "effort": "high"
+       }
+      ]
+     }
+    }
+   },
+   "from": {
+    "provider": "claude",
+    "model": "m2"
+   },
+   "rows": []
+  },
+  {
+   "name": "ladder-from-entry",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "model": "m2b"
+       },
+       {
+        "provider": "claude",
+        "model": "m2c",
+        "effort": "high"
+       }
+      ]
+     }
+    }
+   },
+   "from": {
+    "provider": "claude",
+    "model": "m2b"
+   },
+   "rows": []
+  },
+  {
+   "name": "ladder-closed-book",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "provider": "openai",
+        "model": "gx"
+       }
+      ]
+     }
+    }
+   },
+   "from": {
+    "provider": "claude",
+    "model": "m2"
+   },
+   "rows": []
+  },
+  {
+   "name": "ladder-provider-from-cfg",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "model": "m2",
+      "fallback": [
+       {
+        "model": "m2b"
+       }
+      ]
+     }
+    }
+   },
+   "from": {
+    "provider": "claude",
+    "model": "m2"
+   },
+   "rows": []
+  },
+  {
+   "name": "second-level",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "model": "s2",
+       "effort": "high",
+       "fallback": [
+        {
+         "model": "s3"
+        }
+       ]
+      }
+     },
+     "second_provider": "claude"
+    }
+   },
+   "from": {
+    "provider": "claude",
+    "model": "m2"
+   },
+   "rows": []
+  },
+  {
+   "name": "second-level-other",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L3": {
+       "model": "s3"
+      }
+     }
+    }
+   },
+   "from": {
+    "provider": "claude",
+    "model": "m2"
+   },
+   "rows": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "s3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ]
+  },
+  {
+   "name": "second-level-other-unconfirmed",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L3": {
+       "model": "s3"
+      }
+     }
+    }
+   },
+   "from": {
+    "provider": "claude",
+    "model": "m2"
+   },
+   "rows": [
+    {
+     "event": "session",
+     "role": "coder",
+     "model": "s3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ]
+  },
+  {
+   "name": "routes",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "routes": [
+      {
+       "min_lines": 0,
+       "model": "r1",
+       "effort": "low",
+       "second": {
+        "model": "r2"
+       }
+      }
+     ]
+    }
+   },
+   "from": {
+    "provider": "claude",
+    "model": "m2"
+   },
+   "rows": []
+  },
+  {
+   "name": "routes-other-level",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    },
+    "review": {
+     "routes": [
+      {
+       "min_lines": 0,
+       "level": "L3",
+       "model": "r3"
+      }
+     ]
+    }
+   },
+   "from": {
+    "provider": "claude",
+    "model": "m2"
+   },
+   "rows": [
+    {
+     "event": "review.result",
+     "sessions": [
+      {
+       "event": "session",
+       "role": "reviewer",
+       "model": "r3",
+       "provider": "claude",
+       "run": "r1",
+       "block": "B1",
+       "lens": "full"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "routes-dup",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "model": "r1"
+       }
+      ]
+     }
+    },
+    "review": {
+     "routes": [
+      {
+       "min_lines": 0,
+       "model": "r1"
+      },
+      {
+       "min_lines": 5,
+       "model": "r1",
+       "provider": "claude"
+      }
+     ]
+    }
+   },
+   "from": {
+    "provider": "claude",
+    "model": "m2"
+   },
+   "rows": []
+  },
+  {
+   "name": "all-together",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2",
+      "fallback": [
+       {
+        "model": "m2b"
+       }
+      ]
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "model": "s2"
+      }
+     },
+     "routes": [
+      {
+       "min_lines": 0,
+       "model": "r1"
+      }
+     ]
+    }
+   },
+   "from": {
+    "provider": "claude",
+    "model": "m2"
+   },
+   "rows": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m2b",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    },
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m2b",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    },
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "s2",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ]
+  }
+ ],
+ "golden": {
+  "ladder": {
+   "output": {
+    "cfg": {
+     "provider": "claude",
+     "levels": {
+      "L2": {
+       "model": "m2b",
+       "provider": "claude",
+       "fallback": []
+      }
+     }
+    },
+    "model": "m2b",
+    "provider": "claude",
+    "reason": "configured-order"
+   }
+  },
+  "ladder-from-entry": {
+   "output": {
+    "cfg": {
+     "provider": "claude",
+     "levels": {
+      "L2": {
+       "model": "m2c",
+       "provider": "claude",
+       "effort": "high",
+       "fallback": []
+      }
+     }
+    },
+    "model": "m2c",
+    "provider": "claude",
+    "reason": "configured-order"
+   }
+  },
+  "ladder-closed-book": {
+   "output": null
+  },
+  "ladder-provider-from-cfg": {
+   "output": {
+    "cfg": {
+     "provider": "claude",
+     "levels": {
+      "L2": {
+       "model": "m2b",
+       "provider": "claude",
+       "fallback": []
+      }
+     }
+    },
+    "model": "m2b",
+    "provider": "claude",
+    "reason": "configured-order"
+   }
+  },
+  "second-level": {
+   "output": {
+    "cfg": {
+     "provider": "claude",
+     "levels": {
+      "L2": {
+       "model": "s2",
+       "provider": "claude",
+       "effort": "high",
+       "fallback": []
+      }
+     },
+     "review": {
+      "second_levels": {
+       "L2": {
+        "model": "s2",
+        "effort": "high",
+        "fallback": [
+         {
+          "model": "s3"
+         }
+        ]
+       }
+      },
+      "second_provider": "claude"
+     }
+    },
+    "model": "s2",
+    "provider": "claude",
+    "reason": "configured-order"
+   }
+  },
+  "second-level-other": {
+   "output": {
+    "cfg": {
+     "provider": "claude",
+     "levels": {
+      "L2": {
+       "model": "s3",
+       "provider": "claude",
+       "fallback": []
+      }
+     },
+     "review": {
+      "second_levels": {
+       "L3": {
+        "model": "s3"
+       }
+      }
+     }
+    },
+    "model": "s3",
+    "provider": "claude",
+    "reason": "configured-order"
+   }
+  },
+  "second-level-other-unconfirmed": {
+   "output": null
+  },
+  "routes": {
+   "output": {
+    "cfg": {
+     "provider": "claude",
+     "levels": {
+      "L2": {
+       "model": "r1",
+       "provider": "claude",
+       "effort": "low",
+       "fallback": []
+      }
+     },
+     "review": {
+      "routes": [
+       {
+        "min_lines": 0,
+        "model": "r1",
+        "effort": "low",
+        "second": {
+         "model": "r2"
+        }
+       }
+      ]
+     }
+    },
+    "model": "r1",
+    "provider": "claude",
+    "reason": "configured-order"
+   }
+  },
+  "routes-other-level": {
+   "output": {
+    "cfg": {
+     "provider": "claude",
+     "levels": {
+      "L2": {
+       "model": "r3",
+       "provider": "claude",
+       "fallback": []
+      },
+      "L3": {
+       "provider": "claude",
+       "model": "m3"
+      }
+     },
+     "review": {
+      "routes": [
+       {
+        "min_lines": 0,
+        "level": "L3",
+        "model": "r3"
+       }
+      ]
+     }
+    },
+    "model": "r3",
+    "provider": "claude",
+    "reason": "configured-order"
+   }
+  },
+  "routes-dup": {
+   "output": {
+    "cfg": {
+     "provider": "claude",
+     "levels": {
+      "L2": {
+       "model": "r1",
+       "provider": "claude",
+       "fallback": []
+      }
+     },
+     "review": {
+      "routes": [
+       {
+        "min_lines": 0,
+        "model": "r1"
+       },
+       {
+        "min_lines": 5,
+        "model": "r1",
+        "provider": "claude"
+       }
+      ]
+     }
+    },
+    "model": "r1",
+    "provider": "claude",
+    "reason": "configured-order"
+   }
+  },
+  "all-together": {
+   "output": {
+    "cfg": {
+     "provider": "claude",
+     "levels": {
+      "L2": {
+       "model": "m2b",
+       "provider": "claude",
+       "fallback": []
+      }
+     },
+     "review": {
+      "second_levels": {
+       "L2": {
+        "model": "s2"
+       }
+      },
+      "routes": [
+       {
+        "min_lines": 0,
+        "model": "r1"
+       }
+      ]
+     }
+    },
+    "model": "m2b",
+    "provider": "claude",
+    "reason": "configured-order"
+   }
+  }
+ }
+}

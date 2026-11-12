@@ -11,8 +11,8 @@ import (
 
 // B514: the worker's seams for review.File's broken-answer steps: Node's
 // ledgerSchemaHistory (schema-fallback.mjs) and timeoutFallbackFor
-// (route.mjs) for the configs Go reviews (no levels.<L> fallback, no
-// review.second_levels, no review.routes: review.File refuses those first).
+// (route.mjs); B538 adds the level's explicit alternatives (its ladder,
+// review.second_levels, review.routes).
 
 // schemaHistory is ledgerSchemaHistory over the run's ledger: signed
 // review.schema_invalid / review.session_timeout rows of the level's own
@@ -64,8 +64,9 @@ type fallbackEntry struct {
 	hasEffort       bool
 }
 
-// timeoutFallbackFor is route.mjs timeoutFallbackFor for a config with no
-// review alternatives at the level: every candidate is a configured model the
+// timeoutFallbackFor is route.mjs timeoutFallbackFor: the level's explicit
+// review alternatives (its ladder, review.second_levels.<L>, the level's
+// review.routes rules and their seconds), then every configured model the
 // ledger confirms in this role. errRouteUnsure where Go does not model the
 // input (Node's order of a key it cannot see, a value Node would throw on).
 func timeoutFallbackFor(cfg map[string]any, in review.TimeoutFallbackInput, now time.Time) (*review.Fallback, error) {
@@ -74,49 +75,111 @@ func timeoutFallbackFor(cfg map[string]any, in review.TimeoutFallbackInput, now 
 		return nil, errRouteUnsure
 	}
 	primary, _ := obj(levels[in.Level])
-	if fb, ok := primary["fallback"]; ok && fb != nil {
-		if list, ok := fb.([]any); !ok || len(list) > 0 {
-			return nil, errRouteUnsure
-		}
-	}
 	rv := reviewOf(cfg)
-	if rv["second_levels"] != nil {
+	rules, err := routeRules(cfg)
+	if err != nil {
+		return nil, errRouteUnsure // routeRules throws
+	}
+	secondLevels, _ := obj(rv["second_levels"])
+	if rv["second_levels"] != nil && secondLevels == nil {
 		return nil, errRouteUnsure
 	}
-	if rules, err := routeRules(cfg); err != nil || len(rules) > 0 {
-		return nil, errRouteUnsure
+	secondProvider := rv["second_provider"]
+	if secondProvider == nil {
+		secondProvider = cfg["provider"]
 	}
-	// configured: every levels entry and its ladder, provider defaulted to
-	// the entry's own, then the top-level one
-	configured := []map[string]any{}
-	for _, raw := range levels {
+	// add is timeoutFallbackFor's add: the entry with its provider defaulted,
+	// then its own ladder with each provider defaulted to the entry's
+	add := func(target *[]map[string]any, raw any, provider any) error {
+		if raw == nil {
+			return nil
+		}
 		entry, ok := obj(raw)
 		if !ok {
-			return nil, errRouteUnsure
+			return errRouteUnsure
 		}
 		own, has := entry["provider"]
 		if !has || own == nil {
-			own = cfg["provider"]
+			own = provider
 		}
 		withProvider := copyMap(entry)
 		withProvider["provider"] = own
-		configured = append(configured, withProvider)
+		*target = append(*target, withProvider)
 		if fb, has := entry["fallback"]; has && fb != nil {
 			list, ok := fb.([]any)
 			if !ok {
-				return nil, errRouteUnsure
+				return errRouteUnsure
 			}
 			for _, f := range list {
 				fe, ok := obj(f)
 				if !ok {
-					return nil, errRouteUnsure
+					return errRouteUnsure
 				}
 				c := copyMap(fe)
 				if p, has := fe["provider"]; !has || p == nil {
 					c["provider"] = own
 				}
-				configured = append(configured, c)
+				*target = append(*target, c)
 			}
+		}
+		return nil
+	}
+	explicit := []map[string]any{}
+	if fb, has := primary["fallback"]; has && fb != nil {
+		list, ok := fb.([]any)
+		if !ok {
+			return nil, errRouteUnsure
+		}
+		pp := primary["provider"]
+		if pp == nil {
+			pp = cfg["provider"]
+		}
+		for _, f := range list {
+			if err := add(&explicit, f, pp); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := add(&explicit, secondLevels[in.Level], secondProvider); err != nil {
+		return nil, err
+	}
+	for _, rule := range rules {
+		if ruleLevel(rule) != in.Level {
+			continue
+		}
+		provider, err := providerOf(cfg, rule)
+		if err != nil {
+			return nil, errRouteUnsure // providerOf throws
+		}
+		if err := add(&explicit, entryOf(rule), provider); err != nil {
+			return nil, err
+		}
+		if err := add(&explicit, rule["second"], secondProvider); err != nil {
+			return nil, err
+		}
+	}
+	// configured: every levels entry, second level and rule with its ladder
+	configured := []map[string]any{}
+	for _, raw := range levels {
+		if err := add(&configured, raw, cfg["provider"]); err != nil {
+			return nil, err
+		}
+	}
+	for _, raw := range secondLevels {
+		if err := add(&configured, raw, secondProvider); err != nil {
+			return nil, err
+		}
+	}
+	for _, rule := range rules {
+		provider, err := providerOf(cfg, rule)
+		if err != nil {
+			return nil, errRouteUnsure
+		}
+		if err := add(&configured, entryOf(rule), provider); err != nil {
+			return nil, err
+		}
+		if err := add(&configured, rule["second"], secondProvider); err != nil {
+			return nil, err
 		}
 	}
 	// configured.find: Go's map has lost the config's key order, so two
@@ -138,6 +201,17 @@ func timeoutFallbackFor(cfg map[string]any, in review.TimeoutFallbackInput, now 
 		return out, found
 	}
 	entries := []fallbackEntry{}
+	for _, e := range explicit {
+		// the explicit alternatives are candidates as written (a non-text
+		// model or provider is filtered out below)
+		model, _ := e["model"].(string)
+		provider, _ := e["provider"].(string)
+		if model == "" || provider == "" {
+			continue
+		}
+		effort, has := e["effort"]
+		entries = append(entries, fallbackEntry{model: model, provider: provider, effort: effort, hasEffort: has})
+	}
 	unsure := false
 	confirm := func(s map[string]any) {
 		if s == nil || s["role"] != in.Role {
