@@ -341,6 +341,8 @@ const (
 	hSpawnCoderRun
 	hSpawnFactsCwd
 	hSpawnBackgroundStart
+	hGoPanic
+	hGoPanicStopped
 )
 
 var handoverReasons = [...]string{
@@ -681,4 +683,6 @@ var handoverReasons = [...]string{
 	hSpawnCoderRun:        "spawn-coder-run",
 	hSpawnFactsCwd:        "spawn-facts-cwd",
 	hSpawnBackgroundStart: "spawn-background-start",
+	hGoPanic:                     "go-panic",
+	hGoPanicStopped:              "go-panic-stopped",
 }

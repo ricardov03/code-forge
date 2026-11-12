@@ -170,6 +170,17 @@ and writes nothing, in Go. Review dates in every ECMAScript date-time form (year
 `±YYYYYY` years, `T24:00`, local time) are read like V8; only legacy forms stay `close-gates-format`.
 `close-help` now means only a `--help=value` or `-h=value` spelling.
 `land-merge-gate` is reserved for a full-suite gate configuration Go cannot run.
+If Go itself fails with an internal error (a Go panic) on the main goroutine, it never
+exits with the usage-error code 2 or prints a stack trace (B508). A command that writes no
+state in Go (`setup`, `status`, `run status`, `queue` and `queue status`, `heal list`,
+`heal show`, `decisions list`, `docs path`, `logs`, `logs summary`, `logs path`,
+`logs handovers` and `ledger tail`) goes to Node with its original arguments and a
+`go-panic` row. Any other command may already have changed state, so Node never runs it a
+second time: Go prints one line that names the command and the code site, never the panic
+text or an argument, writes a `go-panic-stopped` row and exits 1. Check `code-forge status`
+before you retry. A panic in a background goroutine (for example the merge gate that
+`block land` runs next to its review wait) is not caught and still ends with Go's stack
+trace and exit 2.
 The full code list is the `handoverReasons` table in
 [`handover_reasons.go`](../native/cmd/code-forge-native/handover_reasons.go).
 
