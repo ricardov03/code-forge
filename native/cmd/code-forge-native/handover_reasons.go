@@ -328,6 +328,7 @@ const (
 	hWorkerJevRef
 	hWorkerJevStore
 	hWorkerJevKeychain
+	hWorkerWatchShape
 )
 
 var handoverReasons = [...]string{
@@ -650,4 +651,5 @@ var handoverReasons = [...]string{
 	hWorkerJevRef:              "worker-jev-key-ref",
 	hWorkerJevStore:            "worker-jev-key-store",
 	hWorkerJevKeychain:         "worker-jev-keychain",
+	hWorkerWatchShape:          "worker-watch-shape",
 }

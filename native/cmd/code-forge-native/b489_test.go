@@ -214,7 +214,6 @@ func TestB489WorkerHandOverCases(t *testing.T) {
 		want                      string
 	}{
 		{"no snapshot", "", "file", "", false, 127, "worker worker-config"},
-		{"commit watch", `{"review":{"file_loop":"watch"},"version":1}`, "file", "", false, 127, "worker worker-watch"},
 		// B533: a resolvable Jev key serves in Go; only the sources Go
 		// cannot read like Node keep a narrow reason.
 		{"bad key reference", `{"system1":{"key":"keychain:BAD NAME"},"version":1}`, "file", "", false, 127, "worker worker-jev-key-ref"},

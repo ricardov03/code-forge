@@ -8,7 +8,6 @@ package main
 //     Node (B533: the OS keychain, a live 1Password read, a ref Node throws
 //     on, a store entry Go cannot judge); an env or file-store key is
 //     resolved here and the review round asks Jev in Go;
-//   - the boot config turns on the commit watch (review.file_loop: watch);
 //   - the run has no config snapshot (loadProjectConfig is not ported here);
 //   - a read Go cannot judge like Node (record shape, key, registry).
 // While serving, the first ticket RunTicket leaves to Node (or an autopilot
@@ -16,6 +15,9 @@ package main
 // finish, no new one starts, the announcement is withdrawn and this process
 // becomes the Node worker (same pid and start time), which then serves every
 // ticket still pending. See native/worker/serve.go for the split rule.
+// B534: the commit watch (review.file_loop: watch) runs in Go
+// (native/worker/watch.go); a watch shape Go does not reproduce stops the
+// worker the same way (worker-watch-shape), before that tick writes.
 
 import (
 	"encoding/hex"
@@ -26,6 +28,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -111,9 +114,6 @@ func workerServePlan(home string, a workerServeArgs) (*worker.TicketRunner, map[
 	}
 	if cfg == nil {
 		return nil, nil, nil, hWorkerConfig, nil
-	}
-	if review, _ := cfg["review"].(map[string]any); review["file_loop"] == "watch" {
-		return nil, nil, nil, hWorkerWatch, nil
 	}
 	jevKey, reason := workerJevResolver(cfg, home)
 	if reason != 0 {
@@ -286,10 +286,11 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 	pool.RunOne = loop.RunOne
 	pool.Stop = loop.Stop
 	pool.ExpiryCheck = loop.ExpiryCheck
+	pool.WatchTick = (&worker.Watch{Runner: runner, HandOff: loop.HandOff}).Tick
 	if a.once {
 		done, err := loop.Once()
-		if loop.Handoff() != "" {
-			return 0, hWorkerTicket
+		if reason := loop.Handoff(); reason != "" {
+			return 0, workerHandoffReason(reason)
 		}
 		if err != nil {
 			o.err("worker: " + err.Error() + "\n")
@@ -320,9 +321,18 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 	workerServing(loop)
 	loop.Run()
 	stopSignals()
-	if loop.Handoff() != "" {
-		return 0, hWorkerTicket
+	if reason := loop.Handoff(); reason != "" {
+		return 0, workerHandoffReason(reason)
 	}
 	o.err("worker: stopped\n")
 	return 0, 0
+}
+
+// workerHandoffReason names why the loop gave the worker to Node: a commit
+// watch shape Go does not reproduce (B534), else a ticket shape.
+func workerHandoffReason(reason string) handoverReason {
+	if strings.HasPrefix(reason, worker.WatchHandOff) {
+		return hWorkerWatchShape
+	}
+	return hWorkerTicket
 }
