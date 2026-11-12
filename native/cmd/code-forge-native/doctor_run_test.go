@@ -231,8 +231,8 @@ func TestB532DoctorUndecidedRegistryHandsOver(t *testing.T) {
 	}
 }
 
-// B532: an errno outside the name table prints Node's UNKNOWN; a mapped one
-// prints its name.
+// B532, B535: an errno outside the name table prints Node's "Unknown system
+// error -<n>"; a mapped one prints its name.
 func TestB532DoctorWorkerErrnoNames(t *testing.T) {
 	for _, c := range []struct {
 		err  error
@@ -240,7 +240,7 @@ func TestB532DoctorWorkerErrnoNames(t *testing.T) {
 	}{
 		{syscall.EMFILE, "EMFILE"},
 		{&os.PathError{Op: "open", Path: "x", Err: syscall.EACCES}, "EACCES"},
-		{syscall.Errno(250), "UNKNOWN"},
+		{syscall.Errno(250), "Unknown system error -250"},
 	} {
 		if got := dwpCode(c.err); got != c.want {
 			t.Fatalf("dwpCode(%v) = %q, want %q", c.err, got, c.want)

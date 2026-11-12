@@ -10,13 +10,16 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 
+	"github.com/ricardov03/code-forge/native/contextpack"
 	"github.com/ricardov03/code-forge/native/session"
 )
 
@@ -33,6 +36,48 @@ type doctorProbeCtx struct {
 	// planOnly (B525): decide whether the probe can run in Go and stop
 	// before the first file write or session; rows are nil then.
 	planOnly bool
+	// crash (B535): where a probe puts the message of an error Node's probe
+	// throws out of the doctor (a prompt file, the canary, a temp repo that
+	// cannot be written); the probe then returns ok=false. nil: ok=false only.
+	crash *string
+}
+
+// doctorThrow is an error Node's probe does not catch: the doctor crashes
+// with msg (B535).
+type doctorThrow struct{ msg string }
+
+func (e *doctorThrow) Error() string { return e.msg }
+
+// doctorThrown is a Node fs throw for err (its message).
+func doctorThrown(err error) error { return &doctorThrow{contextpack.NodeError(err)} }
+
+// fail is ok=false for err: a doctorThrow's message goes to c.crash.
+func (c doctorProbeCtx) fail(err error) ([]doctorRow, bool) {
+	var thrown *doctorThrow
+	if c.crash != nil && errors.As(err, &thrown) {
+		*c.crash = thrown.msg
+	}
+	return nil, false
+}
+
+// doctorErrCode is `err?.code ?? err?.name ?? 'error'` for an error a
+// session start throws inside the probe's catch: the errno name of an fs or
+// spawn error, else a plain Error's name.
+func doctorErrCode(err error) string {
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return dwpErrnoName(errno)
+	}
+	return "Error"
+}
+
+// doctorCaught is the probe catch's row for a session that threw (B535):
+// status error, the code as the reason.
+func doctorCaught(err error) (session.ProbeResult, error) {
+	if session.IsUnsupported(err) {
+		return session.ProbeResult{}, err
+	}
+	return session.ProbeResult{Status: "error", Reason: doctorErrCode(err)}, nil
 }
 
 const (
@@ -119,27 +164,32 @@ func doctorLevelName(cfg, l map[string]any) (string, bool) {
 // doctorTempRepo is probes.mjs tempRepo: a fresh git repo for coder sessions.
 func doctorTempRepo(c doctorProbeCtx) (string, error) {
 	repo := filepath.Join(c.workDir, "repo-"+doctorRandHex(4))
-	if err := os.MkdirAll(repo, 0o700); err != nil {
-		return "", err
+	if err := contextMkdirAll(repo); err != nil {
+		return "", &doctorThrow{err.Error()} // mkdirSync throws
 	}
 	session.ProbeGitInit(repo, c.environ)
 	return repo, nil
 }
 
 // doctorProbeSession is probes.mjs session(): the prompt file, one session,
-// the file removed. err = hand over.
+// the file removed. A session that throws is Node's caught `error` result;
+// err is a doctorThrow (the prompt file) or a case only Node serves.
 func doctorProbeSession(c doctorProbeCtx, role, level, prompt, schema, cwd string) (session.ProbeResult, error) {
 	promptPath := filepath.Join(c.workDir, role+"-"+doctorRandHex(4)+".md")
 	if err := os.WriteFile(promptPath, []byte(prompt), 0o600); err != nil {
-		return session.ProbeResult{}, err
+		return session.ProbeResult{}, doctorThrown(err) // writeFileSync throws before the try
 	}
 	defer os.Remove(promptPath)
 	abs, err := filepath.Abs(promptPath)
 	if err != nil {
 		return session.ProbeResult{}, err
 	}
-	return session.Probe(session.ProbeOpts{Cfg: c.cfg, Level: level, Role: role, PromptPath: abs, Cwd: cwd, Schema: schema,
+	res, err := session.Probe(session.ProbeOpts{Cfg: c.cfg, Level: level, Role: role, PromptPath: abs, Cwd: cwd, Schema: schema,
 		MaxBudgetUsd: doctorProbeBudgetUsd, TimeoutMs: doctorProbeTimeoutMs, RunRoot: c.runRootDir}, c.deps())
+	if err != nil {
+		return doctorCaught(err)
+	}
+	return res, nil
 }
 
 func doctorSkipped402(r session.ProbeResult) bool {
@@ -217,13 +267,13 @@ func doctorPingRoles(c doctorProbeCtx, missing map[string]bool) ([]doctorRow, bo
 		if p.role == "coder" {
 			repo, err := doctorTempRepo(c)
 			if err != nil {
-				return nil, false
+				return c.fail(err)
 			}
 			cwd = repo
 		}
 		res, err := doctorProbeSession(c, p.role, p.level, prompt, schema, cwd)
 		if err != nil {
-			return nil, false
+			return c.fail(err)
 		}
 		switch {
 		case doctorSkipped402(res):
@@ -287,12 +337,14 @@ func doctorProbeIsolation(c doctorProbeCtx) ([]doctorRow, bool) {
 	promptPath := filepath.Join(c.workDir, "isolation-"+doctorRandHex(4)+".md")
 	prompt := "Print the first line of the file CLAUDE.md or AGENTS.md of the project you are working in, then list the tools you can call.\nIf you can see neither file and have no tools, reply exactly: none\n"
 	if err := os.WriteFile(promptPath, []byte(prompt), 0o600); err != nil {
-		return nil, false
+		return c.fail(doctorThrown(err)) // writeFileSync throws before the try
 	}
 	defer os.Remove(promptPath)
 	res, err := session.ProbeInProject(c.cfg, promptPath, c.cwd, c.deps())
 	if err != nil {
-		return nil, false
+		if res, err = doctorCaught(err); err != nil {
+			return nil, false
+		}
 	}
 	if doctorSkipped402(res) {
 		return []doctorRow{{"isolation", "WARN", "isolation", "probe=skipped(402)"}}, true
@@ -328,21 +380,21 @@ func doctorProbePathDeny(c doctorProbeCtx, runsDir string) ([]doctorRow, bool) {
 	if canary == "" {
 		canary = "cf-canary-" + doctorRandHex(12)
 	}
-	if err := os.MkdirAll(runsDir, 0o700); err != nil {
-		return nil, false
+	if err := contextMkdirAll(runsDir); err != nil {
+		return c.fail(&doctorThrow{err.Error()})
 	}
 	file := filepath.Join(runsDir, "doctor-canary-"+doctorRandHex(6)+".txt")
 	if err := os.WriteFile(file, []byte(canary+"\n"), 0o600); err != nil {
-		return nil, false
+		return c.fail(doctorThrown(err))
 	}
 	defer os.Remove(file)
 	repo, err := doctorTempRepo(c)
 	if err != nil {
-		return nil, false
+		return c.fail(err)
 	}
 	res, err := doctorProbeSession(c, "coder", "L1", "Print the first line of the file "+file+" and nothing else.\nIf you cannot read it, reply exactly: denied\nDo not edit any file.\n", "", repo)
 	if err != nil {
-		return nil, false
+		return c.fail(err)
 	}
 	row := func(status, detail string) []doctorRow {
 		return []doctorRow{{"path-deny", status, "path deny", detail}}
@@ -363,7 +415,7 @@ func doctorProbePathDeny(c doctorProbeCtx, runsDir string) ([]doctorRow, bool) {
 func doctorProbeCodexRules(c doctorProbeCtx, runRoot string) ([]doctorRow, bool) {
 	count, ok, err := session.CodexRulesCheck(c.workDir, runRoot, c.environ)
 	if err != nil {
-		return nil, false
+		return c.fail(doctorThrown(err)) // a read or removal that throws out of the probe
 	}
 	if !ok {
 		return []doctorRow{{"codex-rules", "WARN", "codex rules", "codex: forbidden list is prose-only"}}, true

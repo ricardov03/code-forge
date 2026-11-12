@@ -1,0 +1,22 @@
+exit=1
+--- stdout
+OK   config: valid
+WARN links: no harness link recorded (run code-forge init)
+WARN keys: jev key not resolved; System 1 falls back to rules
+WARN code-forge: not on PATH (the skill shim calls it)
+INFO solo: UNVERIFIED (no Solo probe in this version)
+WARN gates: no gate command configured
+WARN jev: live call skipped (no key)
+INFO tools: missing recommended tools: codex, gemini, op — run code-forge tools install
+OK   ledger: writable
+OK   locks: no unreadable or malformed locks
+OK   tmp: 0 stale roots, 0 stale pids
+OK   sweep: 0 stale workers, 0 orphans, 0 zombies
+INFO memory: code-forge N MB, children N MB, orphans N MB
+INFO review concurrency: 6 tickets at once; provider slots anthropic 4 · openai 2 · xai 2
+FAIL probes: no temp root (EACCES: permission denied, mkdir '<BASE>/tmp/doctor-<PID>-<MS>-<HEX>')
+INFO signer: same-user boundary only
+INFO native binary: not found, using Node
+INFO native daemon: off
+--- stderr
+doctor: 5 ok, 5 warn, 1 fail

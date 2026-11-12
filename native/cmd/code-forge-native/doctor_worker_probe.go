@@ -78,23 +78,43 @@ func dwpCode(err error) string {
 			return "key-exists"
 		}
 	case errors.As(err, &errno):
-		for _, e := range dwpErrnoNames {
-			if e.no == errno {
-				return e.name
-			}
-		}
-		return "UNKNOWN" // Node's uvUnmappedError
+		return dwpErrnoName(errno)
 	}
 	return "error"
 }
 
-// dwpErrnoNames is libuv's err.code (uv_err_name) for each errno libuv maps
-// on darwin and linux (B532); Node names any other errno UNKNOWN. The first
-// match wins where two names share a number (ENOTSUP/EOPNOTSUPP on linux).
-var dwpErrnoNames = []struct {
+// dwpErrnoName is libuv's uv_err_name, the err.code Node's fs and spawn
+// errors carry: the name of an errno libuv maps on this platform, else
+// "Unknown system error -<n>" (B535: a real Node 24 doctor run with an
+// errno injected into its worker probe printed `could not start (Unknown
+// system error -80)`; Node's JS-side UNKNOWN never reaches these calls).
+func dwpErrnoName(errno syscall.Errno) string {
+	for _, e := range dwpErrnoNames {
+		if e.no == errno {
+			return e.name
+		}
+	}
+	for _, e := range dwpErrnoPlatform {
+		if e.no == errno {
+			return e.name
+		}
+	}
+	return fmt.Sprintf("Unknown system error -%d", int(errno))
+}
+
+// dwpErrnoEntry is one errno with libuv's name for it.
+type dwpErrnoEntry struct {
 	no   syscall.Errno
 	name string
-}{
+}
+
+// dwpErrnoNames is libuv's err.code (uv_err_name) for each errno libuv maps
+// on both darwin and linux (B532, B535: checked against Node 24's
+// util.getSystemErrorMap() on darwin and libuv's uv.h/errno.h);
+// dwpErrnoPlatform holds the ones only one platform maps. A number appears
+// once per platform (ENOTSUP and EOPNOTSUPP share one on linux).
+var dwpErrnoNames = []dwpErrnoEntry{
+	{syscall.ENOEXEC, "ENOEXEC"}, {syscall.ESOCKTNOSUPPORT, "ESOCKTNOSUPPORT"},
 	{syscall.E2BIG, "E2BIG"}, {syscall.EACCES, "EACCES"}, {syscall.EADDRINUSE, "EADDRINUSE"}, {syscall.EADDRNOTAVAIL, "EADDRNOTAVAIL"},
 	{syscall.EAFNOSUPPORT, "EAFNOSUPPORT"}, {syscall.EAGAIN, "EAGAIN"}, {syscall.EALREADY, "EALREADY"}, {syscall.EBADF, "EBADF"},
 	{syscall.EBUSY, "EBUSY"}, {syscall.ECANCELED, "ECANCELED"}, {syscall.ECONNABORTED, "ECONNABORTED"},

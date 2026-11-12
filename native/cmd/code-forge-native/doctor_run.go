@@ -12,10 +12,16 @@ package main
 // its first file write or session. The body then makes the run root, runs
 // the worker probe first (the one probe that can still meet a case Go cannot
 // judge, a worker registry entry, and that removes all it made before it
-// says so, B532), then the model-call probes, the key, the Jev call and the
-// ledger directory. What is left to hand over from the body is an I/O error
-// Node reports differently (a prompt file that cannot be written, a run root
-// that cannot be made): the run root is removed before the hand-over.
+// says so, B532), then the key, the Jev call, the ledger directory and the
+// model-call probes.
+//
+// B535: the body finishes the I/O errors like Node. A run root that cannot
+// be made is tried again under runDoctor's own name, then becomes Node's
+// `probes: no temp root (<message>)` row with the signer row and no probe;
+// an error Node's probe catches is its row (`ping=error(EACCES)`); an error
+// Node throws out of the doctor (the work dir, a prompt file, the canary, a
+// temp repo, the Codex rules file, an empty Jev key) is the launcher's crash
+// line, exit 1, with the run root removed.
 
 import (
 	"encoding/hex"
@@ -145,7 +151,9 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 	rows = append(rows, dfReviewConcurrencyRow(cfg, order))
 	rows = append(rows, dfCoderSandboxRows(cfg)...)
 
-	// The CLI presence probes (read-only: --version and --help).
+	// The CLI presence probes (read-only: --version and --help). Node runs
+	// them after the run root exists: a doctor with no root has none.
+	cliAt := len(rows)
 	missing := map[string]bool{}
 	providers := doctorConfiguredProviders(cfg)
 	for _, provider := range providers {
@@ -218,27 +226,70 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 		_, _ = dfRandom(bytes[:])
 		root, err := contextMakeRunRoot(fmt.Sprintf("doctor-%d-%s", os.Getpid(), hex.EncodeToString(bytes[:])), tmpRoot)
 		if err != nil {
-			return smallVerbHandover("doctor", args, hDoctorRunRoot) // Node's `probes: no temp root` row
+			// the CLI's root failed: runDoctor makes its own (doctorRoot)
+			_, _ = dfRandom(bytes[:])
+			root, err = contextMakeRunRoot(fmt.Sprintf("doctor-%d-%d-%s", os.Getpid(), drunNow().UnixMilli(), hex.EncodeToString(bytes[:])), tmpRoot)
 		}
-		probes, reason := drunProbes(drunCtx{cfg: cfg, snap: snap, cwd: cwd, home: home, root: root, missing: missing,
-			skipIsolation: skipIsolation, skipPathDeny: skipPathDeny, codexRules: codexRules})
-		var secrets []string
-		if reason == 0 {
-			keys := resolveKeys()
-			secrets = keys.secrets
-			rows[keysAt] = keys.row
-			jevRow, ok := doctorJevRow(cfg, keys.key, keys.hasKey)
-			if !ok {
-				reason = hDoctorRunJev
+		noRoot := ""
+		if err != nil {
+			noRoot, root = err.Error(), ""
+		}
+		crash := func(msg string) int {
+			if root != "" {
+				_ = os.RemoveAll(root)
 			}
-			rows[jevAt] = jevRow
+			fmt.Fprint(stderr, "code-forge: verb \"doctor\" failed: "+msg+"\n")
+			return 1
 		}
-		if reason != 0 {
+		d := drunCtx{cfg: cfg, snap: snap, cwd: cwd, home: home, root: root, missing: missing,
+			skipIsolation: skipIsolation, skipPathDeny: skipPathDeny, codexRules: codexRules}
+		var workerRows []doctorRow
+		if root != "" {
+			d.workDir = filepath.Join(root, "doctor")
+			if err := contextMkdirAll(d.workDir); err != nil {
+				return crash("Error: " + err.Error()) // mkdirSync(workDir) throws
+			}
+			var ok bool
+			workerRows, ok = doctorWorkerProbe(dwpCtx{cfg: d.snap, configFile: d.snap.Path, workDir: d.workDir, runRootDir: root,
+				env: os.Environ(), runID: drunNewRunID(), home: home})
+			if !ok {
+				_ = os.RemoveAll(root)
+				return smallVerbHandover("doctor", args, hDoctorWorkerRegistry) // B532: a registry entry Go cannot judge
+			}
+		}
+		keys := resolveKeys()
+		secrets := keys.secrets
+		rows[keysAt] = keys.row
+		jevRow, ok := doctorJevRow(cfg, keys.key, keys.hasKey)
+		switch {
+		case !ok && keys.key == "":
+			return crash("TypeError: askJev: key must be a non-empty string")
+		case !ok:
+			// unreachable: prepare checked the risk payload, and the call
+			// errs only on an empty key
 			_ = os.RemoveAll(root)
-			return smallVerbHandover("doctor", args, reason)
+			return smallVerbHandover("doctor", args, hDoctorRunJev)
 		}
+		rows[jevAt] = jevRow
 		rows[ledgerAt] = dfLedgerRow(home)
-		_ = os.RemoveAll(root)
+		var probes []doctorRow
+		if root == "" {
+			rows = rows[:cliAt]
+			probes = []doctorRow{{"probes", "FAIL", "probes", "no temp root (" + noRoot + ")"}, dwpSignerRow}
+		} else {
+			var thrown string
+			var reason handoverReason
+			probes, thrown, reason = drunProbes(d)
+			switch {
+			case thrown != "":
+				return crash("Error: " + thrown)
+			case reason != 0:
+				_ = os.RemoveAll(root)
+				return smallVerbHandover("doctor", args, reason)
+			}
+			probes = append(probes, workerRows...)
+			_ = os.RemoveAll(root)
+		}
 		all := append(append(append([]doctorRow{}, rows...), probes...), tail...)
 		secrets = append(secrets, runKeys...)
 		redactOne := func(text string) string { return redactSecret(text, secrets...) }
@@ -298,38 +349,29 @@ func drunIndexingRows(cwd, configPath string, cfg map[string]any) []doctorRow {
 type drunCtx struct {
 	cfg                         map[string]any
 	snap                        config.Snapshot
-	cwd, home, root             string
+	cwd, home, root, workDir    string
 	missing                     map[string]bool
 	skipIsolation, skipPathDeny bool
 	codexRules                  bool
 }
 
-// drunProbes is runDoctor's probe block: the work dir, the worker probe
-// (first: see the file comment), the pings, isolation, path deny and Codex
-// rules. The rows come back in Node's order. reason != 0: hand over (the
-// work dir is left for the caller's run root removal).
-func drunProbes(d drunCtx) ([]doctorRow, handoverReason) {
-	workDir := filepath.Join(d.root, "doctor")
-	if err := os.MkdirAll(workDir, 0o700); err != nil {
-		return nil, hDoctorRunRoot
-	}
-	environ := os.Environ()
-	workerRows, ok := doctorWorkerProbe(dwpCtx{cfg: d.snap, configFile: d.snap.Path, workDir: workDir, runRootDir: d.root,
-		env: environ, runID: drunNewRunID(), home: d.home})
-	if !ok {
-		return nil, hDoctorWorkerRegistry // B532: a registry entry Go cannot judge
-	}
-	c := doctorProbeCtx{cfg: d.cfg, cwd: d.cwd, workDir: workDir, runRootDir: d.root, environ: environ}
+// drunProbes is runDoctor's probe block after the worker probe: the pings,
+// isolation, path deny and Codex rules, in Node's order. thrown is the
+// message of an error Node throws out of the doctor (B535). reason != 0 is
+// a probe that refused after prepare's planOnly pass accepted it (none is
+// known: the refusals depend on the config only): hand over.
+func drunProbes(d drunCtx) (rows []doctorRow, thrown string, reason handoverReason) {
+	c := doctorProbeCtx{cfg: d.cfg, cwd: d.cwd, workDir: d.workDir, runRootDir: d.root, environ: os.Environ(), crash: &thrown}
 	rows, ok := doctorPingRoles(c, d.missing)
 	if !ok {
-		return nil, hDoctorRunPing
+		return nil, thrown, hDoctorRunPing
 	}
 	if d.skipIsolation {
 		rows = append(rows, doctorRow{"isolation", "FAIL", "isolation", "skipped (reviewer CLI missing)"})
 	} else {
 		more, ok := doctorProbeIsolation(c)
 		if !ok {
-			return nil, hDoctorRunIsolation
+			return nil, thrown, hDoctorRunIsolation
 		}
 		rows = append(rows, more...)
 	}
@@ -338,16 +380,16 @@ func drunProbes(d drunCtx) ([]doctorRow, handoverReason) {
 	} else {
 		more, ok := doctorProbePathDeny(c, filepath.Join(d.home, ".code-forge", "runs"))
 		if !ok {
-			return nil, hDoctorRunPathDeny
+			return nil, thrown, hDoctorRunPathDeny
 		}
 		rows = append(rows, more...)
 	}
 	if d.codexRules {
 		more, ok := doctorProbeCodexRules(c, d.root)
 		if !ok {
-			return nil, hDoctorRunCodexRules
+			return nil, thrown, hDoctorRunCodexRules
 		}
 		rows = append(rows, more...)
 	}
-	return append(rows, workerRows...), 0
+	return rows, "", 0
 }
