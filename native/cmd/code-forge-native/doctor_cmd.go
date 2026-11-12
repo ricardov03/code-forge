@@ -318,17 +318,26 @@ type doctorKeyResult struct {
 
 // doctorKeyPlan is what is known of the key before the resolver runs (B525):
 // maybe false means the key is null whatever happens; empty means it is the
-// empty string (Node's askJev throws on it).
-type doctorKeyPlan struct{ maybe, empty bool }
+// empty string (Node's askJev throws on it); badRef means the ref is one
+// Node's parseRef throws on (the resolver gives the FAIL row; B533).
+type doctorKeyPlan struct{ maybe, empty, badRef bool }
 
 // doctorKeysResolve is doctorKeysRow with the key itself.
 func doctorKeysResolve(cfg map[string]any, home string, now float64) (func() doctorKeyResult, doctorKeyPlan, handoverReason) {
+	return jevKeyChain(cfg, home, now, true)
+}
+
+// jevKeyChain is the one resolveKey chain doctor and the worker share
+// (B533). opOK false: a chain that would run `op read` returns
+// hDoctorKeyRefresh instead (the worker leaves a live 1Password read to
+// Node).
+func jevKeyChain(cfg map[string]any, home string, now float64, opOK bool) (func() doctorKeyResult, doctorKeyPlan, handoverReason) {
 	none := doctorKeyPlan{}
 	fixed := func(row doctorRow, secrets ...string) func() doctorKeyResult {
 		return func() doctorKeyResult { return doctorKeyResult{row: row, secrets: secrets} }
 	}
 	keyed := func(row doctorRow, key string) (func() doctorKeyResult, doctorKeyPlan, handoverReason) {
-		return func() doctorKeyResult { return doctorKeyResult{row, []string{key}, key, true} }, doctorKeyPlan{true, key == ""}, 0
+		return func() doctorKeyResult { return doctorKeyResult{row, []string{key}, key, true} }, doctorKeyPlan{maybe: true, empty: key == ""}, 0
 	}
 	var ref string
 	hasRef := false
@@ -358,12 +367,12 @@ func doctorKeysResolve(cfg map[string]any, home string, now float64) (func() doc
 	if hasRef && strings.HasPrefix(ref, "keychain:") {
 		storeName = ref[9:]
 		if !keyNamePattern.MatchString(storeName) {
-			return fixed(failed), none, 0
+			return fixed(failed), doctorKeyPlan{badRef: true}, 0
 		}
 	}
 	if hasRef && strings.HasPrefix(ref, "op://") {
 		if !opRefPattern.MatchString(ref) {
-			return fixed(failed), none, 0
+			return fixed(failed), doctorKeyPlan{badRef: true}, 0
 		}
 		opRef = ref
 	}
@@ -438,7 +447,7 @@ func doctorKeysResolve(cfg map[string]any, home string, now float64) (func() doc
 					})
 				}
 				return doctorKeyResult{okRow("file", &latest), secrets, value, true}
-			}, doctorKeyPlan{true, value == ""}, 0
+			}, doctorKeyPlan{maybe: true, empty: value == ""}, 0
 		default:
 			return keyed(okRow("file", exp), value)
 		}
@@ -454,6 +463,9 @@ func doctorKeysResolve(cfg map[string]any, home string, now float64) (func() doc
 			before()
 			return doctorKeyResult{row: doctorRow{"keys", "WARN", "keys", "jev key not resolved" + keyReasons(reasons) + "; System 1 falls back to rules"}, secrets: secrets}
 		}, none, 0
+	}
+	if !opOK {
+		return nil, none, hDoctorKeyRefresh
 	}
 	if before == nil && !keyIndexReadable(home, storeName, false) {
 		return nil, none, hDoctorKeyRefresh

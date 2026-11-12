@@ -4,7 +4,10 @@ package main
 // worker.mjs runWorker + src/worker/loop.mjs bootWorker). Go serves a run
 // only when every part it reaches is ported; the rest goes to Node as a whole
 // worker, before anything is written:
-//   - the System 1 (Jev) key could resolve (Jev triage is not ported);
+//   - the System 1 (Jev) key comes from a source Go does not read like
+//     Node (B533: the OS keychain, a live 1Password read, a ref Node throws
+//     on, a store entry Go cannot judge); an env or file-store key is
+//     resolved here and the review round asks Jev in Go;
 //   - the boot config turns on the commit watch (review.file_loop: watch);
 //   - the run has no config snapshot (loadProjectConfig is not ported here);
 //   - a read Go cannot judge like Node (record shape, key, registry).
@@ -30,6 +33,7 @@ import (
 	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/jev"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/session"
 	"github.com/ricardov03/code-forge/native/state"
@@ -48,6 +52,10 @@ var (
 	workerServing = func(*worker.Loop) {}
 	// workerOrphans is the orphan clean-up after a drain (reaper sweep).
 	workerOrphans = func(run string) func() { return (&worker.OrphanSweep{RunID: run}).Sweep }
+	// workerNow is the key resolver's clock; workerJevOpts are askJev's
+	// options other than the key (B533 tests point URL at a fake Jev).
+	workerNow     = time.Now
+	workerJevOpts = jev.Opts{}
 )
 
 type workerServeArgs struct {
@@ -59,56 +67,83 @@ type workerServeArgs struct {
 
 // workerServePlan is bootWorker up to createWorker: refusals Node makes print
 // as Node prints them; a case Go does not serve returns its hand-over reason.
-func workerServePlan(home string, a workerServeArgs) (*worker.TicketRunner, map[string]any, func(o *runOut) int, handoverReason) {
+// The last result is the Jev key resolver (B533): it runs resolveJevKey's
+// side effects (an expired entry deleted, an entry cut to the cache hours)
+// and gives the key ("" none) and every value Node registers for redaction.
+func workerServePlan(home string, a workerServeArgs) (*worker.TicketRunner, map[string]any, func(o *runOut) int, handoverReason, func() (string, []string)) {
 	fail := func(message string) func(o *runOut) int {
 		return func(o *runOut) int { o.err("worker: " + message + "\n"); return 1 }
 	}
 	record, err := state.ReadRun(home, a.runID)
 	if err != nil {
-		return nil, nil, nil, hWorkerRecord
+		return nil, nil, nil, hWorkerRecord, nil
 	}
 	if status, _ := record.Get("status").(string); status != "active" {
-		return nil, nil, fail("run " + a.runID + " has ended"), 0
+		return nil, nil, fail("run " + a.runID + " has ended"), 0, nil
 	}
 	dir := a.cwd
 	if !a.hasCwd {
 		workspace, isString := record.Get("workspace").(string)
 		if !isString {
-			return nil, nil, nil, hWorkerShape
+			return nil, nil, nil, hWorkerShape, nil
 		}
 		dir = workspace
 	}
 	dir, err = filepath.Abs(dir)
 	if err != nil {
-		return nil, nil, nil, hWorkerShape
+		return nil, nil, nil, hWorkerShape, nil
 	}
 	root, err := gitx.RepoTop(dir)
 	if err != nil {
-		return nil, nil, fail("not inside a git repository"), 0
+		return nil, nil, fail("not inside a git repository"), 0, nil
 	}
 	slug, isString := record.Get("project").(string)
 	if !isString {
-		return nil, nil, nil, hWorkerShape
+		return nil, nil, nil, hWorkerShape, nil
 	}
 	runner := &worker.TicketRunner{Home: home, RunID: a.runID, RepoRoot: root, Slug: slug}
 	cfg, bad, err := runner.ConfigInForce()
 	if err != nil {
-		return nil, nil, nil, hWorkerRecord
+		return nil, nil, nil, hWorkerRecord, nil
 	}
 	if bad {
-		return nil, nil, fail("run " + a.runID + ": the config snapshot in the run record is missing or altered"), 0
+		return nil, nil, fail("run " + a.runID + ": the config snapshot in the run record is missing or altered"), 0, nil
 	}
 	if cfg == nil {
-		return nil, nil, nil, hWorkerConfig
+		return nil, nil, nil, hWorkerConfig, nil
 	}
 	if review, _ := cfg["review"].(map[string]any); review["file_loop"] == "watch" {
-		return nil, nil, nil, hWorkerWatch
+		return nil, nil, nil, hWorkerWatch, nil
 	}
-	if !worker.JevKeyAbsent(cfg, workerJevProbe) {
-		return nil, nil, nil, hWorkerJev
+	jevKey, reason := workerJevResolver(cfg, home)
+	if reason != 0 {
+		return nil, nil, nil, reason, nil
 	}
 	runner.Cfg = cfg
-	return runner, cfg, nil, 0
+	return runner, cfg, nil, 0, jevKey
+}
+
+// workerJevResolver is loop.mjs resolveJevKey decided before any write: the
+// env variable and the file store (CODE_FORGE_KEY_BACKEND=file) run in Go
+// (doctor's jevKeyChain); with the default backends a key Go proves absent
+// is none, any other goes to Node (the keychain is not read here).
+func workerJevResolver(cfg map[string]any, home string) (func() (string, []string), handoverReason) {
+	chain, plan, reason := jevKeyChain(cfg, home, float64(workerNow().UnixMilli()), false)
+	switch {
+	case plan.badRef:
+		return nil, hWorkerJevRef
+	case chain != nil:
+		return func() (string, []string) {
+			r := chain()
+			return r.key, r.secrets
+		}, 0
+	case reason == hDoctorKeyStore && os.Getenv("CODE_FORGE_KEY_BACKEND") != "file":
+		if worker.JevKeyAbsent(cfg, workerJevProbe) {
+			return func() (string, []string) { return "", nil }, 0
+		}
+		return nil, hWorkerJevKeychain
+	}
+	return nil, hWorkerJevStore
 }
 
 // workerRunRoot is tmp.mjs runRoot: the run's root, made if missing, with
@@ -177,7 +212,7 @@ func startNativeDaemon(run string, cfg map[string]any) (func(), error) {
 // workerServe boots and serves; handover is the reason to give the worker to
 // Node instead ("" none: the code is final).
 func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int, handoverReason) {
-	runner, cfg, refuse, reason := workerServePlan(home, a)
+	runner, cfg, refuse, reason, jevKey := workerServePlan(home, a)
 	if refuse != nil {
 		return refuse(o), 0
 	}
@@ -209,6 +244,11 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 	runner.Worker = identity
 	runner.RunRootDir = runRootDir
 	runner.Secrets = []string{hex.EncodeToString(key)}
+	// loop.mjs createWorker: resolveJevKey before the boot lock (B533)
+	jevValue, jevSecrets := jevKey()
+	runner.JevKey = jevValue
+	runner.JevOpts = workerJevOpts
+	runner.Secrets = append(runner.Secrets, jevSecrets...)
 	// B489 step 3: Node's worker sets its process root to the run root
 	// (setRunRoot), so a session's child pid entry lands in <run root>/pids.
 	runner.SessionDeps = session.Deps{Stderr: os.Stderr, PidsRoot: func() (string, error) { return runRootDir, nil }}
@@ -272,7 +312,11 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 			loop.Stop()
 		}
 	}()
-	o.err(fmt.Sprintf("worker: pid %d serving run %s · jev key absent (fallback)\n", pid, a.runID))
+	jevState := "absent (fallback)"
+	if jevValue != "" {
+		jevState = "resolved"
+	}
+	o.err(fmt.Sprintf("worker: pid %d serving run %s · jev key %s\n", pid, a.runID, jevState))
 	workerServing(loop)
 	loop.Run()
 	stopSignals()

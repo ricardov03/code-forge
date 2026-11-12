@@ -26,6 +26,7 @@ import (
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/jev"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/proof"
 	"github.com/ricardov03/code-forge/native/session"
@@ -67,12 +68,14 @@ type TicketRunner struct {
 	// session seams (Home defaults to Home, Environ to SessionEnv of the
 	// process env); Warn is the error log's warning line (nil: none, and a
 	// ticket under budget.usd is left to Node); JevKey is the resolved
-	// System 1 key ("" none; a key is left to Node: Jev triage is not ported).
+	// System 1 key ("" none; B533: the triage asks Jev with it); JevOpts are
+	// askJev's other options (URL, timeout, sleep: test seams).
 	RunRootDir  string
 	Secrets     []string
 	SessionDeps session.Deps
 	Warn        func(warning, message string)
 	JevKey      string
+	JevOpts     jev.Opts
 	// Pool (B489) holds every review session to the worker's caps
 	// (loop.mjs spawnPooled); nil runs sessions without them.
 	Pool *Pool

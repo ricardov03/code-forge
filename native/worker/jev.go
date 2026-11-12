@@ -11,10 +11,11 @@ import (
 	"strings"
 )
 
-// B489: the Go worker serves a run only while the System 1 (Jev) key is
-// provably absent. Jev triage is not ported, and a resolved key makes every
-// engine ticket hand over anyway (planEngineDry), so a worker whose key could
-// resolve is left to Node as a whole, before it boots.
+// B489/B533: JevKeyAbsent proves, without reading any secret, that a worker
+// with the default key backends has no Jev key (the env variable, the file
+// store and the login keychain all empty). The worker resolves the env and
+// file-store keys itself and hands a keychain-held key to Node
+// (worker-jev-keychain), since Go does not read the OS keychain.
 
 var keyName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 

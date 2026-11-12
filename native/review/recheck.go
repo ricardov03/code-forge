@@ -6,8 +6,9 @@ package review
 // hunk context, then the open findings), one L2 recheck session through the
 // stub guard (recheckSession: B30's same-model timeout retry, the schema-miss
 // row, the open-findings coverage check), stale answers, late findings and
-// the terminal stop before a round (stopBeforeRound). No Jev (the worker
-// passes none), so every open finding goes to the session.
+// the terminal stop before a round (stopBeforeRound). B533: with deps.Jev,
+// S1's resolved band closes an open finding before the packet is built; the
+// rest go to the session (the dry pass plans with every open finding).
 //
 // Not ported (ErrUnsupported before anything runs): review.recheck_scope
 // file, moved-code hints and cross-file evidence (a base with peers), the
@@ -154,6 +155,7 @@ type recheckPlan struct {
 	diff               *FileDiff
 	noFixHunks         bool
 	pending            []any
+	jevClosed          int     // open findings S1's resolved band closed (B533)
 	whole              *Packet // nil: no session (no hunks or nothing open)
 }
 
@@ -224,7 +226,18 @@ func planRecheck(state ledger.Object, kind string, deps LoopDeps, dry bool) (*re
 	if len(p.diff.Hunks) == 0 {
 		return p, nil
 	}
-	p.pending, _ = state.Get("open").([]any)
+	open, _ := state.Get("open").([]any)
+	p.pending = open
+	if !dry && deps.Jev != nil {
+		p.pending = []any{}
+		for _, f := range open {
+			if resolvedClosed(f, p.diff.DiffText, deps) {
+				p.jevClosed++
+			} else {
+				p.pending = append(p.pending, f)
+			}
+		}
+	}
 	if len(p.pending) == 0 {
 		return p, nil
 	}
@@ -376,7 +389,7 @@ func runRecheck(state ledger.Object, deps LoopDeps, kind string) (ledger.Object,
 	draft.Set("pending_kind", nil)
 	draft.Set("open", append([]any{}, stateOpen...))
 	draftLate := append([]any{}, stateLate...)
-	closed, newInHunks := 0, 0
+	closed, newInHunks := plan.jevClosed, 0
 	lateRows, staleRows := []ledger.Object{}, []ledger.Object{}
 
 	// the ordered sets of fixloop.mjs (JS Set insertion order)
@@ -511,7 +524,7 @@ func runRecheck(state ledger.Object, deps LoopDeps, kind string) (ledger.Object,
 				}
 			}
 			closed += len(pending) - len(stillOpen)
-			fixNow := triageFallback(plan.rel, inside, false, deps.WriteRow)
+			fixNow := triage(plan.rel, inside, false, plan.diff.DiffText, deps)
 			newInHunks = len(fixNow)
 			open := append(append(stillOpen, fixNow...), blocking...)
 			draft.Set("open", open)

@@ -181,7 +181,7 @@ func (r FixLoopRequest) prepare(t FixLoopTicket, rows []ledger.Object, loaded Lo
 		kind = "patch_check"
 		state.Set("l3_rung_used", true) // the orchestrator ran this file's one L3 patch before this ticket
 	}
-	spawns, err := review.CheckLoop(state, kind, review.LoopDeps{RepoRoot: r.ContentRoot, Cfg: r.Cfg, Input: r.Input, Session: r.Session})
+	spawns, err := review.CheckLoop(state, kind, review.LoopDeps{RepoRoot: r.ContentRoot, Cfg: r.Cfg, Input: r.Input, Session: r.Session, Jev: r.Jev})
 	if err != nil {
 		return prepared{}, unsupported(err.Error())
 	}

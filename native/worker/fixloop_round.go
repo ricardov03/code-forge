@@ -80,6 +80,8 @@ type FixLoopRequest struct {
 	// and session seams (B517); Session.WriteRow is playRound's writer.
 	Input   review.Input
 	Session review.Deps
+	// Jev is System 1 with the worker's key bound (B533; nil: no key).
+	Jev review.JevAsk
 }
 
 // failureReason is engine.mjs failureReason.
@@ -138,7 +140,7 @@ func playRound(t FixLoopTicket, r FixLoopRequest, state ledger.Object, kind stri
 			out.Engine = res
 		}
 		return res, err
-	}, Input: r.Input, Session: r.Session}
+	}, Input: r.Input, Session: r.Session, Jev: r.Jev}
 	if spawn := r.Session.Spawn; spawn != nil {
 		deps.Session.Spawn = func(opts review.SpawnOpts) (ledger.Object, error) {
 			res, err := spawn(opts)

@@ -325,6 +325,9 @@ const (
 	hDoctorRunCodexRules
 	hDoctorRunCliVersion
 	hDoctorRunWorkerProbe
+	hWorkerJevRef
+	hWorkerJevStore
+	hWorkerJevKeychain
 )
 
 var handoverReasons = [...]string{
@@ -644,4 +647,7 @@ var handoverReasons = [...]string{
 	hDoctorRunCodexRules:       "doctor-run-codex-rules",
 	hDoctorRunCliVersion:       "doctor-run-cli-version",
 	hDoctorRunWorkerProbe:      "doctor-run-worker-probe",
+	hWorkerJevRef:              "worker-jev-key-ref",
+	hWorkerJevStore:            "worker-jev-key-store",
+	hWorkerJevKeychain:         "worker-jev-keychain",
 }

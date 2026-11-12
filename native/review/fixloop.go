@@ -32,8 +32,12 @@ type LoopDeps struct {
 	// packet, paired context and guards; B517).
 	Input Input
 	// Session spawns a recheck's L2 session (Spawn, Warn, SchemaHistory,
-	// Rand; B517). WriteRow comes from the field above.
+	// Rand; B517). WriteRow comes from the field above. Session.Warn also
+	// writes triage's s1_fallback line (B533).
 	Session Deps
+	// Jev asks System 1 for the triage and the recheck's resolved band
+	// (B533); nil = no key (the §3.5 fallback, no warning).
+	Jev JevAsk
 }
 
 var levelOrder = []string{"L0", "L1", "L2", "L3"}
@@ -265,47 +269,6 @@ func cameFromJudge(result ledger.Object) bool {
 	return false
 }
 
-// triageFallback is triageFindings with no Jev and no rule: the fix_now
-// findings, writing one review.triage row per finding (best effort).
-func triageFallback(file string, findings []any, fromJudge bool, write func(ledger.Object) error) []any {
-	fixNow := []any{}
-	verdictOf := func(f ledger.Object) string {
-		if f.Get("severity") == "nit" {
-			return "nit"
-		}
-		return "fix_now"
-	}
-	row := func(f ledger.Object, source, verdict string) ledger.Object {
-		r := ledger.Object{{Key: "event", Value: "review.triage"}, {Key: "file", Value: file}}
-		r = present(r, "finding", renameID(f))
-		r = present(r, "severity", f)
-		return append(r, ledger.Field{Key: "source", Value: source}, ledger.Field{Key: "p", Value: nil}, ledger.Field{Key: "band", Value: nil}, ledger.Field{Key: "verdict", Value: verdict})
-	}
-	if fromJudge {
-		for _, v := range findings {
-			f := asObject(v)
-			verdict := verdictOf(f)
-			if verdict == "fix_now" {
-				fixNow = append(fixNow, v)
-			}
-			note(write, row(f, "shadow", verdict))
-		}
-		return fixNow
-	}
-	for _, v := range findings {
-		f := asObject(v)
-		verdict := verdictOf(f)
-		if f.Get("severity") == "critical" {
-			verdict = "fix_now"
-		}
-		if verdict == "fix_now" {
-			fixNow = append(fixNow, v)
-		}
-		note(write, row(f, "s2-fallback", verdict))
-	}
-	return fixNow
-}
-
 func renameID(f ledger.Object) ledger.Object {
 	for _, field := range f {
 		if field.Key == "id" {
@@ -378,8 +341,8 @@ func checkLoopBase(state ledger.Object, kind string, deps LoopDeps) error {
 	return nil
 }
 
-// RunRound is fixloop.mjs runRound for kind `full`, without Jev or an S2
-// rule (the worker passes neither). It mutates and returns state; an error
+// RunRound is fixloop.mjs runRound for kind `full`, with deps.Jev and no S2
+// rule (the worker passes none). It mutates and returns state; an error
 // is a throw (the caller's `unavailable` with next: retry).
 func RunRound(state ledger.Object, deps LoopDeps, kind string) (ledger.Object, error) {
 	if err := checkLoopBase(state, kind, deps); err != nil {
@@ -432,7 +395,7 @@ func RunRound(state ledger.Object, deps LoopDeps, kind string) (ledger.Object, e
 			ids = append(ids, id)
 		}
 	}
-	fixNow := triageFallback(file, findings, cameFromJudge(result), deps.WriteRow)
+	fixNow := triage(file, findings, cameFromJudge(result), "", deps)
 	draft.Set("open", fixNow)
 
 	draft.Set("round", float64(num(draft, "round")+1))

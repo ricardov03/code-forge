@@ -18,6 +18,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/contextpack"
 	"github.com/ricardov03/code-forge/native/gates"
+	"github.com/ricardov03/code-forge/native/jev"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/review"
@@ -142,6 +143,19 @@ type enginePlan struct {
 	workDir string
 }
 
+// jevAsk is engine.mjs jevWith: askJev with the worker's key bound (the key
+// stays in this process); nil without a key.
+func (w *TicketRunner) jevAsk() review.JevAsk {
+	if w.JevKey == "" {
+		return nil
+	}
+	return func(state, questions any) (jev.Result, error) {
+		o := w.JevOpts
+		o.State, o.Questions, o.Key = state, questions, w.JevKey
+		return jev.Ask(o)
+	}
+}
+
 func (w *TicketRunner) secrets() []string {
 	out := []string{}
 	for _, s := range w.Secrets {
@@ -252,7 +266,10 @@ func (w *TicketRunner) planEngineDry(t ledger.Object, rec ledger.Object, cfg map
 		return nil, nil, unsupported("a review with no run key (reviewFile without the fix loop)")
 	}
 	if w.JevKey != "" {
-		return nil, nil, unsupported("System 1 (Jev) triage in the fix loop")
+		// B533: Jev triage runs in Go; a config Go renders unlike Node goes to Node
+		if err := review.CheckJev(cfg); err != nil {
+			return nil, nil, unsupported(err.Error())
+		}
 	}
 	budget, _ := obj(cfg["budget"])
 	if usd, ok := budget["usd"].(float64); ok && usd > 0 && !math.IsInf(usd, 0) && w.sessionDeps().Warn == nil {
@@ -308,6 +325,7 @@ func (w *TicketRunner) planEngineDry(t ledger.Object, rec ledger.Object, cfg map
 	req.Input = in
 	req.Session = review.Deps{Spawn: w.pooled(id, cfg, session.ReviewSpawn(sopts, sdeps)), Warn: w.Warn,
 		SchemaHistory: schemaHistory(w.readRows, w.Key, w.RunID, file, hash)}
+	req.Jev = w.jevAsk()
 	spawns, kind, err := FixLoopCheck(tk, req)
 	if err != nil {
 		return nil, nil, err

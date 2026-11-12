@@ -206,18 +206,32 @@ func TestB489WorkerUnportedTicketHandsOver(t *testing.T) {
 func TestB489WorkerHandOverCases(t *testing.T) {
 	f := newB489Fix(t)
 	base := strings.Repeat("0", 40)
+	store := filepath.Join(f.home, ".code-forge", "store", "jev.key")
 	cases := []struct {
-		name, cfg, jev string
-		code           int
-		want           string
+		name, cfg, backend, store string
+		keychain                  bool
+		code                      int
+		want                      string
 	}{
-		{"no snapshot", "", "", 127, "worker worker-config"},
-		{"commit watch", `{"review":{"file_loop":"watch"},"version":1}`, "", 127, "worker worker-watch"},
-		{"jev key", `{"version":1}`, "k", 127, "worker worker-jev-key"},
+		{"no snapshot", "", "file", "", false, 127, "worker worker-config"},
+		{"commit watch", `{"review":{"file_loop":"watch"},"version":1}`, "file", "", false, 127, "worker worker-watch"},
+		// B533: a resolvable Jev key serves in Go; only the sources Go
+		// cannot read like Node keep a narrow reason.
+		{"bad key reference", `{"system1":{"key":"keychain:BAD NAME"},"version":1}`, "file", "", false, 127, "worker worker-jev-key-ref"},
+		{"undecodable store", `{"version":1}`, "file", "{bad", false, 127, "worker worker-jev-key-store"},
+		{"keychain holds a key", `{"version":1}`, "", "", true, 127, "worker worker-jev-keychain"},
 	}
+	oldProbe := workerJevProbe
+	t.Cleanup(func() { workerJevProbe = oldProbe })
 	for _, c := range cases {
 		f.withConfig(t, base, c.cfg)
-		t.Setenv("CODE_FORGE_KEY_JEV", c.jev)
+		t.Setenv("CODE_FORGE_KEY_BACKEND", c.backend)
+		found := c.keychain
+		workerJevProbe = worker.JevProbe{Keychain: func(string, string) (bool, bool) { return found, true }}
+		_ = os.Remove(store)
+		if c.store != "" {
+			b460Write(t, store, c.store)
+		}
 		before := len(b460Handovers(t, f.home))
 		code, _, _ := b460Call(t, "worker", "--run", "r1", "--once")
 		rows := b460Handovers(t, f.home)
@@ -228,7 +242,8 @@ func TestB489WorkerHandOverCases(t *testing.T) {
 			t.Errorf("%s: the run root was made before the hand-over", c.name)
 		}
 	}
-	t.Setenv("CODE_FORGE_KEY_JEV", "")
+	_ = os.Remove(store)
+	t.Setenv("CODE_FORGE_KEY_BACKEND", "file")
 	f.record(t, "r1", "active", `,"config":{"hash":"`+strings.Repeat("f", 64)+`","snapshots":{}}`)
 	code, _, errText := b460Call(t, "worker", "--run", "r1", "--once")
 	if code != 1 || errText != "worker: run r1: the config snapshot in the run record is missing or altered\n" {
