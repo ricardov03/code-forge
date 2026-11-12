@@ -31,8 +31,12 @@ Install once for your user:
 
 ```sh
 npm install -g @codedology/code-forge
+code-forge setup
 code-forge version
 ```
+
+npm runs no install script. `code-forge setup` checks the Go binary for your
+system and prints `OK`, or the problem and the one command that fixes it.
 
 Or pin one version in a project that has a `package.json`:
 
@@ -933,7 +937,7 @@ The open and land rows abbreviate arguments shown in full above.
 
 | Step | Command |
 |---|---|
-| 1 Install | `npm install -g @codedology/code-forge` |
+| 1 Install | `npm install -g @codedology/code-forge`; `code-forge setup` |
 | 2 Init | `code-forge init` |
 | 3 Check | `code-forge tools`; `code-forge doctor --quick` |
 | 4 Keys and models | `code-forge keys list`; `code-forge resolve L1` |

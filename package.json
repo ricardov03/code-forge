@@ -57,8 +57,7 @@
     "bench:review": "node scripts/bench-review.mjs",
     "bench:block": "node scripts/bench-block.mjs",
     "bench:verbs": "node scripts/bench-verbs.mjs",
-    "setup": "node scripts/setup.mjs",
-    "postinstall": "node scripts/setup.mjs --postinstall"
+    "setup": "node scripts/setup.mjs"
   },
   "dependencies": {
     "@clack/prompts": "1.8.1",

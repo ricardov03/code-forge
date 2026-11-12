@@ -20,12 +20,6 @@ while [ -L "$entry" ]; do
 done
 pkg=$(CDPATH= cd -P "${entry%/*}/.." && pwd) || exit 1
 
-# `code-forge setup` checks and repairs the Go binary, so it never runs through it (B463).
-if [ "${1:-}" = setup ]; then
-  shift
-  exec node "$pkg/scripts/setup.mjs" "$@"
-fi
-
 host=$(uname -sm)
 case "$host" in
   Darwin\ *) platform=darwin ;;
@@ -38,6 +32,20 @@ case "$host" in
   *) arch=unsupported ;;
 esac
 native=$pkg/native/bin/$platform-$arch/code-forge-native
+# `code-forge setup` (B463): the Go binary serves it. Its own exits are 0 (OK), 1 (problem) and
+# 2 (usage). When the binary is missing, not executable, disabled or exits any other way (a crash),
+# Node's scripts/setup.mjs checks it and names the fix.
+if [ "${1:-}" = setup ]; then
+  if [ "${CODE_FORGE_NATIVE:-}" != 0 ] && [ -f "$native" ] && [ -x "$native" ]; then
+    "$native" "$@"
+    status=$?
+    case $status in
+      0|1|2) exit $status ;;
+    esac
+  fi
+  shift
+  exec node "$pkg/scripts/setup.mjs" "$@"
+fi
 if [ "${CODE_FORGE_NATIVE:-}" != 0 ] && [ -f "$native" ] && [ -x "$native" ]; then
   exec "$native" "$@"
 fi

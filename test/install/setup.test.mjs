@@ -1,12 +1,13 @@
 /**
  * B463: `code-forge setup` / `scripts/setup.mjs` checks the packaged Go binary for this host.
+ * npm runs no install script (owner pick B): customers run `code-forge setup` themselves.
  * Every case runs the script inside a throwaway package directory with a fake binary; nothing
  * touches the real global install or `~/.code-forge`.
  */
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -123,26 +124,16 @@ test('binary exits non-zero with garbage: reports the exit code, exit 1', { skip
   fixLine(r);
 });
 
-test('--postinstall never fails the install: warns on stderr, exit 0', { skip: !supported }, () => {
-  const { pkg } = makePackage();
-  const r = runSetup(pkg, ['--postinstall']);
-  assert.equal(r.status, 0);
-  assert.match(r.stderr, /^code-forge setup: warning: Go binary is missing/);
-  assert.equal(fixLine(r), `fix: npm install -g @codedology/code-forge@${VERSION}`);
-});
-
-test('--postinstall with an ok binary prints the OK line, exit 0', { skip: !supported }, () => {
-  const { pkg } = makePackage({ binary: okBinary });
-  const r = runSetup(pkg, ['--postinstall']);
-  assert.equal(r.status, 0);
-  assert.match(r.stdout, /^code-forge setup: OK Go binary/);
-});
-
 test('unknown argument: usage on stderr, exit 2', () => {
   const { pkg } = makePackage();
   const r = runSetup(pkg, ['--nope']);
   assert.equal(r.status, 2);
-  assert.match(r.stderr, /usage: code-forge setup \[--postinstall\]/);
+  assert.equal(r.stderr, 'usage: code-forge setup\n');
+  const old = runSetup(pkg, ['--postinstall']);
+  assert.equal(old.status, 2, 'the removed --postinstall form is a usage error');
+  const help = runSetup(pkg, ['--help']);
+  assert.equal(help.status, 0);
+  assert.equal(help.stdout, 'usage: code-forge setup\n');
 });
 
 test('launcher: `code-forge setup` runs the setup script even when the Go binary is broken', { skip: !supported }, () => {
@@ -154,4 +145,21 @@ test('launcher: `code-forge setup` runs the setup script even when the Go binary
   const r2 = spawnSync(path.join(ok.pkg, 'bin', 'code-forge'), ['setup'], { encoding: 'utf8', cwd: ok.pkg });
   assert.equal(r2.status, 0, r2.stderr);
   assert.match(r2.stdout, /^code-forge setup: OK Go binary/);
+});
+
+test('launcher: a Go binary that serves setup keeps its own result (exit 1 here), Node does not re-run', { skip: !supported }, () => {
+  const served = `#!/bin/sh\nif [ "$1" = setup ]; then echo 'code-forge setup: served by Go' >&2; echo 'fix: x' >&2; exit 1; fi\nexit 3\n`;
+  const { pkg } = makePackage({ binary: served });
+  const r = spawnSync(path.join(pkg, 'bin', 'code-forge'), ['setup'], { encoding: 'utf8', cwd: pkg });
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, 'code-forge setup: served by Go\nfix: x\n');
+});
+
+test('package manifest runs nothing at install time (no preinstall, install or postinstall script)', () => {
+  const manifest = JSON.parse(readFileSync(path.join(REPO, 'package.json'), 'utf8'));
+  const scripts = manifest.scripts ?? {};
+  for (const hook of ['preinstall', 'install', 'postinstall']) {
+    assert.equal(Object.hasOwn(scripts, hook), false, `package.json must not declare a "${hook}" script`);
+  }
+  assert.equal(scripts.setup, 'node scripts/setup.mjs', 'the manual check stays as npm run setup');
 });

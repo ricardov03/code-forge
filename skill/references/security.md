@@ -32,4 +32,4 @@ Codex has no mode without a shell: `-s read-only` still lets it read any absolut
 
 ## §5 What the package itself never does
 
-No telemetry (`telemetry: off`, reserved). The only `postinstall` is `node scripts/setup.mjs --postinstall`: a local check of the packaged Go binary (it may restore mode 755); no network, and it always exits 0. No secret in argv — a keychain write goes through stdin. Temp dirs live under one per-run root and are swept by the next `run start`; the reaper kills only processes this package registered whose start time still matches — never a foreign pid. Every child `git` runs with inherited `GIT_*` variables stripped, so a gate invoked from a hook still sees the right repository.
+No telemetry (`telemetry: off`, reserved). No `postinstall`. No secret in argv — a keychain write goes through stdin. Temp dirs live under one per-run root and are swept by the next `run start`; the reaper kills only processes this package registered whose start time still matches — never a foreign pid. Every child `git` runs with inherited `GIT_*` variables stripped, so a gate invoked from a hook still sees the right repository.

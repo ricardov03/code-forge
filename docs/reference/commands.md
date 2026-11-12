@@ -36,6 +36,7 @@ This page lists the CLI commands and their usage. It is generated from the CLI. 
 - [review-file](#review-file)
 - [run](#run)
 - [s2](#s2)
+- [setup](#setup)
 - [spawn](#spawn)
 - [status](#status)
 - [sweep](#sweep)
@@ -784,6 +785,14 @@ Answer a decision packet using a System 2 session.
 
 ```text
 usage: code-forge s2 --packet <file.json> [--run <id>] [--block <id>] [--timeout <seconds>]
+```
+
+## setup
+
+Check the Go binary for this system: print OK, or the problem and one fix command.
+
+```text
+usage: code-forge setup
 ```
 
 ## spawn

@@ -77,9 +77,6 @@ test('all command mentions in README and docs code name runtime verbs and valid 
   assert.equal(help.status, 0, `help must exit 0: ${help.stderr}`);
   const verbs = new Set([...help.stdout.matchAll(/^ {2}([a-z][a-z0-9-]*)$/gm)].map((m) => m[1]));
   assert.ok(verbs.size > 0, 'help must list at least one real verb');
-  // B463: the shell launcher serves `setup` itself (before Go or Node), so help does not list it.
-  const setup = spawnSync(path.join(REPO, 'bin/code-forge'), ['setup', '--not-a-flag'], { cwd: TMP, env, encoding: 'utf8', timeout: 15000 });
-  if (setup.status === 2 && setup.stderr.startsWith('usage: code-forge setup')) verbs.add('setup');
   const subcodes = new Map();
   function badMentions(file, markdown) {
     const bad = [];

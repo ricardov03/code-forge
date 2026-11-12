@@ -87,6 +87,7 @@ var handoverCommands = map[string]string{
 	"review":        "",
 	"run":           "start status reload end",
 	"s2":            "",
+	"setup":         "",
 	"spawn":         "",
 	"status":        "",
 	"sweep":         "",

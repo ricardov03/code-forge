@@ -14,6 +14,7 @@ between.
 
 ```bash
 npm install -g @codedology/code-forge
+code-forge setup
 code-forge init
 ```
 
@@ -89,6 +90,7 @@ with code-forge, one block at a time. The scoped name is only for the install li
 
 ```bash
 npm install -g @codedology/code-forge
+code-forge setup
 code-forge init
 ```
 
