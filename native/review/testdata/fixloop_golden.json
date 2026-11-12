@@ -1,0 +1,2068 @@
+{
+ "rounds": [
+  {
+   "name": "clean",
+   "cfg": {},
+   "level": "L2",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "approved": true,
+    "findings": [],
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L2",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 0,
+     "late": 0,
+     "open_after": 0,
+     "tokens_in": null,
+     "tokens_out": null
+    },
+    {
+     "event": "review.approved",
+     "file": "src/app.go",
+     "content_hash": "fd8c4ac8f69ba828186499b3698871d9d7509b15bb7a0e5149a846e8a4a5149c",
+     "round": 1
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 1,
+    "rounds_at_level": 1,
+    "warn_rounds_at_level": 0,
+    "open": [],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "complete",
+    "next": {
+     "action": "complete"
+    },
+    "last_packet": null,
+    "pending_kind": null
+   }
+  },
+  {
+   "name": "mixed-L1",
+   "cfg": {},
+   "level": "L1",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "approved": false,
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": " a ",
+      "evidence": "b",
+      "fix": "do it"
+     },
+     {
+      "id": "f2",
+      "severity": "nit",
+      "line_start": 2,
+      "line_end": 3,
+      "claim": "c",
+      "evidence": "d",
+      "fix": "do it"
+     },
+     {
+      "id": "f3",
+      "severity": "critical",
+      "line_start": 3,
+      "line_end": 4,
+      "claim": "e",
+      "evidence": "f",
+      "fix": "do it"
+     },
+     {
+      "id": "f4",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "a",
+      "evidence": " b ",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f2",
+     "severity": "nit",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "nit"
+    },
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f3",
+     "severity": "critical",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f4",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L1",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 3,
+     "late": 0,
+     "open_after": 3,
+     "tokens_in": null,
+     "tokens_out": null
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 1,
+    "rounds_at_level": 0,
+    "warn_rounds_at_level": 0,
+    "open": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": " a ",
+      "evidence": "b",
+      "fix": "do it"
+     },
+     {
+      "id": "f3",
+      "severity": "critical",
+      "line_start": 3,
+      "line_end": 4,
+      "claim": "e",
+      "evidence": "f",
+      "fix": "do it"
+     },
+     {
+      "id": "f4",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "a",
+      "evidence": " b ",
+      "fix": "do it"
+     }
+    ],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "open",
+    "next": {
+     "action": "fix",
+     "level": "L2",
+     "trigger": "review_warnings"
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"a\",\"b\"]",
+     "[\"c\",\"d\"]",
+     "[\"e\",\"f\"]"
+    ],
+    "finding_ids": [
+     "f1",
+     "f2",
+     "f3",
+     "f4"
+    ]
+   }
+  },
+  {
+   "name": "one-warning-L2",
+   "cfg": {},
+   "level": "L2",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "approved": false,
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L2",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 1,
+     "late": 0,
+     "open_after": 1,
+     "tokens_in": null,
+     "tokens_out": null
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 1,
+    "rounds_at_level": 1,
+    "warn_rounds_at_level": 0,
+    "open": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "open",
+    "next": {
+     "action": "fix",
+     "level": "L2",
+     "trigger": null
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"x\",\"y\"]"
+    ],
+    "finding_ids": [
+     "f1"
+    ]
+   }
+  },
+  {
+   "name": "nits-only",
+   "cfg": {},
+   "level": "L2",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "approved": true,
+    "findings": [
+     {
+      "id": "n1",
+      "severity": "nit",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "n1",
+     "severity": "nit",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "nit"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L2",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 0,
+     "late": 0,
+     "open_after": 0,
+     "tokens_in": null,
+     "tokens_out": null
+    },
+    {
+     "event": "review.approved",
+     "file": "src/app.go",
+     "content_hash": "fd8c4ac8f69ba828186499b3698871d9d7509b15bb7a0e5149a846e8a4a5149c",
+     "round": 1
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 1,
+    "rounds_at_level": 1,
+    "warn_rounds_at_level": 0,
+    "open": [],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "complete",
+    "next": {
+     "action": "complete"
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"x\",\"y\"]"
+    ],
+    "finding_ids": [
+     "n1"
+    ]
+   }
+  },
+  {
+   "name": "unavailable",
+   "cfg": {},
+   "level": "L2",
+   "rung": false,
+   "result": {
+    "status": "unavailable",
+    "reason": "timeout",
+    "approved": false,
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 0,
+    "rounds_at_level": 0,
+    "warn_rounds_at_level": 0,
+    "open": [],
+    "late": [],
+    "reviewed_content": null,
+    "l3_rung_used": false,
+    "status": "open",
+    "next": {
+     "action": "retry",
+     "reason": "timeout"
+    },
+    "last_packet": null,
+    "pending_kind": "full"
+   }
+  },
+  {
+   "name": "refused-no-reason",
+   "cfg": {},
+   "level": "L2",
+   "rung": false,
+   "result": {
+    "status": "no_change",
+    "approved": false,
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 0,
+    "rounds_at_level": 0,
+    "warn_rounds_at_level": 0,
+    "open": [],
+    "late": [],
+    "reviewed_content": null,
+    "l3_rung_used": false,
+    "status": "open",
+    "next": {
+     "action": "retry",
+     "reason": "no_change"
+    },
+    "last_packet": null,
+    "pending_kind": "full"
+   }
+  },
+  {
+   "name": "cap1",
+   "cfg": {
+    "review": {
+     "max_rounds_per_file": 1
+    }
+   },
+   "level": "L2",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L2",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 1,
+     "late": 0,
+     "open_after": 1,
+     "tokens_in": null,
+     "tokens_out": null
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 1,
+    "rounds_at_level": 1,
+    "warn_rounds_at_level": 0,
+    "open": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "open",
+    "next": {
+     "action": "patch",
+     "level": "L3",
+     "trigger": "review_cap"
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"x\",\"y\"]"
+    ],
+    "finding_ids": [
+     "f1"
+    ]
+   }
+  },
+  {
+   "name": "cap1-rung",
+   "cfg": {
+    "review": {
+     "max_rounds_per_file": 1
+    }
+   },
+   "level": "L2",
+   "rung": true,
+   "result": {
+    "status": "reviewed",
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L2",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 1,
+     "late": 0,
+     "open_after": 1,
+     "tokens_in": null,
+     "tokens_out": null
+    },
+    {
+     "event": "review.cap",
+     "file": "src/app.go",
+     "round": 1,
+     "reason": "review_cap",
+     "open": [
+      "f1"
+     ]
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 1,
+    "rounds_at_level": 1,
+    "warn_rounds_at_level": 0,
+    "open": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": true,
+    "status": "stopped",
+    "next": {
+     "action": "stop",
+     "reason": "review_cap",
+     "trigger": "review_cap"
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"x\",\"y\"]"
+    ],
+    "finding_ids": [
+     "f1"
+    ],
+    "stop_content_hash": "fd8c4ac8f69ba828186499b3698871d9d7509b15bb7a0e5149a846e8a4a5149c"
+   }
+  },
+  {
+   "name": "perlevel1-L2",
+   "cfg": {
+    "escalation": {
+     "review_rounds_per_level": 1
+    }
+   },
+   "level": "L2",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L2",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 1,
+     "late": 0,
+     "open_after": 1,
+     "tokens_in": null,
+     "tokens_out": null
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 1,
+    "rounds_at_level": 1,
+    "warn_rounds_at_level": 0,
+    "open": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "open",
+    "next": {
+     "action": "patch",
+     "level": "L3",
+     "trigger": "review_rounds"
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"x\",\"y\"]"
+    ],
+    "finding_ids": [
+     "f1"
+    ]
+   }
+  },
+  {
+   "name": "perlevel1-L2-rung",
+   "cfg": {
+    "escalation": {
+     "review_rounds_per_level": 1
+    }
+   },
+   "level": "L2",
+   "rung": true,
+   "result": {
+    "status": "reviewed",
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L2",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 1,
+     "late": 0,
+     "open_after": 1,
+     "tokens_in": null,
+     "tokens_out": null
+    },
+    {
+     "event": "review.cap",
+     "file": "src/app.go",
+     "round": 1,
+     "reason": "l3_patch_exhausted",
+     "open": [
+      "f1"
+     ]
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 1,
+    "rounds_at_level": 1,
+    "warn_rounds_at_level": 0,
+    "open": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": true,
+    "status": "stopped",
+    "next": {
+     "action": "stop",
+     "reason": "l3_patch_exhausted",
+     "trigger": "review_rounds"
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"x\",\"y\"]"
+    ],
+    "finding_ids": [
+     "f1"
+    ],
+    "stop_content_hash": "fd8c4ac8f69ba828186499b3698871d9d7509b15bb7a0e5149a846e8a4a5149c"
+   }
+  },
+  {
+   "name": "perlevel1-L2-code",
+   "cfg": {
+    "escalation": {
+     "review_rounds_per_level": 1,
+     "l3_mode": "code"
+    }
+   },
+   "level": "L2",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L2",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 1,
+     "late": 0,
+     "open_after": 1,
+     "tokens_in": null,
+     "tokens_out": null
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L3",
+    "round": 1,
+    "rounds_at_level": 0,
+    "warn_rounds_at_level": 0,
+    "open": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "open",
+    "next": {
+     "action": "fix",
+     "level": "L3",
+     "trigger": "review_rounds"
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"x\",\"y\"]"
+    ],
+    "finding_ids": [
+     "f1"
+    ]
+   }
+  },
+  {
+   "name": "perlevel1-L1",
+   "cfg": {
+    "escalation": {
+     "review_rounds_per_level": 1,
+     "after_rounds_with_warnings": 0
+    }
+   },
+   "level": "L1",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L1",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 1,
+     "late": 0,
+     "open_after": 1,
+     "tokens_in": null,
+     "tokens_out": null
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 1,
+    "rounds_at_level": 0,
+    "warn_rounds_at_level": 0,
+    "open": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "open",
+    "next": {
+     "action": "fix",
+     "level": "L2",
+     "trigger": "review_rounds"
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"x\",\"y\"]"
+    ],
+    "finding_ids": [
+     "f1"
+    ]
+   }
+  },
+  {
+   "name": "stopat-L1",
+   "cfg": {
+    "escalation": {
+     "review_rounds_per_level": 1,
+     "stop_at": "L1"
+    }
+   },
+   "level": "L1",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L1",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 1,
+     "late": 0,
+     "open_after": 1,
+     "tokens_in": null,
+     "tokens_out": null
+    },
+    {
+     "event": "review.cap",
+     "file": "src/app.go",
+     "round": 1,
+     "reason": "stop_at",
+     "open": [
+      "f1"
+     ]
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L1",
+    "round": 1,
+    "rounds_at_level": 1,
+    "warn_rounds_at_level": 0,
+    "open": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "stopped",
+    "next": {
+     "action": "stop",
+     "reason": "stop_at",
+     "trigger": "review_rounds"
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"x\",\"y\"]"
+    ],
+    "finding_ids": [
+     "f1"
+    ],
+    "stop_content_hash": "fd8c4ac8f69ba828186499b3698871d9d7509b15bb7a0e5149a846e8a4a5149c"
+   }
+  },
+  {
+   "name": "warn-threshold-3",
+   "cfg": {
+    "escalation": {
+     "warning_threshold": 3
+    }
+   },
+   "level": "L1",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     },
+     {
+      "id": "f2",
+      "severity": "warning",
+      "line_start": 2,
+      "line_end": 3,
+      "claim": "z",
+      "evidence": "w",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f2",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L1",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 2,
+     "late": 0,
+     "open_after": 2,
+     "tokens_in": null,
+     "tokens_out": null
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L1",
+    "round": 1,
+    "rounds_at_level": 1,
+    "warn_rounds_at_level": 0,
+    "open": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     },
+     {
+      "id": "f2",
+      "severity": "warning",
+      "line_start": 2,
+      "line_end": 3,
+      "claim": "z",
+      "evidence": "w",
+      "fix": "do it"
+     }
+    ],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "open",
+    "next": {
+     "action": "fix",
+     "level": "L1",
+     "trigger": null
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"x\",\"y\"]",
+     "[\"z\",\"w\"]"
+    ],
+    "finding_ids": [
+     "f1",
+     "f2"
+    ]
+   }
+  },
+  {
+   "name": "judge",
+   "cfg": {},
+   "level": "L1",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "nit",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     },
+     {
+      "id": "f2",
+      "severity": "warning",
+      "line_start": 2,
+      "line_end": 3,
+      "claim": "z",
+      "evidence": "w",
+      "fix": "do it"
+     }
+    ],
+    "sessions": [
+     {
+      "role": "reviewer"
+     },
+     {
+      "role": "judge"
+     }
+    ]
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "nit",
+     "source": "shadow",
+     "p": null,
+     "band": null,
+     "verdict": "nit"
+    },
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f2",
+     "severity": "warning",
+     "source": "shadow",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L1",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 1,
+     "late": 0,
+     "open_after": 1,
+     "tokens_in": null,
+     "tokens_out": null
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L1",
+    "round": 1,
+    "rounds_at_level": 1,
+    "warn_rounds_at_level": 0,
+    "open": [
+     {
+      "id": "f2",
+      "severity": "warning",
+      "line_start": 2,
+      "line_end": 3,
+      "claim": "z",
+      "evidence": "w",
+      "fix": "do it"
+     }
+    ],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "open",
+    "next": {
+     "action": "fix",
+     "level": "L1",
+     "trigger": null
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"x\",\"y\"]",
+     "[\"z\",\"w\"]"
+    ],
+    "finding_ids": [
+     "f1",
+     "f2"
+    ]
+   }
+  },
+  {
+   "name": "round-row-fails",
+   "cfg": {},
+   "level": "L2",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": "review.round",
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 0,
+    "rounds_at_level": 0,
+    "warn_rounds_at_level": 0,
+    "open": [],
+    "late": [],
+    "reviewed_content": null,
+    "l3_rung_used": false,
+    "status": "open",
+    "next": {
+     "action": "retry",
+     "reason": "ledger_write_failed"
+    },
+    "last_packet": null,
+    "pending_kind": "full"
+   }
+  },
+  {
+   "name": "cap-row-fails",
+   "cfg": {
+    "review": {
+     "max_rounds_per_file": 1
+    }
+   },
+   "level": "L2",
+   "rung": true,
+   "result": {
+    "status": "reviewed",
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": "review.cap",
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L2",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 1,
+     "late": 0,
+     "open_after": 1,
+     "tokens_in": null,
+     "tokens_out": null
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 0,
+    "rounds_at_level": 0,
+    "warn_rounds_at_level": 0,
+    "open": [],
+    "late": [],
+    "reviewed_content": null,
+    "l3_rung_used": true,
+    "status": "open",
+    "next": {
+     "action": "retry",
+     "reason": "ledger_write_failed"
+    },
+    "last_packet": null,
+    "pending_kind": "full"
+   }
+  },
+  {
+   "name": "approved-row-fails",
+   "cfg": {},
+   "level": "L2",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "findings": [],
+    "sessions": []
+   },
+   "failOn": "review.approved",
+   "rows": [
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L2",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 0,
+     "late": 0,
+     "open_after": 0,
+     "tokens_in": null,
+     "tokens_out": null
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 1,
+    "rounds_at_level": 1,
+    "warn_rounds_at_level": 0,
+    "open": [],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "complete",
+    "next": {
+     "action": "complete"
+    },
+    "last_packet": null,
+    "pending_kind": null
+   }
+  },
+  {
+   "name": "triage-row-fails",
+   "cfg": {},
+   "level": "L2",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": "review.triage",
+   "rows": [
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L2",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 1,
+     "late": 0,
+     "open_after": 1,
+     "tokens_in": null,
+     "tokens_out": null
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 1,
+    "rounds_at_level": 1,
+    "warn_rounds_at_level": 0,
+    "open": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "open",
+    "next": {
+     "action": "fix",
+     "level": "L2",
+     "trigger": null
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"x\",\"y\"]"
+    ],
+    "finding_ids": [
+     "f1"
+    ]
+   }
+  },
+  {
+   "name": "dup-findings",
+   "cfg": {},
+   "level": "L2",
+   "rung": false,
+   "result": {
+    "status": "reviewed",
+    "findings": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     },
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "sessions": []
+   },
+   "failOn": null,
+   "rows": [
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.triage",
+     "file": "src/app.go",
+     "finding": "f1",
+     "severity": "warning",
+     "source": "s2-fallback",
+     "p": null,
+     "band": null,
+     "verdict": "fix_now"
+    },
+    {
+     "event": "review.round",
+     "file": "src/app.go",
+     "round": 1,
+     "level": "L2",
+     "kind": "full",
+     "open_before": 0,
+     "closed": 0,
+     "new_in_hunks": 2,
+     "late": 0,
+     "open_after": 2,
+     "tokens_in": null,
+     "tokens_out": null
+    }
+   ],
+   "state": {
+    "file": "src/app.go",
+    "level": "L2",
+    "round": 1,
+    "rounds_at_level": 1,
+    "warn_rounds_at_level": 1,
+    "open": [
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     },
+     {
+      "id": "f1",
+      "severity": "warning",
+      "line_start": 1,
+      "line_end": 2,
+      "claim": "x",
+      "evidence": "y",
+      "fix": "do it"
+     }
+    ],
+    "late": [],
+    "reviewed_content": "package app\n\nfunc A() {}\n",
+    "l3_rung_used": false,
+    "status": "open",
+    "next": {
+     "action": "fix",
+     "level": "L2",
+     "trigger": null
+    },
+    "last_packet": null,
+    "pending_kind": null,
+    "finding_history": [
+     "[\"x\",\"y\"]"
+    ],
+    "finding_ids": [
+     "f1"
+    ]
+   }
+  }
+ ],
+ "budgets": [
+  {
+   "name": "plain",
+   "cfg": {},
+   "files": [
+    "a.go",
+    "b.go"
+   ],
+   "rows": [
+    {
+     "event": "review.budget",
+     "block": "B1",
+     "budget": 150000,
+     "forecast_unconstrained": 14000,
+     "forecast_chosen": 14000,
+     "actual": null,
+     "raised": 0,
+     "over_budget": false,
+     "degrade_step": 0
+    }
+   ]
+  },
+  {
+   "name": "migration",
+   "cfg": {},
+   "files": [
+    "db/migrations/1.sql",
+    "x.go"
+   ],
+   "rows": [
+    {
+     "event": "review.budget",
+     "block": "B1",
+     "budget": 150000,
+     "forecast_unconstrained": 41000,
+     "forecast_chosen": 41000,
+     "actual": null,
+     "raised": 0,
+     "over_budget": false,
+     "degrade_step": 0
+    }
+   ]
+  },
+  {
+   "name": "high-path",
+   "cfg": {
+    "proof": {
+     "tiers": {
+      "high": {
+       "paths": [
+        "secure/**"
+       ]
+      }
+     }
+    }
+   },
+   "files": [
+    "secure/k.go",
+    "lib/policy.go",
+    "z.md"
+   ],
+   "rows": [
+    {
+     "event": "review.budget",
+     "block": "B1",
+     "budget": 150000,
+     "forecast_unconstrained": 75000,
+     "forecast_chosen": 75000,
+     "actual": null,
+     "raised": 0,
+     "over_budget": false,
+     "degrade_step": 0
+    }
+   ]
+  },
+  {
+   "name": "tiny-budget",
+   "cfg": {
+    "review": {
+     "block_budget_tokens": 20000
+    }
+   },
+   "files": [
+    "db/migration.go",
+    "m/middleware.go",
+    "c.go"
+   ],
+   "rows": [
+    {
+     "event": "review.budget",
+     "block": "B1",
+     "budget": 20000,
+     "forecast_unconstrained": 75000,
+     "forecast_chosen": 41000,
+     "actual": null,
+     "raised": 0,
+     "over_budget": true,
+     "degrade_step": 4
+    },
+    {
+     "event": "review.over_budget",
+     "block": "B1",
+     "budget": 20000,
+     "forecast_chosen": 41000
+    }
+   ]
+  },
+  {
+   "name": "consensus",
+   "cfg": {
+    "review": {
+     "multimodel": true
+    }
+   },
+   "files": [
+    "db/migration.go",
+    "c.go"
+   ],
+   "rows": [
+    {
+     "event": "review.budget",
+     "block": "B1",
+     "budget": 150000,
+     "forecast_unconstrained": 60000,
+     "forecast_chosen": 60000,
+     "actual": null,
+     "raised": 0,
+     "over_budget": false,
+     "degrade_step": 0
+    }
+   ]
+  },
+  {
+   "name": "consensus-tiny",
+   "cfg": {
+    "review": {
+     "multimodel": true,
+     "block_budget_tokens": 1000
+    }
+   },
+   "files": [
+    "db/migration.go",
+    "c.go"
+   ],
+   "rows": [
+    {
+     "event": "review.budget",
+     "block": "B1",
+     "budget": 1000,
+     "forecast_unconstrained": 60000,
+     "forecast_chosen": 60000,
+     "actual": null,
+     "raised": 0,
+     "over_budget": true,
+     "degrade_step": 4
+    },
+    {
+     "event": "review.over_budget",
+     "block": "B1",
+     "budget": 1000,
+     "forecast_chosen": 60000
+    }
+   ]
+  },
+  {
+   "name": "high-tiny",
+   "cfg": {
+    "review": {
+     "block_budget_tokens": 30000
+    }
+   },
+   "files": [
+    "db/migration.go",
+    "p/policies.go"
+   ],
+   "rows": [
+    {
+     "event": "review.budget",
+     "block": "B1",
+     "budget": 30000,
+     "forecast_unconstrained": 68000,
+     "forecast_chosen": 34000,
+     "actual": null,
+     "raised": 0,
+     "over_budget": true,
+     "degrade_step": 4
+    },
+    {
+     "event": "review.over_budget",
+     "block": "B1",
+     "budget": 30000,
+     "forecast_chosen": 34000
+    }
+   ]
+  }
+ ],
+ "risks": [
+  {
+   "file": "a.go",
+   "plus": 0,
+   "minus": 0,
+   "cfg": {},
+   "risk": 0
+  },
+  {
+   "file": "a.go",
+   "plus": 150,
+   "minus": 51,
+   "cfg": {},
+   "risk": 1
+  },
+  {
+   "file": "a.go",
+   "plus": 200,
+   "minus": 0,
+   "cfg": {},
+   "risk": 0
+  },
+  {
+   "file": "Migration.rb",
+   "plus": 0,
+   "minus": 0,
+   "cfg": {},
+   "risk": 2
+  },
+  {
+   "file": "x/POLICIES/y",
+   "plus": 0,
+   "minus": 0,
+   "cfg": {},
+   "risk": 2
+  },
+  {
+   "file": "k/sec.go",
+   "plus": 0,
+   "minus": 0,
+   "cfg": {
+    "proof": {
+     "tiers": {
+      "high": {
+       "paths": [
+        "k"
+       ]
+      }
+     }
+    }
+   },
+   "risk": 3
+  },
+  {
+   "file": "k/sec.go",
+   "plus": 0,
+   "minus": 0,
+   "cfg": {
+    "proof": {
+     "tiers": {
+      "high": {
+       "paths": [
+        "k/*.{go,ts}"
+       ]
+      }
+     }
+    }
+   },
+   "risk": 3
+  }
+ ],
+ "saves": [
+  {
+   "name": "clean",
+   "idx": 0,
+   "seq": 0,
+   "rows": [
+    {
+     "event": "review.state",
+     "block": "B1",
+     "file": "src/app.go",
+     "seq": 1,
+     "state_sha": "c935dc3985d105c7bbc8600f7c96716e36addd7f6d9bf7413969bc7b65e5c2b6",
+     "l3_rung_used": false,
+     "state_body": {
+      "run": "r1",
+      "block": "B1",
+      "file": "src/app.go",
+      "seq": 1,
+      "state": {
+       "file": "src/app.go",
+       "level": "L2",
+       "round": 1,
+       "rounds_at_level": 1,
+       "warn_rounds_at_level": 0,
+       "open": [],
+       "late": [],
+       "reviewed_content": null,
+       "l3_rung_used": false,
+       "status": "complete",
+       "next": {
+        "action": "complete"
+       },
+       "last_packet": null,
+       "pending_kind": null
+      },
+      "reviewed_content_sha": "fd8c4ac8f69ba828186499b3698871d9d7509b15bb7a0e5149a846e8a4a5149c",
+      "reviewed_content_blob": "8f7c667412252b7325d6db9c4c99ee95e0af0bdb",
+      "ts": "2026-11-11T09:00:00.000Z",
+      "mac": "347609ef8cbc49776350b0e6a664833a99473de5d10601cf3302987bd940ca5d"
+     }
+    }
+   ],
+   "files": [
+    "dbf990c1a8157eaf4227aec2.json"
+   ],
+   "text": "{\"run\":\"r1\",\"block\":\"B1\",\"file\":\"src/app.go\",\"seq\":1,\"state\":{\"file\":\"src/app.go\",\"level\":\"L2\",\"round\":1,\"rounds_at_level\":1,\"warn_rounds_at_level\":0,\"open\":[],\"late\":[],\"reviewed_content\":\"package app\\n\\nfunc A() {}\\n\",\"l3_rung_used\":false,\"status\":\"complete\",\"next\":{\"action\":\"complete\"},\"last_packet\":null,\"pending_kind\":null},\"ts\":\"2026-11-11T09:00:00.000Z\",\"mac\":\"67fc890767a5ad0076c25a860edfe7379e1a344f74c2148e753030e46192c419\"}\n"
+  },
+  {
+   "name": "mixed",
+   "idx": 1,
+   "seq": 3,
+   "rows": [
+    {
+     "event": "review.state",
+     "block": "B1",
+     "file": "src/app.go",
+     "seq": 4,
+     "state_sha": "0388f1882d98b7f745ffd53766d3693261e7fbb5d76d601906bb0410f461bcec",
+     "l3_rung_used": false,
+     "state_body": {
+      "run": "r1",
+      "block": "B1",
+      "file": "src/app.go",
+      "seq": 4,
+      "state": {
+       "file": "src/app.go",
+       "level": "L2",
+       "round": 1,
+       "rounds_at_level": 0,
+       "warn_rounds_at_level": 0,
+       "open": [
+        {
+         "id": "f1",
+         "severity": "warning",
+         "line_start": 1,
+         "line_end": 2,
+         "claim": " a ",
+         "evidence": "b",
+         "fix": "do it"
+        },
+        {
+         "id": "f3",
+         "severity": "critical",
+         "line_start": 3,
+         "line_end": 4,
+         "claim": "e",
+         "evidence": "f",
+         "fix": "do it"
+        },
+        {
+         "id": "f4",
+         "severity": "warning",
+         "line_start": 1,
+         "line_end": 2,
+         "claim": "a",
+         "evidence": " b ",
+         "fix": "do it"
+        }
+       ],
+       "late": [],
+       "reviewed_content": null,
+       "l3_rung_used": false,
+       "status": "open",
+       "next": {
+        "action": "fix",
+        "level": "L2",
+        "trigger": "review_warnings"
+       },
+       "last_packet": null,
+       "pending_kind": null,
+       "finding_history": [
+        "[\"a\",\"b\"]",
+        "[\"c\",\"d\"]",
+        "[\"e\",\"f\"]"
+       ],
+       "finding_ids": [
+        "f1",
+        "f2",
+        "f3",
+        "f4"
+       ]
+      },
+      "reviewed_content_sha": "fd8c4ac8f69ba828186499b3698871d9d7509b15bb7a0e5149a846e8a4a5149c",
+      "reviewed_content_blob": "8f7c667412252b7325d6db9c4c99ee95e0af0bdb",
+      "ts": "2026-11-11T09:00:00.000Z",
+      "mac": "9e02816b70132c51966bdbac7e72e5cb9533acddfd9ed82806a98d7bbb62f057"
+     }
+    }
+   ],
+   "files": [
+    "dbf990c1a8157eaf4227aec2.json"
+   ],
+   "text": "{\"run\":\"r1\",\"block\":\"B1\",\"file\":\"src/app.go\",\"seq\":4,\"state\":{\"file\":\"src/app.go\",\"level\":\"L2\",\"round\":1,\"rounds_at_level\":0,\"warn_rounds_at_level\":0,\"open\":[{\"id\":\"f1\",\"severity\":\"warning\",\"line_start\":1,\"line_end\":2,\"claim\":\" a \",\"evidence\":\"b\",\"fix\":\"do it\"},{\"id\":\"f3\",\"severity\":\"critical\",\"line_start\":3,\"line_end\":4,\"claim\":\"e\",\"evidence\":\"f\",\"fix\":\"do it\"},{\"id\":\"f4\",\"severity\":\"warning\",\"line_start\":1,\"line_end\":2,\"claim\":\"a\",\"evidence\":\" b \",\"fix\":\"do it\"}],\"late\":[],\"reviewed_content\":\"package app\\n\\nfunc A() {}\\n\",\"l3_rung_used\":false,\"status\":\"open\",\"next\":{\"action\":\"fix\",\"level\":\"L2\",\"trigger\":\"review_warnings\"},\"last_packet\":null,\"pending_kind\":null,\"finding_history\":[\"[\\\"a\\\",\\\"b\\\"]\",\"[\\\"c\\\",\\\"d\\\"]\",\"[\\\"e\\\",\\\"f\\\"]\"],\"finding_ids\":[\"f1\",\"f2\",\"f3\",\"f4\"]},\"ts\":\"2026-11-11T09:00:00.000Z\",\"mac\":\"9263f037f937f749c792b600c8882989dd178b779fdd1c5ed8e94d8e2f5dce57\"}\n"
+  }
+ ]
+}
