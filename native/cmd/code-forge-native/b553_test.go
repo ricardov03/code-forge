@@ -352,32 +352,5 @@ func TestB553ReviewRefusalsGo(t *testing.T) {
 	})
 }
 
-// Several files: the Go worker gives such tickets to a Node worker (the
-// moved-code hints are not ported) and a wait already polling reads the gap
-// as worker_down, so the run stays Node's: a named hand-over before anything
-// is written or printed. With node on PATH the handed-over run matches Node.
-func TestB553ReviewSeveralFilesHandOver(t *testing.T) {
-	bin := b553Binary(t)
-	f, g := b553Go(t, bin, "approve", []string{"--max", "60"})
-	if g.code != 127 || g.out != "" || strings.Contains(g.err, "review:") || strings.Join(g.handover, ",") != "review review-worker-handoff" || len(g.tmp) != 0 {
-		t.Fatalf("several files = %+v", g)
-	}
-	if _, err := os.Stat(filepath.Join(f.home, ".code-forge", "runs")); err == nil {
-		t.Fatal("a run was started before the hand-over")
-	}
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not on PATH: the Node twin is skipped")
-	}
-	f2 := b553Fixture(t, "approve")
-	env := b553Env(f2, "CODE_FORGE_NODE="+node)
-	env[0] += ":" + filepath.Dir(node)
-	g2 := b553Run(t, f2, []string{bin, "review", "--max", "60"}, env)
-	_, n, _ := b553Node(t, "approve", []string{"--max", "60"})
-	want := "src/a.txt  approved\nsrc/b.txt  approved\n\ntotals: 2 files · 2 approved · 0 with findings (0 findings) · 0 stopped · 0 unavailable\n"
-	// the per-file progress lines come as each wait ends, in either order
-	lines := func(s string) string { l := strings.Split(s, "\n"); sort.Strings(l); return strings.Join(l, "\n") }
-	if g2.code != 0 || g2.out != want || n.code != g2.code || n.out != g2.out || lines(n.err) != lines(g2.err) {
-		t.Fatalf("go via node %d %q %q\nnode %d %q %q", g2.code, g2.out, g2.err, n.code, n.out, n.err)
-	}
-}
+// B561b: several files and test-like files run in Go; their cases moved to
+// b561b_test.go (Node goldens in testdata/b561b).

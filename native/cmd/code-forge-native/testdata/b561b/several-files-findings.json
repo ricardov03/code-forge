@@ -1,0 +1,18 @@
+{
+  "code": 1,
+  "out": "src/a.txt  1 finding\nsrc/b.txt  1 finding\n\nfix list: src/a.txt\n  F1 · warning · lines 2-2\n    claim: a bug\n    fix:   remove it\n\nfix list: src/b.txt\n  F1 · warning · lines 2-2\n    claim: a bug\n    fix:   remove it\n\ntotals: 2 files · 0 approved · 2 with findings (2 findings) · 0 stopped · 0 unavailable\n",
+  "err": "review: base 56e2b3ab19d0 (HEAD (uncommitted changes)) · 2 files · run \u003cRUN\u003e\nreview: src/a.txt  1 finding\nreview: src/b.txt  1 finding\nreview: run \u003cRUN\u003e kept (--keep-run): reuse it with --run \u003cRUN\u003e; end it with `code-forge run end --run \u003cRUN\u003e`\n",
+  "tmp": [
+    "\u003cRUN\u003e"
+  ],
+  "home": [
+    ".code-forge/ledger/rvb553.jsonl",
+    ".code-forge/logs/breadcrumbs.json",
+    ".code-forge/logs/errors.jsonl",
+    ".code-forge/runs/\u003cRUN\u003e.json",
+    ".code-forge/runs/\u003cRUN\u003e.key",
+    ".code-forge/runs/\u003cRUN\u003e/blocks/\u003cBLOCK\u003e.done.json",
+    ".code-forge/runs/\u003cRUN\u003e/review-state/\u003cBLOCK\u003e/86e9e2e9af9f19b657100eb5.json",
+    ".code-forge/runs/\u003cRUN\u003e/review-state/\u003cBLOCK\u003e/cf6cefc853be88e0057529b0.json"
+  ]
+}

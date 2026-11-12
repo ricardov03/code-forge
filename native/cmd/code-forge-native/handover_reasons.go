@@ -750,7 +750,7 @@ var handoverReasons = [...]string{
 	hReviewRunRecord:       "review-run-record",
 	hReviewTmpRoot:         "review-tmp-root",
 	hReviewSelf:            "review-self-binary",
-	hReviewWorkerHandOff:   "review-worker-handoff",
+	hReviewWorkerHandOff:   "review-worker-handoff", // B561b: no longer returned (Go serves several and test-like files)
 	// B551r
 	hSpawnCodexSandbox: "spawn-codex-sandbox",
 	// B556

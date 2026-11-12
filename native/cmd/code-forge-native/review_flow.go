@@ -82,9 +82,6 @@ func rvfPrepare(args []string, parsed cliParsed, root, sha, from string, files [
 	usage := func(text string) (func(o *runOut) int, handoverReason) {
 		return func(o *runOut) int { o.err("review: " + text + "\n"); return 2 }, 0
 	}
-	if rvfWorkerHandsOff(files) {
-		return nil, hReviewWorkerHandOff
-	}
 	cfg, err := config.LoadUnchecked(root)
 	if err != nil {
 		var cfgErr *config.Error
@@ -163,20 +160,6 @@ func rvfPrepare(args []string, parsed cliParsed, root, sha, from string, files [
 	in.tmp = tmp
 	in.childEnv = rvfChildEnv(args)
 	return func(o *runOut) int { return rvfRun(in, o) }, 0
-}
-
-// rvfWorkerHandsOff: files whose ticket the Go worker gives to a Node worker
-// (several owned files bring the moved-code hints, a test-like name the
-// test-quality hint: native/review engine.go). The worker withdraws its
-// announcement before the Node worker boots, and a `review-file --wait`
-// already polling reads that gap as worker_down, where Node's own run
-// reviews the file; so these runs stay Node's whole.
-func rvfWorkerHandsOff(files []string) bool {
-	if len(files) > 1 {
-		return true
-	}
-	low := strings.ToLower(files[0])
-	return strings.Contains(low, "test") || strings.Contains(low, "spec")
 }
 
 // rvfEndedPlan: the skipped notes, then Node's refusal of an ended --run.

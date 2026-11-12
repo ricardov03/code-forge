@@ -1,0 +1,17 @@
+{
+  "code": 0,
+  "out": "src/a.test.mjs  approved\nsrc/a.txt       approved\n\ntotals: 2 files · 2 approved · 0 with findings (0 findings) · 0 stopped · 0 unavailable\n",
+  "err": "review: base 56e2b3ab19d0 (HEAD (uncommitted changes)) · 2 files · run \u003cRUN\u003e\nreview: src/a.txt  approved\nreview: src/a.test.mjs  approved\nreview: run \u003cRUN\u003e kept (--keep-run): reuse it with --run \u003cRUN\u003e; end it with `code-forge run end --run \u003cRUN\u003e`\n",
+  "tmp": [
+    "\u003cRUN\u003e"
+  ],
+  "home": [
+    ".code-forge/ledger/rvb553.jsonl",
+    ".code-forge/logs/breadcrumbs.json",
+    ".code-forge/runs/\u003cRUN\u003e.json",
+    ".code-forge/runs/\u003cRUN\u003e.key",
+    ".code-forge/runs/\u003cRUN\u003e/blocks/\u003cBLOCK\u003e.done.json",
+    ".code-forge/runs/\u003cRUN\u003e/review-state/\u003cBLOCK\u003e/cf6cefc853be88e0057529b0.json",
+    ".code-forge/runs/\u003cRUN\u003e/review-state/\u003cBLOCK\u003e/d427972158b052447603785a.json"
+  ]
+}

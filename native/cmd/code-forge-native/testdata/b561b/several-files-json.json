@@ -1,0 +1,17 @@
+{
+  "code": 0,
+  "out": "{\"ok\":true,\"base\":\"56e2b3ab19d0dcc79abc124de6f6a4709b227cb3\",\"base_from\":\"HEAD (uncommitted changes)\",\"run\":\"\u003cRUN\u003e\",\"block\":\"\u003cBLOCK\u003e\",\"files\":[{\"file\":\"src/a.txt\",\"result\":\"approved\",\"reason\":null,\"findings\":[]},{\"file\":\"src/b.txt\",\"result\":\"approved\",\"reason\":null,\"findings\":[]}],\"skipped\":[],\"totals\":{\"files\":2,\"approved\":2,\"unchanged\":0,\"with_findings\":0,\"findings\":0,\"stopped\":0,\"unavailable\":0}}\n",
+  "err": "review: base 56e2b3ab19d0 (HEAD (uncommitted changes)) · 2 files · run \u003cRUN\u003e\nreview: src/a.txt  approved\nreview: src/b.txt  approved\nreview: run \u003cRUN\u003e kept (--keep-run): reuse it with --run \u003cRUN\u003e; end it with `code-forge run end --run \u003cRUN\u003e`\n",
+  "tmp": [
+    "\u003cRUN\u003e"
+  ],
+  "home": [
+    ".code-forge/ledger/rvb553.jsonl",
+    ".code-forge/logs/breadcrumbs.json",
+    ".code-forge/runs/\u003cRUN\u003e.json",
+    ".code-forge/runs/\u003cRUN\u003e.key",
+    ".code-forge/runs/\u003cRUN\u003e/blocks/\u003cBLOCK\u003e.done.json",
+    ".code-forge/runs/\u003cRUN\u003e/review-state/\u003cBLOCK\u003e/86e9e2e9af9f19b657100eb5.json",
+    ".code-forge/runs/\u003cRUN\u003e/review-state/\u003cBLOCK\u003e/cf6cefc853be88e0057529b0.json"
+  ]
+}
