@@ -364,6 +364,13 @@ const (
 	hJevAskPayload
 	hJevAskAnswer
 	hJevAskHome
+	hReviewHome
+	hReviewConfig
+	hReviewAcceptanceShape
+	hReviewRunRecord
+	hReviewTmpRoot
+	hReviewSelf
+	hReviewWorkerHandOff
 )
 
 var handoverReasons = [...]string{
@@ -729,4 +736,12 @@ var handoverReasons = [...]string{
 	hJevAskPayload:  "jev-ask-payload",
 	hJevAskAnswer:   "jev-ask-answer",
 	hJevAskHome:     "jev-ask-home",
+	// B553
+	hReviewHome:            "review-home",
+	hReviewConfig:          "review-config",
+	hReviewAcceptanceShape: "review-acceptance-shape",
+	hReviewRunRecord:       "review-run-record",
+	hReviewTmpRoot:         "review-tmp-root",
+	hReviewSelf:            "review-self-binary",
+	hReviewWorkerHandOff:   "review-worker-handoff",
 }

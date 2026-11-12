@@ -19,9 +19,10 @@ import (
 // B460 (phase 1): `code-forge review` in Go (src/cli/review.mjs). Go answers
 // --help, every usage error, "not inside a git repository", a base that does
 // not resolve, a bad --files path, and the whole run when nothing is left to
-// review (text or --json, with the skipped-file notes). When any file is left
-// to review, the run (config, run start, tickets, worker, wait, block, run
-// end) keeps its hand-over to Node; Go writes nothing before it hands over.
+// review (text or --json, with the skipped-file notes). B553: when a file is
+// left to review, review_flow.go runs it (config, run start, block, ticket,
+// wait, block stop, run end); the cases it cannot serve like Node hand over
+// with a named reason before Go writes anything.
 func init() { routes["review"] = runReviewVerb }
 
 const reviewUsage = "usage: code-forge review [--base <ref>] [--files <path…>] [--acceptance <file> | --intent \"<text>\"] [--run <id>] [--max <seconds>] [--json] [--keep-run]\n"
@@ -285,13 +286,19 @@ func reviewPlan(args []string) (func(o *runOut) int, handoverReason) {
 		}
 	}
 	skipped := []reviewSkip{}
+	files := []string{}
 	for _, file := range candidates {
 		why := reviewSkipReason(root, file, !explicit)
 		if why == "" {
-			// a file to review: the run is Node's
-			return nil, hReviewFlow
+			files = append(files, file)
+			continue
 		}
 		skipped = append(skipped, reviewSkip{file, why})
+	}
+	if len(files) > 0 {
+		// B553: a file to review runs the whole flow in Go
+		rvfSortJS(files)
+		return rvfPrepare(args, parsed, root, sha, from, files, skipped)
 	}
 	asJSON := parsed.booleans["json"]
 	return func(o *runOut) int {
@@ -329,7 +336,7 @@ func runReviewVerb(args []string) int {
 	}
 	home := os.Getenv("HOME")
 	if home == "" || !filepath.IsAbs(home) {
-		return reviewHandover(args, hReviewFlow)
+		return reviewHandover(args, hReviewHome)
 	}
 	plan, reason := reviewPlan(args)
 	if plan == nil {

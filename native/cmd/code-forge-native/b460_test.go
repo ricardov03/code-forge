@@ -335,13 +335,16 @@ func TestB460ReviewBaseFromMergeBase(t *testing.T) {
 	}
 }
 
-func TestB460ReviewWithFilesHandsOver(t *testing.T) {
+// B553: a file to review runs in Go; with no .code-forge.yml Go refuses the
+// way Node does (exit 2, the skipped notes not printed) and hands nothing over.
+func TestB460ReviewWithFilesNoConfigInGo(t *testing.T) {
 	f, repo := newB460Repo(t)
 	b460Write(t, filepath.Join(repo, "app.go"), "package app\n")
-	if code, out, errText := b460Call(t, "review", "--json"); code != 127 || out != "" || strings.Contains(errText, "skipped") {
-		t.Fatalf("a file to review = %d %q %q, want the Node hand-over (127) with nothing written first", code, out, errText)
+	code, out, errText := b460Call(t, "review", "--json")
+	if code != 2 || out != "" || errText != "review: no .code-forge.yml at the repository root — run `code-forge init` first\n" {
+		t.Fatalf("a file to review, no config = %d %q %q", code, out, errText)
 	}
-	if got := strings.Join(b460Handovers(t, f.home), ","); got != "review review-flow" {
-		t.Fatalf("hand-overs = %s", got)
+	if rows := b460Handovers(t, f.home); len(rows) != 0 {
+		t.Fatalf("hand-overs = %v", rows)
 	}
 }
