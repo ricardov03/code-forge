@@ -36,6 +36,7 @@ var proofSubUsage = map[string]string{
 type proofOutcome struct {
 	stdout, stderr string
 	code           int
+	live           func(stdout, stderr io.Writer) int // B481: red-green after its export
 }
 
 func proofRefuse(sub, message string, code int) *proofOutcome {
@@ -151,7 +152,22 @@ func proofPlan(args []string) (*proofOutcome, handoverReason) {
 		if normalized == ".code-forge" || strings.HasPrefix(normalized, ".code-forge/") {
 			return usage("--test cannot be under .code-forge/")
 		}
-		return nil, hProofRun
+		runID := flags["run"].(string)
+		mechanism, _ := flags["mechanism"].(string)
+		testCase, hasCase := "", false
+		if sep := strings.Index(test, "::"); sep >= 0 {
+			testCase, hasCase = test[sep+2:], true
+		}
+		rg, outcome, reason := proofRedGreenPlan(runID, positionals[0], normalized, testCase, hasCase, mechanism)
+		if rg == nil {
+			return outcome, reason
+		}
+		if rg.isolation == "export" {
+			if outcome, reason := rg.export(); outcome != nil || reason != 0 {
+				return outcome, reason
+			}
+		}
+		return &proofOutcome{live: rg.run}, 0
 	}
 	return &proofOutcome{stderr: proofUsage, code: 2}, 0
 }
@@ -166,6 +182,9 @@ func runProofVerb(args []string) int {
 	}
 	sub := metaSub(args, "tier", "export", "lock", "unlock", "restore", "red-green")
 	return metaServe("proof", sub, args, func(stdout, stderr io.Writer) int {
+		if outcome.live != nil {
+			return outcome.live(stdout, stderr)
+		}
 		fmt.Fprint(stdout, outcome.stdout)
 		fmt.Fprint(stderr, outcome.stderr)
 		return outcome.code

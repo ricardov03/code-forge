@@ -194,8 +194,6 @@ func TestB458HandOvers(t *testing.T) {
 		{[]string{"s2", "--packet", "p.json"}, "system-two-session"},
 		{[]string{"jev", "ask", "lane", "--state", "s.json"}, "jev-ask"},
 		{[]string{"proof", "tier", "--file", "a", "--risk", "1", "--cwd", configDir}, "proof-config"},
-		{[]string{"proof", "red-green", "B1", "--run", "r", "--test", "./"}, "proof-run"},
-		{[]string{"proof", "red-green", "B1", "--run", "r", "--test", "t.test.mjs::case"}, "proof-run"},
 	}
 	for _, c := range cases {
 		home := t.TempDir()

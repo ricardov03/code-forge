@@ -270,6 +270,9 @@ const (
 	hJevAsk
 	hProofConfig
 	hProofRun
+	hProofRunner
+	hProofSnapshot
+	hProofRedGreen
 )
 
 var handoverReasons = [...]string{
@@ -519,6 +522,9 @@ var handoverReasons = [...]string{
 	hJevAsk:                    "jev-ask",
 	hProofConfig:               "proof-config",
 	hProofRun:                  "proof-run",
+	hProofRunner:               "proof-runner",
+	hProofSnapshot:             "proof-snapshot",
+	hProofRedGreen:             "proof-red-green",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
