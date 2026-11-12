@@ -69,6 +69,16 @@ var ErrUnorderedBlockID = errors.New("block id outside printable ASCII")
 // timeout details). The error carries the message Node's status prints after
 // "status: " when its computation throws.
 func ComputeErr(record Object, rows []ledger.Row, home string) (ledger.Object, error) {
+	return compute(record, rows, home, true)
+}
+
+// ComputeBriefErr is statusOf(record, rows, {gateDetails: false}), the form
+// the native-status companion writes: no flaky files and no timeout results.
+func ComputeBriefErr(record Object, rows []ledger.Row, home string) (ledger.Object, error) {
+	return compute(record, rows, home, false)
+}
+
+func compute(record Object, rows []ledger.Row, home string, gateDetails bool) (ledger.Object, error) {
 	rawID, present := record["run_id"]
 	id := gatecheck.JSString(rawID, present)
 	var budget any
@@ -206,6 +216,9 @@ func ComputeErr(record Object, rows []ledger.Row, home string) (ledger.Object, e
 	if len(awaiting) > 0 {
 		sortUTF16(awaiting)
 		result.Set("awaiting_human_check", awaiting)
+	}
+	if !gateDetails {
+		return result, nil
 	}
 	if flaky := flakyFiles(rows, id); len(flaky) > 0 {
 		result.Set("flaky", flaky)

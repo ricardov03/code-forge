@@ -283,6 +283,9 @@ const (
 	hGatesFsError
 	hGatesRunIDMismatch
 	hGatesRunNoWorkspace
+	hNativeStatusNoHome
+	hNativeStatusTTY
+	hNativeStatusLine
 )
 
 var handoverReasons = [...]string{
@@ -545,6 +548,9 @@ var handoverReasons = [...]string{
 	hGatesFsError:              "gates-fs-error",
 	hGatesRunIDMismatch:        "gates-run-id-mismatch",
 	hGatesRunNoWorkspace:       "gates-run-no-workspace",
+	hNativeStatusNoHome:        "native-status-no-home",
+	hNativeStatusTTY:           "native-status-tty",
+	hNativeStatusLine:          "native-status-line",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
