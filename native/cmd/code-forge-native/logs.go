@@ -195,8 +195,17 @@ func logsReportPicks(newest []ledger.Object, flags map[string]string, last int64
 	return false
 }
 
+// Seams: Node asks only when stdin is a terminal (process.stdin.isTTY);
+// clack draws on stdout, so the Go prompt needs both ends (humanask).
+var (
+	logsStdinTTY = func() bool { return humanask.IsTTY(os.Stdin) }
+	logsAskTTY   = humanask.Available
+	logsConfirm  = humanask.Confirm
+)
+
 // logsClear is Node's clear: a missing log is nothing to do, --yes deletes it,
-// no terminal refuses. The terminal prompt stays in Node.
+// no terminal refuses, a terminal asks (clack confirm, No first). A prompt
+// Go cannot draw like clack (stdout not a terminal) stays in Node.
 func logsClear(args []string, file string, flags map[string]string, crumb string, fail func(int, string) int) int {
 	if _, err := os.ReadFile(file); err != nil {
 		gatesBreadcrumbName(crumb)
@@ -204,12 +213,27 @@ func logsClear(args []string, file string, flags map[string]string, crumb string
 		return 0
 	}
 	if _, yes := flags["yes"]; !yes {
-		if humanask.IsTTY(os.Stdin) {
+		if !logsStdinTTY() {
+			return fail(2, "logs: no terminal to confirm; nothing deleted — pass --yes to delete the error log\n")
+		}
+		entries, safe := logsRead(file)
+		if !logsAskTTY() || !safe || !routerHintReadable() {
 			return logsHandover(args, hLogsClearPrompt)
 		}
-		return fail(2, "logs: no terminal to confirm; nothing deleted — pass --yes to delete the error log\n")
+		before := gatesBreadcrumbName(crumb)
+		answer, err := logsConfirm(fmt.Sprintf("Delete the error log (%d entries)?", len(entries)))
+		if err != nil || answer == humanask.NoTTY {
+			// Nothing was answered; Node asks again from the start.
+			return logsHandover(args, hLogsClearPrompt)
+		}
+		if answer != humanask.Confirmed {
+			fmt.Fprint(os.Stdout, "cancelled — nothing deleted\n")
+			routerHint(nativeVerbFailure("logs", "clear", args, 1, nil, before), 1)
+			return 1
+		}
+	} else {
+		gatesBreadcrumbName(crumb)
 	}
-	gatesBreadcrumbName(crumb)
 	if err := os.Remove(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return logsHandover(args, hLogsClearPrompt)
 	}
