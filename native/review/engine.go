@@ -295,6 +295,16 @@ func Check(in Input) error {
 	return err
 }
 
+// SpawnLevel is the level and role File's session runs at (Check's pass);
+// ok false when File ends before any session.
+func SpawnLevel(in Input) (level, role string, ok bool, err error) {
+	p, err := prepare(in)
+	if err != nil || p.early != nil {
+		return "", "", false, err
+	}
+	return p.spec.level, p.spec.role, true, nil
+}
+
 // File reviews one file. The outcome is Node's reviewFile result object.
 func File(in Input, deps Deps) (ledger.Object, error) {
 	p, err := prepare(in)

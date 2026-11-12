@@ -101,6 +101,69 @@ func (w *TicketRunner) readRows() ([]any, error) {
 	if w.ReadRows != nil {
 		return w.ReadRows()
 	}
+	lines, err := w.ledgerLines()
+	if err != nil {
+		return nil, err
+	}
+	rows := []any{}
+	for _, l := range lines {
+		var v any
+		if err := json.Unmarshal(l, &v); err != nil {
+			return nil, unsupported("ledger line JSON.parse throws on")
+		}
+		rows = append(rows, v)
+	}
+	return rows, nil
+}
+
+// readObjects is readRows with each row's key order kept (the fix loop's
+// view). A row that is not an object is left out: no row test matches one.
+func (w *TicketRunner) readObjects() ([]ledger.Object, error) {
+	out := []ledger.Object{}
+	if w.ReadRows != nil {
+		rows, err := w.ReadRows()
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			if m, ok := r.(map[string]any); ok {
+				data, err := json.Marshal(m)
+				if err != nil {
+					return nil, unsupported("ledger row encode")
+				}
+				o, err := ledger.DecodeObject(data)
+				if err != nil {
+					return nil, unsupported("ledger row decode")
+				}
+				out = append(out, o)
+			}
+		}
+		return out, nil
+	}
+	lines, err := w.ledgerLines()
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range lines {
+		var v any
+		if err := json.Unmarshal(l, &v); err != nil {
+			return nil, unsupported("ledger line JSON.parse throws on")
+		}
+		if _, ok := v.(map[string]any); !ok {
+			continue
+		}
+		o, err := ledger.DecodeObject(l)
+		if err != nil {
+			return nil, unsupported("ledger row decode")
+		}
+		out = append(out, o)
+	}
+	return out, nil
+}
+
+// ledgerLines are the complete lines of the rotations in numeric order,
+// then the current file.
+func (w *TicketRunner) ledgerLines() ([][]byte, error) {
 	dir := filepath.Join(w.Home, ".code-forge", "ledger")
 	entries, err := os.ReadDir(dir)
 	if err != nil && !os.IsNotExist(err) {
@@ -120,7 +183,7 @@ func (w *TicketRunner) readRows() ([]any, error) {
 	}
 	sort.SliceStable(parts, func(i, j int) bool { return parts[i].n < parts[j].n })
 	parts = append(parts, part{name: w.Slug + ".jsonl"})
-	rows := []any{}
+	lines := [][]byte{}
 	for _, p := range parts {
 		data, err := os.ReadFile(filepath.Join(dir, p.name))
 		if os.IsNotExist(err) && p.n == 0 && p.name == w.Slug+".jsonl" {
@@ -134,17 +197,12 @@ func (w *TicketRunner) readRows() ([]any, error) {
 			return nil, unsupported("ledger bytes Node would decode with replacements")
 		}
 		for _, l := range bytes.Split(data, []byte("\n")) {
-			if len(l) == 0 {
-				continue
+			if len(l) != 0 {
+				lines = append(lines, l)
 			}
-			var v any
-			if err := json.Unmarshal(l, &v); err != nil {
-				return nil, unsupported("ledger line JSON.parse throws on")
-			}
-			rows = append(rows, v)
 		}
 	}
-	return rows, nil
+	return lines, nil
 }
 
 // reviewWith is loop.mjs reviewWith up to the engine call, plus the engine
@@ -175,7 +233,7 @@ func (w *TicketRunner) reviewWith(id string, t ledger.Object, cfg map[string]any
 	if err != nil {
 		return nil, unsupported("routing: " + err.Error())
 	}
-	outcome, err := w.engineRefusal(t, cfg, contentRoot)
+	outcome, plan, err := w.engineRefusal(t, r.cfg, contentRoot, r.timeoutS)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +245,9 @@ func (w *TicketRunner) reviewWith(id string, t ledger.Object, cfg map[string]any
 		if !ok {
 			return base("unavailable", "route-row"), nil
 		}
+	}
+	if plan != nil {
+		return w.runEngine(plan, base)
 	}
 	return outcome, nil
 }
@@ -240,10 +301,10 @@ func (w *TicketRunner) writeRouteRows(id string, t ledger.Object, rows []ledger.
 	return true, nil
 }
 
-// engineRefusal is the top of engine.mjs reviewTicket: an `excluded`,
-// `unavailable` or `stale` outcome, or ErrUnsupported when the ticket would
-// go on to a review session.
-func (w *TicketRunner) engineRefusal(t ledger.Object, cfg map[string]any, contentRoot string) (ledger.Object, error) {
+// engineRefusal is engine.mjs reviewTicket's dry pass: an `excluded`,
+// `unavailable` or `stale` outcome, the plan of a ticket whose review Go
+// serves (planEngine), or ErrUnsupported. It writes nothing.
+func (w *TicketRunner) engineRefusal(t ledger.Object, cfg map[string]any, contentRoot string, timeoutS float64) (ledger.Object, *enginePlan, error) {
 	block, _ := t.Get("block").(string)
 	file, _ := t.Get("file").(string)
 	hash, _ := t.Get("content_hash").(string)
@@ -253,40 +314,40 @@ func (w *TicketRunner) engineRefusal(t ledger.Object, cfg map[string]any, conten
 	}
 	rule, err := w.exclusion(file, cfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if rule != "" {
-		return out("excluded", "review.exclude "+rule), nil
+		return out("excluded", "review.exclude "+rule), nil, nil
 	}
 	// packetDirFor: never null for an id readTicket accepted (24 hex)
 	rec, syntax, err := w.readRecord()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var revision any
 	revisionSet := false
 	if rec != nil || syntax {
 		if syntax {
-			return out("unavailable", "run-record-unreadable"), nil
+			return out("unavailable", "run-record-unreadable"), nil, nil
 		}
 		blocks, ok := rec.Get("blocks").(ledger.Object)
 		if !ok {
 			if _, isArr := rec.Get("blocks").([]any); isArr {
-				return nil, unsupported("blocks is an array")
+				return nil, nil, unsupported("blocks is an array")
 			}
-			return out("unavailable", "run-record-unreadable"), nil
+			return out("unavailable", "run-record-unreadable"), nil, nil
 		}
 		if !hasKey(blocks, block) {
-			return out("unavailable", "block-unknown"), nil
+			return out("unavailable", "block-unknown"), nil, nil
 		}
 		// entry?.base_sha of a value that is not an object is undefined
 		entry, _ := blocks.Get(block).(ledger.Object)
 		if sha, ok := entry.Get("base_sha").(string); !ok || sha == "" {
-			return out("unavailable", "block-base-missing"), nil
+			return out("unavailable", "block-base-missing"), nil, nil
 		}
 		if wt := entry.Get("worktree"); wt != nil {
 			if !worktreeRecordOK(wt) {
-				return out("unavailable", "worktree-malformed"), nil
+				return out("unavailable", "worktree-malformed"), nil, nil
 			}
 		}
 		revision, revisionSet = entry.Get("acceptance_revision"), hasKey(entry, "acceptance_revision")
@@ -295,18 +356,21 @@ func (w *TicketRunner) engineRefusal(t ledger.Object, cfg map[string]any, conten
 	entryRev, entryIsString := revision.(string)
 	same := (!ticketSet && !revisionSet) || (ticketSet && revisionSet && entryIsString && entryRev == ticketRev)
 	if !same {
-		return out("stale", "acceptance-amended"), nil
+		return out("stale", "acceptance-amended"), nil, nil
 	}
 	// treeTopOf and the contentRoot check read the same record contentRootFor
 	// read: a record that changed between the two is left to Node
 	root, code, err := w.contentRootFor(block)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if code != "" || canonicalPath(root) != canonicalPath(contentRoot) {
-		return nil, unsupported("run record changed between the content root and the engine")
+		return nil, nil, unsupported("run record changed between the content root and the engine")
 	}
-	return nil, unsupported("the review engine (context digest, fix loop, sessions) is not ported")
+	if syntax || (rec != nil && !hasKey(rec, "blocks")) {
+		return nil, nil, unsupported("run record changed between the content root and the engine")
+	}
+	return w.planEngine(t, rec, cfg, contentRoot, timeoutS)
 }
 
 var objectID = regexp.MustCompile(`^[0-9a-f]{40}$|^[0-9a-f]{64}$`)

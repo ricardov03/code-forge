@@ -250,6 +250,43 @@ func (r FixLoopRequest) round(t FixLoopTicket, p prepared) (ledger.Object, error
 	return roundOutcome(pl.State, p.kind, pl), nil
 }
 
+// FixLoopCheck is FixLoopRound's dry pass, run before the worker writes its
+// route rows: ErrUnsupported for a ticket FixLoopRound would leave to Node,
+// else whether the round runs a review session. It reads, never writes.
+func FixLoopCheck(t FixLoopTicket, r FixLoopRequest) (session bool, err error) {
+	if r.ReadRows == nil || r.WriteRow == nil {
+		return false, nil
+	}
+	all, err := r.ReadRows()
+	if err != nil {
+		if IsUnsupported(err) {
+			return false, err
+		}
+		return false, nil
+	}
+	rows := []ledger.Object{}
+	for _, row := range all {
+		if row.Get("run") == r.RunID {
+			rows = append(rows, row)
+		}
+	}
+	where := StateWhere{Home: r.Home, RunRootDir: r.RunRootDir, RunID: r.RunID, Block: t.Block, File: t.File, ContentRoot: r.ContentRoot, Key: r.Key, Rows: rows}
+	dry, err := LoadState(where, false)
+	if err != nil {
+		return false, err
+	}
+	p, err := r.prepare(t, rows, dry)
+	if err != nil {
+		return false, err
+	}
+	if !hasBudgetRow(rows, t.Block) {
+		if _, err := BlockBudgetRows(BudgetRequest{ContentRoot: r.ContentRoot, Block: t.Block, File: t.File, Base: r.Base, Owned: r.Owned, OwnedKinds: r.OwnedKinds, Cfg: r.Cfg}); err != nil {
+			return false, err
+		}
+	}
+	return p.outcome == nil, nil
+}
+
 // FixLoopRound is engine.mjs fixLoopRound for one ticket.
 func FixLoopRound(t FixLoopTicket, r FixLoopRequest) (ledger.Object, error) {
 	if r.ReadRows == nil || r.WriteRow == nil {

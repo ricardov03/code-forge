@@ -26,6 +26,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/proof"
+	"github.com/ricardov03/code-forge/native/session"
 	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/ticket"
 )
@@ -58,6 +59,18 @@ type TicketRunner struct {
 	// (default: the rotations and current file under Home).
 	Cfg      map[string]any
 	ReadRows func() ([]any, error)
+	// B497, the review session: RunRootDir holds the packets
+	// (<RunRootDir>/packets/<ticket>) and the sessions' process root;
+	// Secrets are the registered redact values; SessionDeps are the
+	// session seams (Home defaults to Home, Environ to SessionEnv of the
+	// process env); Warn is the error log's warning line (nil: none, and a
+	// ticket under budget.usd is left to Node); JevKey is the resolved
+	// System 1 key ("" none; a key is left to Node: Jev triage is not ported).
+	RunRootDir  string
+	Secrets     []string
+	SessionDeps session.Deps
+	Warn        func(warning, message string)
+	JevKey      string
 }
 
 type attempt struct {
@@ -455,8 +468,7 @@ func (w *TicketRunner) signObject(row ledger.Object) (ledger.Object, error) {
 	return out, nil
 }
 
-// complete is loop.mjs complete for an outcome with no findings, sessions or
-// split fields (every outcome Go decides): timings, the signed result and
+// complete is loop.mjs complete: timings, the signed result and
 // done marker (writeResult), then the signed ledger row (a failure there is
 // swallowed: the done marker is what the queue reads).
 func (w *TicketRunner) complete(id string, outcome ledger.Object, a *attempt) error {
@@ -473,16 +485,18 @@ func (w *TicketRunner) complete(id string, outcome ledger.Object, a *attempt) er
 			result = append(result, ledger.Field{Key: k, Value: a.ticket.Get(k)})
 		}
 	}
-	for _, f := range outcome {
+	for _, f := range recordedVerdict(outcome) {
 		result.Set(f.Key, f.Value)
 	}
-	// recordedVerdict: these outcomes are never approved and list no findings
-	result.Set("approved", false)
-	result.Set("open", []any{})
 	for _, f := range timings {
 		result.Set(f.Key, f.Value)
 	}
 	result.Set("worker", w.Worker)
+	// queue.mjs writeResult: a split names its budget and round-1 lens.
+	measured := measuredOf(result)
+	for _, f := range measured {
+		result.Set(f.Key, f.Value)
+	}
 	if !ticketID.MatchString(id) {
 		return fmt.Errorf("a ticket id is 24 lowercase hex characters")
 	}
@@ -502,7 +516,11 @@ func (w *TicketRunner) complete(id string, outcome ledger.Object, a *attempt) er
 	}
 	rel, _ := filepath.Rel(w.RepoRoot, resultFile)
 	done := ledger.Object{{Key: "ticket", Value: id}, {Key: "status", Value: signed.Get("status")}}
+	done = append(done, measured...)
 	done = append(done, timings...)
+	if openFindingsMarked(signed) {
+		done = append(done, ledger.Field{Key: "open_findings", Value: true})
+	}
 	done = append(done, ledger.Field{Key: "result", Value: rel})
 	data, err = line(done)
 	if err != nil {
@@ -517,10 +535,16 @@ func (w *TicketRunner) complete(id string, outcome ledger.Object, a *attempt) er
 	}
 	row = append(row, ledger.Field{Key: "status", Value: result.Get("status")})
 	row = append(row, timings...)
-	row = append(row, ledger.Field{Key: "approved", Value: false}, ledger.Field{Key: "open", Value: []any{}})
-	if reason, ok := result.Get("reason").(string); ok {
-		row = append(row, ledger.Field{Key: "reason", Value: reason})
+	row = append(row, ledger.Field{Key: "approved", Value: result.Get("approved")}, ledger.Field{Key: "open", Value: result.Get("open")})
+	if sessions := needsFileSessions(result.Get("sessions")); len(sessions) > 0 {
+		row = append(row, ledger.Field{Key: "sessions", Value: sessions})
 	}
+	for _, k := range []string{"reason", "trigger", "stopped"} {
+		if v, ok := result.Get(k).(string); ok {
+			row = append(row, ledger.Field{Key: k, Value: v})
+		}
+	}
+	row = append(row, packetSizeOf(result)...)
 	if signedRow, err := w.signObject(row); err == nil {
 		_ = w.writeRow(signedRow)
 	}
@@ -533,4 +557,42 @@ func (w *TicketRunner) writeRow(row ledger.Object) error {
 	}
 	_, err := ledger.AppendObject(filepath.Join(w.Home, ".code-forge", "ledger"), w.Slug, row, ledger.DefaultRotateAtBytes)
 	return err
+}
+
+// measuredOf is writeResult's measured fields: a split_required result (or
+// one stopped for a split) names its budget and its round-1 lens.
+func measuredOf(r ledger.Object) []ledger.Field {
+	status, _ := r.Get("status").(string)
+	stopped, _ := r.Get("stopped").(string)
+	if status != "split_required" && !(status == "stopped" && stopped == "split_required") {
+		return nil
+	}
+	var lens any
+	if r.Get("lens") != nil {
+		lens = r.Get("lens")
+	} else if status == "stopped" {
+		lens = "recheck"
+	} else if d := r.Get("depth"); d == "quick" {
+		lens = "quick"
+	} else if d == "dual" {
+		lens = "A"
+	} else {
+		lens = "full"
+	}
+	return []ledger.Field{{Key: "budget", Value: r.Get("budget")}, {Key: "lens", Value: lens}}
+}
+
+// openFindingsMarked is writeResult's open_findings: a reviewed, not
+// approved result with findings.
+func openFindingsMarked(r ledger.Object) bool {
+	if r.Get("status") != "reviewed" || r.Get("approved") == true {
+		return false
+	}
+	switch list := r.Get("findings").(type) {
+	case []any:
+		return len(list) > 0
+	case []ledger.Object:
+		return len(list) > 0
+	}
+	return false
 }

@@ -216,6 +216,29 @@ func providerOf(cfg map[string]any, rule map[string]any) (string, error) {
 type routed struct {
 	timeoutS float64
 	rows     []ledger.Object
+	// cfg is routeTicket's routed config (B497): the ticket's sessions run on it
+	cfg map[string]any
+}
+
+func copyMap(v any) map[string]any {
+	out := map[string]any{}
+	if m, ok := obj(v); ok {
+		for k, x := range m {
+			out[k] = x
+		}
+	}
+	return out
+}
+
+// entryOf is route.mjs entryOf: the rule's model, provider, effort and fallback.
+func entryOf(rule map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, k := range []string{"model", "provider", "effort", "fallback"} {
+		if v, ok := rule[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // explicitRoutes is routeTicket without performance: the rows of the routed
@@ -226,7 +249,7 @@ func explicitRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 		return routed{}, err
 	}
 	if len(picked) == 0 {
-		return routed{timeoutS: timeoutS}, nil
+		return routed{timeoutS: timeoutS, cfg: cfg}, nil
 	}
 	timeout := math.Inf(-1)
 	for _, p := range picked {
@@ -238,6 +261,20 @@ func explicitRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 		timeout = timeoutS
 	}
 	multimodel := reviewOf(cfg)["multimodel"] == true
+	levels, review := copyMap(cfg["levels"]), copyMap(cfg["review"])
+	seconds, secondsChanged := copyMap(review["second_levels"]), false
+	for _, p := range picked {
+		levels[p.level] = entryOf(p.rule)
+		if s, ok := p.rule["second"]; ok && !(p.level == "L2" && multimodel) {
+			seconds[p.level] = s
+			secondsChanged = true
+		}
+	}
+	if secondsChanged {
+		review["second_levels"] = seconds
+	}
+	routedCfg := copyMap(cfg)
+	routedCfg["levels"], routedCfg["review"] = levels, review
 	rows := []ledger.Object{}
 	for _, p := range picked {
 		provider, err := providerOf(cfg, p.rule)
@@ -255,7 +292,7 @@ func explicitRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 			{Key: "session_timeout_s", Value: timeout}, {Key: "second_model", Value: second},
 		})
 	}
-	return routed{timeoutS: timeout, rows: rows}, nil
+	return routed{timeoutS: timeout, rows: rows, cfg: routedCfg}, nil
 }
 
 type candidate struct{ model, provider string }
@@ -335,14 +372,26 @@ func adaptiveRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 		return routed{}, errRouteUnsure
 	}
 	entries := []candidate{}
+	// the effort of a candidate's first entry (absent: undefined)
+	efforts := map[candidate]any{}
+	add := func(c candidate, from map[string]any) {
+		entries = append(entries, c)
+		if _, seen := efforts[c]; !seen {
+			e, ok := from["effort"]
+			if !ok {
+				e = undefinedEffort
+			}
+			efforts[c] = e
+		}
+	}
 	if rule != nil {
 		p, err := providerOf(cfg, rule)
 		if err != nil {
 			return routed{}, err
 		}
-		entries = append(entries, candidate{rule["model"].(string), p})
+		add(candidate{rule["model"].(string), p}, rule)
 	}
-	entries = append(entries, candidate{l2["model"].(string), primaryProvider.(string)})
+	add(candidate{l2["model"].(string), primaryProvider.(string)}, l2)
 	if fb, ok := l2["fallback"]; ok && fb != nil {
 		list, ok := fb.([]any)
 		if !ok {
@@ -354,7 +403,7 @@ func adaptiveRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 			if !ok || !isText(m["model"]) || !isText(m["provider"]) {
 				return routed{}, errRouteUnsure
 			}
-			entries = append(entries, candidate{m["model"].(string), m["provider"].(string)})
+			add(candidate{m["model"].(string), m["provider"].(string)}, m)
 		}
 	}
 	if rule != nil {
@@ -367,7 +416,7 @@ func adaptiveRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 						return routed{}, err
 					}
 				}
-				entries = append(entries, candidate{m["model"].(string), p})
+				add(candidate{m["model"].(string), p}, m)
 			}
 		}
 	}
@@ -469,8 +518,30 @@ func adaptiveRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 			out = append(out, r)
 		}
 	}
-	return routed{timeoutS: legacy.timeoutS, rows: out}, nil
+	entry := func(c candidate) map[string]any {
+		e := map[string]any{"model": c.model, "provider": c.provider}
+		if v := efforts[c]; v != undefinedEffort {
+			e["effort"] = v
+		}
+		return e
+	}
+	fallback := []any{}
+	for _, c := range candidates {
+		if c != chosen {
+			fallback = append(fallback, entry(c))
+		}
+	}
+	l2Entry := entry(chosen)
+	l2Entry["fallback"] = fallback
+	routedCfg := copyMap(legacy.cfg)
+	routedLevels := copyMap(legacy.cfg["levels"])
+	routedLevels["L2"] = l2Entry
+	routedCfg["levels"] = routedLevels
+	return routed{timeoutS: legacy.timeoutS, rows: out, cfg: routedCfg}, nil
 }
+
+// undefinedEffort marks an entry with no effort key (JS undefined).
+var undefinedEffort any = &struct{ undefined bool }{true}
 
 // protoKeys: names a plain JS object inherits; `stats[model]` would not be undefined.
 var protoKeys = map[string]bool{"__proto__": true, "constructor": true, "toString": true, "toLocaleString": true, "valueOf": true, "hasOwnProperty": true, "isPrototypeOf": true, "propertyIsEnumerable": true, "__defineGetter__": true, "__defineSetter__": true, "__lookupGetter__": true, "__lookupSetter__": true}
