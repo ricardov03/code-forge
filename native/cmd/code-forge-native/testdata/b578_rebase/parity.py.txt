@@ -1,0 +1,136 @@
+"""B578 parity: each former hand-over case of `block rebase`, run by Node
+(CODE_FORGE_NATIVE=0) and by the Go binary on identical throwaway fixtures.
+Compares exit, stdout, stderr, run record, ledger rows and worktree HEAD tree.
+Masks: shas of commits made per fixture (each fixture is built twice, so commit
+times can differ) -> <sha>; timestamps ts/ended_at/at -> <ts>; mac -> <mac>;
+the temp root -> <root>."""
+import json, os, re, shutil, subprocess, sys
+
+S = sys.argv[1]
+PKG = os.path.join(S, "pkg")
+CF = os.path.join(PKG, "bin", "code-forge")
+WORK = os.path.join(S, "b578-parity")
+ENV0 = {k: v for k, v in os.environ.items() if not k.startswith("CODE_FORGE") and not k.startswith("GIT_")}
+ENV0.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "f@example.invalid",
+             "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "f@example.invalid", "GIT_AUTHOR_DATE": "2026-11-01T00:00:00Z", "GIT_COMMITTER_DATE": "2026-11-01T00:00:00Z",
+             "CODE_FORGE_NO_ERROR_LOG": "1", "CODE_FORGE_TEST_QUEUE": "off"})
+
+
+def git(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, env=ENV0, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def write(path, body):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(body)
+
+
+def approval(until):
+    return {"approval_id": "apr-1", "key": "review.max_rounds_per_file", "new": 4, "old": 3, "old_absent": False, "prune": 0, "until": until,
+            "approved_at": "2026-11-11T08:00:00.000Z", "status": "active", "ended_at": None}
+
+
+def fixture(root, case):
+    home, repo, tree = (os.path.join(root, n) for n in ("home", "repo", "wt"))
+    os.makedirs(home)
+    os.makedirs(repo)
+    closed = case.get("closed")
+    git(repo, "init", "-qb", "main")
+    write(os.path.join(repo, ".gitignore"), ".code-forge/\n")
+    write(os.path.join(repo, ".code-forge.yml"), "review:\n  max_rounds_per_file: 5 # by hand\n")
+    a0 = "package a\n\n// one\n// two\n// three\n" if closed == "changed" else "package a\n"
+    write(os.path.join(repo, "a.go"), a0)
+    write(os.path.join(repo, "b.go"), "package b\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "base")
+    base = git(repo, "rev-parse", "HEAD")
+    git(repo, "worktree", "add", "-qb", "forge/r-b578/A", tree, base)
+    if closed == "changed":
+        write(os.path.join(tree, "a.go"), "package a\n\n// one\n// two\n// three A\n")
+        git(tree, "commit", "-qam", "A")
+        write(os.path.join(repo, "a.go"), "package a // main\n\n// one\n// two\n// three\n")
+        git(repo, "commit", "-qam", "main touches a")
+    else:
+        write(os.path.join(tree, "a.go"), "package a\n\nfunc A() {}\n")
+        git(tree, "commit", "-qam", "A")
+        write(os.path.join(repo, "b.go"), "package b\n\nfunc B() {}\n")
+        git(repo, "commit", "-qam", "B lands")
+    block = {"status": "closed" if closed else "open", "owned_files": ["a.go"], "kind": "code", "base_sha": base, "base_branch": "main",
+             "worktree": {"path": tree, "branch": "forge/r-b578/A", "base_sha": base}}
+    record = {"run_id": "r-b578", "project": "fixture", "workspace": repo, "status": "active", "blocks": {"A": block}, "orphans": []}
+    case["change"](record)
+    runs = os.path.join(home, ".code-forge", "runs")
+    os.makedirs(runs, mode=0o700)
+    write(os.path.join(runs, "r-b578.json"), json.dumps(record, indent=2) + "\n")
+    with open(os.path.join(runs, "r-b578.key"), "wb") as f:
+        f.write(bytes([7] * 32))
+    os.chmod(os.path.join(runs, "r-b578.key"), 0o600)
+    return home, repo, tree
+
+
+def mask(text, root):
+    text = text.replace(root, "<root>")
+    text = re.sub(r"\b[0-9a-f]{40}\b", "<sha>", text)
+    text = re.sub(r"\b[0-9a-f]{12}\b", "<sha12>", text)
+    text = re.sub(r'"(ts|ended_at|at|mac)":\s*"[^"]*"', r'"\1": "<masked>"', text)
+    return text
+
+
+def run(engine, case):
+    root = os.path.join(WORK, case["name"].replace(" ", "-"), engine)
+    os.makedirs(root)
+    home, repo, tree = fixture(root, case)
+    env = dict(ENV0, HOME=home)
+    if engine == "node":
+        env["CODE_FORGE_NATIVE"] = "0"
+    p = subprocess.run([CF, "block", "rebase", "A", "--run", "r-b578"], cwd=repo, env=env, capture_output=True, text=True)
+    out = {"exit": p.returncode, "stdout": p.stdout, "stderr": p.stderr}
+    with open(os.path.join(home, ".code-forge", "runs", "r-b578.json")) as f:
+        out["record"] = f.read()
+    ledger = os.path.join(home, ".code-forge", "ledger", "fixture.jsonl")
+    out["ledger"] = open(ledger).read() if os.path.exists(ledger) else ""
+    out["tree"] = git(tree, "rev-parse", "HEAD^{tree}")
+    out["handovers"] = open(os.path.join(home, ".code-forge", "native", "handovers.jsonl")).read() if os.path.exists(os.path.join(home, ".code-forge", "native", "handovers.jsonl")) else ""
+    return {k: mask(v, root) if isinstance(v, str) else v for k, v in out.items()}
+
+
+def drop(key):
+    return lambda r: r.pop(key, None)
+
+
+def other_block(r):
+    r["blocks"]["B"] = {"status": "open", "owned_files": [1]}
+
+
+def setblock(key, value):
+    return lambda r: r["blocks"]["A"].__setitem__(key, value)
+
+
+CASES = [
+    {"name": "baseline plain open rebase (already Go since B431)", "change": lambda r: None},
+    {"name": "active approval not due", "change": lambda r: r.__setitem__("autopilot_approvals", [approval("2099-01-01T00:00:00.000Z")])},
+    {"name": "due approval changed by hand", "change": lambda r: r.__setitem__("autopilot_approvals", [approval("2026-11-11T09:00:00.000Z")])},
+    {"name": "no orphans list", "change": drop("orphans")},
+    {"name": "sibling with odd owned files", "change": other_block},
+    {"name": "config snapshot not readable", "change": lambda r: r.__setitem__("config", {"hash": "nope"})},
+    {"name": "closed checkpoint truthy string", "closed": "changed", "change": setblock("rebase_check", "pending")},
+    {"name": "closed checkpoint false changed file", "closed": "changed", "change": setblock("rebase_check", False)},
+    {"name": "closed checkpoint zero clean", "closed": "clean", "change": setblock("rebase_check", 0)},
+]
+
+if os.path.exists(WORK):
+    sys.exit("remove " + WORK + " first")
+failed = 0
+for case in CASES:
+    node, go = run("node", case), run("go", case)
+    diffs = [k for k in ("exit", "stdout", "stderr", "record", "ledger", "tree") if node[k] != go[k]]
+    status = "SAME" if not diffs else "DIFF " + ",".join(diffs)
+    failed += bool(diffs)
+    print(f"{case['name']}: {status} | exit={node['exit']} stdout={node['stdout']!r} stderr={node['stderr'][:160]!r} go-handovers={go['handovers']!r}")
+    for k in diffs:
+        print("  node", k, repr(node[k])[:600])
+        print("  go  ", k, repr(go[k])[:600])
+    with open(os.path.join(WORK, case["name"].replace(" ", "-"), "golden.json"), "w") as f:
+        json.dump({"node": node, "go": go}, f, indent=1)
+print("cases", len(CASES), "diff", failed)

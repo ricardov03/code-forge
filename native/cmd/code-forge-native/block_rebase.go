@@ -2,17 +2,13 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"os/signal"
+	"os/user"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/ricardov03/code-forge/native/gitx"
-	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -22,7 +18,16 @@ import (
 // code-forge worktree rebuilds that worktree's native binary afterwards.
 // B431: the plain rebase of an open worktree block runs in Go (rebase.RunPlain):
 // owned files main changed are replayed instead of refused up front.
+// B578: no Node child any more; the guarded run states run in Go too.
 func init() { blockSubs["rebase"] = healWrap([]string{"block", "rebase"}, runBlockRebase) }
+
+// rebaseUserHome is the user database's home folder (a seam for tests).
+var rebaseUserHome = func() string {
+	if u, err := user.Current(); err == nil {
+		return u.HomeDir
+	}
+	return ""
+}
 
 func short12(sha string) string {
 	if len(sha) > 12 {
@@ -39,84 +44,37 @@ func runBlockRebase(args []string) int {
 			return 0
 		}
 	}
+	// B578: Node's os.homedir() reads the user database when HOME is unset.
+	if os.Getenv("HOME") == "" {
+		if home := rebaseUserHome(); home != "" {
+			_ = os.Setenv("HOME", home)
+		}
+	}
 	tree, before := blockRebaseTree(args)
 	var stdout bytes.Buffer
 	stderr := &closeErrorBuffer{}
-	code := rebaseStep(args, &stdout, stderr)
-	if code != rebaseUnported {
-		crumb := gatesBreadcrumbName("block rebase")
-		fmt.Fprint(os.Stdout, stdout.String())
+	code, reason := rebaseStep(args, &stdout, stderr)
+	if reason != 0 {
+		// B578: a narrow guarded state Go does not serve yet; nothing of the
+		// rebase was kept, and Node runs the whole command. The expiry lines
+		// Go already printed are not printed again by Node (its checks find
+		// nothing left to do).
 		fmt.Fprint(os.Stderr, stderr.String())
-		if code != 0 {
-			var message any
-			if stderr.last != "" {
-				message = stderr.last
-			}
-			nativeVerbFailure("block", "rebase", args, code, message, crumb)
-			return code
-		}
-		if tree == "" {
-			return 0
-		}
-		return blockRebaseRebuild(args[0], tree, before)
+		return blockHandover(full, reason)
 	}
-	// B449: only the guarded run states rebaseStep names stay with Node.
+	crumb := gatesBreadcrumbName("block rebase")
+	fmt.Fprint(os.Stdout, stdout.String())
+	fmt.Fprint(os.Stderr, stderr.String())
+	if code != 0 {
+		var message any
+		if stderr.last != "" {
+			message = stderr.last
+		}
+		nativeVerbFailure("block", "rebase", args, code, message, crumb)
+		return code
+	}
 	if tree == "" {
-		return blockHandover(full, hBlockUnportedSubcommand)
-	}
-	node := os.Getenv("CODE_FORGE_NODE")
-	if node == "" {
-		node = "node"
-	}
-	nodePath, err := exec.LookPath(node)
-	if err != nil {
-		return blockHandover(full, hBlockUnportedSubcommand)
-	}
-	executable, err := os.Executable()
-	if err == nil {
-		executable, err = filepath.EvalSymlinks(executable)
-	}
-	if err != nil {
-		return blockHandover(full, hBlockUnportedSubcommand)
-	}
-	recordHandover(append([]string{"block"}, full...), handoverReasons[hBlockUnportedSubcommand])
-	script := filepath.Join(filepath.Dir(executable), "..", "..", "..", "bin", "code-forge.mjs")
-	cmd := exec.Command(nodePath, append([]string{script, "block"}, full...)...)
-	cmd.Args[0] = node
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	// The child shares the terminal; keep this process alive until it ends.
-	signals := make(chan os.Signal, 4)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
-	defer signal.Stop(signals)
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native: exec node:", err)
-		return 126
-	}
-	done := make(chan struct{})
-	gosafe.Go("block-rebase-signals", func() {
-		for {
-			select {
-			case s := <-signals:
-				if s == syscall.SIGTERM || s == syscall.SIGHUP {
-					_ = cmd.Process.Signal(s)
-				}
-			case <-done:
-				return
-			}
-		}
-	})
-	err = cmd.Wait()
-	close(done)
-	if err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			if status, ok := exit.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-				return 128 + int(status.Signal())
-			}
-			return exit.ExitCode()
-		}
-		fmt.Fprintln(os.Stderr, "code-forge-native: node:", err)
-		return 1
+		return 0
 	}
 	return blockRebaseRebuild(args[0], tree, before)
 }

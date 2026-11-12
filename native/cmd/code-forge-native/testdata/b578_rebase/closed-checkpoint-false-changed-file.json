@@ -1,0 +1,20 @@
+{
+ "node": {
+  "exit": 1,
+  "stdout": "",
+  "stderr": "block rebase: rebase-changed-reviewed a.go\nRe-review: code-forge review-file --rebase-check --block A --run r-b578\nHuman accept (repeat --accept-changed for each file): code-forge block rebase A --run r-b578 --accept-changed <file> --reason <text>\n",
+  "record": "{\n  \"run_id\": \"r-b578\",\n  \"project\": \"fixture\",\n  \"workspace\": \"<root>/repo\",\n  \"status\": \"active\",\n  \"blocks\": {\n    \"A\": {\n      \"status\": \"closed\",\n      \"owned_files\": [\n        \"a.go\"\n      ],\n      \"kind\": \"code\",\n      \"base_sha\": \"<sha>\",\n      \"base_branch\": \"main\",\n      \"worktree\": {\n        \"path\": \"<root>/wt\",\n        \"branch\": \"forge/r-b578/A\",\n        \"base_sha\": \"<sha>\"\n      },\n      \"rebase_check\": false\n    }\n  },\n  \"orphans\": []\n}\n",
+  "ledger": "",
+  "tree": "<sha>",
+  "handovers": ""
+ },
+ "go": {
+  "exit": 1,
+  "stdout": "",
+  "stderr": "block rebase: rebase-changed-reviewed a.go\nRe-review: code-forge review-file --rebase-check --block A --run r-b578\nHuman accept (repeat --accept-changed for each file): code-forge block rebase A --run r-b578 --accept-changed <file> --reason <text>\n",
+  "record": "{\n  \"run_id\": \"r-b578\",\n  \"project\": \"fixture\",\n  \"workspace\": \"<root>/repo\",\n  \"status\": \"active\",\n  \"blocks\": {\n    \"A\": {\n      \"status\": \"closed\",\n      \"owned_files\": [\n        \"a.go\"\n      ],\n      \"kind\": \"code\",\n      \"base_sha\": \"<sha>\",\n      \"base_branch\": \"main\",\n      \"worktree\": {\n        \"path\": \"<root>/wt\",\n        \"branch\": \"forge/r-b578/A\",\n        \"base_sha\": \"<sha>\"\n      },\n      \"rebase_check\": false\n    }\n  },\n  \"orphans\": []\n}\n",
+  "ledger": "",
+  "tree": "<sha>",
+  "handovers": ""
+ }
+}

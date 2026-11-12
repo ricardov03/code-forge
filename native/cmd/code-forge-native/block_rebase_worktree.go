@@ -118,11 +118,11 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 	}
 	top, err := gitx.RepoTop(blockString(initial.Get("workspace")))
 	if err != nil {
-		return "", "", errRebaseUnported
+		return "", "", &rebaseHandoverError{hRebasePath}
 	}
 	idx := &queue.Index{Dir: filepath.Join(top, ".code-forge", "queue")}
 	if idx.Refresh() != nil {
-		return "", "", errRebaseUnported
+		return "", "", &rebaseHandoverError{hRebaseQueue}
 	}
 	err = state.WithRunLock(home, run, func() (runErr error) {
 		record, err := state.ReadRun(home, run)
@@ -140,7 +140,7 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 			return &state.Error{Code: "no-block", Message: fmt.Sprintf("block %s is not open in run %s", id, run)}
 		}
 		if wt == nil {
-			return errRebaseUnported
+			return &rebaseHandoverError{hRebaseRecordShape}
 		}
 		closed := status != "open"
 		if blockString(b.Get("base_branch")) == "" {
@@ -170,14 +170,20 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 		}
 		oldHead = strings.TrimSpace(oldHead)
 		key, err := rebaseKey(home, run)
+		if errors.Is(err, errRebaseUnported) {
+			return &rebaseHandoverError{hRebaseKey}
+		}
 		if err != nil {
 			return err
 		}
-		pending := blockObject(b.Get("rebase_check"))
+		// B578: Node tests the checkpoint for truth: a falsy one is no
+		// checkpoint, any other value that is not a signed row is invalid.
+		check := b.Get("rebase_check")
+		pending := blockObject(check)
 		base := blockString(b.Get("base_sha"))
-		if b.Get("rebase_check") != nil {
+		if jsTruthy(check, true) {
 			if pending == nil {
-				return errRebaseUnported
+				return &state.Error{Code: "rebase-check-invalid", Message: "the pending rebase checkpoint is invalid"}
 			}
 			verified, e := sign.VerifyRow(pending.Map(), key)
 			if e != nil || !verified.OK || pending.Get("run") != run || pending.Get("block") != id || pending.Get("old_base") != base {
@@ -201,11 +207,11 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 		resolved = strings.TrimSpace(resolved)
 		realWorkspace, err := filepath.EvalSymlinks(workspace)
 		if err != nil {
-			return errRebaseUnported
+			return &rebaseHandoverError{hRebasePath}
 		}
 		prefix, err := filepath.Rel(top, realWorkspace)
 		if err != nil {
-			return errRebaseUnported
+			return &rebaseHandoverError{hRebasePath}
 		}
 		if prefix == "." {
 			prefix = ""
@@ -304,7 +310,7 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 		if pending != nil {
 			all, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), blockString(record.Get("project")))
 			if err != nil {
-				return errRebaseUnported
+				return &rebaseHandoverError{hRebaseLedger}
 			}
 			started, startedOK := rebaseTime(blockString(pending.Get("started_at")))
 			for _, value := range all {
@@ -321,7 +327,7 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 		}
 		realTree, err := filepath.EvalSymlinks(tree)
 		if err != nil {
-			return errRebaseUnported
+			return &rebaseHandoverError{hRebasePath}
 		}
 		cleared := []any{}
 		clearedFiles := map[string]bool{}
@@ -333,7 +339,7 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 			}
 			hash, err := gitx.ContentHash(realTree, file)
 			if err != nil {
-				return errRebaseUnported
+				return &rebaseHandoverError{hRebaseContentHash}
 			}
 			p := ticket.Parts{Run: run, Block: id, File: file, ContentHash: hash, Tree: &realTree}
 			if revision, ok := b.Get("acceptance_revision").(string); ok {

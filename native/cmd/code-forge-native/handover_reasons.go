@@ -378,6 +378,17 @@ const (
 	hFactsBriefEncoding
 	hFactsRootInGit
 	hFactsOutsideSource
+	// B578
+	hRebaseHome
+	hRebaseRunRecord
+	hRebaseAutopilotShape
+	hRebaseRecordShape
+	hRebaseStorage
+	hRebaseQueue
+	hRebasePath
+	hRebaseKey
+	hRebaseLedger
+	hRebaseContentHash
 )
 
 var handoverReasons = [...]string{
@@ -759,4 +770,15 @@ var handoverReasons = [...]string{
 	hFactsBriefEncoding: "facts-brief-encoding",
 	hFactsRootInGit:     "facts-root-in-git",
 	hFactsOutsideSource: "facts-outside-source",
+	// B578
+	hRebaseHome:           "rebase-home",
+	hRebaseRunRecord:      "rebase-run-record",
+	hRebaseAutopilotShape: "rebase-autopilot-shape",
+	hRebaseRecordShape:    "rebase-record-shape",
+	hRebaseStorage:        "rebase-storage",
+	hRebaseQueue:          "rebase-queue-unreadable",
+	hRebasePath:           "rebase-path-unresolved",
+	hRebaseKey:            "rebase-key-unreadable",
+	hRebaseLedger:         "rebase-ledger-unreadable",
+	hRebaseContentHash:    "rebase-content-hash",
 }

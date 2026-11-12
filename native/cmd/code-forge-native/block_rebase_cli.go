@@ -31,8 +31,6 @@ var (
 
 const (
 	rebaseForm = "<id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>] [--accept-landed]"
-	// rebaseUnported: a guarded run state Go does not serve yet (see rebaseStep).
-	rebaseUnported = -1
 )
 
 var (
@@ -95,10 +93,75 @@ func rebaseFlags(args []string) (map[string]any, []string, string) {
 	return flags, positionals, ""
 }
 
-// rebaseStep runs one `block rebase` call, or returns rebaseUnported before
-// anything was printed or changed.
-func rebaseStep(args []string, stdout, stderr io.Writer) int {
+// rebaseHandoverError carries the narrow reason a guarded state stays with
+// Node (B578); it is raised before anything is kept.
+type rebaseHandoverError struct{ reason handoverReason }
+
+func (e *rebaseHandoverError) Error() string { return handoverReasons[e.reason] }
+
+// rebaseRecordShape: the run and block fields the Go rebase reads have the
+// types Node's code assumes (B578); other shapes stay with Node.
+func rebaseRecordShape(record ledger.Object, id string) bool {
+	blocks, ok := record.Get("blocks").(ledger.Object)
+	if !ok {
+		return false
+	}
+	for _, field := range blocks {
+		if _, ok := field.Value.(ledger.Object); !ok {
+			return false
+		}
+	}
+	value := blocks.Get(id)
+	if value == nil {
+		return true
+	}
+	block := value.(ledger.Object)
+	if wt := block.Get("worktree"); wt != nil {
+		object, ok := wt.(ledger.Object)
+		if !ok {
+			return false
+		}
+		if _, ok := object.Get("path").(string); !ok {
+			return false
+		}
+		if _, ok := object.Get("branch").(string); !ok {
+			return false
+		}
+	}
+	for _, key := range []string{"status", "base_branch", "base_sha"} {
+		if v := block.Get(key); v != nil {
+			if _, ok := v.(string); !ok {
+				return false
+			}
+		}
+	}
+	files, ok := block.Get("owned_files").([]any)
+	if !ok {
+		return false
+	}
+	for _, file := range files {
+		if _, ok := file.(string); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// rebaseStep runs one `block rebase` call, or returns the reason a guarded
+// run state stays with Node before anything was printed or changed.
+func rebaseStep(args []string, stdout, stderr io.Writer) (int, handoverReason) {
+	var reason handoverReason
+	code := rebaseStepBody(args, stdout, stderr, &reason)
+	return code, reason
+}
+
+func rebaseStepBody(args []string, stdout, stderr io.Writer, handed *handoverReason) int {
+	handOver := func(reason handoverReason) int { *handed = reason; return 0 }
 	fail := func(err error) int {
+		var h *rebaseHandoverError
+		if errors.As(err, &h) {
+			return handOver(h.reason)
+		}
 		var se *state.Error
 		fmt.Fprintf(stderr, "block rebase: %s\n", err.Error())
 		if errors.As(err, &se) && se.Code == "usage" {
@@ -119,7 +182,7 @@ func rebaseStep(args []string, stdout, stderr io.Writer) int {
 	asJSON := flags["json"] == true
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return rebaseUnported
+		return handOver(hRebaseHome)
 	}
 	if flags["accept-landed"] == true {
 		for name := range flags {
@@ -139,17 +202,39 @@ func rebaseStep(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		var se *state.Error
 		if !errors.As(err, &se) {
-			return rebaseUnported
+			return handOver(hRebaseRunRecord)
 		}
 		return fail(err)
 	}
-	// Pending approvals (their restore), malformed grants or blocks, and
-	// unusual storage stay with Node before anything is written.
-	if !blockGrantEndSafe(record) || !blockStorageSafe(home, run, record) {
-		return rebaseUnported
+	// B578: grants and approvals run in Go (Node's expire(): checkExpiry,
+	// then checkApprovals and its restore). Shapes the Go code does not
+	// read, unusual storage and a restore Go does not serve stay with Node,
+	// decided before anything is written.
+	now := rebaseNow()
+	if _, err := autopilot.ReadGrant(record, now); err != nil || errors.Is(autopilot.Approvals(record, now), autopilot.ErrUnsupported) {
+		return handOver(hRebaseAutopilotShape)
 	}
-	if _, err := autopilot.CheckExpiry(home, run, rebaseNow()); err != nil {
+	if !rebaseRecordShape(record, id) {
+		return handOver(hRebaseRecordShape)
+	}
+	if !blockStorageSafe(home, run, record) {
+		return handOver(hRebaseStorage)
+	}
+	if _, reason := autopilotRestorePlan(home, run, record, now); reason != 0 {
+		return handOver(reason)
+	}
+	if _, err := autopilot.CheckGrantExpiry(home, run, now); err != nil {
 		fmt.Fprintf(stderr, "autopilot: WARN the expiry check failed (%s)\n", blockIOMessage(err))
+	} else if fresh, err := state.ReadRun(home, run); err == nil && errors.Is(autopilot.Approvals(fresh, now), autopilot.ErrApprovalDue) {
+		check, restoreErr, reason := autopilotRestore(home, run, fresh, now)
+		if reason != 0 {
+			return handOver(reason)
+		}
+		if restoreErr != nil {
+			fmt.Fprintf(stderr, "autopilot: WARN the expiry check failed (%s)\n", blockIOMessage(restoreErr))
+		} else {
+			fmt.Fprint(stderr, check.text(true))
+		}
 	}
 	accept := []string{}
 	if list, ok := flags["accept-changed"].([]string); ok {
@@ -172,7 +257,7 @@ func rebaseStep(args []string, stdout, stderr io.Writer) int {
 		if !rebaseTTY() {
 			return humanNoTTY(stderr, "rebase")
 		}
-		grant, err := autopilot.CheckExpiry(home, run, rebaseNow())
+		grant, err := autopilot.CheckGrantExpiry(home, run, rebaseNow())
 		if err != nil {
 			return fail(err)
 		}
@@ -192,6 +277,9 @@ func rebaseStep(args []string, stdout, stderr io.Writer) int {
 	record, err = state.ReadRun(home, run)
 	if err != nil {
 		return fail(err)
+	}
+	if !rebaseRecordShape(record, id) {
+		return handOver(hRebaseRecordShape)
 	}
 	block := blockObject(blockObject(record.Get("blocks")).Get(id))
 	status := blockString(block.Get("status"))
@@ -235,9 +323,6 @@ func rebaseStep(args []string, stdout, stderr io.Writer) int {
 			head = value
 		}
 		oldBase, newBase, err = rebaseBaseBlock(home, run, id, head)
-	}
-	if errors.Is(err, errRebaseUnported) {
-		return rebaseUnported
 	}
 	if err != nil {
 		return fail(err)

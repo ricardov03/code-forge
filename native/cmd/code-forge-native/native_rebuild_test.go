@@ -71,6 +71,10 @@ func newB408Fixture(t *testing.T) *b408Fixture {
 	if err := os.WriteFile(filepath.Join(f.home, ".code-forge", "runs", "fixture.json"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
+	// B578: block rebase runs in Go; it signs its row with the run key.
+	if err := os.WriteFile(filepath.Join(f.home, ".code-forge", "runs", "fixture.key"), bytes.Repeat([]byte{7}, 32), 0600); err != nil {
+		t.Fatal(err)
+	}
 	return f
 }
 
@@ -254,10 +258,11 @@ func TestBlockRebaseRebuildsNative(t *testing.T) {
 		fail              bool
 		code              int
 	}{
-		{name: "native change", file: "native/x.go", calls: "node block rebase\n%s"},
-		{name: "build script change", file: "scripts/build-native.mjs", calls: "node block rebase\n%s"},
-		{name: "no native change", file: "README.md", calls: "node block rebase\n"},
-		{name: "build fails", file: "native/x.go", calls: "node block rebase\n%s", fail: true, code: 1},
+		// B578: the rebase runs in Go (no Node call); the rebuild follows it.
+		{name: "native change", file: "native/x.go", calls: "%s"},
+		{name: "build script change", file: "scripts/build-native.mjs", calls: "%s"},
+		{name: "no native change", file: "README.md", calls: ""},
+		{name: "build fails", file: "native/x.go", calls: "%s", fail: true, code: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newB408Fixture(t)
@@ -335,7 +340,7 @@ func TestBlockRebaseSlowBuildLeavesRunUnlocked(t *testing.T) {
 		t.Fatalf("block rebase ended before the other write finished (exit %d), the test proves nothing: %s", o.code, o.stderr)
 	default:
 	}
-	if o := <-done; o.code != 0 || f.calls() != "node block rebase\n"+f.buildCall() {
+	if o := <-done; o.code != 0 || f.calls() != f.buildCall() {
 		t.Fatalf("want exit 0 and one rebase then one build, got exit %d calls %q stderr %s", o.code, f.calls(), o.stderr)
 	}
 	after, err := state.ReadRun(f.home, "fixture")
