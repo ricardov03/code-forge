@@ -22,7 +22,6 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"github.com/ricardov03/code-forge/native/canon"
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -54,6 +53,11 @@ type TicketRunner struct {
 	Now      func() time.Time
 	WriteRow func(ledger.Object) error
 	Stopping func() bool
+	// Cfg is the boot config (a ticket of a run with no record or no
+	// snapshot is reviewed with it); ReadRows is the project ledger view
+	// (default: the rotations and current file under Home).
+	Cfg      map[string]any
+	ReadRows func() ([]any, error)
 }
 
 type attempt struct {
@@ -291,12 +295,13 @@ func (w *TicketRunner) reviewOne(id string, t ledger.Object) (ledger.Object, err
 		return base("stale", ""), nil
 	}
 	retry := t.Get("started_at") != nil || w.resultExists(id)
-	if bad, err := w.snapshotBad(id, retry); err != nil {
+	cfg, bad, err := w.configFor(id, retry)
+	if err != nil {
 		return nil, err
 	} else if bad {
 		return base("unavailable", "config-snapshot"), nil
 	}
-	return nil, unsupported("the review engine (routing, fix loop) is not ported")
+	return w.reviewWith(id, t, cfg, contentRoot, data, base)
 }
 
 func canonicalPath(p string) string {
@@ -399,47 +404,6 @@ func (w *TicketRunner) contentRootFor(block string) (string, string, error) {
 		return w.RepoRoot, "", nil
 	}
 	return canonicalPath(tree.Path), "", nil
-}
-
-// snapshotBad is configFor's failure: true when Node answers
-// `config-snapshot` (snapshotFor throws). No record or no snapshot is the
-// boot config: false.
-func (w *TicketRunner) snapshotBad(id string, retry bool) (bool, error) {
-	rec, syntax, err := w.readRecord()
-	if err != nil {
-		return false, err
-	}
-	if syntax {
-		return false, unsupported("run record unreadable at the config read (Node retries)")
-	}
-	st, ok := rec.Get("config").(ledger.Object)
-	if !ok {
-		return false, nil
-	}
-	hash, ok := st.Get("hash").(string)
-	if !ok {
-		return false, nil
-	}
-	key := id
-	if retry {
-		key = ""
-	}
-	if pins, ok := st.Get("pins").(ledger.Object); ok {
-		if pin, ok := pins.Get(key).(string); ok {
-			hash = pin
-		}
-	}
-	snaps, _ := st.Get("snapshots").(ledger.Object)
-	cfg, ok := snaps.Get(hash).(ledger.Object)
-	if !ok {
-		return true, nil
-	}
-	canonical, err := canon.Marshal(cfg)
-	if err != nil {
-		return false, unsupported("config canonical form")
-	}
-	sum := sha256.Sum256(canonical)
-	return hex.EncodeToString(sum[:]) != hash, nil
 }
 
 // iso is new Date().toISOString().

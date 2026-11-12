@@ -315,6 +315,8 @@ func TestB488SnapshotPins(t *testing.T) {
 		t.Fatalf("done = %s", got)
 	}
 	id2 := fx.ticket(t, "r1", "B1", "a.txt", real, ledger.Field{Key: "acceptance_revision", Value: "rev1"})
+	// B492: the block entry the engine reads (a record with no blocks is run-record-unreadable)
+	fx.record(t, `{"run_id":"r1","project":"unit","workspace":"`+fx.root+`","status":"active","blocks":{"B1":{"base_sha":"`+strings.Repeat("a", 40)+`","acceptance_revision":"rev1"}},"config":{"hash":"`+good+`","snapshots":{"`+good+`":`+cfg+`}}}`)
 	if _, _, err := fx.runner(&clock).RunTicket(id2); !IsUnsupported(err) {
 		t.Fatalf("the snapshot in force matches: want ErrUnsupported (a review), got %v", err)
 	}
