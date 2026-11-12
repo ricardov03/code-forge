@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -153,7 +154,12 @@ func runBlockLand(args []string) int {
 	record, err := state.ReadRun(home, run)
 	if err != nil {
 		var se *state.Error
-		if !errors.As(err, &se) {
+		var errno syscall.Errno
+		if !errors.As(err, &se) && errors.As(err, &errno) {
+			// Node's readRun rethrows readFile's error: a read error has no path (B470).
+			return fail(closeTranscriptReadMessage(err), 1)
+		}
+		if se == nil {
 			return fallback(hLandReadRun)
 		}
 		return fail(err.Error(), 1)

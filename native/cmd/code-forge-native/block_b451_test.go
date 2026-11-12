@@ -229,21 +229,17 @@ func TestB451StopDaemonSocketWithoutDaemonIsNative(t *testing.T) {
 	}
 }
 
-// land-read-run (fix1): Go no longer refuses a run file it cannot read; the
-// case keeps its Node hand-over (exact Node error text) until B466.
-func TestB451LandReadRunHandoverKept(t *testing.T) {
+// land-read-run: a run file Go cannot read is Node's readFile error in Go;
+// a directory is EISDIR on read, which names no path (B470).
+func TestB451LandReadRunErrorIsNative(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, ".code-forge", "runs")
 	if err := os.MkdirAll(filepath.Join(dir, "r-land.json"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	res := b451RunWith(t, home, true, "land", "B1", "--run", "r-land", "--report", "r.md", "--transcript", "t.log")
-	if res.code != 127 || strings.Contains(res.stderr, "refused") {
-		t.Fatalf("exit=%d stderr=%q; want the Node hand-over (exit 127 with no Node), not a refusal", res.code, res.stderr)
-	}
-	data, err := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
-	if err != nil || !strings.Contains(string(data), `"land-read-run"`) {
-		t.Fatalf("hand-over log %q %v; want a land-read-run row", data, err)
+	res := b451Run(t, home, "land", "B1", "--run", "r-land", "--report", "r.md", "--transcript", "t.log")
+	if res.code != 1 || res.stdout != "" || res.stderr != "block land: EISDIR: illegal operation on a directory, read\n" {
+		t.Fatalf("exit=%d stdout=%q stderr=%q; want exit 1 and Node's EISDIR line", res.code, res.stdout, res.stderr)
 	}
 }
 
