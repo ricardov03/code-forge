@@ -13,9 +13,20 @@ import (
 var routes = map[string]func([]string) int{}
 
 func run(args []string) (int, error) {
+	if len(args) == 0 {
+		// B458: no verb is help, as in bin/code-forge.mjs.
+		args = []string{"help"}
+	}
 	if len(args) > 0 {
 		if args[0] == "internal" {
 			return runInternal(args[1:])
+		}
+		// B458: bin/code-forge.mjs aliases --help/-h to help and --version/-v to version.
+		switch args[0] {
+		case "--help", "-h":
+			args = append([]string{"help"}, args[1:]...)
+		case "--version", "-v":
+			args = append([]string{"version"}, args[1:]...)
 		}
 		if route, ok := routes[args[0]]; ok {
 			return route(args[1:]), nil

@@ -260,6 +260,16 @@ const (
 	hAutopilotApproveConfig
 	hAutopilotApproveValue
 	hAutopilotApproveChanged
+	hHelpVerbs
+	hVersionPackage
+	hInitWizard
+	hNativeStatusCompanion
+	hFactsSession
+	hAuthorSession
+	hS2Session
+	hJevAsk
+	hProofConfig
+	hProofRun
 )
 
 var handoverReasons = [...]string{
@@ -499,6 +509,16 @@ var handoverReasons = [...]string{
 	hAutopilotApproveConfig:    "autopilot-approve-config",
 	hAutopilotApproveValue:     "autopilot-approve-value",
 	hAutopilotApproveChanged:   "autopilot-approve-changed",
+	hHelpVerbs:                 "help-verbs",
+	hVersionPackage:            "version-package",
+	hInitWizard:                "init-wizard",
+	hNativeStatusCompanion:     "native-status-companion",
+	hFactsSession:              "facts-session",
+	hAuthorSession:             "author-session",
+	hS2Session:                 "system-two-session",
+	hJevAsk:                    "jev-ask",
+	hProofConfig:               "proof-config",
+	hProofRun:                  "proof-run",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
