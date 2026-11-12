@@ -202,6 +202,10 @@ const (
 	hValidateSchemaIssues
 	hValidateSecretValues
 	hValidateSandboxDirs
+	hSweepUnported
+	hUpgradeRelink
+	hUpgradeControlChars
+	hPlanCheckUnported
 )
 
 var handoverReasons = [...]string{
@@ -383,6 +387,10 @@ var handoverReasons = [...]string{
 	hValidateSchemaIssues:      "validate-schema-issues",
 	hValidateSecretValues:      "validate-secret-values",
 	hValidateSandboxDirs:       "validate-sandbox-dirs",
+	hSweepUnported:             "sweep-unported",
+	hUpgradeRelink:             "upgrade-relink",
+	hUpgradeControlChars:       "upgrade-control-chars",
+	hPlanCheckUnported:         "plan-check-unported",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
