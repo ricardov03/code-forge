@@ -47,13 +47,32 @@ func yamlError(code, message string, line, column int) error {
 }
 
 func parseYAML(source string) (any, error) {
-	value, _, err := parseYAMLOrdered(source)
+	value, _, err := parseYAMLWith(source, false)
 	return value, err
 }
 
 // parseYAMLOrdered also records each mapping's key insertion order, keyed by
 // the map's identity, so callers can rebuild JavaScript property order.
 func parseYAMLOrdered(source string) (any, map[uintptr][]string, error) {
+	return parseYAMLWith(source, false)
+}
+
+// Pair is one mapping entry of ParseOrdered's value.
+type Pair struct {
+	Key   string
+	Value any
+}
+
+// ParseOrdered is the value LoadFile parses from source, with every mapping
+// as []Pair in document order, as JavaScript enumerates the object (a key
+// repeated through jsKey keeps its first place and its last value). Numbers
+// are left as parsed; nothing is migrated or checked.
+func ParseOrdered(source string) (any, error) {
+	value, _, err := parseYAMLWith(source, true)
+	return value, err
+}
+
+func parseYAMLWith(source string, ordered bool) (any, map[uintptr][]string, error) {
 	order := map[uintptr][]string{}
 	var doc yaml.Node
 	decoder := yaml.NewDecoder(strings.NewReader(source))
@@ -77,7 +96,7 @@ func parseYAMLOrdered(source string) (any, map[uintptr][]string, error) {
 	if len(doc.Content) == 0 {
 		return nil, order, nil
 	}
-	value, err := (&yamlReader{active: map[*yaml.Node]bool{}, anchors: map[*yaml.Node]*yamlAnchor{}, source: source, order: order}).value(doc.Content[0])
+	value, err := (&yamlReader{active: map[*yaml.Node]bool{}, anchors: map[*yaml.Node]*yamlAnchor{}, source: source, order: order, ordered: ordered}).value(doc.Content[0])
 	return value, order, err
 }
 
@@ -92,6 +111,7 @@ type yamlReader struct {
 	anchors map[*yaml.Node]*yamlAnchor
 	source  string
 	order   map[uintptr][]string
+	ordered bool
 }
 
 func (r *yamlReader) value(node *yaml.Node) (any, error) {
@@ -144,6 +164,7 @@ func (r *yamlReader) readValue(node *yaml.Node) (any, error) {
 	switch node.Kind {
 	case yaml.MappingNode:
 		out := map[string]any{}
+		pairs := []Pair{}
 		seen := map[string]bool{}
 		for i := 0; i < len(node.Content); i += 2 {
 			keyNode := node.Content[i]
@@ -172,7 +193,19 @@ func (r *yamlReader) readValue(node *yaml.Node) (any, error) {
 			if _, exists := out[name]; !exists && r.order != nil {
 				r.order[reflect.ValueOf(out).Pointer()] = append(r.order[reflect.ValueOf(out).Pointer()], name)
 			}
+			if _, again := out[name]; again {
+				for j := range pairs {
+					if pairs[j].Key == name {
+						pairs[j].Value = value
+					}
+				}
+			} else {
+				pairs = append(pairs, Pair{name, value})
+			}
 			out[name] = value
+		}
+		if r.ordered {
+			return pairs, nil
 		}
 		return out, nil
 	case yaml.SequenceNode:

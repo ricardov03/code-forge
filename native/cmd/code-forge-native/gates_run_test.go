@@ -232,9 +232,10 @@ func TestGatesNativeRoute(t *testing.T) {
 			t.Fatalf("%v: exit=%d output=%q, want native usage exit 2", flags, code, out)
 		}
 	}
-	code, _ = call("gates", "detect")
-	if code != 127 {
-		t.Fatalf("detect handover exit=%d, want 127", code)
+	// B459: gates detect runs in Go now (was a Node hand-over, exit 127 here).
+	code, out = call("gates", "detect")
+	if code != 0 || !strings.HasPrefix(out, `{"stack":`) {
+		t.Fatalf("detect exit=%d output=%q, want the native detect JSON, exit 0", code, out)
 	}
 }
 

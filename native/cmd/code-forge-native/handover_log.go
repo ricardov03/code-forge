@@ -273,6 +273,16 @@ const (
 	hProofRunner
 	hProofSnapshot
 	hProofRedGreen
+	hGatesDetectConfig
+	hGatesAcceptanceJSON
+	hGatesTapEncoding
+	hGatesTranscriptExtras
+	hGatesTranscriptUnsup
+	hGatesGitRace
+	hGatesGit
+	hGatesFsError
+	hGatesRunIDMismatch
+	hGatesRunNoWorkspace
 )
 
 var handoverReasons = [...]string{
@@ -525,6 +535,16 @@ var handoverReasons = [...]string{
 	hProofRunner:               "proof-runner",
 	hProofSnapshot:             "proof-snapshot",
 	hProofRedGreen:             "proof-red-green",
+	hGatesDetectConfig:         "gates-detect-config",
+	hGatesAcceptanceJSON:       "gates-acceptance-json",
+	hGatesTapEncoding:          "gates-tap-encoding",
+	hGatesTranscriptExtras:     "gates-transcript-extras",
+	hGatesTranscriptUnsup:      "gates-transcript-unsupported",
+	hGatesGitRace:              "gates-git-race",
+	hGatesGit:                  "gates-git-spawn",
+	hGatesFsError:              "gates-fs-error",
+	hGatesRunIDMismatch:        "gates-run-id-mismatch",
+	hGatesRunNoWorkspace:       "gates-run-no-workspace",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {

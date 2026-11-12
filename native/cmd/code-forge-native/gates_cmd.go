@@ -263,8 +263,11 @@ func runGates(args []string) int {
 	if len(args) > 0 && args[0] == "classes" {
 		return gatesClasses(args[1:], os.Getenv("HOME"), os.Stdout, os.Stderr)
 	}
+	if code, done := gatesHelp(args, os.Stdout); done {
+		return code
+	}
 	if len(args) == 0 || args[0] != "run" {
-		return gatesHandover(args, hGatesUnportedSubcommand)
+		return gatesOther(args)
 	}
 	// B402: refuse gates.extra.invariants before any hand-over; Node would
 	// skip its script silently too.
@@ -323,9 +326,10 @@ func runGates(args []string) int {
 		gatesFinish(args, code)
 		return code
 	}
+	gatesHandoverReason = hGatesCustom
 	code, safe := gatesNativeStep(args, o, nil)
 	if !safe {
-		return gatesHandover(args, hGatesCustom)
+		return gatesHandover(args, gatesHandoverReason)
 	}
 	gatesFinish(args, code)
 	return code

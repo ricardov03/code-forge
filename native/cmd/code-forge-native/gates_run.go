@@ -312,6 +312,9 @@ func gatesNative(args []string, o gatesOptions) (int, bool) { return gatesNative
 
 // gatesNativeStep runs gates run in Go. Every form runs here (B450): the bool
 // is always true, and a case Go cannot serve is a clear error, never Node.
+// gatesHandoverReason names why gatesNativeStep left a run to Node (B459).
+var gatesHandoverReason = hGatesCustom
+
 func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) {
 	stdout, stderr := step.writers()
 	gatesErrf := func(format string, args ...any) {
@@ -359,9 +362,11 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		// has no workspace path (B450 keeps these two Node hand-overs: the
 		// gate slot and the proof rows of such a record are not ported).
 		if record.Get("run_id") != o.run {
+			gatesHandoverReason = hGatesRunIDMismatch
 			return 0, false
 		}
 		if _, ok := record.Get("workspace").(string); !ok {
+			gatesHandoverReason = hGatesRunNoWorkspace
 			return 0, false
 		}
 	}

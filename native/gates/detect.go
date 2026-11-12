@@ -113,7 +113,8 @@ func Detect(root string) Plan {
 		prettier := false
 		for _, section := range []string{"dependencies", "devDependencies"} {
 			deps, _ := pkg[section].(map[string]any)
-			if v := deps["prettier"]; v != nil && v != "" && v != false {
+			// JavaScript truthiness (Node's hasDependency): 0 is false too.
+			if v := deps["prettier"]; v != nil && v != "" && v != false && v != float64(0) {
 				prettier = true
 			}
 		}
