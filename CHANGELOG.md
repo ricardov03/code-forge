@@ -11,6 +11,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - The hand-over reason list (the `handoverReason` constants and the `handoverReasons` array) moved unchanged from `handover_log.go` to its own file `native/cmd/code-forge-native/handover_reasons.go`, and `.gitattributes` now marks only that file `merge=union`, so a union merge can no longer garble the hand-over functions; a Go test checks every reason has one non-empty, unique code (B513)
 - `native-status`, the private daemon helper, runs in Go with the same status lines, line splitting, router error line, exit 1, breadcrumb and error log as Node, and `--help`/`-h` print its usage; no `HOME`, a terminal stderr with no agent, and a line Go cannot read exactly like Node (a non-ASCII block id to sort, an `Infinity` number, a lone surrogate, bytes that are not UTF-8) still hand over to Node with their own reason (B501)
 - The native daemon answers `status` in Go where it used to start Node's `native-status` helper: a run record or ledger row Node cannot read gives `status-unreadable`, and a spend that overflows is `null`, with the same gate timeout and flaky details; only a block id outside printable ASCII still uses the helper (B503)
+- Go has the doctor's Jev client (Node's request, retries, 30 s attempts and failure kinds), its `jev` row and the provider CLI `cli`/`flags` rows; the full doctor run still hands over to Node as `doctor-live-probes` until the model-call, isolation, path-deny, Codex rules and worker probes run in Go (B505)
 
 ### Added
 

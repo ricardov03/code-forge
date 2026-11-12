@@ -2,7 +2,7 @@ package main
 
 // B505: the provider CLI probes of the full doctor run (src/doctor/probes.mjs)
 // in Go: configuredProviders, the presence/version/--help flag probe per CLI
-// (probeCli + src/engines/probe.mjs probeHelpText) and the ping rows.
+// (probeCli + src/engines/probe.mjs probeHelpText). The ping rows stay in Node.
 
 import (
 	"os"
