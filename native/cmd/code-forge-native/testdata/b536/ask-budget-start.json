@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "run_id": "r-fix",
+  "project": "ws",
+  "workspace": "@WORKSPACE@",
+  "engine": "auto",
+  "provider": "anthropic",
+  "levels": {
+    "L0": {
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "L1": {
+      "model": "claude-sonnet-5"
+    },
+    "L2": {
+      "model": "claude-opus-5-5"
+    },
+    "L3": {
+      "model": "claude-fable-5-1"
+    }
+  },
+  "fallback_mode": "rules",
+  "started_at": "2026-11-11T00:00:00.000Z",
+  "orchestrator_pid": 1234,
+  "solo_pid": null,
+  "worker": null,
+  "workers": [],
+  "status": "active",
+  "blocks": {},
+  "orphans": [],
+  "config": {
+    "hash": "c36739166b42e99552ce58e87c7e28b32ae4d54f436dc1a3bd5c2f08844d69f1",
+    "snapshots": {
+      "c36739166b42e99552ce58e87c7e28b32ae4d54f436dc1a3bd5c2f08844d69f1": {
+        "provider": "anthropic",
+        "levels": {
+          "L0": {
+            "model": "claude-haiku-4-5-20251001"
+          },
+          "L1": {
+            "model": "claude-sonnet-5"
+          },
+          "L2": {
+            "model": "claude-opus-5-5"
+          },
+          "L3": {
+            "model": "claude-fable-5-1"
+          }
+        },
+        "review": {
+          "max_rounds_per_file": 3
+        },
+        "version": 1,
+        "budget": {
+          "usd": 0.000001
+        }
+      }
+    },
+    "pins": {}
+  },
+  "autopilot": {
+    "grant_id": "ap-0000abcd",
+    "status": "active",
+    "until": "2099-01-01T00:00:00.000Z",
+    "delegate": "L2",
+    "scopes": [
+      "round:extra"
+    ],
+    "deny": [],
+    "caps": {
+      "review": 5,
+      "coding": 10
+    },
+    "stop_at": 0.9,
+    "started_at": "2026-11-11T09:00:00.000Z",
+    "stopped_at": null,
+    "expired_at": null
+  }
+}

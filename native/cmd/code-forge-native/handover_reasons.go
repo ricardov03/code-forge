@@ -329,6 +329,9 @@ const (
 	hWorkerJevStore
 	hWorkerJevKeychain
 	hWorkerWatchShape
+	hAutopilotApproveYAMLShape
+	hAutopilotApproveReloadShape
+	hAutopilotRestoreReloadShape
 )
 
 var handoverReasons = [...]string{
@@ -652,4 +655,9 @@ var handoverReasons = [...]string{
 	hWorkerJevStore:            "worker-jev-key-store",
 	hWorkerJevKeychain:         "worker-jev-keychain",
 	hWorkerWatchShape:          "worker-watch-shape",
+
+	// B536
+	hAutopilotApproveYAMLShape:   "autopilot-approve-yaml-shape",
+	hAutopilotApproveReloadShape: "autopilot-approve-reload-shape",
+	hAutopilotRestoreReloadShape: "autopilot-restore-reload-shape",
 }

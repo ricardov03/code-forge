@@ -528,3 +528,16 @@ func ProbeGitInit(repo string, environ []string) {
 	env = setEnv(setEnv(setEnv(env, "GIT_CONFIG_NOSYSTEM", "1"), "GIT_CONFIG_GLOBAL", "/dev/null"), "GIT_TERMINAL_PROMPT", "0")
 	run(execOpts{Argv: []string{"git", "init", "-q"}, Cwd: repo, Env: env, TimeoutMs: 20000})
 }
+
+// DelegateSchema is src/autopilot/delegate.mjs DELEGATE_SCHEMA in its own key
+// order (B536: the delegate session of `autopilot ask`).
+func DelegateSchema() ledger.Object {
+	schema, err := ledger.DecodeObject([]byte(probeSchemaJSON[ProbeSchemaDelegate]))
+	if err != nil {
+		panic(err)
+	}
+	return schema
+}
+
+// MatchesDelegateSchema is matchesSchema(DELEGATE_SCHEMA, value).
+func MatchesDelegateSchema(value any) bool { return probeMatchesSchema(ProbeSchemaDelegate, value) }

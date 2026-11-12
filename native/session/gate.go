@@ -141,13 +141,17 @@ func EstimateUSD(provider, level, role string, tokensIn float64) float64 {
 	return usd
 }
 
-// packetTokens is spend.mjs packetTokens with no system prompt text: ceil(bytes / 4).
-func packetTokens(promptPath string) float64 {
-	st, err := os.Stat(promptPath)
-	if err != nil {
-		return 0
+// packetTokens is spend.mjs packetTokens: ceil((prompt file bytes + system
+// prompt bytes) / 4); a missing prompt file counts 0 bytes.
+func packetTokens(o Opts) float64 {
+	var size int64
+	if st, err := os.Stat(o.PromptPath); err == nil {
+		size = st.Size()
 	}
-	return math.Ceil(float64(st.Size()) / 4)
+	if o.SystemPrompt != nil {
+		size += int64(len(*o.SystemPrompt))
+	}
+	return math.Ceil(float64(size) / 4)
 }
 
 // toFixed2 is Number.prototype.toFixed(2) for a finite number (ties away from zero).
@@ -353,7 +357,7 @@ func budgetGate(o Opts, deps Deps, writeRow func(ledger.Object) error, s step) (
 	if !hasBudget && outside == nil && !unknown {
 		return nil, none, nil
 	}
-	estimate := EstimateUSD(s.provider, o.Level, o.Role, packetTokens(o.PromptPath))
+	estimate := EstimateUSD(s.provider, o.Level, o.Role, packetTokens(o))
 	var refused ledger.Object
 	var release func()
 	lockErr := filelock.WithLock("budget:"+run, func() error {

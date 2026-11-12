@@ -2,20 +2,21 @@ package main
 
 import (
 	"encoding/json"
-
-	"github.com/ricardov03/code-forge/native/humanask"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
 // B484: `autopilot approve` in Go up to the owner's terminal prompt:
 // validateApproval (src/autopilot/limits.mjs) and the no-terminal refusal of
-// runApprove (src/cli/autopilot.mjs). At a terminal the prompt and the
-// .code-forge.yml change stay with Node (hand-over autopilot-approve).
+// runApprove (src/cli/autopilot.mjs). B536: after the prompt the
+// .code-forge.yml change, the run reload and the signed autopilot.approve
+// row run in Go too (autopilot_reload.go); a YAML shape or an edited config
+// Go does not reproduce keeps a narrow hand-over, decided before the prompt.
 
 const autopilotApproveNoTTY = "autopilot approve: no terminal to confirm; only the owner approves a change, in a terminal (approve has no --yes)"
 
@@ -125,10 +126,8 @@ func autopilotApproveRecord(runID string, record ledger.Object, key string) (err
 
 // autopilotApprovePlan is the rest of validateApproval on the record read
 // once, then the terminal check. At a terminal (B490) the owner's prompt
-// runs in Go when approveChange would refuse after it without a write (no
-// config, an unreadable one, or the key already holding the value); a
-// change of .code-forge.yml (the YAML write and the run reload) keeps the
-// command on Node, which asks the owner.
+// runs in Go; B536: so does the change of .code-forge.yml when Go writes
+// and reloads it the way Node does (apdApproveDecide).
 func autopilotApprovePlan(home, runID string, record ledger.Object, flags autopilotFlags, now time.Time) (func(o *runOut) int, handoverReason) {
 	key, invalid := autopilotApproveInput(flags, now)
 	if invalid != nil {
@@ -146,7 +145,7 @@ func autopilotApprovePlan(home, runID string, record ledger.Object, flags autopi
 	if !ok || !autopilotPlainPrompt(key, runID, value) {
 		return nil, hAutopilotApproveValue
 	}
-	if _, reason := autopilotApproveChange(record, key, value, hAutopilotApproveWrite); reason != 0 {
+	if _, _, reason := apdApproveDecide(home, runID, record, key, value, now, hAutopilotApproveYAMLShape); reason != 0 {
 		return nil, reason
 	}
 	if !autopilotPromptable() {
@@ -186,24 +185,6 @@ func autopilotJSONValue(text string) (any, bool) {
 		return nil, false
 	}
 	return obj.Get("v"), true
-}
-
-// autopilotApproveChange is approveChange's read of the workspace config:
-// Node's refusal, or write (the reason passed in) when the file would
-// change: that write and the reload stay with Node.
-func autopilotApproveChange(record ledger.Object, key string, value any, write handoverReason) (error, handoverReason) {
-	workspace, _ := record.Get("workspace").(string)
-	js, refusal, ok := autopilotReadWorkspace(workspace)
-	if !ok {
-		return nil, hAutopilotApproveConfig
-	}
-	if refusal != nil {
-		return refusal, 0
-	}
-	if current, present := autopilotValueAt(js, strings.Split(key, ".")); present && autopilotSameJSON(current, value) {
-		return &state.Error{Code: "no-change", Message: key + " already has that value in .code-forge.yml; nothing to approve"}, 0
-	}
-	return nil, write
 }
 
 // autopilotApprove is runApprove at a terminal: the owner's confirm with
@@ -246,6 +227,8 @@ func autopilotApprove(o *runOut, home, runID string, flags autopilotFlags, key s
 		return autopilotReport(o, "approve", refusal)
 	}
 	var late handoverReason
+	var approval ledger.Object
+	until := autopilotStamp(time.UnixMilli(ms))
 	err = autopilotWithApprovalsLock(home, runID, func() error {
 		refusal, reason := check()
 		if reason != 0 || refusal != nil {
@@ -256,12 +239,24 @@ func autopilotApprove(o *runOut, home, runID string, flags autopilotFlags, key s
 		if err != nil {
 			return err
 		}
-		refusal, late = autopilotApproveChange(record, key, value, hAutopilotApproveChanged)
-		return refusal
+		step, refusal, reason := apdApproveDecide(home, runID, record, key, value, now, hAutopilotApproveChanged)
+		if reason != 0 {
+			late = reason // nothing written: Node asks again
+			return nil
+		}
+		if refusal != nil {
+			return refusal
+		}
+		approval, err, late = apdApproveApply(home, runID, key, until, value, step, now)
+		return err
 	})
 	if late != 0 && err == nil {
-		autopilotLate = late // the file changed during the prompt: Node asks again and writes it
+		autopilotLate = late // the file or the record changed during the prompt: Node asks again and writes it
 		return 0
 	}
-	return autopilotReport(o, "approve", err)
+	if err != nil {
+		return autopilotReport(o, "approve", err)
+	}
+	o.out("autopilot approve run " + runID + ": " + key + " changed until " + until + " (approval " + approval.Get("approval_id").(string) + "); the old value comes back then\n")
+	return 0
 }

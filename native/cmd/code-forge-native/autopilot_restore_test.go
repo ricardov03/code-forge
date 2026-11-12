@@ -252,7 +252,9 @@ func TestAutopilotRestoreLockedInGo(t *testing.T) {
 
 // B490: a restore that needs the run reload, or (B494) a YAML write of a
 // shape Go does not serve, stays with Node, with its own reason, before Go writes anything (even for another
-// approval of the same check that Go could end).
+// approval of the same check that Go could end). B536: the reload of an
+// active run runs in Go, so the active run's revert now stops at the same
+// anchor (autopilot-restore-write).
 func TestAutopilotRestoreHandsOverInGo(t *testing.T) {
 	f := newAutopilotFixture(t)
 	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
@@ -287,7 +289,7 @@ func TestAutopilotRestoreHandsOverInGo(t *testing.T) {
 	if code, _, _ := autopilotCall(t, "status", "--run", "r-bom"); code != 127 {
 		t.Fatalf("inf = %d", code)
 	}
-	want := []string{"autopilot-restore-reload", "autopilot-restore-write", "autopilot-restore-config", "autopilot-restore-config"}
+	want := []string{"autopilot-restore-write", "autopilot-restore-write", "autopilot-restore-config", "autopilot-restore-config"}
 	if got := apHandoverReasons(t, f); strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("reasons = %v, want %v", got, want)
 	}
@@ -303,9 +305,9 @@ func TestAutopilotRestoreHandsOverInGo(t *testing.T) {
 
 // B490: approve at a terminal runs the owner's prompt in Go when Node would
 // refuse after it without a write: the prompt text, the cancel answer, the
-// refusals after a yes and the --until check at the fresh clock. A change
-// of .code-forge.yml stays with Node (asked there), found before or after
-// the prompt.
+// refusals after a yes and the --until check at the fresh clock. B536: the
+// change of .code-forge.yml runs in Go (TestB536*); one Go cannot reload
+// like Node stays with Node, found before or after the prompt.
 func TestAutopilotApproveAtTerminalInGo(t *testing.T) {
 	f := newAutopilotFixture(t)
 	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
@@ -359,14 +361,17 @@ func TestAutopilotApproveAtTerminalInGo(t *testing.T) {
 		t.Fatalf("prompt error = %d %q %q", code, out, errText)
 	}
 	answerErr = nil
-	// the file changed while the owner was asked: Node asks again and writes it
+	// the file changed while the owner was asked: Go decides again under the
+	// lock; B536: this config (no provider, no levels) is one Node calls
+	// invalid with key paths Go does not carry, so Node runs it
 	during = func() { apWriteConfig(t, f, "review:\n  max_rounds_per_file: 2\n") }
 	if code, out, _ = approve("4"); code != 127 || out != "" {
 		t.Fatalf("changed during prompt = %d %q", code, out)
 	}
 	during = func() {}
 	asked = nil
-	// a change of the file, and a value Go cannot hold, go to Node before any prompt
+	// B536: a change Go cannot reload like Node (the invalid config above),
+	// and a value Go cannot hold, go to Node before any prompt
 	if code, _, _ = approve("5"); code != 127 {
 		t.Fatalf("write = %d", code)
 	}
@@ -380,7 +385,7 @@ func TestAutopilotApproveAtTerminalInGo(t *testing.T) {
 	if len(asked) != 0 {
 		t.Fatalf("asked = %q", asked)
 	}
-	want := []string{"autopilot-approve-changed", "autopilot-approve-write", "autopilot-approve-value", "autopilot-approve-value"}
+	want := []string{"autopilot-approve-reload-shape", "autopilot-approve-reload-shape", "autopilot-approve-value", "autopilot-approve-value"}
 	if got := apHandoverReasons(t, f); strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("reasons = %v, want %v", got, want)
 	}

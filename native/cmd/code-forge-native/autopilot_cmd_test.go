@@ -363,7 +363,7 @@ func TestAutopilotVerbHandsOver(t *testing.T) {
 	}{
 		{[]string{"ask", "--run", "r-nolink", "--scope", "round:extra", "--question", "q"}, "autopilot-ask"},
 		{[]string{"waive", "--run", "r-a"}, "autopilot-action"},
-		{[]string{"status", "--run", "r-appr"}, "autopilot-restore-reload"},
+		{[]string{"status", "--run", "r-appr"}, "autopilot-restore-reload-shape"}, // B536: a reverted config Go does not validate like Node
 		{[]string{"start", "--run", "r-shape", "--yes"}, "autopilot-shape"},
 		{[]string{"stop", "--run", "r-bad"}, "autopilot-record"},
 		{[]string{"status", "--run", "r-ledger"}, "autopilot-ledger"},

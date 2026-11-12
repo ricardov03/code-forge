@@ -37,6 +37,7 @@ type reloadInput struct {
 	cfg                   ledger.Object
 	effectiveSlug         string
 	now                   time.Time
+	allow                 []string // B536: limitGuard's allow (approve and its restore); nil for the verb
 }
 
 // rrWriter sends a write to runOut, so the last stderr text reaches the error log.
@@ -139,6 +140,27 @@ type reloadOutcome struct {
 }
 
 func runReloadLocked(args []string, in reloadInput, stdout, stderr io.Writer) int {
+	out, message, race, err := reloadApplyLocked(in)
+	if race != 0 {
+		// the record changed between the check and the lock into a shape Go
+		// does not reproduce; nothing was written, so Node runs it from the top
+		return runHandover(args, race)
+	}
+	if err != nil {
+		var stateErr *state.Error
+		if errors.As(err, &stateErr) {
+			message = stateErr.Message
+		} else {
+			message = err.Error()
+		}
+	}
+	return reloadPrint(in, out, message, stdout, stderr)
+}
+
+// reloadApplyLocked is reloadRun under the run lock (B536: shared with
+// autopilot approve and its restore): the outcome, a refusal message, the
+// hand-over for a record Go does not reproduce (nothing written), or err.
+func reloadApplyLocked(in reloadInput) (reloadOutcome, string, handoverReason, error) {
 	var out reloadOutcome
 	var message string
 	race := handoverReason(0)
@@ -158,7 +180,7 @@ func runReloadLocked(args []string, in reloadInput, stdout, stderr io.Writer) in
 			return nil
 		}
 		if plan.noChange {
-			out = reloadOutcome{noChange: true}
+			out = reloadOutcome{noChange: true, oldHash: plan.oldHash, newHash: plan.newHash}
 			return nil
 		}
 		pending, err := reloadPendingTickets(in.repoRoot)
@@ -214,19 +236,11 @@ func runReloadLocked(args []string, in reloadInput, stdout, stderr io.Writer) in
 		}
 		return nil
 	})
-	if race != 0 {
-		// the record changed between the check and the lock into a shape Go
-		// does not reproduce; nothing was written, so Node runs it from the top
-		return runHandover(args, race)
-	}
-	if err != nil {
-		var stateErr *state.Error
-		if errors.As(err, &stateErr) {
-			message = stateErr.Message
-		} else {
-			message = err.Error()
-		}
-	}
+	return out, message, race, err
+}
+
+// reloadPrint is reloadVerb's report of a reload outcome.
+func reloadPrint(in reloadInput, out reloadOutcome, message string, stdout, stderr io.Writer) int {
 	if message != "" {
 		fmt.Fprintf(stderr, "run reload: %s\n", message)
 		return 1
@@ -471,10 +485,15 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 			}
 			if status == "active" {
 				hit := ""
+				paths := p.changed
+				if in.allow != nil && before != nil {
+					// B536: the allowed key (and the parents it leaves empty) out of both sides
+					paths = changedKeyPathsGo(apdWithoutKey(before, in.allow), apdWithoutKey(p.config, in.allow))
+				}
 				if p.legacy {
 					hit = "the whole config"
 				} else {
-					for _, key := range p.changed {
+					for _, key := range paths {
 						if rrIsLimitKey(key) {
 							hit = key
 							break

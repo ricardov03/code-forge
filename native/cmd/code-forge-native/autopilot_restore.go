@@ -31,10 +31,13 @@ import (
 // autopilot.restore_skipped row) and an ended run whose file already holds
 // the old value (the signed autopilot.restore row). B494: an ended run
 // whose file needs the old value back is written in Go too (yamledit gives
-// the yaml package's bytes; writeText's temp file and rename). A due
-// approval that needs the reload (validateConfig and reloadRun, an active
-// run), a YAML shape yamledit does not serve, or a second read of the file
-// after a Go write keeps the whole check on Node, before Go writes anything.
+// the yaml package's bytes; writeText's temp file and rename). B536: an
+// active run's revert is written and reloaded in Go too (apdReloadDecide,
+// apdReloadDo; a failed reload writes the file back and marks the approval
+// failed, as Node does). A reverted config Go does not load, validate or
+// word like Node (autopilot-restore-reload-shape), a YAML shape yamledit
+// does not serve, or a second read of the file after a Go write keeps the
+// whole check on Node, before Go writes anything.
 
 // autopilotApprovalsLockTimeout is LOCK_TIMEOUT_MS (a seam for tests).
 var autopilotApprovalsLockTimeout = 10 * time.Second
@@ -236,6 +239,7 @@ const (
 	apStepSkip           // changed by hand
 	apStepRestore        // an ended run whose file holds the old value
 	apStepRewrite        // an ended run whose file gets the old value back (B494)
+	apStepReload         // an active run: the old value back (when needed) and the reload (B536)
 )
 
 type autopilotStep struct {
@@ -245,6 +249,9 @@ type autopilotStep struct {
 	reason string // apStepRewrite: editDoc's refusal (nothing is written)
 	file   string // apStepRewrite: the workspace .code-forge.yml
 	text   string // apStepRewrite: the bytes String(doc) gives after the edit
+	orig   string // apStepReload: the file's text before the edit (put back on a failed reload)
+	write  bool   // apStepReload: the file needs the old value written back
+	reload reloadInput
 }
 
 // autopilotRevert is revertChange applied with editDoc: the text with the
@@ -282,7 +289,7 @@ func autopilotRevert(text, key string, segs []string, a ledger.Object) (out, rea
 
 // autopilotRestorePlan reads checkApprovals' steps for the due approvals of
 // record, or the reason the check stays with Node. It writes nothing.
-func autopilotRestorePlan(record ledger.Object, now time.Time) ([]autopilotStep, handoverReason) {
+func autopilotRestorePlan(home, runID string, record ledger.Object, now time.Time) ([]autopilotStep, handoverReason) {
 	switch err := autopilot.Approvals(record, now); {
 	case err == nil:
 		return nil, 0
@@ -363,7 +370,25 @@ func autopilotRestorePlan(record ledger.Object, now time.Time) ([]autopilotStep,
 			continue
 		}
 		if record.Get("status") == "active" {
-			return nil, hAutopilotRestoreReload // validateConfig and reloadRun stay with Node
+			// B536: the old value back, then reloadWorkspace with the key allowed
+			step.kind, step.file, step.orig, step.text, step.write = apStepReload, filepath.Join(workspace, config.Filename), text, text, !holdsOld
+			if !holdsOld {
+				out, reason, handOver := autopilotRevert(text, key, segs, a)
+				if handOver {
+					return nil, hAutopilotRestoreWrite // a YAML shape Go does not write like the yaml package
+				}
+				step.text, step.reason = out, reason
+			}
+			if step.reason == "" {
+				in, ok := apdReloadDecide(home, runID, record, workspace, step.text, segs, now)
+				if !ok {
+					return nil, hAutopilotRestoreReloadShape
+				}
+				step.reload = in
+			}
+			rewritten = true // a later approval would read the file and the record again
+			steps = append(steps, step)
+			continue
 		}
 		if !holdsOld {
 			out, reason, handOver := autopilotRevert(text, key, segs, a)
@@ -386,7 +411,7 @@ func autopilotRestorePlan(record ledger.Object, now time.Time) ([]autopilotStep,
 // lock, so a hand-over happens before anything is written. err is what
 // Node's check throws (the command then reports it).
 func autopilotRestore(home, runID string, record ledger.Object, now time.Time) (*autopilotCheck, error, handoverReason) {
-	if _, reason := autopilotRestorePlan(record, now); reason != 0 {
+	if _, reason := autopilotRestorePlan(home, runID, record, now); reason != 0 {
 		return nil, nil, reason
 	}
 	check := &autopilotCheck{runID: runID}
@@ -396,7 +421,7 @@ func autopilotRestore(home, runID string, record ledger.Object, now time.Time) (
 		if err != nil {
 			return err
 		}
-		steps, reason := autopilotRestorePlan(fresh, now)
+		steps, reason := autopilotRestorePlan(home, runID, fresh, now)
 		if reason != 0 {
 			late = reason
 			return nil
@@ -413,7 +438,7 @@ func autopilotRestore(home, runID string, record ledger.Object, now time.Time) (
 			case apStepSkip:
 				status = "restore_skipped"
 				row = ledger.Object{{Key: "event", Value: "autopilot.restore_skipped"}, {Key: "reason", Value: "changed-by-hand"}}
-			case apStepRestore, apStepRewrite:
+			case apStepRestore, apStepRewrite, apStepReload:
 				if step.entry.Get("restoring") != true {
 					// crash safety: the restore is recorded as started first
 					if err := state.WithRunLock(home, runID, func() error {
@@ -443,13 +468,38 @@ func autopilotRestore(home, runID string, record ledger.Object, now time.Time) (
 						continue
 					}
 				}
+				var newHash any
+				if step.kind == apStepReload {
+					if step.reason == "" && step.write {
+						if err := autopilotWriteText(step.file, step.text); err != nil {
+							step.reason = autopilotFsMessage(err)
+						}
+					}
+					if step.reason != "" {
+						check.failed = append(check.failed, [2]string{step.id, step.reason})
+						continue
+					}
+					hash, err, race := apdReloadDo(step.reload)
+					if race != 0 || err != nil {
+						if err := autopilotWriteText(step.file, step.orig); err != nil {
+							return err
+						}
+						if race != 0 {
+							late = hAutopilotRestoreReloadShape // the file is back; the restoring mark makes Node finish it
+							return nil
+						}
+						check.failed = append(check.failed, [2]string{step.id, apdErrText(err)})
+						continue
+					}
+					newHash = hash
+				}
 				status = "restored"
 				var restored any
 				if !step.entry.Get("old_absent").(bool) {
 					restored = autopilotRedactValue(step.entry.Get("old"))
 				}
 				row = ledger.Object{{Key: "event", Value: "autopilot.restore"}, {Key: "restored", Value: restored}, {Key: "old_absent", Value: step.entry.Get("old_absent")},
-					{Key: "reloaded", Value: false}, {Key: "new_hash", Value: nil}}
+					{Key: "reloaded", Value: step.kind == apStepReload}, {Key: "new_hash", Value: newHash}}
 			}
 			wrote, err := autopilotFinish(home, runID, step, status, row, now, check)
 			if err != nil {

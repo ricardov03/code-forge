@@ -1,0 +1,9 @@
+code 3
+--- stdout
+autopilot ask run r-fix: to the owner (session unavailable (budget))
+--- stderr
+code-forge: this session's estimated cost (about 0.97) is above budget.usd 0.00; raise budget.usd
+--- ledger
+{"event":"budget.refused","run":"r-fix","block":null,"role":"delegate","budget_usd":0.000001,"spent_usd":0,"unknown_usd_sessions":0,"reserved_usd":0,"estimate_usd":0.967,"tokens_source":null,"cost_source":null}
+{"run":"r-fix","event":"autopilot.decision","decision_id":"ad-<ID>","grant_id":"ap-0000abcd","scope":"round:extra","subject":null,"question":"one more round?","options":[],"decision":null,"within_scope":null,"confidence":null,"reason":null,"escalate":null,"acted":false,"to_owner":true,"owner_reason":"session-failed","failure":"session unavailable (budget)","level":"L2","provider":"anthropic","model":"claude-opus-5-5","tokens_source":null,"cost_source":null}
+--- argv

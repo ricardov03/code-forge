@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "run_id": "r-fix",
+  "project": "ws",
+  "workspace": "@WORKSPACE@",
+  "engine": "auto",
+  "provider": "anthropic",
+  "levels": {
+    "L0": {
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "L1": {
+      "model": "claude-sonnet-5"
+    },
+    "L2": {
+      "model": "claude-opus-5-5"
+    },
+    "L3": {
+      "model": "claude-fable-5-1"
+    }
+  },
+  "fallback_mode": "rules",
+  "started_at": "2026-11-11T00:00:00.000Z",
+  "orchestrator_pid": 1234,
+  "solo_pid": null,
+  "worker": null,
+  "workers": [],
+  "status": "active",
+  "blocks": {},
+  "orphans": [],
+  "config": {
+    "hash": "08300ef39a6361fcbe973c9b978e8bda20f91cd8a91ce2b64fc601a8c47b2bff",
+    "snapshots": {
+      "08300ef39a6361fcbe973c9b978e8bda20f91cd8a91ce2b64fc601a8c47b2bff": {
+        "provider": "anthropic",
+        "levels": {
+          "L0": {
+            "model": "claude-haiku-4-5-20251001"
+          },
+          "L1": {
+            "model": "claude-sonnet-5"
+          },
+          "L2": {
+            "model": "claude-opus-5-5"
+          },
+          "L3": {
+            "model": "claude-fable-5-1"
+          }
+        },
+        "review": {
+          "max_rounds_per_file": 3
+        },
+        "autopilot": {
+          "min_confidence": 0.8
+        },
+        "version": 1
+      }
+    },
+    "pins": {},
+    "reloaded_at": "2026-11-11T11:10:00.000Z"
+  },
+  "autopilot": {
+    "grant_id": "ap-0000abcd",
+    "status": "active",
+    "until": "2026-11-11T12:30:00.000Z",
+    "delegate": "L2",
+    "scopes": [
+      "round:extra"
+    ],
+    "deny": [],
+    "caps": {
+      "review": 5,
+      "coding": 10
+    },
+    "stop_at": 0.9,
+    "started_at": "2026-11-11T09:00:00.000Z",
+    "stopped_at": null,
+    "expired_at": null
+  },
+  "autopilot_approvals": [
+    {
+      "approval_id": "apr-0000aaa1",
+      "key": "review.max_rounds_per_file",
+      "new": 5,
+      "old": 3,
+      "old_absent": false,
+      "prune": 0,
+      "until": "2026-11-11T11:00:00.000Z",
+      "approved_at": "2026-11-11T10:00:00.000Z",
+      "status": "restored",
+      "ended_at": "2026-11-11T11:00:00.000Z",
+      "restoring": true
+    },
+    {
+      "approval_id": "apr-0000aaa2",
+      "key": "review.exclude",
+      "new": [
+        "dist/**",
+        "*.lock"
+      ],
+      "old": null,
+      "old_absent": true,
+      "prune": 0,
+      "until": "2026-11-11T11:10:00.000Z",
+      "approved_at": "2026-11-11T10:00:00.000Z",
+      "status": "restored",
+      "ended_at": "2026-11-11T11:10:00.000Z",
+      "restoring": true
+    },
+    {
+      "approval_id": "apr-0000aaa3",
+      "key": "autopilot.min_confidence",
+      "new": 0.8,
+      "old": null,
+      "old_absent": true,
+      "prune": 1,
+      "until": "2026-11-11T11:20:00.000Z",
+      "approved_at": "2026-11-11T10:00:00.000Z",
+      "status": "active",
+      "ended_at": null
+    }
+  ]
+}

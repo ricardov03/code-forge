@@ -81,8 +81,10 @@ func TestAutopilotVerbQuietApprovals(t *testing.T) {
 }
 
 // B484: an approval due now whose restore edits .code-forge.yml and reloads
-// the active run (B490: autopilot-restore-reload) and an entry Node reads
-// differently keep their hand-over.
+// the active run and an entry Node reads differently keep their hand-over.
+// B536: the reload runs in Go; this fixture's reverted config (no provider,
+// no levels) is one Node calls invalid with key paths Go's validator does
+// not carry, so it keeps the narrow autopilot-restore-reload-shape.
 func TestAutopilotVerbApprovalRestoreHandsOver(t *testing.T) {
 	f := newAutopilotFixture(t)
 	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
@@ -97,7 +99,7 @@ func TestAutopilotVerbApprovalRestoreHandsOver(t *testing.T) {
 			t.Fatalf("%v = %d %q, want hand-over", args, code, out)
 		}
 	}
-	want := []string{"autopilot-restore-reload", "autopilot-restore-reload", "autopilot-shape", "autopilot-shape"}
+	want := []string{"autopilot-restore-reload-shape", "autopilot-restore-reload-shape", "autopilot-shape", "autopilot-shape"}
 	got := apHandoverReasons(t, f)
 	if len(got) != len(want) {
 		t.Fatalf("reasons = %v, want %v", got, want)

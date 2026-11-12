@@ -17,8 +17,9 @@ import (
 // B484: `autopilot ask` in Go up to the delegate session: runAsk's usage
 // checks (src/cli/autopilot.mjs), askDelegate's option and subject checks
 // and grantFor's refusals (src/autopilot/delegate.mjs, grant.mjs), in text
-// and --json. A grant that lets the question through needs the delegate
-// session, which stays with Node (hand-over autopilot-ask).
+// and --json. B536: a grant that lets the question through runs the
+// delegate session in Go too (autopilot_delegate.go); the shapes it does
+// not serve keep the hand-over autopilot-ask.
 
 var (
 	autopilotSubjectBlock   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
@@ -145,13 +146,30 @@ func autopilotAskRefusal(result autopilot.Result, scope string) string {
 // autopilotAskPlan answers the ask Go can answer on the record read once:
 // an input refusal, or a grant refusal (no session; to the owner). A grant
 // that lets the question through hands over: the session stays with Node.
-func autopilotAskPlan(home, runID string, flags autopilotFlags, read autopilot.Result, now time.Time) (func(o *runOut) int, handoverReason) {
+func autopilotAskPlan(home, runID string, record ledger.Object, flags autopilotFlags, read autopilot.Result, now time.Time) (func(o *runOut) int, handoverReason) {
 	scope, invalid := autopilotAskInput(flags)
 	if invalid != nil {
 		return func(o *runOut) int { return autopilotReport(o, "ask", invalid) }, 0
 	}
 	if autopilotAskRefusal(read, scope) == "" {
-		return nil, hAutopilotAsk
+		// B536: the delegate session runs in Go (autopilot_delegate.go)
+		ask, configErr, ok := apdPlan(record, read.Grant, flags, scope)
+		if !ok {
+			return nil, hAutopilotAsk
+		}
+		return func(o *runOut) int {
+			checked, err := autopilotCheckExpiry(home, runID, now)
+			if err != nil {
+				return autopilotReport(o, "ask", err)
+			}
+			if why := autopilotAskRefusal(checked, scope); why != "" {
+				return autopilotAskRefused(o, runID, flags, checked, why)
+			}
+			if configErr != nil {
+				return autopilotReport(o, "ask", configErr)
+			}
+			return apdRun(o, home, runID, flags, ask, checked.Grant)
+		}, 0
 	}
 	return func(o *runOut) int {
 		// grantFor: checkExpiry writes the one expire row of a window that is over
@@ -163,25 +181,30 @@ func autopilotAskPlan(home, runID string, flags autopilotFlags, read autopilot.R
 		if reason == "" {
 			reason = autopilotAskRefusal(read, scope)
 		}
-		if !flags.bools["json"] {
-			o.out("autopilot ask run " + runID + ": refused (" + reason + ") — no session; the question goes to the owner\n")
-			return 1
-		}
-		var grantID any
-		if checked.Grant != nil {
-			grantID = checked.Grant.Get("grant_id")
-		}
-		data, err := ledger.Stringify(ledger.Object{
-			{Key: "run", Value: runID}, {Key: "scope", Value: flags.values["scope"]}, {Key: "grant_id", Value: grantID},
-			{Key: "decision_id", Value: nil}, {Key: "answered", Value: false}, {Key: "acted", Value: false},
-			{Key: "to_owner", Value: true}, {Key: "reason", Value: reason}, {Key: "decision", Value: nil},
-			{Key: "confidence", Value: nil}, {Key: "within_scope", Value: nil}, {Key: "escalate", Value: nil},
-			{Key: "answer_reason", Value: nil},
-		}, false)
-		if err != nil {
-			return autopilotReport(o, "ask", err)
-		}
-		o.out(string(data) + "\n")
-		return 1
+		return autopilotAskRefused(o, runID, flags, checked, reason)
 	}, 0
+}
+
+// autopilotAskRefused is runAsk's output for a grantFor refusal (exit 1).
+func autopilotAskRefused(o *runOut, runID string, flags autopilotFlags, checked autopilot.Result, reason string) int {
+	if !flags.bools["json"] {
+		o.out("autopilot ask run " + runID + ": refused (" + reason + ") — no session; the question goes to the owner\n")
+		return 1
+	}
+	var grantID any
+	if checked.Grant != nil {
+		grantID = checked.Grant.Get("grant_id")
+	}
+	data, err := ledger.Stringify(ledger.Object{
+		{Key: "run", Value: runID}, {Key: "scope", Value: flags.values["scope"]}, {Key: "grant_id", Value: grantID},
+		{Key: "decision_id", Value: nil}, {Key: "answered", Value: false}, {Key: "acted", Value: false},
+		{Key: "to_owner", Value: true}, {Key: "reason", Value: reason}, {Key: "decision", Value: nil},
+		{Key: "confidence", Value: nil}, {Key: "within_scope", Value: nil}, {Key: "escalate", Value: nil},
+		{Key: "answer_reason", Value: nil},
+	}, false)
+	if err != nil {
+		return autopilotReport(o, "ask", err)
+	}
+	o.out(string(data) + "\n")
+	return 1
 }

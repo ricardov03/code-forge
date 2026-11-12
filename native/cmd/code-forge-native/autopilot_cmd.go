@@ -326,7 +326,7 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 		return nil, hAutopilotShape // a grant shape Go does not read
 	}
 	if sub == "ask" {
-		return autopilotAskPlan(home, runID, flags, read, now)
+		return autopilotAskPlan(home, runID, record, flags, read, now)
 	}
 	if sub == "round" {
 		project, _ := record.Get("project").(string)

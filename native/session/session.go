@@ -104,6 +104,12 @@ type Opts struct {
 	// RunGateClear skips the run-pinned gate (budget.usd and the autopilot
 	// category cap): the caller checked that spawn.mjs budgetGate is a no-op.
 	RunGateClear bool
+	// SystemPrompt is spawn.mjs systemPromptText (B536): claude --system-prompt,
+	// grok --system-prompt-override; nil = none.
+	SystemPrompt *string
+	// Validate is matchesSchema for a Schema other than finding.schema.json
+	// (B536): the answer is kept as given (no review coercion) when it passes.
+	Validate func(answer any) bool
 }
 
 // Deps are the seams (SessionDeps).
@@ -186,7 +192,7 @@ func plan(o Opts) ([]step, int, error) {
 	if o.Role == "coder" || o.Role == "facts" {
 		return nil, 0, unsupported("the " + o.Role + " role")
 	}
-	if o.Schema != nil && o.Schema.Get("$id") != FindingSchemaID {
+	if o.Schema != nil && o.Schema.Get("$id") != FindingSchemaID && o.Validate == nil {
 		return nil, 0, unsupported("a schema other than finding.schema.json")
 	}
 	if o.TimeoutMs < 0 || o.TimeoutMs > math.MaxInt32 {
@@ -285,7 +291,11 @@ func buildStep(o Opts, s step, sessionDir string) (built, error) {
 		if effort != "" {
 			argv = append(argv, "--effort", effort)
 		}
-		argv = append(argv, "--safe-mode", "--tools", "", "--strict-mcp-config", "--no-session-persistence", "--output-format", "json")
+		argv = append(argv, "--safe-mode", "--tools", "", "--strict-mcp-config", "--no-session-persistence")
+		if o.SystemPrompt != nil {
+			argv = append(argv, "--system-prompt", *o.SystemPrompt)
+		}
+		argv = append(argv, "--output-format", "json")
 		if o.Schema != nil {
 			body := o.Schema.Clone()
 			body.Delete("$schema")
@@ -310,6 +320,9 @@ func buildStep(o Opts, s step, sessionDir string) (built, error) {
 			argv = append(argv, "--json-schema", string(text))
 		}
 		argv = append(argv, "--disallowed-tools", "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch", "--deny", "*", "--no-plan", "--no-subagents", "--max-turns", "1", "--permission-mode", "dontAsk", "--cwd", cwd)
+		if o.SystemPrompt != nil {
+			argv = append(argv, "--system-prompt-override", *o.SystemPrompt)
+		}
 		return built{cli: "grok", argv: argv, cwd: cwd, env: []string{"GROK_CURSOR_MCPS_ENABLED=false", "GROK_CLAUDE_MCPS_ENABLED=false"}}, nil
 	}
 }
@@ -727,6 +740,12 @@ func foreground(b built, o Opts, deps Deps) (ledger.Object, error) {
 			code = jsNum(c)
 		}
 		return with(ledger.Object{{Key: "status", Value: "failed"}, {Key: "reason", Value: "exit " + code}, {Key: "answer", Value: nil}}), nil
+	}
+	if o.Schema != nil && o.Validate != nil {
+		if !hasAnswer || !o.Validate(answer) {
+			return with(ledger.Object{{Key: "status", Value: "invalid-output"}, {Key: "reason", Value: "answer does not match the schema"}, {Key: "answer", Value: nil}}), nil
+		}
+		return with(ledger.Object{{Key: "status", Value: "ok"}, {Key: "answer", Value: answer}}), nil
 	}
 	if o.Schema != nil {
 		var raw any
