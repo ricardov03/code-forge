@@ -1,0 +1,74 @@
+What you will share (public on GitHub): code-forge, Node and OS versions; command names and flag NAMES; the names of the last commands you ran (no flags or values); exit codes; error types; error messages and crash reports after cleaning.
+Never shared: flag values, file contents, your code, keys or tokens, your home folder, project folder or project name.
+Cleaned: 3 home paths, 2 project paths, 1 project name, 1 email, 1 1Password reference, 1 1Password item ID, 1 custom thing.
+AI cleaning was skipped (--no-ai); only the built-in cleaning ran.
+
+Title: [error report] block error
+
+## code-forge error report
+
+### What you were doing
+
+(not given)
+
+### Versions
+
+- code-forge: 0.22.1
+- latest on npm: 0.22.1
+- Node: v24.22.1
+- OS: darwin 25.2.0 arm64
+
+### Error details
+
+| # | when | command | exit | kind | fingerprint |
+|---|---|---|---|---|---|
+| 1 | 2026-11-10T10:00:00.000Z | block close | 1 | error | 0123456789ab |
+| 2 | 2026-11-09T10:00:00.000Z | block close | 1 | error | 0123456789ab |
+
+#### 1. block close: error
+
+- when: 2026-11-10T10:00:00.000Z
+- flags: `--yes` `--json`
+- commands before (oldest first): `status`, `gates run`
+- exit: 1
+- kind: error
+- fingerprint: 0123456789ab
+- code-forge 0.22.0, Node v24.1.0, darwin arm64
+
+message:
+
+```text
+failed at ~/x and <project>/src/a.go for <email> in <slug> op://<ref> <item-id>
+```
+
+stack:
+
+````text
+Error: boom ``` x
+    at <project>/x.mjs:1
+````
+
+#### 2. block close: error
+
+- when: 2026-11-09T10:00:00.000Z
+- flags: `--yes`
+- exit: 1
+- kind: error
+- fingerprint: 0123456789ab
+- code-forge 0.22.0, Node v24.1.0, darwin arm64
+
+message:
+
+```text
+older | pipe
+line
+```
+
+### Fingerprint
+
+Fingerprint: 0123456789ab
+
+<!-- code-forge-fp: 0123456789ab -->
+
+This error was already reported: https://github.com/x/y/issues/7 (open)
+commented: https://github.com/x/y/issues/7

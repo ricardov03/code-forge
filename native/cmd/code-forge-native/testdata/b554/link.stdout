@@ -1,0 +1,77 @@
+Could not check npm for a newer code-forge (npm did not run); going on.
+What you will share (public on GitHub): code-forge, Node and OS versions; command names and flag NAMES; the names of the last commands you ran (no flags or values); exit codes; error types; error messages and crash reports after cleaning.
+Never shared: flag values, file contents, your code, keys or tokens, your home folder, project folder or project name.
+Cleaned: 3 home paths, 2 project paths, 1 project name, 1 email, 1 1Password reference, 1 1Password item ID, 1 custom thing.
+AI cleaning was skipped (--no-ai); only the built-in cleaning ran.
+
+Title: [error report] block error
+
+## code-forge error report
+
+### What you were doing
+
+(not given)
+
+### Versions
+
+- code-forge: 0.22.1
+- latest on npm: unknown
+- Node: v24.22.1
+- OS: darwin 25.2.0 arm64
+
+### Error details
+
+| # | when | command | exit | kind | fingerprint |
+|---|---|---|---|---|---|
+| 1 | 2026-11-10T10:00:00.000Z | block close | 1 | error | 0123456789ab |
+| 2 | 2026-11-09T10:00:00.000Z | block close | 1 | error | 0123456789ab |
+
+#### 1. block close: error
+
+- when: 2026-11-10T10:00:00.000Z
+- flags: `--yes` `--json`
+- commands before (oldest first): `status`, `gates run`
+- exit: 1
+- kind: error
+- fingerprint: 0123456789ab
+- code-forge 0.22.0, Node v24.1.0, darwin arm64
+
+message:
+
+```text
+failed at ~/x and <project>/src/a.go for <email> in <slug> op://<ref> <item-id>
+```
+
+stack:
+
+````text
+Error: boom ``` x
+    at <project>/x.mjs:1
+````
+
+#### 2. block close: error
+
+- when: 2026-11-09T10:00:00.000Z
+- flags: `--yes`
+- exit: 1
+- kind: error
+- fingerprint: 0123456789ab
+- code-forge 0.22.0, Node v24.1.0, darwin arm64
+
+message:
+
+```text
+older | pipe
+line
+```
+
+### Fingerprint
+
+Fingerprint: 0123456789ab
+
+<!-- code-forge-fp: 0123456789ab -->
+
+Already reported? Search first:
+https://github.com/ricardov03/code-forge/issues?q=0123456789ab
+Open this link to file the issue:
+https://github.com/ricardov03/code-forge/issues/new?template=error-report.yml&title=%5Berror%20report%5D%20block%20error&labels=error-report&fingerprint=0123456789ab&details=%23%23%20code-forge%20error%20report%0A%0A%23%23%23%20What%20you%20were%20doing%0A%0A(not%20given)%0A%0A%23%23%23%20Versions%0A%0A-%20code-forge%3A%200.22.1%0A-%20latest%20on%20npm%3A%20unknown%0A-%20Node%3A%20v24.22.1%0A-%20OS%3A%20darwin%2025.2.0%20arm64%0A%0A%23%23%23%20Error%20details%0A%0A%7C%20%23%20%7C%20when%20%7C%20command%20%7C%20exit%20%7C%20kind%20%7C%20fingerprint%20%7C%0A%7C---%7C---%7C---%7C---%7C---%7C---%7C%0A%7C%201%20%7C%202026-11-10T10%3A00%3A00.000Z%20%7C%20block%20close%20%7C%201%20%7C%20error%20%7C%200123456789ab%20%7C%0A%7C%202%20%7C%202026-11-09T10%3A00%3A00.000Z%20%7C%20block%20close%20%7C%201%20%7C%20error%20%7C%200123456789ab%20%7C%0A%0A%23%23%23%23%201.%20block%20close%3A%20error%0A%0A-%20when%3A%202026-11-10T10%3A00%3A00.000Z%0A-%20flags%3A%20%60--yes%60%20%60--json%60%0A-%20commands%20before%20(oldest%20first)%3A%20%60status%60%2C%20%60gates%20run%60%0A-%20exit%3A%201%0A-%20kind%3A%20error%0A-%20fingerprint%3A%200123456789ab%0A-%20code-forge%200.22.0%2C%20Node%20v24.1.0%2C%20darwin%20arm64%0A%0Amessage%3A%0A%0A%60%60%60text%0Afailed%20at%20~%2Fx%20and%20%3Cproject%3E%2Fsrc%2Fa.go%20for%20%3Cemail%3E%20in%20%3Cslug%3E%20op%3A%2F%2F%3Cref%3E%20%3Citem-id%3E%0A%60%60%60%0A%0Astack%3A%0A%0A%60%60%60%60text%0AError%3A%20boom%20%60%60%60%20x%0A%20%20%20%20at%20%3Cproject%3E%2Fx.mjs%3A1%0A%60%60%60%60%0A%0A%23%23%23%23%202.%20block%20close%3A%20error%0A%0A-%20when%3A%202026-11-09T10%3A00%3A00.000Z%0A-%20flags%3A%20%60--yes%60%0A-%20exit%3A%201%0A-%20kind%3A%20error%0A-%20fingerprint%3A%200123456789ab%0A-%20code-forge%200.22.0%2C%20Node%20v24.1.0%2C%20darwin%20arm64%0A%0Amessage%3A%0A%0A%60%60%60text%0Aolder%20%7C%20pipe%0Aline%0A%60%60%60%0A%0A%23%23%23%20Fingerprint%0A%0AFingerprint%3A%200123456789ab%0A%0A%3C!--%20code-forge-fp%3A%200123456789ab%20--%3E%0A

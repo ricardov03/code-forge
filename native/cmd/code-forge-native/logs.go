@@ -154,7 +154,7 @@ func runLogs(args []string) int {
 				output, ok = logsSummary(entries, n, asJSON)
 			case "report":
 				if logsReportPicks(entries, flags, n) {
-					return logsHandover(args, hLogsReport) // the npm check, AI scrub and gh stay in Node
+					return logsReport(args, flags, entries, n, crumb) // B554
 				}
 				output = "no matching errors to report\n"
 			default:

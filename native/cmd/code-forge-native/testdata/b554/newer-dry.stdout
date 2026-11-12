@@ -1,0 +1,94 @@
+You use 0.22.1. 0.23.0 is out. Many errors are fixed in newer versions: upgrade with npm install -g @codedology/code-forge@latest and try again first.
+What you will share (public on GitHub): code-forge, Node and OS versions; command names and flag NAMES; the names of the last commands you ran (no flags or values); exit codes; error types; error messages and crash reports after cleaning; warnings (problems code-forge recovered from) after cleaning.
+Never shared: flag values, file contents, your code, keys or tokens, your home folder, project folder or project name.
+Cleaned: 3 home paths, 2 project paths, 1 project name, 1 email, 1 1Password reference, 1 1Password item ID, 1 custom thing.
+AI cleaning was skipped (--no-ai); only the built-in cleaning ran.
+
+Title: [error report] 3 errors
+
+## code-forge error report
+
+### What you were doing
+
+(not given)
+
+### Versions
+
+- code-forge: 0.22.1
+- latest on npm: 0.23.0
+- Node: v24.22.1
+- OS: darwin 25.2.0 arm64
+
+### Error details
+
+| # | when | command | exit | kind | fingerprint |
+|---|---|---|---|---|---|
+| 1 | 2026-11-10T10:00:00.000Z | block close | 1 | error | 0123456789ab |
+| 2 | 2026-11-09T11:00:00.000Z | gates | 0 | warning | bbbbbbbbbbbb |
+| 3 | 2026-11-09T10:00:00.000Z | block close | 1 | error | 0123456789ab |
+
+#### 1. block close: error
+
+- when: 2026-11-10T10:00:00.000Z
+- flags: `--yes` `--json`
+- commands before (oldest first): `status`, `gates run`
+- exit: 1
+- kind: error
+- fingerprint: 0123456789ab
+- code-forge 0.22.0, Node v24.1.0, darwin arm64
+
+message:
+
+```text
+failed at ~/x and <project>/src/a.go for <email> in <slug> op://<ref> <item-id>
+```
+
+stack:
+
+````text
+Error: boom ``` x
+    at <project>/x.mjs:1
+````
+
+#### 2. gates: warning
+
+- when: 2026-11-09T11:00:00.000Z
+- flags: none
+- exit: 0
+- kind: warning
+- warning: slow gate
+- fingerprint: bbbbbbbbbbbb
+- code-forge 0.22.0, Node v24.1.0, darwin arm64
+
+message:
+
+```text
+slow
+```
+
+#### 3. block close: error
+
+- when: 2026-11-09T10:00:00.000Z
+- flags: `--yes`
+- exit: 1
+- kind: error
+- fingerprint: 0123456789ab
+- code-forge 0.22.0, Node v24.1.0, darwin arm64
+
+message:
+
+```text
+older | pipe
+line
+```
+
+### Fingerprint
+
+Fingerprint: 0123456789ab
+
+Other fingerprints: bbbbbbbbbbbb
+
+<!-- code-forge-fp: 0123456789ab -->
+<!-- code-forge-fp: bbbbbbbbbbbb -->
+
+dry run: not sent
