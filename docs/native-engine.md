@@ -86,7 +86,7 @@ See [how it works](how-it-works.md) for the scope rules and reuse checks.
 
 A hand-over always passes the original arguments. Node then runs the command
 exactly as before. When Go is not sure it gives the same answer, it hands over.
-Commands such as `code-forge version` and the full `code-forge doctor` also go through
+Commands such as the full `code-forge doctor` also go through
 Go to Node. Go additionally runs private helpers and the optional background
 daemon.
 
