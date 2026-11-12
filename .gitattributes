@@ -1,4 +1,5 @@
 # Every block adds its CHANGELOG line at the top of [Unreleased]; union keeps both sides (B396).
 CHANGELOG.md merge=union
 # Blocks append hand-over reasons at the end of the const block and the array only; union keeps both sides (B510).
-native/cmd/code-forge-native/handover_log.go merge=union
+# The file holds only that list; the functions stay in handover_log.go so a union merge cannot garble code (B513).
+native/cmd/code-forge-native/handover_reasons.go merge=union

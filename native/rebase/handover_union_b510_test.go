@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// B510: the hand-over reason list (native/cmd/code-forge-native/handover_log.go)
+// B510: the hand-over reason list (native/cmd/code-forge-native/handover_reasons.go since B513)
 // is append-only in practice: every block adds a constant at the end of the
 // iota block and an entry at the end of the handoverReasons array. Two blocks
 // doing that at once used to stop the land on a conflict. The repository's
@@ -16,7 +16,7 @@ import (
 // tests run real git and real go on a small file of the same shape, with the
 // repository's own .gitattributes copied in.
 
-const handoverPath = "native/cmd/code-forge-native/handover_log.go"
+const handoverPath = "native/cmd/code-forge-native/handover_reasons.go"
 const handoverMod = "native/cmd/code-forge-native/go.mod"
 
 // handoverBase has the shape of the real file: an iota block and a keyed

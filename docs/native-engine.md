@@ -170,7 +170,7 @@ and writes nothing, in Go. Review dates in every ECMAScript date-time form (year
 `close-help` now means only a `--help=value` or `-h=value` spelling.
 `land-merge-gate` is reserved for a full-suite gate configuration Go cannot run.
 The full code list is the `handoverReasons` table in
-[`handover_log.go`](../native/cmd/code-forge-native/handover_log.go).
+[`handover_reasons.go`](../native/cmd/code-forge-native/handover_reasons.go).
 
 ### Measure it
 
@@ -429,5 +429,7 @@ This prevents random failures under load from reading a partial fixture.
 
 New hand-over reasons go at the end only: one constant at the end of the
 `const` block and one entry at the end of the `handoverReasons` array in
-`native/cmd/code-forge-native/handover_log.go`. `.gitattributes` merges that
-file with `merge=union`, so two such appends land without a conflict (B510).
+`native/cmd/code-forge-native/handover_reasons.go`. That file holds only the
+list; the functions that use it stay in `handover_log.go`. `.gitattributes` merges
+`handover_reasons.go` with `merge=union`, so two such appends land without a
+conflict (B510, B513).
