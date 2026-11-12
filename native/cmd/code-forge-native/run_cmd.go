@@ -189,7 +189,11 @@ func runRun(args []string) int {
 			runID, hasRun := flags.values["run"]
 			switch {
 			case flags.add:
-				return runHandover(args, hRunAddWorker)
+				var reason handoverReason
+				plan, reason = runAddWorkerPlan(home, runID)
+				if plan == nil {
+					return runHandover(args, reason)
+				}
 			case sub == "start" && flags.reattach:
 				var reason handoverReason
 				plan, reason = runReattachPlan(home, runID, workerPid)
@@ -197,7 +201,11 @@ func runRun(args []string) int {
 					return runHandover(args, reason)
 				}
 			case sub == "start":
-				return runHandover(args, hRunStart)
+				var reason handoverReason
+				plan, reason = runStartPlan(home, flags, workerPid)
+				if plan == nil {
+					return runHandover(args, reason)
+				}
 			case sub == "status" && hasRun:
 				var reason handoverReason
 				plan, reason = runStatusPlan(home, runID)
@@ -205,7 +213,11 @@ func runRun(args []string) int {
 					return runHandover(args, reason)
 				}
 			case sub == "reload" && hasRun:
-				return runHandover(args, hRunReload)
+				var reason handoverReason
+				plan, reason = runReloadPlan(home, runID)
+				if plan == nil {
+					return runHandover(args, reason)
+				}
 			case sub == "end" && hasRun:
 				var reason handoverReason
 				plan, reason = runEndPlan(home, runID)
