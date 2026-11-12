@@ -63,9 +63,8 @@ func nodeFlags(args []string, booleans, values []string) (map[string]string, []s
 	return flags, positionals, ""
 }
 
-// preparePlan is src/cli/plan.mjs up to its config load: usage and the plan
-// and facts reads answer here. The check itself (checkPlan with the facts
-// sheet, project config and ledger lanes) stays in Node.
+// preparePlan is src/cli/plan.mjs: usage, the plan and facts reads, then
+// the check (plan_check.go).
 func preparePlan(args []string) (func(stdout, stderr io.Writer) int, handoverReason, bool) {
 	refuse := func(text string) (func(stdout, stderr io.Writer) int, handoverReason, bool) {
 		return func(_, stderr io.Writer) int {
@@ -87,13 +86,18 @@ func preparePlan(args []string) (func(stdout, stderr io.Writer) int, handoverRea
 		}
 		return filepath.Join(cwd, p)
 	}
-	if _, err := os.ReadFile(resolve(positionals[1])); err != nil {
+	planPath := resolve(positionals[1])
+	text, err := os.ReadFile(planPath)
+	if err != nil {
 		return refuse("plan: the plan file cannot be read\n")
 	}
-	if facts, ok := flags["facts"]; ok {
-		if _, err := os.ReadFile(resolve(facts)); err != nil {
+	factsPath, factsText := "", []byte(nil)
+	facts, hasFacts := flags["facts"]
+	if hasFacts {
+		factsPath = resolve(facts)
+		if factsText, err = os.ReadFile(factsPath); err != nil {
 			return refuse("plan: --facts cannot be read\n")
 		}
 	}
-	return nil, hPlanCheckUnported, false
+	return preparePlanCheck(cwd, planPath, factsPath, hasFacts, nodeUTF8(string(text)), nodeUTF8(string(factsText)), flags)
 }

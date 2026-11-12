@@ -214,6 +214,12 @@ const (
 	hDoctorKeyRefresh
 	hDoctorLedgerShape
 	hDoctorNoHome
+	hPlanCheckNodeThrows
+	hPlanCheckLimits
+	hPlanCheckLedgerRead
+	hUpgradePackageRoot
+	hUpgradeUnsafeTarget
+	hUpgradeDocsSync
 )
 
 var handoverReasons = [...]string{
@@ -407,6 +413,12 @@ var handoverReasons = [...]string{
 	hDoctorKeyRefresh:          "doctor-key-refresh",
 	hDoctorLedgerShape:         "doctor-ledger-shape",
 	hDoctorNoHome:              "doctor-no-home",
+	hPlanCheckNodeThrows:       "plan-check-node-throws",
+	hPlanCheckLimits:           "plan-check-limits",
+	hPlanCheckLedgerRead:       "plan-check-ledger-read",
+	hUpgradePackageRoot:        "upgrade-package-root",
+	hUpgradeUnsafeTarget:       "upgrade-unsafe-target",
+	hUpgradeDocsSync:           "upgrade-docs-sync",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {

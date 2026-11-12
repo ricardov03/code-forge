@@ -31,11 +31,14 @@ func TestB471PlanUsageAndReadsMatchNode(t *testing.T) {
 	})
 }
 
-// The check itself (facts, config, ledger lanes) goes to Node.
-func TestB471PlanCheckHandsOver(t *testing.T) {
+// B475: the check runs in Go (it handed over as plan-check-unported).
+func TestB471PlanCheckRunsInGo(t *testing.T) {
 	_, repo := smallProject(t, "")
 	writeHomeFile(t, repo, "plan.md", "# plan\n")
 	writeHomeFile(t, repo, "facts.md", "x")
-	expectHandover(t, "plan-check-unported", "plan", "check", "plan.md")
-	expectHandover(t, "plan-check-unported", "plan", "check", "plan.md", "--facts", "facts.md", "--slug", "demo")
+	none := "no block table found (a table with id, owned_files and acceptance columns)\n"
+	checkSmallCases(t, []smallCase{
+		{[]string{"plan", "check", "plan.md"}, 1, "", none},
+		{[]string{"plan", "check", "plan.md", "--facts", "facts.md", "--slug", "demo"}, 1, "", none},
+	})
 }
