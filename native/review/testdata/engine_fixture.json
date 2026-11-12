@@ -1,0 +1,916 @@
+{
+ "cases": [
+  {
+   "name": "clean-full",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 45
+     }
+    }
+   ]
+  },
+  {
+   "name": "quick-warning",
+   "file": "notes.txt",
+   "risk": 0,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": false,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F1",
+        "file": "notes.txt",
+        "line_start": 1,
+        "line_end": 2,
+        "severity": "warning",
+        "category": "logic",
+        "claim": "c",
+        "evidence": "e",
+        "fix": "x"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "nit-approved",
+   "file": "notes.txt",
+   "risk": 0.5,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F1",
+        "file": "notes.txt",
+        "line_start": 1,
+        "line_end": 2,
+        "severity": "nit",
+        "category": "logic",
+        "claim": "c",
+        "evidence": "e",
+        "fix": "x"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "hunks-mismatch",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": [],
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "timeout-then-ok",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "timeout-twice-nowriter",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": false,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ],
+     "tail_note": "t"
+    }
+   ]
+  },
+  {
+   "name": "timeout-other-model",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m9",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "timeout-no-identity",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "timeout"
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "spawn-throws",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    "throw"
+   ]
+  },
+  {
+   "name": "spawn-null",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    null
+   ]
+  },
+  {
+   "name": "at-capacity",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "unavailable",
+     "reason": "at-capacity",
+     "provider": "claude",
+     "model": "m2"
+    }
+   ]
+  },
+  {
+   "name": "budget",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "unavailable",
+     "reason": "budget",
+     "message": "budget.usd 3 reached"
+    }
+   ]
+  },
+  {
+   "name": "truncated",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "invalid-output",
+     "provider": "claude",
+     "model": "m2",
+     "answer": null,
+     "text": "{\"passed\": false, \"summary\": \"ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss\", \"reviewed_hunks\": \"$HUNKS\", \"findings\": [{\"id\": \"F1\", \"file\": \"notes.txt\", \"line_start\": 1, \"line_end\": 2, \"severity\": \"warning\", \"category\": \"logic\", \"claim\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"evidence\": \"e\", \"fix\": \"x\"}]}",
+     "usage": {
+      "tokens_in": 5,
+      "tokens_out": 400
+     }
+    }
+   ]
+  },
+  {
+   "name": "passed-coerced",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": null,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F1",
+        "file": "notes.txt",
+        "line_start": 1,
+        "line_end": 2,
+        "severity": "warning",
+        "category": "logic",
+        "claim": "c",
+        "evidence": "e",
+        "fix": "x"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "schema-nowriter",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": false,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "extra": 1
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "too-short",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": false,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F1",
+        "file": "notes.txt",
+        "line_start": 1,
+        "line_end": 2,
+        "severity": "warning",
+        "category": "logic",
+        "claim": "c",
+        "evidence": "e",
+        "fix": "x"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 100
+     }
+    }
+   ]
+  },
+  {
+   "name": "no-usage",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "row": {
+      "tokens_out": 50
+     }
+    }
+   ]
+  },
+  {
+   "name": "no-change",
+   "file": "same.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": []
+  },
+  {
+   "name": "split-step-up-ok",
+   "file": "big.txt",
+   "risk": 0,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "budgets": {
+      "quick_in": 100
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "split-step-up-split",
+   "file": "big.txt",
+   "risk": 0,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "budgets": {
+      "quick_in": 100,
+      "full_in": 100
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": []
+  },
+  {
+   "name": "split-full",
+   "file": "big.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 100
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": []
+  },
+  {
+   "name": "big-full-context",
+   "file": "big.txt",
+   "risk": 1.5,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F1",
+        "file": "notes.txt",
+        "line_start": 1,
+        "line_end": 2,
+        "severity": "nit",
+        "category": "logic",
+        "claim": "c",
+        "evidence": "e",
+        "fix": "x"
+       },
+       {
+        "id": "F2",
+        "file": "notes.txt",
+        "line_start": 1,
+        "line_end": 2,
+        "severity": "critical",
+        "category": "logic",
+        "claim": "c",
+        "evidence": "e",
+        "fix": "x"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 300
+     }
+    }
+   ]
+  },
+  {
+   "name": "new-file",
+   "file": "new.yaml",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "single-max-2",
+   "file": "notes.txt",
+   "risk": 2,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "single_reviewer_max_risk": 2,
+     "multimodel": true
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "min-tokens-cfg",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "min_tokens_out": 200
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": false,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F1",
+        "file": "notes.txt",
+        "line_start": 1,
+        "line_end": 2,
+        "severity": "warning",
+        "category": "logic",
+        "claim": "c",
+        "evidence": "e",
+        "fix": "x"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  }
+ ]
+}
