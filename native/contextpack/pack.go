@@ -233,7 +233,11 @@ func walkLinks(file string) string {
 	}
 	return cur
 }
-func readLines(root, rel, key string) ([]string, error) {
+func readLines(root, rel, key string) ([]string, error) { return readLinesMasked(root, rel, key, nil) }
+
+// readLinesMasked is readLines with pack.mjs's redact(raw) before the trim
+// (mask nil: no secrets registered).
+func readLinesMasked(root, rel, key string, mask func(string) string) ([]string, error) {
 	shown := key + ": " + quote(rel)
 	if control(rel) {
 		return nil, refusal(shown + " contains a control character")
@@ -268,7 +272,44 @@ func readLines(root, rel, key string) ([]string, error) {
 		return nil, refusal(shown + " cannot be read (" + errno(err) + ")")
 	}
 	// readFileSync(file, 'utf8') replaces each invalid sequence with U+FFFD.
-	return split(trimEnd(DecodeUTF8(b))), nil
+	text := DecodeUTF8(b)
+	if mask != nil {
+		text = mask(text)
+	}
+	return split(trimEnd(text)), nil
+}
+
+// DigestLessonsHeading is pack.mjs DIGEST_LESSONS_HEADING.
+const DigestLessonsHeading = "### lessons"
+
+// ReviewDigest is pack.mjs reviewDigest: the rules files' lines, then the
+// lessons heading and the lessons file's lines, each file redacted with mask;
+// "" without a `context` key (or a null one). A bad `context` value or a file
+// that cannot be read is an *Error (Node's ContextError).
+func ReviewDigest(root string, cfg map[string]any, mask func(string) string) (string, error) {
+	if cfg["context"] == nil {
+		return "", nil
+	}
+	s, err := settingsFor(cfg, root)
+	if err != nil || s == nil {
+		return "", err
+	}
+	out := []string{}
+	for _, rel := range s.rules {
+		lines, err := readLinesMasked(root, rel, "context.rules", mask)
+		if err != nil {
+			return "", err
+		}
+		out = append(out, lines...)
+	}
+	if s.lessons != "" {
+		lines, err := readLinesMasked(root, s.lessons, "context.lessons", mask)
+		if err != nil {
+			return "", err
+		}
+		out = append(append(out, DigestLessonsHeading), lines...)
+	}
+	return strings.Join(out, "\n"), nil
 }
 
 var bareToken = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
