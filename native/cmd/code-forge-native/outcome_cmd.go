@@ -169,7 +169,7 @@ func prepareOutcome(args []string) (func(stdout, stderr io.Writer) int, handover
 		return usage, 0, true
 	}
 	command, rest := args[0], args[1:]
-	var file, root string
+	var file, root, explicitStep string
 	haveFile, haveRoot, haveStep, asJSON := false, false, false, false
 	for i := 0; i < len(rest); i++ {
 		arg := rest[i]
@@ -184,7 +184,7 @@ func prepareOutcome(args []string) (func(stdout, stderr io.Writer) int, handover
 			if haveStep || i+1 >= len(rest) || rest[i+1] == "" || strings.HasPrefix(rest[i+1], "-") {
 				return usage, 0, true
 			}
-			haveStep = true
+			explicitStep, haveStep = rest[i+1], true
 			i++
 		case arg == "--json" && command != "seal" && !asJSON:
 			asJSON = true
@@ -241,7 +241,11 @@ func prepareOutcome(args []string) (func(stdout, stderr io.Writer) int, handover
 			return nil, hOutcomeUnsupported, false
 		}
 		if command == "record" && len(problems) == 0 {
-			return nil, hOutcomeRecordUnported, false
+			var step any
+			if haveStep {
+				step = explicitStep
+			}
+			return prepareOutcomeRecord(file, root, step, haveStep, asJSON)
 		}
 	}
 
