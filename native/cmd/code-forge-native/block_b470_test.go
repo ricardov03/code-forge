@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -241,5 +244,67 @@ func TestB470OpenBriefErrorsAreNative(t *testing.T) {
 				t.Fatal("the run record changed")
 			}
 		})
+	}
+}
+
+// stop with a serving daemon: the done file's spend comes from the daemon's
+// rows for the block, as Node's writeDoneFile asks it first (B470).
+func TestB470StopUsesDaemonRows(t *testing.T) {
+	// a unix socket path must stay short, so this home is not t.TempDir()
+	home, err := os.MkdirTemp("/tmp", "cf-b470-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	run := "r-stop"
+	record := map[string]any{"run_id": run, "project": "unit", "workspace": t.TempDir(), "status": "active", "orphans": []string{}, "blocks": map[string]any{"B1": map[string]any{"status": "open", "owned_files": []string{}}}}
+	b451WriteRun(t, home, run, record)
+	closeFixtureWrite(t, filepath.Join(home, ".code-forge/ledger/unit.jsonl"), []byte(`{"run":"r-stop","block":"B1","event":"session","usd":2}`+"\n"))
+	dir := filepath.Join(home, ".code-forge/runs", run)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", filepath.Join(dir, "native.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	asked := make(chan map[string]any, 8)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				scan := bufio.NewScanner(conn)
+				for scan.Scan() {
+					var request map[string]any
+					if json.Unmarshal(scan.Bytes(), &request) != nil {
+						return
+					}
+					if request["method"] == "ping" {
+						_ = json.NewEncoder(conn).Encode(map[string]any{"ok": true, "run": run, "version": version})
+						continue
+					}
+					asked <- request
+					_ = json.NewEncoder(conn).Encode(map[string]any{"rows": []any{map[string]any{"run": run, "block": "B1", "event": "session", "usd": 0.5}}})
+					return
+				}
+			}()
+		}
+	}()
+	res := b451Run(t, home, "stop", "B1", "--run", run, "--reason", "done")
+	if res.code != 0 || res.stderr != "" || !strings.HasPrefix(res.stdout, "block B1 stopped") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q; want Go's stop", res.code, res.stdout, res.stderr)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "blocks", "B1.done.json"))
+	var done map[string]any
+	if err != nil || json.Unmarshal(data, &done) != nil || done["spent_usd"] != 0.5 {
+		t.Fatalf("done file %s %v; want spent_usd 0.5 from the daemon's rows", data, err)
+	}
+	if request := <-asked; request["method"] != "rows" || request["block"] != "B1" {
+		t.Fatalf("daemon request %v; want rows for B1", request)
 	}
 }

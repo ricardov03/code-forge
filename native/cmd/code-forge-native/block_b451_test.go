@@ -207,9 +207,9 @@ func TestB451OpenAcceptanceReadError(t *testing.T) {
 	}
 }
 
-// stop-daemon (fix1): Node stops a block with a daemon socket, so Go keeps
-// the hand-over until B466 ports it; no refusal, and Go writes nothing first.
-func TestB451StopDaemonHandoverKept(t *testing.T) {
+// stop-daemon: a socket with no daemon behind it is Node's daemonRequest
+// failure; the stop runs in Go and the done file reads the ledger (B470).
+func TestB451StopDaemonSocketWithoutDaemonIsNative(t *testing.T) {
 	home := t.TempDir()
 	record := map[string]any{"run_id": "r-stop", "project": "unit", "workspace": t.TempDir(), "status": "active", "orphans": []string{}, "blocks": map[string]any{"B1": map[string]any{"status": "open", "owned_files": []string{}}}}
 	b451WriteRun(t, home, "r-stop", record)
@@ -220,18 +220,12 @@ func TestB451StopDaemonHandoverKept(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sock, "native.sock"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	runFile := filepath.Join(home, ".code-forge", "runs", "r-stop.json")
-	before, _ := os.ReadFile(runFile)
-	res := b451RunWith(t, home, true, "stop", "B1", "--run", "r-stop", "--reason", "done")
-	if res.code != 127 || strings.Contains(res.stderr, "refused") {
-		t.Fatalf("exit=%d stdout=%q stderr=%q; want the Node hand-over (exit 127 with no Node), not a refusal", res.code, res.stdout, res.stderr)
+	res := b451Run(t, home, "stop", "B1", "--run", "r-stop", "--reason", "done")
+	if res.code != 0 || res.stderr != "" || !strings.HasPrefix(res.stdout, "block B1 stopped") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q; want Go's stop", res.code, res.stdout, res.stderr)
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
-	if err != nil || !strings.Contains(string(data), `"stop-daemon"`) {
-		t.Fatalf("hand-over log %q %v; want a stop-daemon row", data, err)
-	}
-	if after, _ := os.ReadFile(runFile); string(after) != string(before) {
-		t.Fatal("Go changed the run file before handing over")
+	if _, err := os.Stat(filepath.Join(sock, "blocks", "B1.done.json")); err != nil {
+		t.Fatalf("done file: %v", err)
 	}
 }
 

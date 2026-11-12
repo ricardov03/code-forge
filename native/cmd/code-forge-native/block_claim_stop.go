@@ -293,13 +293,6 @@ func blockClaimStop(sub string, args []string) int {
 	safe := func(current ledger.Object) bool {
 		return blockGrantEndSafe(current) && blockStorageSafe(home, run, current)
 	}
-	// A serving daemon can return a different rows snapshot. Let Node negotiate
-	// its protocol rather than mixing that snapshot with a direct ledger read.
-	if sub == "stop" && os.Getenv("CODE_FORGE_NATIVE") != "0" {
-		if _, err := os.Lstat(filepath.Join(home, ".code-forge", "runs", run, "native.sock")); err == nil {
-			return fallback(hStopDaemon)
-		}
-	}
 	if sub == "stop" {
 		if _, ok := blockDoneFacts(home, run, id, record); !ok {
 			return fallback(hStopDoneFacts)
@@ -383,7 +376,9 @@ func blockIOMessage(err error) string {
 // registry to the requested block, presented as open so ended blocks are counted.
 // Unsupported gate-clearing rules trigger delegation before stop changes state.
 func blockDoneFacts(home, run, id string, record ledger.Object) (ledger.Object, bool) {
-	rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), blockString(record.Get("project")))
+	// Node's writeDoneFile asks a serving daemon for the block's rows first and
+	// reads the ledger when it does not answer (B470).
+	rows, err := closeDoneRows(home, run, id, record)
 	if err != nil {
 		return ledger.Object{{Key: "spent_usd", Value: nil}, {Key: "unknown_usd_sessions", Value: nil}, {Key: "findings", Value: nil}}, true
 	}
