@@ -123,10 +123,23 @@ func runIntFlag(raw, name string) (float64, error) {
 }
 
 // runOut tracks the last non-blank stderr text, which Node logs as the message.
-type runOut struct{ last string }
+// runOut writes the verb's output; redact, when set, masks each write
+// (Node's writeSafe).
+type runOut struct {
+	last   string
+	redact func(string) string
+}
 
-func (o *runOut) out(s string) { fmt.Fprint(os.Stdout, s) }
+func (o *runOut) out(s string) {
+	if o.redact != nil {
+		s = o.redact(s)
+	}
+	fmt.Fprint(os.Stdout, s)
+}
 func (o *runOut) err(s string) {
+	if o.redact != nil {
+		s = o.redact(s)
+	}
 	fmt.Fprint(os.Stderr, s)
 	if strings.TrimSpace(s) != "" {
 		o.last = s

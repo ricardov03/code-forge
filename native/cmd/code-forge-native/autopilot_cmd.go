@@ -184,7 +184,8 @@ func runAutopilot(args []string) int {
 		crumb, logSub = "autopilot "+sub, sub
 	}
 	before := gatesBreadcrumbName(crumb)
-	o := &runOut{}
+	autopilotSecrets = nil // a fresh process: nothing registered yet
+	o := &runOut{redact: autopilotRedact}
 	code := 0
 	switch {
 	case !known:
@@ -509,7 +510,7 @@ func autopilotStrings(v any) []string {
 }
 
 func autopilotStatus(o *runOut, home, runID string, flags autopilotFlags, now time.Time) int {
-	checked, err := autopilot.CheckExpiry(home, runID, now)
+	checked, err := autopilotCheckExpiry(home, runID, now)
 	if err != nil {
 		return autopilotReport(o, "status", err)
 	}
@@ -624,7 +625,7 @@ func autopilotStatus(o *runOut, home, runID string, flags autopilotFlags, now ti
 
 func autopilotStop(o *runOut, home, runID string, now time.Time) int {
 	// the expiry check first: an expired grant gets its one expire row and no stop row
-	checked, err := autopilot.CheckExpiry(home, runID, now)
+	checked, err := autopilotCheckExpiry(home, runID, now)
 	if err != nil {
 		return autopilotReport(o, "stop", err)
 	}
@@ -650,7 +651,7 @@ func autopilotStop(o *runOut, home, runID string, now time.Time) int {
 		if stateName == "expired" {
 			return &runFail{autopilot.ExpiredMessage(runID, autopilotText(grant.Get("until"))), false}
 		}
-		if _, err := state.WriteSigned(home, runID, ledger.Object{{Key: "event", Value: "autopilot.stop"}, {Key: "grant_id", Value: grant.Get("grant_id")}, {Key: "ts", Value: autopilotStamp(now)}}); err != nil {
+		if _, err := autopilotWriteSigned(home, runID, ledger.Object{{Key: "event", Value: "autopilot.stop"}, {Key: "grant_id", Value: grant.Get("grant_id")}, {Key: "ts", Value: autopilotStamp(now)}}); err != nil {
 			return err
 		}
 		grant.Set("status", "stopped")
@@ -860,7 +861,7 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 	if record.Get("status") != "active" {
 		return autopilotReport(o, "start", &runFail{"run " + runID + " has ended", false})
 	}
-	before, err := autopilot.CheckExpiry(home, runID, now)
+	before, err := autopilotCheckExpiry(home, runID, now)
 	if err != nil {
 		return autopilotReport(o, "start", err)
 	}
@@ -890,7 +891,7 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 		now = startedAt
 	}
 	// startGrant: the expiry check again, then under the run lock.
-	if _, err := autopilot.CheckExpiry(home, runID, now); err != nil {
+	if _, err := autopilotCheckExpiry(home, runID, now); err != nil {
 		return autopilotReport(o, "start", err)
 	}
 	id, err := autopilotGrantID()
@@ -913,7 +914,7 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 			}
 		}
 		// the row first: a grant stored without its signed row would act unrecorded
-		if _, err := state.WriteSigned(home, runID, ledger.Object{
+		if _, err := autopilotWriteSigned(home, runID, ledger.Object{
 			{Key: "event", Value: "autopilot.grant"}, {Key: "grant_id", Value: id}, {Key: "scopes", Value: in.scopes}, {Key: "deny", Value: in.deny},
 			{Key: "delegate", Value: in.delegate}, {Key: "until", Value: in.until}, {Key: "caps", Value: in.caps}, {Key: "stop_at", Value: in.stopAt}, {Key: "ts", Value: ts},
 		}); err != nil {

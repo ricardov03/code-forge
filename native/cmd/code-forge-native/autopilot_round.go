@@ -125,7 +125,7 @@ func (r *roundRefused) Error() string { return r.message }
 // roundGrantFor is grantFor(runId, scope, now) for round:extra and
 // model:choose (both in the coding budget category).
 func roundGrantFor(home, runID, scope string, now time.Time) (ledger.Object, error) {
-	checked, err := autopilot.CheckExpiry(home, runID, now)
+	checked, err := autopilotCheckExpiry(home, runID, now)
 	if err != nil {
 		return nil, err
 	}
@@ -304,6 +304,7 @@ func autopilotRound(o *runOut, home, runID string, flags autopilotFlags) int {
 	if err != nil {
 		return report(err)
 	}
+	autopilotRegisterKey(home, runID) // loadKey registers the key
 	project, _ := record.Get("project").(string)
 	recordRun, _ := record.Get("run_id").(string)
 	var row ledger.Object
@@ -326,7 +327,7 @@ func autopilotRound(o *runOut, home, runID string, flags autopilotFlags) int {
 				}
 			}
 		}
-		row, err = state.WriteSigned(home, runID, ledger.Object{{Key: "event", Value: "autopilot.extra_round"}, {Key: "block", Value: block}, {Key: "file", Value: file}, {Key: "grant_id", Value: grantID}, {Key: "decision_id", Value: decisionID}, {Key: "ts", Value: autopilotStamp(fresh)}})
+		row, err = autopilotWriteSigned(home, runID, ledger.Object{{Key: "event", Value: "autopilot.extra_round"}, {Key: "block", Value: block}, {Key: "file", Value: file}, {Key: "grant_id", Value: grantID}, {Key: "decision_id", Value: decisionID}, {Key: "ts", Value: autopilotStamp(fresh)}})
 		return err
 	})
 	if err != nil {

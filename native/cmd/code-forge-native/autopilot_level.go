@@ -294,6 +294,7 @@ func autopilotLevel(o *runOut, home, runID string, flags autopilotFlags) int {
 	if err != nil {
 		return report(err)
 	}
+	autopilotRegisterKey(home, runID) // loadKey registers the key
 	runRows := []map[string]any{}
 	for _, value := range all {
 		if row, ok := value.(map[string]any); ok && row["run"] == runID {
@@ -329,7 +330,7 @@ func autopilotLevel(o *runOut, home, runID string, flags autopilotFlags) int {
 		if problem := roundDecisionProblem(rows, decisionID, grantID, levelScope, level, block, "", fresh.UnixMilli(), key); problem != "" {
 			return noDecision(problem)
 		}
-		row, err = state.WriteSigned(home, runID, ledger.Object{
+		row, err = autopilotWriteSigned(home, runID, ledger.Object{
 			{Key: "event", Value: "autopilot.level"},
 			{Key: "block", Value: block},
 			{Key: "level", Value: level},

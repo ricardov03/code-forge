@@ -362,7 +362,7 @@ func bnNewScrub(home, cwd string) func(string) string {
 		s.paths = append(s.paths, [2]string{h, "~"})
 	}
 	sort.SliceStable(s.paths, func(i, j int) bool { return bnLen16(s.paths[i][0]) > bnLen16(s.paths[j][0]) })
-	return func(text string) string { return s.scrub(bnMaskSecrets(text)) }
+	return func(text string) string { return s.scrub(bnMaskSecrets(autopilotRedact(text))) }
 }
 
 func (s bnScrubber) scrub(text string) string {
@@ -1532,7 +1532,7 @@ func bnParseLink(text string) (link string, usage error, known bool) {
 // autopilotStoreLink is storeLink: the signed autopilot.link row, then the
 // grant's link, under the run lock.
 func autopilotStoreLink(home, runID, link string, now time.Time) error {
-	if _, err := autopilot.CheckExpiry(home, runID, now); err != nil {
+	if _, err := autopilotCheckExpiry(home, runID, now); err != nil {
 		return err
 	}
 	return state.UpdateRun(home, runID, func(record *ledger.Object) error {
@@ -1550,7 +1550,7 @@ func autopilotStoreLink(home, runID, link string, now time.Time) error {
 		if stateName != "active" {
 			return &runFail{"run " + runID + "'s autopilot grant is " + stateName + "; the link goes into an active grant", false}
 		}
-		if _, err := state.WriteSigned(home, runID, ledger.Object{{Key: "event", Value: "autopilot.link"}, {Key: "grant_id", Value: grant.Get("grant_id")}, {Key: "link", Value: link}, {Key: "ts", Value: autopilotStamp(now)}}); err != nil {
+		if _, err := autopilotWriteSigned(home, runID, ledger.Object{{Key: "event", Value: "autopilot.link"}, {Key: "grant_id", Value: grant.Get("grant_id")}, {Key: "link", Value: link}, {Key: "ts", Value: autopilotStamp(now)}}); err != nil {
 			return err
 		}
 		grant.Set("link", link)
@@ -1566,7 +1566,7 @@ func autopilotBinnacle(o *runOut, home, runID, sub string, flags autopilotFlags)
 	}
 	clock := func() time.Time { return autopilotNow().Truncate(time.Millisecond) }
 	if _, has := flags.values["link"]; has && sub == "binnacle" {
-		checked, err := autopilot.CheckExpiry(home, runID, clock())
+		checked, err := autopilotCheckExpiry(home, runID, clock())
 		if err != nil {
 			return autopilotReport(o, sub, err)
 		}
@@ -1582,7 +1582,7 @@ func autopilotBinnacle(o *runOut, home, runID, sub string, flags autopilotFlags)
 		}
 	}
 	now := clock()
-	if _, err := autopilot.CheckExpiry(home, runID, now); err != nil {
+	if _, err := autopilotCheckExpiry(home, runID, now); err != nil {
 		return autopilotReport(o, sub, err)
 	}
 	record, err := state.ReadRun(home, runID)
