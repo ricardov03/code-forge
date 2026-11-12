@@ -126,6 +126,12 @@ func ValidateSchema(config map[string]any, version string) error {
 	return failure("schema", strings.Join(issues, "\n"), "")
 }
 
+// SchemaIssues is runSchemaValidation in src/config/validate.mjs: every
+// schema refusal as "<pointer> <detail>", in Ajv order.
+func SchemaIssues(config map[string]any, version string) []string {
+	return validate(projectSchema, config, "", version)
+}
+
 // LoadValidated is the load-then-schema-check pipeline used by verbs that need
 // a complete configuration. Load itself preserves loadProjectConfig semantics.
 func LoadValidated(cwd, version string) (map[string]any, error) {

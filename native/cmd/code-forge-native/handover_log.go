@@ -198,6 +198,10 @@ const (
 	hOutcomeRecordUnported
 	hToolsUnsupported
 	hToolsConfirm
+	hValidateUnported
+	hValidateSchemaIssues
+	hValidateSecretValues
+	hValidateSandboxDirs
 )
 
 var handoverReasons = [...]string{
@@ -375,6 +379,10 @@ var handoverReasons = [...]string{
 	hOutcomeRecordUnported:     "outcome-record-unported",
 	hToolsUnsupported:          "tools-unsupported",
 	hToolsConfirm:              "tools-confirm",
+	hValidateUnported:          "validate-unported",
+	hValidateSchemaIssues:      "validate-schema-issues",
+	hValidateSecretValues:      "validate-secret-values",
+	hValidateSandboxDirs:       "validate-sandbox-dirs",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
