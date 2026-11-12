@@ -232,8 +232,6 @@ var autopilotSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // the Go step or the reason Node must run the command.
 func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int, handoverReason) {
 	switch sub {
-	case "ask":
-		return nil, hAutopilotAsk
 	case "waive":
 		return nil, hAutopilotAction
 	}
@@ -272,6 +270,11 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 					return autopilotReport(o, sub, invalid)
 				}
 			}
+			if sub == "ask" {
+				if _, invalid := autopilotAskInput(flags); invalid != nil {
+					return autopilotReport(o, sub, invalid)
+				}
+			}
 			if sub == "approve" {
 				if _, invalid := autopilotApproveInput(flags, now); invalid != nil {
 					return autopilotReport(o, sub, invalid)
@@ -300,6 +303,9 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 	read, err := autopilot.ReadGrant(record, now)
 	if err != nil {
 		return nil, hAutopilotShape // a grant shape Go does not read
+	}
+	if sub == "ask" {
+		return autopilotAskPlan(home, runID, flags, read, now)
 	}
 	if sub == "round" {
 		project, _ := record.Get("project").(string)

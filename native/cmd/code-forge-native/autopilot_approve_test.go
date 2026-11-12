@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -174,6 +175,99 @@ func TestAutopilotVerbApprove(t *testing.T) {
 		t.Fatalf("terminal ended run = %d %q", code, errText)
 	}
 	if reasons := apHandoverReasons(t, f); len(reasons) != 2 || reasons[0] != "autopilot-shape" || reasons[1] != "autopilot-approve" {
+		t.Fatalf("reasons = %v", reasons)
+	}
+}
+
+// B484: ask answers in Go every refusal Node gives before a delegate
+// session: the usage checks, the option and subject checks, an unknown
+// scope, and grantFor's refusals (text and --json). A grant that lets the
+// question through needs the session, which stays with Node.
+func TestAutopilotVerbAsk(t *testing.T) {
+	f := newAutopilotFixture(t)
+	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
+	t.Setenv("CODE_FORGE_NATIVE", "1")
+	active := grantJSON("active", "2026-11-11T12:30:00.000Z", "null", `"https://example.com/doc"`)
+	f.record(t, "r-none", "active", "")
+	f.record(t, "r-act", "active", active)
+	f.record(t, "r-pause", "active", strings.TrimSuffix(active, "}")+`,"paused":{"coding":{}}}`)
+	f.record(t, "r-stop", "active", grantJSON("stopped", "2026-11-11T12:30:00.000Z", `"2026-11-11T09:30:00.000Z"`, `"https://example.com/doc"`))
+	f.record(t, "r-end", "ended", active)
+	f.record(t, "r-old", "active", grantJSON("active", "2026-11-11T09:30:00.000Z", "null", `"https://example.com/doc"`))
+	ctx := filepath.Join(t.TempDir(), "ctx.md")
+	if err := os.WriteFile(ctx, []byte("context"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q := []string{"--question", "fix or waive?"}
+	ask := func(run string, extra ...string) []string {
+		return append(append([]string{"ask", "--run", run}, extra...), q...)
+	}
+	usage := func(msg string) [3]any { return [3]any{2, "", "autopilot ask: " + msg + "\n"} }
+	long := strings.Repeat("a", 201)
+	many := strings.Repeat("o,", 20) + "p"
+	manyDistinct := ""
+	for i := range 21 {
+		manyDistinct += string(rune('a'+i)) + ","
+	}
+	refused := func(run, reason string) [3]any {
+		return [3]any{1, "autopilot ask run " + run + ": refused (" + reason + ") — no session; the question goes to the owner\n", ""}
+	}
+	cases := []struct {
+		args []string
+		want [3]any
+	}{
+		{[]string{"ask", "--run", "r-act"}, usage("autopilot ask needs --scope <scope>")},
+		{[]string{"ask", "--run", "r-act", "--scope", "  "}, usage("autopilot ask needs --scope <scope>")},
+		{[]string{"ask", "--run", "r-act", "--scope", "round:extra"}, usage("autopilot ask needs --question <text>")},
+		{[]string{"ask", "--run", "r-act", "--scope", "round:extra", "--question", "\t"}, usage("autopilot ask needs --question <text>")},
+		{ask("r-act", "--scope", "round:extra", "--options", " , "), usage("--options needs at least 2 distinct options, e.g. --options waive,fix")},
+		{ask("r-act", "--scope", "round:extra", "--context-file", "no-such-b484.md"), usage("--context-file no-such-b484.md cannot be read")},
+		{ask("r-act", "--scope", "round:extra", "--options", "a,"+long), usage("delegate: an option is longer than 200 bytes")},
+		{ask("r-act", "--scope", "round:extra", "--options", "a, a ,a"), usage("delegate: give at least 2 distinct options")},
+		{ask("r-act", "--scope", "round:extra", "--options", "solo"), usage("delegate: give at least 2 distinct options")},
+		{ask("r-act", "--scope", "round:extra", "--options", manyDistinct), usage("delegate: at most 20 options")},
+		{ask("r-act", "--scope", "round:extra", "--block", "B 1"), usage("delegate: --block must be a block id (letters, digits, . _ -; at most 32 characters)")},
+		{ask("r-act", "--scope", "round:extra", "--file", "a/../../x"), usage("delegate: --file must be a repo-relative path")},
+		{ask("r-act", "--scope", "round:extra", "--file", "/etc/x"), usage("delegate: --file must be a repo-relative path")},
+		{ask("r-act", "--scope", "round:extra", "--file", "a/.."), usage("delegate: --file must be a repo-relative path")},
+		{ask("r-act", "--scope", "round:extra", "--finding", "-F1"), usage("delegate: --finding must be a finding id (letters, digits, . _ : -)")},
+		{ask("r-act", "--scope", "nope"), usage(`unknown autopilot scope "nope"`)},
+		{ask("r-zz", "--scope", "nope"), usage(`unknown autopilot scope "nope"`)},
+		{ask("r-zz", "--scope", "round:extra", "--options", many), [3]any{1, "", "autopilot ask: no run record for r-zz\n"}},
+		{ask("r-none", "--scope", "waive:nit"), refused("r-none", "no-grant")},
+		{ask("r-act", "--scope", "pr:merge"), refused("r-act", "denied")},
+		{ask("r-act", "--scope", "model:choose"), refused("r-act", "denied")},
+		{ask("r-act", "--scope", "waive:warning", "--context-file", ctx, "--block", "B1", "--file", "a/../", "--finding", "F1:x"), refused("r-act", "not-allowed")},
+		{ask("r-pause", "--scope", "round:extra"), refused("r-pause", "paused")},
+		{ask("r-pause", "--scope", " waive:nit "), [3]any{127, "", ""}},
+		{ask("r-stop", "--scope", "waive:nit"), refused("r-stop", "stopped")},
+		{ask("r-end", "--scope", "waive:nit"), refused("r-end", "run-ended")},
+		{ask("r-old", "--scope", "waive:nit"), refused("r-old", "expired")},
+		{ask("r-old", "--scope", "waive:nit", "--json"), [3]any{1, `{"run":"r-old","scope":"waive:nit","grant_id":"ap-0000abcd","decision_id":null,"answered":false,"acted":false,"to_owner":true,"reason":"expired","decision":null,"confidence":null,"within_scope":null,"escalate":null,"answer_reason":null}` + "\n", ""}},
+		{ask("r-none", "--scope", " waive:nit", "--json"), [3]any{1, `{"run":"r-none","scope":" waive:nit","grant_id":null,"decision_id":null,"answered":false,"acted":false,"to_owner":true,"reason":"no-grant","decision":null,"confidence":null,"within_scope":null,"escalate":null,"answer_reason":null}` + "\n", ""}},
+		{ask("r-act", "--scope", "round:extra", "--options", "waive,fix"), [3]any{127, "", ""}},
+	}
+	for _, tc := range cases {
+		code, out, errText := autopilotCall(t, tc.args...)
+		if tc.want[0] == 127 {
+			if code != 127 || out != "" {
+				t.Fatalf("%v = %d %q, want hand-over", tc.args, code, out)
+			}
+			continue
+		}
+		if code != tc.want[0] || out != tc.want[1] || errText != tc.want[2] {
+			t.Fatalf("%v = %d %q %q, want %v", tc.args, code, out, errText, tc.want)
+		}
+	}
+	// the expired grant got its one signed expire row; nothing else was written
+	rows := apSignedRows(t, f)
+	if len(rows) != 1 || rows[0]["event"] != "autopilot.expire" || rows[0]["grant_id"] != "ap-0000abcd" {
+		t.Fatalf("rows: %#v", rows)
+	}
+	if grant := f.read(t, "r-old")["autopilot"].(map[string]any); grant["status"] != "expired" {
+		t.Fatalf("expired grant: %#v", grant)
+	}
+	if reasons := apHandoverReasons(t, f); len(reasons) != 2 || reasons[0] != "autopilot-ask" || reasons[1] != "autopilot-ask" {
 		t.Fatalf("reasons = %v", reasons)
 	}
 }
