@@ -11,11 +11,11 @@ import (
 	"github.com/ricardov03/code-forge/native/owned"
 )
 
-// B458: `proof` help, usage errors, `baseline` and `proof tier` without a
-// project config run in Go, as src/cli/proof.mjs. A call that reads a run
-// (export, lock, unlock, restore, red-green) or a project config still runs
-// in Node: Go has no port of the export, journal and runner code nor of the
-// config domain rules yet.
+// B458: `proof` help, usage errors, `baseline` and `proof tier` run in Go, as
+// src/cli/proof.mjs. B462: `proof tier` with a project config, `lock`,
+// `unlock`, `restore` and `export --remove` too (proof_config.go,
+// proof_run.go). A call Go has no port for yet hands over to Node with its
+// own reason.
 func init() { routes["proof"] = runProofVerb }
 
 const proofUsage = "usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]\n" +
@@ -116,10 +116,11 @@ func proofPlan(args []string) (*proofOutcome, handoverReason) {
 		if message != "" {
 			return usage(message)
 		}
-		if _, ok := flags["run"].(string); len(positionals) != 1 || !ok {
+		runID, ok := flags["run"].(string)
+		if len(positionals) != 1 || positionals[0] == "" || !ok {
 			return usage("proof " + sub + " needs one block id and --run")
 		}
-		return nil, hProofRun
+		return proofRunSub(sub, runID, positionals[0], flags["remove"] == true)
 	case "red-green":
 		flags, positionals, message := metaParseFlags(rest, metaFlagSpec{values: []string{"run", "test", "mechanism"}})
 		if message != "" {
