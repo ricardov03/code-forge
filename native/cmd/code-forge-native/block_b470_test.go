@@ -194,3 +194,52 @@ func TestB470CloseLedgerReadErrorIsNative(t *testing.T) {
 		}
 	})
 }
+
+// open --brief: Node's realpath error names the path as given; its readFile
+// error on a directory has no path. Exit 1, no block opened.
+func TestB470OpenBriefErrorsAreNative(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		brief func(f *closeReviewFixture) string
+		want  func(f *closeReviewFixture) string
+	}{
+		{"missing", func(f *closeReviewFixture) string { return "no-such-brief.md" },
+			func(*closeReviewFixture) string {
+				return "block open: ENOENT: no such file or directory, realpath 'no-such-brief.md'\n"
+			}},
+		{"under-a-file", func(f *closeReviewFixture) string { return filepath.Join(f.top, "file0.txt", "brief.md") },
+			func(f *closeReviewFixture) string {
+				return "block open: ENOTDIR: not a directory, realpath '" + filepath.Join(f.top, "file0.txt", "brief.md") + "'\n"
+			}},
+		{"directory", func(f *closeReviewFixture) string {
+			dir := filepath.Join(f.top, "plans")
+			_ = os.MkdirAll(dir, 0700)
+			return dir
+		}, func(*closeReviewFixture) string {
+			return "block open: EISDIR: illegal operation on a directory, read\n"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCloseReviewFixture(t, 1)
+			// a run records its workspace resolved, as run start does
+			real, _ := filepath.EvalSymlinks(f.top)
+			b470SetRun(t, f, func(record, _ *ledger.Object) { record.Set("workspace", real) })
+			acceptance := filepath.Join(f.home, "acceptance.yml")
+			closeFixtureWrite(t, acceptance, []byte("- clause: the card shows\n  tests: [card_test.go]\n"))
+			runFile := filepath.Join(f.home, ".code-forge/runs/r-close-fixture.json")
+			before, _ := os.ReadFile(runFile)
+			wd, _ := os.Getwd()
+			if err := os.Chdir(f.top); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chdir(wd) })
+			res := b451Run(t, f.home, "open", "B2", "--run", "r-close-fixture", "--level", "L1", "--owned", "card.go", "--acceptance", acceptance, "--brief", tc.brief(f))
+			if res.code != 1 || res.stdout != "" || res.stderr != tc.want(f) {
+				t.Fatalf("exit=%d stdout=%q stderr=%q; want exit 1 and %q", res.code, res.stdout, res.stderr, tc.want(f))
+			}
+			if after, _ := os.ReadFile(runFile); !bytes.Equal(before, after) {
+				t.Fatal("the run record changed")
+			}
+		})
+	}
+}

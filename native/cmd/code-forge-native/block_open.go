@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/ricardov03/code-forge/native/autopilot"
@@ -218,7 +219,12 @@ func runBlockOpen(args []string) int {
 	if brief, ok := flags["brief"].(string); ok {
 		absolute, err := filepath.EvalSymlinks(brief)
 		if err != nil {
-			return fallback(hOpenBriefResolve)
+			// Node's realpath names the path as given, whatever part failed (B470).
+			var errno syscall.Errno
+			if !errors.As(err, &errno) {
+				return fallback(hOpenBriefResolve)
+			}
+			return failure(&os.PathError{Op: "realpath", Path: brief, Err: errno})
 		}
 		absolute, err = filepath.Abs(absolute)
 		if err != nil {
@@ -233,7 +239,12 @@ func runBlockOpen(args []string) int {
 		}
 		body, err := os.ReadFile(absolute)
 		if err != nil {
-			return fallback(hOpenBriefRead)
+			// Node's readFile: open errors name the path, read errors do not (B470).
+			var errno syscall.Errno
+			if !errors.As(err, &errno) {
+				return fallback(hOpenBriefRead)
+			}
+			return logged(1, "block open: "+closeTranscriptReadMessage(err))
 		}
 		opts.BriefPath, opts.BriefData = relative, body
 	}
