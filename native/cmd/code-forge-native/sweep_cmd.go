@@ -569,6 +569,12 @@ var sweepTicketName = regexp.MustCompile(`^[a-f0-9]{24}\.json$`)
 // sweepGit is runActivityAt's exec: git without GIT_* from the environment,
 // with no system or global config, a 10 s timeout and exec's 10 MiB cap.
 func sweepGit(dir string, args ...string) (string, bool) {
+	return sweepGitHooked(dir, nil, args...)
+}
+
+// sweepGitHooked is sweepGit with exec.mjs's pid entry: started (when not
+// nil) records the child and returns what clears it (B567).
+func sweepGitHooked(dir string, started func(pid int, argv0 string) func(), args ...string) (string, bool) {
 	env := []string{}
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, "GIT_") {
@@ -583,7 +589,18 @@ func sweepGit(dir string, args ...string) (string, bool) {
 	cmd.Env = env
 	var out bytes.Buffer
 	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil || out.Len() > 10*1024*1024 {
+	err := cmd.Start()
+	if err == nil {
+		var settled func()
+		if started != nil {
+			settled = started(cmd.Process.Pid, "git")
+		}
+		err = cmd.Wait()
+		if settled != nil {
+			settled()
+		}
+	}
+	if err != nil || out.Len() > 10*1024*1024 {
 		return "", false
 	}
 	return out.String(), true

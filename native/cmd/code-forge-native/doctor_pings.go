@@ -40,6 +40,9 @@ type doctorProbeCtx struct {
 	// throws out of the doctor (a prompt file, the canary, a temp repo that
 	// cannot be written); the probe then returns ok=false. nil: ok=false only.
 	crash *string
+	// pidsRoot (B567) is exec.mjs pidsDir()'s root: every probe child gets
+	// its pid entry there. nil: no entry (tests that call a probe alone).
+	pidsRoot func() (string, error)
 }
 
 // doctorThrow is an error Node's probe does not catch: the doctor crashes
@@ -98,7 +101,19 @@ func doctorRandHex(n int) string {
 }
 
 func (c doctorProbeCtx) deps() session.Deps {
-	return session.Deps{Bins: c.bins, Environ: c.environ, Stderr: io.Discard, Sleep: c.sleep}
+	return session.Deps{Bins: c.bins, Environ: c.environ, Stderr: io.Discard, Sleep: c.sleep, PidsRoot: c.pidsRoot}
+}
+
+// pidsDir is the probe children's pid directory ("" = none).
+func (c doctorProbeCtx) pidsDir() string {
+	if c.pidsRoot == nil {
+		return ""
+	}
+	dir, err := c.pidsRoot()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "pids")
 }
 
 func (c doctorProbeCtx) openBook() bool {
@@ -167,7 +182,7 @@ func doctorTempRepo(c doctorProbeCtx) (string, error) {
 	if err := contextMkdirAll(repo); err != nil {
 		return "", &doctorThrow{err.Error()} // mkdirSync throws
 	}
-	session.ProbeGitInit(repo, c.environ)
+	session.ProbeGitInitIn(repo, c.environ, c.pidsDir())
 	return repo, nil
 }
 

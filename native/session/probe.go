@@ -515,6 +515,13 @@ func ProbeInProject(cfg map[string]any, promptPath, projectDir string, deps Deps
 // ProbeGitInit is probes.mjs tempRepo's `git init -q` (20 s, the git child
 // env); like Node it ignores how git exits.
 func ProbeGitInit(repo string, environ []string) {
+	ProbeGitInitIn(repo, environ, "")
+}
+
+// ProbeGitInitIn is ProbeGitInit with exec.mjs's pid entry: pidsDir is the
+// run root's pids/ directory ("" = no entry), as exec records every child
+// (B567).
+func ProbeGitInitIn(repo string, environ []string, pidsDir string) {
 	if environ == nil {
 		environ = os.Environ()
 	}
@@ -526,7 +533,7 @@ func ProbeGitInit(repo string, environ []string) {
 		env = append(env, kv)
 	}
 	env = setEnv(setEnv(setEnv(env, "GIT_CONFIG_NOSYSTEM", "1"), "GIT_CONFIG_GLOBAL", "/dev/null"), "GIT_TERMINAL_PROMPT", "0")
-	run(execOpts{Argv: []string{"git", "init", "-q"}, Cwd: repo, Env: env, TimeoutMs: 20000})
+	run(execOpts{Argv: []string{"git", "init", "-q"}, Cwd: repo, Env: env, TimeoutMs: 20000, PidsDir: pidsDir})
 }
 
 // DelegateSchema is src/autopilot/delegate.mjs DELEGATE_SCHEMA in its own key

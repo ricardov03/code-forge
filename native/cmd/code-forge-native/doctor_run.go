@@ -126,9 +126,49 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 	rows = append(rows, dfToolsRows()...)
 	ledgerAt := len(rows)
 	rows = append(rows, doctorRow{})
+	// The run root. Node's CLI makes and adopts its root (setRunRoot) before
+	// runDoctor, so exec records every child in its pids/, the locks
+	// check's git included; a root it cannot make leaves the children to the
+	// lazy root (proc-<pid>-<ms>), released at exit (B567). Every hand-over
+	// from here removes the root and releases it, so it writes nothing.
+	if !routerHintReadable() {
+		return nil, hRouterHintState, false // smallVerb.run's check, before the root
+	}
+	contextApplyTmpRoot() // Node applies it at process start (the lazy root's base)
+	var bytes [3]byte
+	_, _ = dfRandom(bytes[:])
+	root, err := contextMakeRunRoot(fmt.Sprintf("doctor-%d-%s", os.Getpid(), hex.EncodeToString(bytes[:])), tmpRoot)
+	adopted := err == nil
+	lrRoot = ""
+	if adopted {
+		lrRoot = root
+	}
+	release := func() {
+		if adopted {
+			lrRoot = ""
+		} else {
+			toolsReleaseRoot()
+		}
+	}
+	if err != nil {
+		// the CLI's root failed: runDoctor makes its own (doctorRoot)
+		_, _ = dfRandom(bytes[:])
+		root, err = contextMakeRunRoot(fmt.Sprintf("doctor-%d-%d-%s", os.Getpid(), drunNow().UnixMilli(), hex.EncodeToString(bytes[:])), tmpRoot)
+	}
+	noRoot := ""
+	if err != nil {
+		noRoot, root = err.Error(), ""
+	}
+	handover := func(reason handoverReason) (func(stdout, stderr io.Writer) int, handoverReason, bool) {
+		if root != "" {
+			_ = os.RemoveAll(root)
+		}
+		release()
+		return nil, reason, false
+	}
 	locks, reason := dfLocksRows(physicalCwd())
 	if reason != 0 {
-		return nil, reason, false
+		return handover(reason)
 	}
 	rows = append(rows, locks...)
 	envBase := dfTmpBase()
@@ -140,54 +180,54 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 	rows = append(rows, dfTmpRows(cfgRoot, cfgSet, envBase)...)
 	sweep, reason := dfSweepRows(home, sweepBase)
 	if reason != 0 {
-		return nil, reason, false
+		return handover(reason)
 	}
 	rows = append(rows, sweep...)
 	review, runKeys, reason := dfReviewStateRows(home, cfgRoot, cfgSet, envBase)
 	if reason != 0 {
-		return nil, reason, false
+		return handover(reason)
 	}
 	rows = append(rows, review...)
 	rows = append(rows, dfReviewConcurrencyRow(cfg, order))
 	rows = append(rows, dfCoderSandboxRows(cfg)...)
 
 	// The CLI presence probes (read-only: --version and --help). Node runs
-	// them after the run root exists: a doctor with no root has none.
+	// them after the run root exists: a doctor with no root has none. The
+	// presence is decided here (no child); the --version and --help children
+	// run once the run root exists (B567).
 	cliAt := len(rows)
 	missing := map[string]bool{}
 	providers := doctorConfiguredProviders(cfg)
+	var clis []drunCli
 	for _, provider := range providers {
 		cli := doctorCLINames[provider]
 		if cli == "" {
-			rows = append(rows, doctorRow{"cli." + provider, "FAIL", provider, "no CLI mapping for this provider"})
+			clis = append(clis, drunCli{rows: []doctorRow{{"cli." + provider, "FAIL", provider, "no CLI mapping for this provider"}}})
 			missing[provider] = true
 			continue
 		}
-		probed, present, ok := doctorProbeCli(cli, cli, pathEnv)
-		if !ok {
-			return nil, hDoctorRunCliVersion, false
-		}
-		rows = append(rows, probed...)
+		found, path, present := doctorProbeCliFind(cli, cli, pathEnv)
+		clis = append(clis, drunCli{rows: found, cli: cli, path: path})
 		if !present {
 			missing[provider] = true
 		}
 	}
 	plan := doctorProbeCtx{cfg: cfg, cwd: cwd, environ: os.Environ(), planOnly: true}
 	if _, ok := doctorPingRoles(plan, missing); !ok {
-		return nil, hDoctorRunPing, false
+		return handover(hDoctorRunPing)
 	}
 	reviewer, isString := drunProvider(cfg, "L2")
 	skipIsolation := isString && missing[reviewer]
 	if !skipIsolation {
 		if _, ok := doctorProbeIsolation(plan); !ok {
-			return nil, hDoctorRunIsolation, false
+			return handover(hDoctorRunIsolation)
 		}
 	}
 	coder, isString := drunProvider(cfg, "L1")
 	skipPathDeny := isString && missing[coder]
 	if !skipPathDeny {
 		if _, ok := doctorProbePathDeny(plan, ""); !ok {
-			return nil, hDoctorRunPathDeny, false
+			return handover(hDoctorRunPathDeny)
 		}
 	}
 	codexRules := false
@@ -199,41 +239,47 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 	// (darwin) and the daemon row.
 	native, reason := dfNativeRow()
 	if reason != 0 {
-		return nil, reason, false
+		return handover(reason)
 	}
 	tail := []doctorRow{native}
-	daemon := "off"
+	daemon, indexing := "off", false
 	live, err := worker.Live(config.ProjectRootFor(cwd), worker.LiveOpts{}, worker.Probes{})
 	switch {
 	case errors.Is(err, worker.ErrUndecided):
-		return nil, hDoctorWorkerRegistry, false
+		return handover(hDoctorWorkerRegistry)
 	case err == nil && live != nil:
-		return nil, hDoctorFullLiveWorker, false // the run's config may ping the daemon
+		return handover(hDoctorFullLiveWorker) // the run's config may ping the daemon
 	case err == nil:
 		native, _ := cfg["native"].(map[string]any)
 		if os.Getenv("CODE_FORGE_NATIVE") != "0" && native["daemon"] != false {
 			daemon = "fallback"
 		}
-		if runtime.GOOS == "darwin" {
-			tail = append(tail, drunIndexingRows(cwd, snap.Path, cfg)...)
+		// the indexing check's git child runs in the body, after the
+		// probes, while the run root is adopted (B567)
+		indexing = runtime.GOOS == "darwin"
+	}
+
+	// The --version and --help children run last, so a version line Go
+	// cannot cut hands over before the worker, the keys, the Jev call or
+	// HOME is touched.
+	var cliRows []doctorRow
+	if root != "" {
+		for _, c := range clis {
+			cliRows = append(cliRows, c.rows...)
+			if c.path == "" {
+				continue
+			}
+			probed, ok := doctorProbeCliRun(c.cli, c.cli, c.path)
+			if !ok {
+				return handover(hDoctorRunCliVersion)
+			}
+			cliRows = append(cliRows, probed...)
 		}
 	}
-	tail = append(tail, doctorRow{"native_daemon", "INFO", "native daemon", daemon})
 
 	return func(stdout, stderr io.Writer) int {
 		nativeReportedKind = ""
-		var bytes [3]byte
-		_, _ = dfRandom(bytes[:])
-		root, err := contextMakeRunRoot(fmt.Sprintf("doctor-%d-%s", os.Getpid(), hex.EncodeToString(bytes[:])), tmpRoot)
-		if err != nil {
-			// the CLI's root failed: runDoctor makes its own (doctorRoot)
-			_, _ = dfRandom(bytes[:])
-			root, err = contextMakeRunRoot(fmt.Sprintf("doctor-%d-%d-%s", os.Getpid(), drunNow().UnixMilli(), hex.EncodeToString(bytes[:])), tmpRoot)
-		}
-		noRoot := ""
-		if err != nil {
-			noRoot, root = err.Error(), ""
-		}
+		defer release()
 		crash := func(msg string) int {
 			if root != "" {
 				_ = os.RemoveAll(root)
@@ -251,7 +297,7 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 			}
 			var ok bool
 			workerRows, ok = doctorWorkerProbe(dwpCtx{cfg: d.snap, configFile: d.snap.Path, workDir: d.workDir, runRootDir: root,
-				env: os.Environ(), runID: drunNewRunID(), home: home})
+				env: os.Environ(), runID: drunNewRunID(), home: home, register: lrRegisterChild})
 			if !ok {
 				_ = os.RemoveAll(root)
 				return smallVerbHandover("doctor", args, hDoctorWorkerRegistry) // B532: a registry entry Go cannot judge
@@ -277,6 +323,7 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 			rows = rows[:cliAt]
 			probes = []doctorRow{{"probes", "FAIL", "probes", "no temp root (" + noRoot + ")"}, dwpSignerRow}
 		} else {
+			rows = append(rows[:cliAt], cliRows...)
 			var thrown string
 			var reason handoverReason
 			probes, thrown, reason = drunProbes(d)
@@ -288,6 +335,12 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 				return smallVerbHandover("doctor", args, reason)
 			}
 			probes = append(probes, workerRows...)
+		}
+		if indexing {
+			tail = append(tail, drunIndexingRows(cwd, snap.Path, cfg)...)
+		}
+		tail = append(tail, doctorRow{"native_daemon", "INFO", "native daemon", daemon})
+		if root != "" {
 			_ = os.RemoveAll(root)
 		}
 		all := append(append(append([]doctorRow{}, rows...), probes...), tail...)
@@ -320,7 +373,7 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 // Node's catch prints no row.
 func drunIndexingRows(cwd, configPath string, cfg map[string]any) []doctorRow {
 	top := filepath.Dir(configPath)
-	if out, ok := sweepGit(cwd, "rev-parse", "--show-toplevel"); ok {
+	if out, ok := sweepGitHooked(cwd, lrRegisterChild, "rev-parse", "--show-toplevel"); ok {
 		if real, err := filepath.EvalSymlinks(strings.TrimSpace(out)); err == nil {
 			top = real
 		}
@@ -345,6 +398,14 @@ func drunIndexingRows(cwd, configPath string, cfg map[string]any) []doctorRow {
 	return rows
 }
 
+// drunCli is one configured provider's CLI probe decided in prepare: rows
+// given without a child, then (path != "") the --version and --help calls
+// the body runs.
+type drunCli struct {
+	rows      []doctorRow
+	cli, path string
+}
+
 // drunCtx is what the body's probes need.
 type drunCtx struct {
 	cfg                         map[string]any
@@ -361,7 +422,7 @@ type drunCtx struct {
 // a probe that refused after prepare's planOnly pass accepted it (none is
 // known: the refusals depend on the config only): hand over.
 func drunProbes(d drunCtx) (rows []doctorRow, thrown string, reason handoverReason) {
-	c := doctorProbeCtx{cfg: d.cfg, cwd: d.cwd, workDir: d.workDir, runRootDir: d.root, environ: os.Environ(), crash: &thrown}
+	c := doctorProbeCtx{cfg: d.cfg, cwd: d.cwd, workDir: d.workDir, runRootDir: d.root, environ: os.Environ(), crash: &thrown, pidsRoot: lrProcRoot}
 	rows, ok := doctorPingRoles(c, d.missing)
 	if !ok {
 		return nil, thrown, hDoctorRunPing

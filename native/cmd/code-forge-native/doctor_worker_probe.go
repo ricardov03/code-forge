@@ -42,6 +42,9 @@ type dwpCtx struct {
 	env        []string
 	runID      string
 	home       string
+	// register (B567) records the git init child's pid entry like exec.mjs
+	// (lrRegisterChild); nil: no entry.
+	register func(pid int, argv0 string) func()
 }
 
 // dwpSignerRow is SIGNER_ROW, printed on every full run.
@@ -302,7 +305,17 @@ func doctorWorkerProbe(c dwpCtx) ([]doctorRow, bool) {
 		cmd := exec.CommandContext(ctx, git, "init", "-q")
 		cmd.Dir = repo
 		cmd.Env = dwpGitChildEnv(c.env)
-		runErr := cmd.Run()
+		runErr := cmd.Start()
+		if runErr == nil {
+			var clear func()
+			if c.register != nil {
+				clear = c.register(cmd.Process.Pid, "git")
+			}
+			runErr = cmd.Wait()
+			if clear != nil {
+				clear()
+			}
+		}
 		cancel()
 		if runErr != nil {
 			return &dwpErr{"git-init"}
@@ -364,10 +377,15 @@ func doctorWorkerProbe(c dwpCtx) ([]doctorRow, bool) {
 				break
 			}
 		}
-		if _, err := gitx.RepoTop(repo); err != nil {
+		// launchWorker's mainRootOf is the one repo-top git child (B567):
+		// its "not inside a git repository" is the probe's no-repo
+		gitx.Started = c.register
+		launched, repoRoot, err := runLaunchWorkerJudged(c.runID, repo, binary, workerEnv, true)
+		gitx.Started = nil
+		var fail *runFail
+		if errors.As(err, &fail) && fail.msg == "not inside a git repository" {
 			return &dwpErr{"no-repo"}
 		}
-		launched, repoRoot, err := runLaunchWorkerJudged(c.runID, repo, binary, workerEnv, true)
 		if errors.Is(err, errRunLaunchUndecided) {
 			return errDwpUndecided
 		}

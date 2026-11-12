@@ -530,6 +530,13 @@ func initFinish(stdout, stderr io.Writer, home string, jsonMode bool, code int, 
 }
 
 func runInitVerb(args []string) int {
+	// bin/code-forge.mjs applyTmpRoot runs at process start, before init
+	// writes a .code-forge.yml: a tmp.root that init writes is not the base
+	// of this run's children (B567). The lazy root a child made is released
+	// at exit (releaseLazyRoot).
+	contextApplyTmpRoot()
+	lrRoot = ""
+	defer toolsReleaseRoot()
 	if metaHelp(args, initUsage, nil) {
 		return 0
 	}

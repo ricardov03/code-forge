@@ -164,9 +164,11 @@ func opRead(ref string) (string, string) {
 		nativeReportedKind = "op_missing"
 		return "", "op_missing"
 	}
-	res := runChild([]string{"op", "read", ref}, opTimeout)
+	// exec: each op child is recorded in the pid registry of this
+	// process's run root while it runs (B567).
+	res := toolsExec([]string{"op", "read", ref}, opTimeout)
 	if !res.ok && res.timedOut {
-		res = runChild([]string{"op", "read", ref}, opTimeout)
+		res = toolsExec([]string{"op", "read", ref}, opTimeout)
 		logNativeWarning("doctor", "op_retry", "1Password did not answer in time; the call was retried once")
 	}
 	if !res.ok {

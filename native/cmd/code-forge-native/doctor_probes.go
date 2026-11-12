@@ -112,37 +112,56 @@ func doctorHelpMissing(cli, help string) []string {
 // PATH, or an absolute path). ok is false when the version line holds a cut
 // Go cannot print as Node does (a surrogate pair split at 80 units).
 func doctorProbeCli(cli, bin, pathEnv string) (rows []doctorRow, present, ok bool) {
+	rows, path, present := doctorProbeCliFind(cli, bin, pathEnv)
+	if !present {
+		return rows, false, true
+	}
+	rows, ok = doctorProbeCliRun(cli, bin, path)
+	return rows, true, ok
+}
+
+// doctorProbeCliFind is probeCli's presence check (no child runs): the
+// FAIL row of a CLI not found, else the path to run.
+func doctorProbeCliFind(cli, bin, pathEnv string) (rows []doctorRow, path string, present bool) {
 	if filepath.IsAbs(bin) {
 		_, err := os.Stat(bin)
-		present = err == nil
+		if err == nil {
+			return nil, bin, true
+		}
 	} else {
 		// execFile looks the name up on the probe env's PATH.
 		for _, dir := range strings.Split(pathEnv, ":") {
 			if dir != "" && commandOnPath(bin, dir) {
-				bin, present = filepath.Join(dir, bin), true
-				break
+				return nil, filepath.Join(dir, bin), true
 			}
 		}
 	}
-	if !present {
-		return []doctorRow{{"cli." + cli, "FAIL", cli, "not on PATH"}}, false, true
+	return []doctorRow{{"cli." + cli, "FAIL", cli, "not on PATH"}}, "", false
+}
+
+// doctorProbeCliRun is probeCli's --version and --help calls of a present
+// CLI. Each child goes through exec, so it is recorded in the pid registry
+// of this process's run root under bin, the command Node spawns (B567).
+func doctorProbeCliRun(cli, bin, path string) (rows []doctorRow, ok bool) {
+	run := func(argv []string) childResult {
+		return runChildHooked(argv, doctorProbeTimeout, func(pid int, _ string) func() { return lrRegisterChild(pid, bin) })
 	}
-	version := runChild([]string{bin, "--version"}, doctorProbeTimeout)
+	version := run([]string{path, "--version"})
 	first, _, _ := strings.Cut(jsTrim(nodeUTF8(version.stdout)), "\n")
 	if version.ok {
 		cut, fits := jsSlice16(first, 80)
 		if !fits {
-			return nil, true, false
+			return nil, false
 		}
 		rows = append(rows, doctorRow{"cli." + cli, "OK", cli, "present, " + cut})
 	} else {
 		rows = append(rows, doctorRow{"cli." + cli, "WARN", cli, "present, --version failed"})
 	}
-	argv := []string{bin, "--help"}
+	argv := []string{path, "--help"}
 	if cli == "codex" {
-		argv = []string{bin, "exec", "--help"}
+		argv = []string{path, "exec", "--help"}
 	}
-	help := runChild(argv, doctorProbeTimeout)
+	help := run(argv)
 	// The Codex coder argv conflict (codexCoderFlagConflict) never fires: the
 	// built coder argv carries no --approve-for-me (CODER_APPROVAL_POLICY).
 	if missing := doctorHelpMissing(cli, nodeUTF8(help.stdout)); len(missing) > 0 {
@@ -150,5 +169,5 @@ func doctorProbeCli(cli, bin, pathEnv string) (rows []doctorRow, present, ok boo
 	} else {
 		rows = append(rows, doctorRow{"flags." + cli, "OK", cli + " flags", "every builder flag is in --help"})
 	}
-	return rows, true, true
+	return rows, true
 }

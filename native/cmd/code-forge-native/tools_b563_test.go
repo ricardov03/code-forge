@@ -156,6 +156,7 @@ func TestB563InitInstallRegistersTheInstaller(t *testing.T) {
 			lines = append(lines, line)
 		}
 	}
+	toolsReleaseRoot() // init's exit (B567: runInitVerb releases the root)
 	if want := "tool codex: installed (npm install -g @openai/codex)"; len(lines) != 1 || lines[0] != want {
 		t.Errorf("init step 1: got %q, want %q", lines, want)
 	}

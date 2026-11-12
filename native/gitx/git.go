@@ -44,23 +44,40 @@ func (e *CommandError) Error() string {
 }
 func (e *CommandError) Unwrap() error { return e.Cause }
 
+// Started, when set, is called with each git child's pid right after it
+// starts; the func it returns runs once the child is waited for. The doctor
+// sets it to record its children in the run root's pid registry like Node's
+// exec (B567).
+var Started func(pid int, argv0 string) func()
+
 func WithEnv(tree string, env []string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = tree
 	cmd.Env = env
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Start()
+	if err == nil {
+		clear := func() {}
+		if Started != nil {
+			if done := Started(cmd.Process.Pid, "git"); done != nil {
+				clear = done
+			}
+		}
+		err = cmd.Wait()
+		clear()
+	}
+	out := stdout.String()
 	if err != nil {
 		code := -1
 		if e, ok := err.(*exec.ExitError); ok {
 			code = e.ExitCode()
 		}
-		return string(out), &CommandError{args, code, stderr.String(), err}
+		return out, &CommandError{args, code, stderr.String(), err}
 	}
-	return string(out), nil
+	return out, nil
 }
 
 func Run(tree string, args ...string) (string, error) { return WithEnv(tree, ChildEnv(), args...) }

@@ -125,6 +125,10 @@ func prepareDoctor(args []string) (func(stdout, stderr io.Writer) int, handoverR
 	jsonOut := flags["json"] == true
 	return func(stdout, stderr io.Writer) int {
 		nativeReportedKind = ""
+		// B567: a quick doctor adopts no root; an op child is recorded in
+		// the lazy root (proc-<pid>-<ms>), released at exit.
+		lrRoot = ""
+		defer toolsReleaseRoot()
 		rows, secrets := quick.run()
 		redactOne := func(text string) string { return redactSecret(text, secrets...) }
 		var out string

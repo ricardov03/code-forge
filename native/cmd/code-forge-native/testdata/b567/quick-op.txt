@@ -1,0 +1,2 @@
+op read op://vault/item/field <PID> SEEN -rw------- drwx------ proc
+{"pid":<PID>,"start_time":"<START>","argv0":"op"}

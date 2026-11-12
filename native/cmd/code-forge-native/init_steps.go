@@ -121,9 +121,6 @@ func initFailureReason(res childResult) string {
 // its --yes-tool, or missing with its install command or hint.
 func initToolLines(solo bool, yes []string) []string {
 	var lines []string
-	lrRoot = ""
-	defer toolsReleaseRoot()
-	applied := false
 	for _, tool := range toolRows {
 		if (tool.id == "solo" && solo) || detectTool(tool) {
 			lines = append(lines, "tool "+tool.id+": present")
@@ -132,11 +129,6 @@ func initToolLines(solo bool, yes []string) []string {
 		argv, hint := toolInstallPlan(tool)
 		switch {
 		case argv != nil && slices.Contains(yes, tool.id):
-			if !applied {
-				// bin/code-forge.mjs applyTmpRoot: the base the registry lives under.
-				contextApplyTmpRoot()
-				applied = true
-			}
 			res := initInstallTool(argv)
 			result := "installed"
 			if !res.ok {

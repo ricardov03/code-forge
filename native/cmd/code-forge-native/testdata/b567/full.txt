@@ -1,0 +1,28 @@
+claude --help <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"claude"}
+claude --version <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"claude"}
+claude -p --model <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"claude"}
+claude -p --model <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"claude"}
+claude -p --model <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"claude"}
+claude -p --model <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"claude"}
+claude -p --model <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"claude"}
+git init -q <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"git"}
+git init -q <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"git"}
+git init -q <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"git"}
+git rev-parse --path-format=absolute <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"git"}
+git rev-parse --show-toplevel <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"git"}
+git rev-parse --show-toplevel <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"git"}
+git rev-parse --show-toplevel <PID> SEEN -rw------- drwx------ doctor
+{"pid":<PID>,"start_time":"<START>","argv0":"git"}

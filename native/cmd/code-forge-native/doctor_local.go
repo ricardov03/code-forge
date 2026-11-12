@@ -232,7 +232,11 @@ func dfLocksRows(procCwd string) ([]doctorRow, handoverReason) {
 		rows = append(rows, doctorRow{"locks", "WARN", "locks", p})
 	}
 	repoRoot := procCwd
-	if root, refusal, ok := reviewMainRoot(dfContext(), procCwd); ok && refusal == nil && root != "" {
+	// the main-root git children are recorded in the pid registry (B567)
+	reviewWaitStarted = lrRegisterChild
+	root, refusal, ok := reviewMainRoot(dfContext(), procCwd)
+	reviewWaitStarted = nil
+	if ok && refusal == nil && root != "" {
 		repoRoot = root
 	}
 	// liveness does not matter for these rows; no process is probed
@@ -626,43 +630,67 @@ func prepareDoctorNoConfig(cwd, home string, rows []doctorRow, jsonOut bool) (fu
 	rows = append(rows, dfToolsRows()...)
 	ledgerAt := len(rows)
 	rows = append(rows, doctorRow{})
+	// B567: the CLI makes and adopts its root before runDoctor, so the
+	// locks check's git and an op child are recorded in its pids/; without
+	// it the children go in the lazy root, released at exit. Every hand-over
+	// from here removes the root and releases it, so it writes nothing.
+	// The router hint and the tmp root are smallVerb.run's, before the root
+	// (Node applies the tmp root at process start).
+	if !routerHintReadable() {
+		return nil, hRouterHintState, false
+	}
+	contextApplyTmpRoot()
+	var bytes [3]byte
+	_, _ = dfRandom(bytes[:])
+	root, err := contextMakeRunRoot(fmt.Sprintf("doctor-%d-%s", os.Getpid(), hex.EncodeToString(bytes[:])), nil)
+	lrRoot = ""
+	if err == nil {
+		lrRoot = root
+	}
+	release := func() {
+		if err == nil {
+			_ = os.RemoveAll(root)
+			lrRoot = ""
+		} else {
+			toolsReleaseRoot()
+		}
+	}
+	handover := func(reason handoverReason) (func(stdout, stderr io.Writer) int, handoverReason, bool) {
+		release()
+		return nil, reason, false
+	}
 	procCwd := physicalCwd()
 	locks, reason := dfLocksRows(procCwd)
 	if reason != 0 {
-		return nil, reason, false
+		return handover(reason)
 	}
 	rows = append(rows, locks...)
 	base := dfTmpBase()
 	rows = append(rows, dfTmpRows("", false, base)...)
 	sweep, reason := dfSweepRows(home, base)
 	if reason != 0 {
-		return nil, reason, false
+		return handover(reason)
 	}
 	rows = append(rows, sweep...)
 	review, keys, reason := dfReviewStateRows(home, "", false, base)
 	if reason != 0 {
-		return nil, reason, false
+		return handover(reason)
 	}
 	rows = append(rows, review...)
 	rows = append(rows, dfReviewConcurrencyRow(nil, config.Ordered{}))
 	rows = append(rows, doctorRow{"probes", "FAIL", "probes", "skipped: no valid config"}, doctorRow{"signer", "INFO", "signer", "same-user boundary only"})
 	native, reason := dfNativeRow()
 	if reason != 0 {
-		return nil, reason, false
+		return handover(reason)
 	}
 	daemon, reason := dfDaemonRow(cwd)
 	if reason != 0 {
-		return nil, reason, false
+		return handover(reason)
 	}
 	rows = append(rows, native, daemon)
 	return func(stdout, stderr io.Writer) int {
 		nativeReportedKind = ""
-		var bytes [3]byte
-		_, _ = dfRandom(bytes[:])
-		root, err := contextMakeRunRoot(fmt.Sprintf("doctor-%d-%s", os.Getpid(), hex.EncodeToString(bytes[:])), nil)
-		if err == nil {
-			defer os.RemoveAll(root)
-		}
+		defer release()
 		keyRow, secrets := resolveKeys()
 		rows[keysAt] = keyRow
 		rows[ledgerAt] = dfLedgerRow(home)

@@ -309,6 +309,11 @@ func reviewWaitCommand(ctx context.Context, cwd, name string, args []string, env
 // descendants keep the pipes open.
 const reviewWaitPipeGrace = 2 * time.Second
 
+// reviewWaitStarted, when set, is called with each child's pid right after
+// it starts; the func it returns runs once the child is waited for (the
+// doctor's locks check records its git children like Node's exec, B567).
+var reviewWaitStarted func(pid int, argv0 string) func()
+
 func reviewWaitCommandErr(ctx context.Context, cwd, name string, args []string, env []string, limit time.Duration) (string, string, bool) {
 	childCtx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
@@ -319,7 +324,17 @@ func reviewWaitCommandErr(ctx context.Context, cwd, name string, args []string, 
 	cmd.WaitDelay = reviewWaitPipeGrace
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		clear := func() {}
+		if reviewWaitStarted != nil {
+			if done := reviewWaitStarted(cmd.Process.Pid, name); done != nil {
+				clear = done
+			}
+		}
+		err = cmd.Wait()
+		clear()
+	}
 	if cmd.Process != nil {
 		// A helper could exit before descendants close their inherited pipes.
 		// WaitDelay bounds the pipe wait; retire the group in that case too.
