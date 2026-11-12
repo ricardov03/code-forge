@@ -61,3 +61,50 @@ func TestB538LadderTicketMatchesNode(t *testing.T) {
 func TestB538LadderTicketSchemaMissMatchesNode(t *testing.T) {
 	b538LadderRun(t, "b538_fake_ladder.sh", "b538_node_ladder_miss.golden")
 }
+
+// b538BudgetRun reviews both B497 tickets with budget.usd set and the
+// production warning seam (TicketRunner.Warn) wired, against Node's golden
+// (node_e2e.mjs with the same budget; Node's stderr is in want).
+func b538BudgetRun(t *testing.T, usd, golden, wantStderr string) []string {
+	t.Helper()
+	clock := fixedNow
+	fx, w, stderr := b497Fixture(t, &clock)
+	w.Cfg = b492Cfg(t, `{"levels":{"L2":{"model":"claude-x","provider":"anthropic"}},"budget":{"usd":`+usd+`}}`)
+	warnings := []string{}
+	w.Warn = func(warning, message string) { warnings = append(warnings, warning+": "+message) }
+	ids := []string{
+		fx.ticket(t, "r1", "B1", "a.txt", sha("hello\nworld\n")),
+		fx.ticket(t, "r1", "B2", "b.txt", sha("one\nWARNME\n")),
+	}
+	for _, id := range ids {
+		done, poison, err := w.RunTicket(id)
+		if err != nil || done != 1 || poison {
+			t.Fatalf("RunTicket(%s) = %d, %v, %v", id, done, poison, err)
+		}
+	}
+	got := b497Normalize(b497Files(t, fx, ids))
+	want := b497Normalize(readFile(t, filepath.Join("testdata", golden)))
+	b497SameLines(t, got, want)
+	if stderr.String() != wantStderr {
+		t.Errorf("stderr = %q, Node %q", stderr.String(), wantStderr)
+	}
+	return warnings
+}
+
+// TestB538BudgetUSDTicketMatchesNode: with budget.usd and the worker's
+// warning seam, Go reviews both tickets like Node (under budget: the same
+// rows as with no budget), and no warning is logged.
+func TestB538BudgetUSDTicketMatchesNode(t *testing.T) {
+	line := "level=L2 provider=anthropic model=claude-x effort=none fallback_step=0\n"
+	if w := b538BudgetRun(t, "100", "b538_node_budget.golden", line+line); len(w) != 0 {
+		t.Errorf("warnings %q, Node logged none", w)
+	}
+}
+
+// TestB538BudgetUSDRefusedMatchesNode: a session estimate above budget.usd
+// writes Node's budget.refused, unavailable/budget, state and result rows and
+// prints Node's stderr line, and no session starts.
+func TestB538BudgetUSDRefusedMatchesNode(t *testing.T) {
+	line := "code-forge: this session's estimated cost (about 0.13) is above budget.usd 0.03; raise budget.usd\n"
+	b538BudgetRun(t, "0.03", "b538_node_budget_refused.golden", line+line)
+}
