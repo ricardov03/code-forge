@@ -43,7 +43,8 @@ then 5a. Going away while a run goes on? Read 5b. One small task, no plan? Read 
 
 - `code-forge <verb>` is the CLI installed globally with `npm install -g @codedology/code-forge`
   (see [getting-started.md](getting-started.md#install); a per-project pinned install is covered
-  there too). Inside the skill the same CLI is called `forge` (a shim at `skill/scripts/forge`).
+  there too). Inside the skill the same CLI is called `forge` (a shim at `skill/scripts/forge` that
+  runs the package's `bin/code-forge` launcher, so Go first, like the `code-forge` command).
 - `<run>` is a run id, `<slug>` is the project slug (`project.slug` in `.code-forge.yml`, else the
   folder name), `<id>` is a block id such as `B1`.
 - "Not yet" marks something that is designed but not built. Nothing else on these pages is a plan.

@@ -1,10 +1,15 @@
 #!/bin/sh
-# code-forge skill shim: `forge <verb> [args…]` runs the package's `bin/code-forge.mjs`.
+# code-forge skill shim: `forge <verb> [args…]` runs the package's `bin/code-forge` sh launcher,
+# which starts the Go engine (native/bin/<platform>-<arch>/code-forge-native) when it is there and
+# CODE_FORGE_NATIVE is not 0, else the Node router `bin/code-forge.mjs`.
 #
 # Resolution order (first hit wins):
-#   1. $CODE_FORGE_BIN, when set and a file (a checkout or a pinned version);
-#   2. <this skill dir>/../../bin/code-forge.mjs — the skill lives inside the package, and a
-#      symlinked install (`code-forge init`, the default) resolves back into it;
+#   1. $CODE_FORGE_BIN, when set and a file (a checkout or a pinned version): the sh launcher when
+#      it names `bin/code-forge` or names `bin/code-forge.mjs` with a `code-forge` launcher next to
+#      it; any other file runs with `node` (old setups);
+#   2. <this skill dir>/../../bin/code-forge — the skill lives inside the package, and a symlinked
+#      install (`code-forge init`, the default) resolves back into it; an old package with only
+#      `bin/code-forge.mjs` there runs that with `node`;
 #   3. `code-forge` on PATH (a global npm install);
 #   4. `npx @codedology/code-forge@<version>` pinned to the version this skill was built with (a
 #      copied install with no package next to it); `test/skill/shim.test.mjs` asserts the pin
@@ -22,13 +27,32 @@ while [ -L "$self" ]; do
   esac
 done
 here=$(cd "$(dirname "$self")" && pwd -P)
-packaged="$here/../../bin/code-forge.mjs"
+bindir="$here/../../bin"
 
 if [ -n "${CODE_FORGE_BIN:-}" ] && [ -f "$CODE_FORGE_BIN" ]; then
+  # The launcher finds its package from its own path, so a bare name gets a `./` in front.
+  bin="$CODE_FORGE_BIN"
+  case "$bin" in
+    */*) ;;
+    *) bin="./$bin" ;;
+  esac
+  case "$bin" in
+    */code-forge.mjs)
+      if [ -f "${bin%.mjs}" ]; then
+        exec /bin/sh "${bin%.mjs}" "$@"
+      fi
+      ;;
+    */code-forge)
+      exec /bin/sh "$bin" "$@"
+      ;;
+  esac
   exec node "$CODE_FORGE_BIN" "$@"
 fi
-if [ -f "$packaged" ]; then
-  exec node "$packaged" "$@"
+if [ -f "$bindir/code-forge" ]; then
+  exec /bin/sh "$bindir/code-forge" "$@"
+fi
+if [ -f "$bindir/code-forge.mjs" ]; then
+  exec node "$bindir/code-forge.mjs" "$@"
 fi
 if on_path=$(command -v code-forge 2>/dev/null); then
   exec "$on_path" "$@"
@@ -36,5 +60,5 @@ fi
 if npx_path=$(command -v npx 2>/dev/null); then
   exec "$npx_path" --yes "@codedology/code-forge@$PINNED_VERSION" "$@"
 fi
-echo "forge: no code-forge found. Install it: npm install -g @codedology/code-forge@$PINNED_VERSION, then run code-forge setup (or set CODE_FORGE_BIN=<path>/bin/code-forge.mjs)" >&2
+echo "forge: no code-forge found. Install it: npm install -g @codedology/code-forge@$PINNED_VERSION, then run code-forge setup (or set CODE_FORGE_BIN=<path>/bin/code-forge)" >&2
 exit 127

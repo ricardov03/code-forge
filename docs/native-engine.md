@@ -18,6 +18,13 @@ The command works in three steps:
    error output and exit code. The exit code is the number that tells the
    shell whether a command succeeded.
 
+The skill's `forge <verb>` shim (`skill/scripts/forge`) starts this same shell
+entry, `bin/code-forge`, so skill verbs run in Go too (B547). With
+`CODE_FORGE_BIN` set to `bin/code-forge`, or to a `bin/code-forge.mjs` that has
+the `code-forge` entry next to it, the shim starts the entry as well. Any other
+`CODE_FORGE_BIN` file, and an old package that has only `bin/code-forge.mjs`
+next to the skill, still runs in Node.
+
 The public route table currently serves these read commands:
 
 - `status`, `status --json` and `status --run <id>`. Go reads the run files

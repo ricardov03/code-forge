@@ -1,6 +1,8 @@
 /**
- * `skill/scripts/forge` — the POSIX shim. Inside the package it runs `bin/code-forge.mjs` (the
- * symlinked-install path); copied out of the package it falls back to `code-forge` on PATH; with
+ * `skill/scripts/forge` — the POSIX shim. Inside the package it runs the `bin/code-forge` sh
+ * launcher (Go first, Node router with CODE_FORGE_NATIVE=0 or no Go binary; an old package with
+ * only `bin/code-forge.mjs` runs that with node); copied out of the package it falls back to
+ * `code-forge` on PATH; with
  * neither it falls back to `npx @codedology/code-forge@<pinned>`; with nothing at all it fails with
  * an install hint. PATH is fully private in every case (`<fakeBin>:/usr/bin:/bin`, `node`
  * symlinked into fakeBin), so a real `code-forge` or `npx` on this machine can never be what
@@ -82,11 +84,11 @@ test('the shim is an executable POSIX sh script whose npx pin equals package.jso
   assert.equal(/npx[^\n]*--yes[^\n]*@codedology\/code-forge"?\s/.test(text), false, 'no unpinned npx spec');
 });
 
-test('inside the package the shim runs bin/code-forge.mjs (version prints the package version) with no code-forge on PATH', async () => {
+test('inside the package the shim runs the package CLI (version prints the package version) with no code-forge on PATH', async () => {
   assert.equal(await resolvesTo('code-forge'), null, 'PATH is private: code-forge must not resolve');
   assert.equal(await resolvesTo('node'), path.join(fakeBin, 'node'));
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
-  const { stdout } = await execFileP(SHIM, ['version'], { env });
+  const { stdout } = await execFileP(SHIM, ['version'], { env: { ...env, CODE_FORGE_NATIVE: '0' } });
   assert.equal(stdout.trim(), `${pkg.name} ${pkg.version}`);
 });
 
@@ -115,4 +117,86 @@ test('with nothing available the shim exits 127 with an install hint and runs no
     assert.match(err.stderr, /^forge: no code-forge found\. Install it: npm install -g @codedology\/code-forge@/);
     return true;
   });
+});
+
+/** The launcher's names for this host (bin/code-forge maps `uname -sm` the same way). */
+const HOST_DIR = `${process.platform}-${process.arch}`;
+
+/**
+ * A temp package: the shim at skill/scripts/forge, and under bin/ whatever `files` lists:
+ * `launcher` (the real bin/code-forge), `router` (a fake bin/code-forge.mjs) and `native` (a fake
+ * Go binary at native/bin/<platform>-<arch>/code-forge-native). Each fake prints a marker and its
+ * bracketed arguments.
+ * @param {string} name @param {{launcher?: boolean, router?: boolean, native?: boolean}} files
+ */
+async function fakePackage(name, files) {
+  const pkg = path.join(parent, name);
+  await mkdir(path.join(pkg, 'skill', 'scripts'), { recursive: true });
+  await mkdir(path.join(pkg, 'bin'), { recursive: true });
+  const shim = path.join(pkg, 'skill', 'scripts', 'forge');
+  await cp(SHIM, shim);
+  await chmod(shim, 0o755);
+  if (files.launcher) {
+    await cp(path.join(ROOT, 'bin', 'code-forge'), path.join(pkg, 'bin', 'code-forge'));
+    await chmod(path.join(pkg, 'bin', 'code-forge'), 0o755);
+  }
+  if (files.router) {
+    await writeFile(
+      path.join(pkg, 'bin', 'code-forge.mjs'),
+      "process.stdout.write('fake-node-router' + process.argv.slice(2).map((a) => `[${a}]`).join('') + '\\n');\n",
+    );
+  }
+  if (files.native) {
+    const dir = path.join(pkg, 'native', 'bin', HOST_DIR);
+    await mkdir(dir, { recursive: true });
+    const bin = path.join(dir, 'code-forge-native');
+    await writeFile(bin, `#!/bin/sh\nprintf 'fake-native'\nfor a in "$@"; do printf '[%s]' "$a"; done\nprintf '\\n'\n`);
+    await chmod(bin, 0o755);
+  }
+  return { pkg, shim };
+}
+
+test('inside the package `forge foo bar` reaches the Go binary through the bin/code-forge sh launcher', async () => {
+  const { shim } = await fakePackage('pkg-go', { launcher: true, router: true, native: true });
+  const { stdout } = await execFileP(shim, ['foo', 'bar', 'a b', '*'], { env });
+  assert.equal(stdout, 'fake-native[foo][bar][a b][*]\n');
+});
+
+test('inside the package with CODE_FORGE_NATIVE=0 the launcher runs the Node router', async () => {
+  const { shim } = await fakePackage('pkg-node', { launcher: true, router: true, native: true });
+  const { stdout } = await execFileP(shim, ['foo', 'bar'], { env: { ...env, CODE_FORGE_NATIVE: '0' } });
+  assert.equal(stdout, 'fake-node-router[foo][bar]\n');
+});
+
+test('an old install with only bin/code-forge.mjs next to the skill still runs it with node', async () => {
+  const { shim } = await fakePackage('pkg-old', { router: true, native: true });
+  const { stdout } = await execFileP(shim, ['foo', 'bar'], { env });
+  assert.equal(stdout, 'fake-node-router[foo][bar]\n');
+});
+
+test('CODE_FORGE_BIN naming bin/code-forge.mjs with a sibling launcher runs the launcher (Go first)', async () => {
+  const { pkg } = await fakePackage('pkg-bin-mjs', { launcher: true, router: true, native: true });
+  const binEnv = { ...env, CODE_FORGE_BIN: path.join(pkg, 'bin', 'code-forge.mjs') };
+  const go = await execFileP(copiedShim, ['foo', 'bar'], { env: binEnv });
+  assert.equal(go.stdout, 'fake-native[foo][bar]\n');
+  const node = await execFileP(copiedShim, ['foo', 'bar'], { env: { ...binEnv, CODE_FORGE_NATIVE: '0' } });
+  assert.equal(node.stdout, 'fake-node-router[foo][bar]\n');
+});
+
+test('CODE_FORGE_BIN naming the sh launcher runs it, also as a bare name from its own folder', async () => {
+  const { pkg } = await fakePackage('pkg-bin-sh', { launcher: true, router: true, native: true });
+  const full = await execFileP(copiedShim, ['foo'], { env: { ...env, CODE_FORGE_BIN: path.join(pkg, 'bin', 'code-forge') } });
+  assert.equal(full.stdout, 'fake-native[foo]\n');
+  const bare = await execFileP(copiedShim, ['foo'], { env: { ...env, CODE_FORGE_BIN: 'code-forge' }, cwd: path.join(pkg, 'bin') });
+  assert.equal(bare.stdout, 'fake-native[foo]\n');
+});
+
+test('CODE_FORGE_BIN naming a .mjs with no sibling launcher keeps running it with node (old setups)', async () => {
+  const { pkg } = await fakePackage('pkg-bin-old', { router: true, native: true });
+  const { stdout } = await execFileP(copiedShim, ['foo', 'bar'], { env: { ...env, CODE_FORGE_BIN: path.join(pkg, 'bin', 'code-forge.mjs') } });
+  assert.equal(stdout, 'fake-node-router[foo][bar]\n');
+  const other = path.join(parent, 'other-cli.mjs');
+  await writeFile(other, "process.stdout.write('fake-other' + process.argv.slice(2).map((a) => `[${a}]`).join('') + '\\n');\n");
+  const res = await execFileP(copiedShim, ['foo'], { env: { ...env, CODE_FORGE_BIN: other } });
+  assert.equal(res.stdout, 'fake-other[foo]\n');
 });
