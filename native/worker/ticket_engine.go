@@ -303,11 +303,20 @@ func (w *TicketRunner) planEngineDry(t ledger.Object, rec ledger.Object, cfg map
 					return fb, nil
 				}})
 		}}
-	spawns, err := FixLoopCheck(tk, req)
+	// B517: a recheck or patch_check round spawns one L2 reviewer session
+	// through the same pool, with no timeout fallback (fixloop.mjs recheckSession)
+	req.Input = in
+	req.Session = review.Deps{Spawn: w.pooled(id, cfg, session.ReviewSpawn(sopts, sdeps)), Warn: w.Warn,
+		SchemaHistory: schemaHistory(w.readRows, w.Key, w.RunID, file, hash)}
+	spawns, kind, err := FixLoopCheck(tk, req)
 	if err != nil {
 		return nil, nil, err
 	}
-	if spawns {
+	if spawns && kind != "full" {
+		if err := session.CheckReview(sopts, "L2", "reviewer"); err != nil {
+			return nil, nil, unsupported("the recheck session: " + err.Error())
+		}
+	} else if spawns {
 		level, role, ok, err := review.SpawnLevel(in)
 		if err != nil {
 			return nil, nil, err

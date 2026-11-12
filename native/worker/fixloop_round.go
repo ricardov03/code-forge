@@ -76,6 +76,10 @@ type FixLoopRequest struct {
 	WriteRow                                    func(ledger.Object) error
 	Review                                      func(write func(ledger.Object) error) (ledger.Object, error)
 	Now                                         func() time.Time
+	// Input and Session are a recheck or patch_check round's review input
+	// and session seams (B517); Session.WriteRow is playRound's writer.
+	Input   review.Input
+	Session review.Deps
 }
 
 // failureReason is engine.mjs failureReason.
@@ -102,6 +106,7 @@ type played struct {
 	Crashed         *string
 	ApprovalWritten bool
 	Engine          ledger.Object
+	Rechecks        []any // the recheck sessions, as engine.mjs playRound records them
 }
 
 // playRound is engine.mjs playRound up to the state save: the round
@@ -133,7 +138,17 @@ func playRound(t FixLoopTicket, r FixLoopRequest, state ledger.Object, kind stri
 			out.Engine = res
 		}
 		return res, err
-	}}
+	}, Input: r.Input, Session: r.Session}
+	if spawn := r.Session.Spawn; spawn != nil {
+		deps.Session.Spawn = func(opts review.SpawnOpts) (ledger.Object, error) {
+			res, err := spawn(opts)
+			if err != nil {
+				return res, err
+			}
+			out.Rechecks = append(out.Rechecks, recheckRow(opts, res))
+			return res, nil
+		}
+	}
 	next, err := review.RunRound(state, deps, kind)
 	if IsUnsupported(err) || review.IsUnsupported(err) {
 		return out, unsupported(err.Error())
@@ -156,4 +171,44 @@ func playRound(t FixLoopTicket, r FixLoopRequest, state ledger.Object, kind stri
 	err = SaveState(SaveRequest{Home: r.Home, RunID: r.RunID, Block: t.Block, File: t.File, ContentRoot: r.ContentRoot, Key: r.Key,
 		State: next, Seq: seq, WriteRow: r.WriteRow, Now: r.Now})
 	return out, err
+}
+
+// recheckRow is engine.mjs playRound's record of one recheck session.
+func recheckRow(opts review.SpawnOpts, res ledger.Object) ledger.Object {
+	get := func(o ledger.Object, key string) any {
+		if o == nil {
+			return nil
+		}
+		return o.Get(key)
+	}
+	var lens any
+	if opts.RowExtra != nil {
+		lens = opts.RowExtra.Get("lens")
+	}
+	usage, _ := get(res, "usage").(ledger.Object)
+	row, _ := get(res, "row").(ledger.Object)
+	tokens := func(key string) any {
+		if v := get(usage, key); v != nil {
+			return v
+		}
+		return get(row, key)
+	}
+	out := ledger.Object{{Key: "lens", Value: lens}, {Key: "role", Value: emptyNull(opts.Role)}, {Key: "level", Value: emptyNull(opts.Level)},
+		{Key: "provider", Value: get(res, "provider")}, {Key: "model", Value: get(res, "model")}, {Key: "status", Value: get(res, "status")},
+		{Key: "tokens_in", Value: tokens("tokens_in")}, {Key: "tokens_out", Value: tokens("tokens_out")}}
+	if st, ok := get(res, "status").(string); ok && st != "ok" {
+		reason := get(res, "reason")
+		if reason == nil {
+			reason = st
+		}
+		out = append(out, ledger.Field{Key: "reason", Value: reason})
+	}
+	return out
+}
+
+func emptyNull(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }

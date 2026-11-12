@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/review"
 )
 
 func deepClone(t *testing.T, v ledger.Object) ledger.Object {
@@ -91,6 +92,8 @@ func TestFixLoopRoundMatchesNode(t *testing.T) {
 					r.Owned = step.Get("owned").([]any)
 					filesBefore := mustJSON(t, b496Files(t, home))
 					got, err := FixLoopRound(l.tk, r)
+					// B517 ports the patch_check, but this config names no levels.L2:
+					// Go's session guard hands the ticket over before any write.
 					if name == "cap-stop-then-stopped" && i == 1 {
 						if !IsUnsupported(err) || len(l.rows) != mark || mustJSON(t, b496Files(t, home)) != filesBefore {
 							t.Fatalf("patch_check: %v, %d rows", err, len(l.rows)-mark)
@@ -146,8 +149,10 @@ func TestFixLoopRoundReadFails(t *testing.T) {
 
 // Tickets that need a part Go does not port return ErrUnsupported before
 // anything is written (no budget row, no restored state, no round): a
-// `block reopen` row, an autopilot extra round, a recheck, a stop the
-// raised cap reopens.
+// `block reopen` row, an autopilot extra round, a recheck with no work dir
+// or review.recheck_scope file or a base with peers (B517 ports the
+// fix-hunk recheck only), and a stop the raised cap reopens into such a
+// recheck.
 func TestFixLoopRoundUnsupportedWritesNothing(t *testing.T) {
 	sign := func(row ledger.Object) ledger.Object {
 		signed, err := signAt(append(ledger.Object{{Key: "run", Value: "r1"}}, row...), b496Key, b496Clock())
@@ -163,14 +168,16 @@ func TestFixLoopRoundUnsupportedWritesNothing(t *testing.T) {
 		"extra round row": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) {
 			l.rows = append(l.rows, sign(ledger.Object{{Key: "event", Value: "autopilot.extra_round"}, {Key: "block", Value: "B1"}, {Key: "file", Value: "a.go"}, {Key: "grant_id", Value: "g1"}}))
 		},
-		"recheck": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) {
-			warn := ledger.Object{{Key: "status", Value: "reviewed"}, {Key: "approved", Value: false}, {Key: "findings", Value: []any{ledger.Object{
-				{Key: "id", Value: "f1"}, {Key: "severity", Value: "warning"}, {Key: "line_start", Value: 1.0}, {Key: "line_end", Value: 2.0},
-				{Key: "claim", Value: "c"}, {Key: "evidence", Value: "e"}, {Key: "fix", Value: "f"}}}}, {Key: "sessions", Value: []any{}}}
-			r.Review = func(func(ledger.Object) error) (ledger.Object, error) { return warn, nil }
-			if _, err := FixLoopRound(l.tk, *r); err != nil {
-				t.Fatal(err)
-			}
+		"recheck with no work dir": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) { b517Warn(t, l, r) },
+		"recheck_scope file": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) {
+			b517Warn(t, l, r)
+			r.Cfg = map[string]any{"review": map[string]any{"recheck_scope": "file"}, "levels": map[string]any{"L2": map[string]any{"provider": "p", "model": "m"}}}
+			r.Input = review.Input{RepoRoot: repo, File: "a.go", Cfg: r.Cfg, WorkDir: filepath.Join(home, "wd")}
+		},
+		"recheck with peers": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) {
+			b517Warn(t, l, r)
+			r.Cfg = map[string]any{"levels": map[string]any{"L2": map[string]any{"provider": "p", "model": "m"}}}
+			r.Input = review.Input{RepoRoot: repo, File: "a.go", Base: "HEAD", Peers: []string{"a.go", "b.go"}, Cfg: r.Cfg, WorkDir: filepath.Join(home, "wd")}
 		},
 		"stop the cap reopens": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) {
 			state := ledger.Object{{Key: "file", Value: "a.go"}, {Key: "level", Value: "L2"}, {Key: "round", Value: 1.0}, {Key: "rounds_at_level", Value: 1.0},
@@ -192,13 +199,32 @@ func TestFixLoopRoundUnsupportedWritesNothing(t *testing.T) {
 			setup(t, home, repo, l, &r)
 			mark, before := len(l.rows), mustJSON(t, b496Files(t, home))
 			r.Review = func(func(ledger.Object) error) (ledger.Object, error) { t.Fatal("review ran"); return nil, nil }
-			if _, err := FixLoopRound(l.tk, r); !IsUnsupported(err) {
+			_, err := FixLoopRound(l.tk, r)
+			if !IsUnsupported(err) {
 				t.Fatalf("got %v", err)
+			}
+			named := map[string]string{"recheck with no work dir": "a recheck with no work dir", "recheck_scope file": "review.recheck_scope file",
+				"recheck with peers": "cross-file evidence of a recheck", "stop the cap reopens": "a recheck with no work dir"}
+			if want, ok := named[name]; ok && !strings.Contains(err.Error(), want) {
+				t.Fatalf("got %v, want %q", err, want)
 			}
 			if len(l.rows) != mark || mustJSON(t, b496Files(t, home)) != before {
 				t.Fatalf("written: %d rows", len(l.rows)-mark)
 			}
 		})
+	}
+}
+
+// b517Warn plays one full round that leaves f1 open, so the next ticket is a
+// recheck.
+func b517Warn(t *testing.T, l *b496Ledger, r *FixLoopRequest) {
+	t.Helper()
+	warn := ledger.Object{{Key: "status", Value: "reviewed"}, {Key: "approved", Value: false}, {Key: "findings", Value: []any{ledger.Object{
+		{Key: "id", Value: "f1"}, {Key: "severity", Value: "warning"}, {Key: "line_start", Value: 1.0}, {Key: "line_end", Value: 2.0},
+		{Key: "claim", Value: "c"}, {Key: "evidence", Value: "e"}, {Key: "fix", Value: "f"}}}}, {Key: "sessions", Value: []any{}}}
+	r.Review = func(func(ledger.Object) error) (ledger.Object, error) { return warn, nil }
+	if _, err := FixLoopRound(l.tk, *r); err != nil {
+		t.Fatal(err)
 	}
 }
 

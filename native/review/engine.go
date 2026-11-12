@@ -474,34 +474,7 @@ func runOne(spec sessionSpec, text string, packet *Packet, in Input, deps Deps) 
 			break // at-capacity without a ladder returns as is, like any result
 		}
 		retried := attempts <= timeoutRetries
-		note := ledger.Object{{Key: "event", Value: "review.session_timeout"}, {Key: "lens", Value: spec.lens}, {Key: "role", Value: spec.role},
-			{Key: "level", Value: spec.level}, {Key: "provider", Value: orDefault(res.Get("provider"), nil)}, {Key: "model", Value: orDefault(res.Get("model"), nil)},
-			{Key: "attempt", Value: float64(attempts)}, {Key: "retried", Value: retried}}
-		if n, ok := res.Get("duration_ms").(float64); ok {
-			note.Set("duration_ms", n)
-		} else {
-			note.Set("duration_ms", nil)
-		}
-		if s, ok := res.Get("stderr_tail").(string); ok {
-			note.Set("stderr_tail", s)
-		} else {
-			note.Set("stderr_tail", nil)
-		}
-		if s, ok := res.Get("tail_note").(string); ok {
-			note.Set("tail_note", s)
-		}
-		if n, ok := res.Get("stdout_bytes").(float64); ok {
-			note.Set("stdout_bytes", n)
-		} else {
-			note.Set("stdout_bytes", nil)
-		}
-		if ev, ok := res.Get("stdout_events").([]any); ok {
-			note.Set("stdout_events", ev)
-		} else {
-			note.Set("stdout_events", []any{})
-		}
-		note.Set("packet_hash", hash)
-		deps.note(note)
+		deps.note(timeoutRow(spec, res, attempts, retried, hash))
 		if deps.WriteRow != nil {
 			taken, err := timeoutTry(spec, res, hash, timeouts, in, deps, func(cfg map[string]any) ledger.Object {
 				out, _ := spawnWith(cfg)
@@ -567,6 +540,39 @@ func runOne(spec sessionSpec, text string, packet *Packet, in Input, deps Deps) 
 	meta.Set("reason", nil)
 	meta.Set("review", verdict.Review)
 	return meta, nil
+}
+
+// timeoutRow is spawnWithTimeoutRetry's review.session_timeout note (with
+// the packet hash, never second_level: the second level is not ported).
+func timeoutRow(spec sessionSpec, res ledger.Object, attempts int, retried bool, hash string) ledger.Object {
+	note := ledger.Object{{Key: "event", Value: "review.session_timeout"}, {Key: "lens", Value: spec.lens}, {Key: "role", Value: spec.role},
+		{Key: "level", Value: spec.level}, {Key: "provider", Value: orDefault(res.Get("provider"), nil)}, {Key: "model", Value: orDefault(res.Get("model"), nil)},
+		{Key: "attempt", Value: float64(attempts)}, {Key: "retried", Value: retried}}
+	if n, ok := res.Get("duration_ms").(float64); ok {
+		note.Set("duration_ms", n)
+	} else {
+		note.Set("duration_ms", nil)
+	}
+	if s, ok := res.Get("stderr_tail").(string); ok {
+		note.Set("stderr_tail", s)
+	} else {
+		note.Set("stderr_tail", nil)
+	}
+	if s, ok := res.Get("tail_note").(string); ok {
+		note.Set("tail_note", s)
+	}
+	if n, ok := res.Get("stdout_bytes").(float64); ok {
+		note.Set("stdout_bytes", n)
+	} else {
+		note.Set("stdout_bytes", nil)
+	}
+	if ev, ok := res.Get("stdout_events").([]any); ok {
+		note.Set("stdout_events", ev)
+	} else {
+		note.Set("stdout_events", []any{})
+	}
+	note.Set("packet_hash", hash)
+	return note
 }
 
 type brokenTry struct {

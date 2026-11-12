@@ -113,12 +113,12 @@ func TestRunRoundRefusesBeforeReview(t *testing.T) {
 		file, level, kind string
 		cfg               map[string]any
 	}{
-		"recheck":      {"b.go", "L2", "recheck", nil},
-		"patch_check":  {"b.go", "L2", "patch_check", nil},
-		"bad level":    {"b.go", "L9", "full", nil},
-		"bad stop_at":  {"b.go", "L2", "full", map[string]any{"escalation": map[string]any{"stop_at": "top"}}},
-		"not utf-8":    {"a.go", "L2", "full", nil},
-		"glob in name": {"b*.go", "L2", "full", nil},
+		"recheck with no work dir":     {"b.go", "L2", "recheck", nil},
+		"patch_check with no work dir": {"b.go", "L2", "patch_check", nil},
+		"bad level":                    {"b.go", "L9", "full", nil},
+		"bad stop_at":                  {"b.go", "L2", "full", map[string]any{"escalation": map[string]any{"stop_at": "top"}}},
+		"not utf-8":                    {"a.go", "L2", "full", nil},
+		"glob in name":                 {"b*.go", "L2", "full", nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ran := false

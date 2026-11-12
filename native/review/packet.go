@@ -508,6 +508,12 @@ func render(lens string, digest []string, facts, context, diff, moved string, pa
 // moved sections (the cases ReadFileDiff accepts); paired is engine.mjs
 // pairedContext's text (” for none).
 func AssemblePacket(d *FileDiff, lens, rulesDigest, factsExcerpt string, cfg map[string]any, paired string) (*Packet, error) {
+	return assemblePacketMode(d, lens, rulesDigest, factsExcerpt, cfg, paired, "auto")
+}
+
+// assemblePacketMode is assemblePacket with its contextMode (auto, or
+// recheck for a fix-hunk packet); over the budget it falls to minimal.
+func assemblePacketMode(d *FileDiff, lens, rulesDigest, factsExcerpt string, cfg map[string]any, paired, mode string) (*Packet, error) {
 	lensText, err := LoadLens(lens)
 	if err != nil {
 		return nil, err
@@ -530,7 +536,7 @@ func AssemblePacket(d *FileDiff, lens, rulesDigest, factsExcerpt string, cfg map
 	if len(digest) > DigestMaxLines {
 		digest = digest[:DigestMaxLines]
 	}
-	ctx := BuildContext(d.File, d.Content, d.Hunks, cfg, "auto")
+	ctx := BuildContext(d.File, d.Content, d.Hunks, cfg, mode)
 	pairedSection := boundedPaired(paired, BudgetFor(cfg, "full_in"))
 	if EstimateTokens(render(lensText, digest, factsExcerpt, ctx.Text, diff, "")) > limit {
 		pairedSection = ""

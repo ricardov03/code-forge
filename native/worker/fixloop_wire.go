@@ -11,11 +11,14 @@ package worker
 //
 // Go serves a ticket only when every part it needs is ported. A dry pass
 // (no writes) decides first, so a ticket that needs a `block reopen` row, an
-// autopilot extra round, a stop a raised cap or a new packet budget
-// reopens, a recheck or a patch_check returns ErrUnsupported with nothing
-// written.
+// autopilot extra round or a recheck part not ported (review.CheckLoop)
+// returns ErrUnsupported with nothing written. B517: a split stop a new
+// packet budget reopens, a cap stop a raised cap reopens (reopenForExtraRound
+// with no extra round) and the recheck / patch_check rounds run in Go.
 
 import (
+	"math"
+
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/review"
@@ -40,6 +43,7 @@ type prepared struct {
 	kind      string
 	seq       int
 	underLock bool
+	spawns    bool // the round runs a review or recheck session
 }
 
 func lateLen(state ledger.Object) (float64, bool) {
@@ -153,17 +157,8 @@ func (r FixLoopRequest) prepare(t FixLoopTicket, rows []ledger.Object, loaded Lo
 	if _, ok := lateLen(state); !ok {
 		return prepared{}, unsupported("a review state whose late is not an array")
 	}
+	reopenForExtraRound(&state, r.Cfg)
 	next, _ := state.Get("next").(ledger.Object)
-	if state.Get("status") == "stopped" && next != nil {
-		budget, finite := next.Get("budget").(float64)
-		if next.Get("reason") == "split_required" && state.Get("stop_lens") == "recheck" && finite && budget > 0 {
-			return prepared{}, unsupported("a split stop a new packet budget may reopen")
-		}
-		round, isNum := state.Get("round").(float64)
-		if next.Get("reason") == "review_cap" && (!isNum || round < float64(review.RoundCap(r.Cfg, 0))) {
-			return prepared{}, unsupported("a cap stop the raised cap reopens (a recheck)")
-		}
-	}
 	if state.Get("status") == "stopped" {
 		p.outcome = append(stoppedOutcome(state, "", loopFields(state, "")),
 			ledger.Field{Key: "approved", Value: false}, ledger.Field{Key: "engine", Value: "adaptive"}, ledger.Field{Key: "sessions", Value: []any{}},
@@ -184,24 +179,68 @@ func (r FixLoopRequest) prepare(t FixLoopTicket, rows []ledger.Object, loaded Lo
 		}
 	} else if next != nil && next.Get("action") == "patch" {
 		kind = "patch_check"
+		state.Set("l3_rung_used", true) // the orchestrator ran this file's one L3 patch before this ticket
 	}
-	if err := review.CheckLoopInput(state, kind, review.LoopDeps{RepoRoot: r.ContentRoot, Cfg: r.Cfg}); err != nil {
+	spawns, err := review.CheckLoop(state, kind, review.LoopDeps{RepoRoot: r.ContentRoot, Cfg: r.Cfg, Input: r.Input, Session: r.Session})
+	if err != nil {
 		return prepared{}, unsupported(err.Error())
 	}
-	p.state, p.kind = state, kind
+	p.state, p.kind, p.spawns = state, kind, spawns
 	p.underLock = MayTakeRung(state, kind, r.Cfg, rungUsed)
 	return p, nil
 }
 
 func isString(v any) bool { _, ok := v.(string); return ok }
 
+// reopenForExtraRound is fixloop.mjs reopenForExtraRound with no autopilot
+// extra round (Go hands a file with one over before this): a recheck's split
+// stop reopens when its budget is not full_in's any more, a cap stop when the
+// cap is above its round now.
+func reopenForExtraRound(sp *ledger.Object, cfg map[string]any) bool {
+	state := *sp
+	defer func() { *sp = state }()
+	if state.Get("status") != "stopped" {
+		return false
+	}
+	next, _ := state.Get("next").(ledger.Object)
+	var reason any
+	if next != nil {
+		reason = next.Get("reason")
+	}
+	budget, isNum := next.Get("budget").(float64)
+	if reason == "split_required" && state.Get("stop_lens") == "recheck" && isNum && !math.IsInf(budget, 0) && !math.IsNaN(budget) && budget > 0 &&
+		budget != float64(review.BudgetFor(cfg, "full_in")) {
+		state.Set("status", "open")
+		state.Set("next", ledger.Object{{Key: "action", Value: "fix"}, {Key: "level", Value: state.Get("level")}, {Key: "trigger", Value: nil}})
+		state.Set("pending_kind", nil)
+		state.Delete("stop_content_hash")
+		state.Delete("stop_lens")
+		return true
+	}
+	if reason != "review_cap" {
+		return false
+	}
+	// JS: state.round >= cap is false for a round that is not a number
+	if round, ok := state.Get("round").(float64); ok && round >= float64(review.RoundCap(cfg, 0)) {
+		return false
+	}
+	state.Set("status", "open")
+	state.Set("next", ledger.Object{{Key: "action", Value: "fix"}, {Key: "level", Value: state.Get("level")}, {Key: "trigger", Value: "autopilot_extra_round"}})
+	state.Set("pending_kind", nil)
+	return true
+}
+
 // outcome is the end of engine.mjs playRound: the saved state as the
 // ticket's outcome.
 func roundOutcome(state ledger.Object, kind string, pl played) ledger.Object {
 	eng := pl.Engine
 	head := loopFields(state, kind)
+	rechecks := pl.Rechecks
+	if rechecks == nil {
+		rechecks = []any{}
+	}
 	head = append(head, ledger.Field{Key: "engine", Value: orDefault(eng.Get("engine"), "adaptive")},
-		ledger.Field{Key: "sessions", Value: orDefault(eng.Get("sessions"), []any{})})
+		ledger.Field{Key: "sessions", Value: orDefault(eng.Get("sessions"), rechecks)})
 	with := func(fields ...ledger.Field) ledger.Object {
 		out := head.Clone()
 		for _, f := range fields {
@@ -252,17 +291,18 @@ func (r FixLoopRequest) round(t FixLoopTicket, p prepared) (ledger.Object, error
 
 // FixLoopCheck is FixLoopRound's dry pass, run before the worker writes its
 // route rows: ErrUnsupported for a ticket FixLoopRound would leave to Node,
-// else whether the round runs a review session. It reads, never writes.
-func FixLoopCheck(t FixLoopTicket, r FixLoopRequest) (session bool, err error) {
+// else whether the round runs a review session and the round's kind (full,
+// recheck or patch_check). It reads, never writes.
+func FixLoopCheck(t FixLoopTicket, r FixLoopRequest) (session bool, kind string, err error) {
 	if r.ReadRows == nil || r.WriteRow == nil {
-		return false, nil
+		return false, "", nil
 	}
 	all, err := r.ReadRows()
 	if err != nil {
 		if IsUnsupported(err) {
-			return false, err
+			return false, "", err
 		}
-		return false, nil
+		return false, "", nil
 	}
 	rows := []ledger.Object{}
 	for _, row := range all {
@@ -273,18 +313,18 @@ func FixLoopCheck(t FixLoopTicket, r FixLoopRequest) (session bool, err error) {
 	where := StateWhere{Home: r.Home, RunRootDir: r.RunRootDir, RunID: r.RunID, Block: t.Block, File: t.File, ContentRoot: r.ContentRoot, Key: r.Key, Rows: rows}
 	dry, err := LoadState(where, false)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	p, err := r.prepare(t, rows, dry)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	if !hasBudgetRow(rows, t.Block) {
 		if _, err := BlockBudgetRows(BudgetRequest{ContentRoot: r.ContentRoot, Block: t.Block, File: t.File, Base: r.Base, Owned: r.Owned, OwnedKinds: r.OwnedKinds, Cfg: r.Cfg}); err != nil {
-			return false, err
+			return false, "", err
 		}
 	}
-	return p.outcome == nil, nil
+	return p.outcome == nil && p.spawns, p.kind, nil
 }
 
 // FixLoopRound is engine.mjs fixLoopRound for one ticket.

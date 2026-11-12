@@ -4,9 +4,9 @@ package review
 // with kind `full`), its triage without System 1 (src/review/triage.mjs
 // triageFindings with no Jev and no S2 rule: every finding is mid with p
 // null, so its verdict is the severity's) and the escalation ladder
-// (src/decide/escalation.mjs escalationAfterAttempt). A recheck or a
-// patch_check (fix hunks, recheck sessions, sections, cross-file evidence)
-// is not ported: RunRound refuses it with ErrUnsupported before anything runs.
+// (src/decide/escalation.mjs escalationAfterAttempt). B517 added the recheck
+// and patch_check rounds on the fix-hunk path (recheck.go); the parts of them
+// not ported are refused with ErrUnsupported before anything runs.
 
 import (
 	"os"
@@ -28,6 +28,12 @@ type LoopDeps struct {
 	WriteRow func(ledger.Object) error
 	// Review runs the file's review (reviewFile); an error is a throw.
 	Review func() (ledger.Object, error)
+	// Input is the review input of a recheck or patch_check round (its
+	// packet, paired context and guards; B517).
+	Input Input
+	// Session spawns a recheck's L2 session (Spawn, Warn, SchemaHistory,
+	// Rand; B517). WriteRow comes from the field above.
+	Session Deps
 }
 
 var levelOrder = []string{"L0", "L1", "L2", "L3"}
@@ -204,6 +210,22 @@ func decideNext(state ledger.Object, openBefore int, s loopSettings) ledger.Obje
 	return nextStep("action", "fix", "level", level, "trigger", nil)
 }
 
+// decideNextKind is fixloop.mjs decideNext with its kind: a patch_check
+// stops when it closed no old finding, then at the cap; else a fix (B517).
+func decideNextKind(state ledger.Object, openBefore int, s loopSettings, kind string, closedIDs int) ledger.Object {
+	open, _ := state.Get("open").([]any)
+	if len(open) > 0 && kind == "patch_check" {
+		if closedIDs == 0 {
+			return nextStep("action", "stop", "reason", "l3_patch_exhausted", "trigger", "review_stall")
+		}
+		if num(state, "round") >= s.maxRounds {
+			return nextStep("action", "stop", "reason", "review_cap", "trigger", "review_cap")
+		}
+		return nextStep("action", "fix", "level", state.Get("level"), "trigger", nil)
+	}
+	return decideNext(state, openBefore, s)
+}
+
 // findingKey is JSON.stringify([claim.trim(), evidence.trim()]).
 func findingKey(f ledger.Object) string {
 	claim, _ := f.Get("claim").(string)
@@ -299,13 +321,41 @@ func retry(state ledger.Object, kind string, reason any) ledger.Object {
 	return state
 }
 
-// CheckLoopInput reports ErrUnsupported for a round Go does not run: any
-// kind but a full round, a level or escalation.stop_at Node's levelIndex
-// throws on, or a file whose text is not UTF-8 (Node decodes it lossily).
-// Called before the review session, never after.
+// CheckLoopInput reports ErrUnsupported for a round Go does not run (see
+// CheckLoop). Called before the review session, never after.
 func CheckLoopInput(state ledger.Object, kind string, deps LoopDeps) error {
-	if kind != "full" {
-		return unsupported("a " + kind + " round (fix hunks, recheck sessions) is not ported")
+	_, err := CheckLoop(state, kind, deps)
+	return err
+}
+
+// CheckLoop reports ErrUnsupported for a round Go does not run: a kind other
+// than full, recheck or patch_check, a level or escalation.stop_at Node's
+// levelIndex throws on, a file whose text is not UTF-8 (Node decodes it
+// lossily), or a recheck part not ported (planRecheck). spawns: the round
+// runs a review or recheck session. It writes no row and no state.
+func CheckLoop(state ledger.Object, kind string, deps LoopDeps) (spawns bool, err error) {
+	if err := checkLoopBase(state, kind, deps); err != nil {
+		return false, err
+	}
+	if kind == "full" {
+		return true, nil
+	}
+	plan, err := planRecheck(state, kind, deps, true)
+	if err != nil {
+		return false, err
+	}
+	return plan.spawns(), nil
+}
+
+func checkLoopBase(state ledger.Object, kind string, deps LoopDeps) error {
+	if kind != "full" && kind != "recheck" && kind != "patch_check" {
+		return unsupported("a " + kind + " round is not ported")
+	}
+	if _, ok := state.Get("open").([]any); !ok {
+		return unsupported("a review state with no open list")
+	}
+	if _, ok := state.Get("late").([]any); !ok && kind != "full" {
+		return unsupported("a review state with no late list")
 	}
 	level, _ := state.Get("level").(string)
 	if levelIndex(level) < 0 {
@@ -332,8 +382,11 @@ func CheckLoopInput(state ledger.Object, kind string, deps LoopDeps) error {
 // rule (the worker passes neither). It mutates and returns state; an error
 // is a throw (the caller's `unavailable` with next: retry).
 func RunRound(state ledger.Object, deps LoopDeps, kind string) (ledger.Object, error) {
-	if err := CheckLoopInput(state, kind, deps); err != nil {
+	if err := checkLoopBase(state, kind, deps); err != nil {
 		return state, err
+	}
+	if kind != "full" {
+		return runRecheck(state, deps, kind)
 	}
 	s := settingsFor(deps.Cfg, deps.ExtraRounds)
 	file := state.Get("file").(string)
