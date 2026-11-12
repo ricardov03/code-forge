@@ -22,6 +22,10 @@ func realOrSelf(file string) string {
 	return p
 }
 
+// AssertInside is Node's assertInsideRoot: the row-path checks, no symlink,
+// and the realpath'd parent inside root.
+func AssertInside(root, file string) error { return assertInside(root, file) }
+
 func assertInside(root, file string) error {
 	if file == "" || len(utf16.Encode([]rune(file))) > 4096 {
 		return badPath("file must be a non-empty relative path")
