@@ -1,0 +1,17 @@
+=== grok
+--prompt-file
+<WORK>/isolation-<H>.md
+-m
+grok-9
+--disallowed-tools
+Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch
+--deny
+*
+--no-plan
+--no-subagents
+--max-turns
+1
+--permission-mode
+dontAsk
+--cwd
+<PROJECT>

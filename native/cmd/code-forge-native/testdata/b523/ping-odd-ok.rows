@@ -1,0 +1,4 @@
+FAIL ping.facts | ping facts (anthropic/claude-haiku-9) | ping=error(TypeError)
+FAIL ping.coder | ping coder (anthropic/undefined) | ping=error(Error)
+OK ping.reviewer | ping reviewer (anthropic/claude-opus-9) | ping=ok
+FAIL ping.s2 | ping s2 (OpenAI /m3) | codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author

@@ -1,0 +1,6 @@
+WARN ping.facts | ping facts (anthropic/claude-haiku-9) | ping=skipped(402)
+WARN ping.coder | ping coder (anthropic/claude-sonnet-9) | ping=skipped(402)
+WARN ping.reviewer | ping reviewer (anthropic/claude-opus-9) | ping=skipped(402)
+WARN ping.s2 | ping s2 (anthropic/claude-opus-9) | ping=skipped(402)
+WARN ping.delegate.L2 | ping delegate L2 (anthropic/claude-opus-9) | ping=skipped(402)
+WARN ping.delegate.L3 | ping delegate L3 (anthropic/claude-opus-9) | ping=skipped(402)

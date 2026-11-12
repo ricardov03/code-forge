@@ -1,0 +1,6 @@
+OK ping.facts | ping facts (xai/grok-9-fast) | ping=ok
+OK ping.coder | ping coder (xai/grok-9-code) | ping=ok
+OK ping.reviewer | ping reviewer (xai/grok-9) | ping=ok
+OK ping.s2 | ping s2 (xai/grok-9) | ping=ok
+OK ping.delegate.L2 | ping delegate L2 (xai/grok-9) | ping=ok
+OK ping.delegate.L3 | ping delegate L3 (xai/grok-9) | ping=ok

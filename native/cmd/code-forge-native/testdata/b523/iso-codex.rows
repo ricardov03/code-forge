@@ -1,0 +1,1 @@
+FAIL isolation | isolation | codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author

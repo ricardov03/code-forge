@@ -1,0 +1,6 @@
+OK ping.facts | ping facts (xai/grok-9-fast) | ping=ok
+OK ping.coder | ping coder (xai/grok-9-code) | ping=ok
+FAIL ping.reviewer | ping reviewer (anthropic/claude-opus-9) | ping=skipped(cli-missing)
+FAIL ping.s2 | ping s2 (openai/gpt-9) | codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author
+FAIL ping.delegate.L2 | ping delegate L2 (anthropic/claude-opus-9) | ping=skipped(cli-missing)
+FAIL ping.delegate.L3 | ping delegate L3 (openai/gpt-9) | codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author

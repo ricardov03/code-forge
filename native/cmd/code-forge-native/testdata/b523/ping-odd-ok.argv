@@ -1,0 +1,15 @@
+=== claude
+-p
+--model
+claude-opus-9
+--safe-mode
+--tools
+
+--strict-mcp-config
+--no-session-persistence
+--output-format
+json
+--max-budget-usd
+0.5
+--permission-mode
+dontAsk
