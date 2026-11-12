@@ -95,59 +95,6 @@ func dfCommandRows(cfg map[string]any, order config.Ordered, pathEnv string) []d
 	return rows
 }
 
-// dfConfiguredProviders is probes.mjs configuredProviders. B505's
-// doctorConfiguredProviders (doctor_probes.go, unmerged) is the same
-// function; the later of the two to land keeps one.
-func dfConfiguredProviders(cfg map[string]any) []string {
-	out := []string{}
-	add := func(p any) {
-		s, ok := p.(string)
-		if !ok {
-			return
-		}
-		for _, have := range out {
-			if have == s {
-				return
-			}
-		}
-		out = append(out, s)
-	}
-	levels, _ := cfg["levels"].(map[string]any)
-	for _, name := range []string{"L0", "L1", "L2", "L3"} {
-		level := levels[name]
-		if !dfTruthy(level) {
-			continue
-		}
-		m, _ := level.(map[string]any)
-		if p, ok := m["provider"]; ok && p != nil {
-			add(p)
-		} else {
-			add(cfg["provider"])
-		}
-		fallback, _ := m["fallback"].([]any)
-		for _, f := range fallback {
-			if fm, ok := f.(map[string]any); ok {
-				add(fm["provider"])
-			}
-		}
-	}
-	return out
-}
-
-func dfTruthy(v any) bool {
-	switch x := v.(type) {
-	case nil:
-		return false
-	case bool:
-		return x
-	case float64:
-		return x != 0 && x == x
-	case string:
-		return x != ""
-	}
-	return true
-}
-
 // dfCoderSandboxRows is probes.mjs checkCoderSandbox (B93).
 func dfCoderSandboxRows(cfg map[string]any) []doctorRow {
 	coder, _ := cfg["coder"].(map[string]any)
@@ -176,7 +123,7 @@ func dfCoderSandboxRows(cfg map[string]any) []doctorRow {
 		extra = fmt.Sprintf(", %d extra writable %s", len(dirs), word)
 	}
 	rows := []doctorRow{{"coder-sandbox", "INFO", "coder sandbox", "profile " + profile + extra + "; applies to the Codex (openai) coder only"}}
-	providers := dfConfiguredProviders(cfg)
+	providers := doctorConfiguredProviders(cfg) // B505, doctor_probes.go
 	var others []string
 	for _, pair := range [][2]string{{"anthropic", "Claude (anthropic)"}, {"xai", "Grok (xai)"}} {
 		for _, p := range providers {
