@@ -215,16 +215,12 @@ func contextPack(args []string, stderr io.Writer) int {
 	if err != nil {
 		return refuse("this install's bin/code-forge.mjs cannot be found (" + contextpack.Errno(err) + "); reinstall code-forge")
 	}
-	nodeName := os.Getenv("CODE_FORGE_NODE")
-	if nodeName == "" {
-		nodeName = "node"
-	}
-	node, err := exec.LookPath(nodeName)
-	if err == nil {
-		node, err = filepath.EvalSymlinks(node)
-	}
+	// B469: a CODE_FORGE_NODE that resolves names the header's node; one that
+	// does not (e.g. /nonexistent) is skipped for node on PATH, as before B452.
+	// Go never starts it, and Node's own pack always has an execPath.
+	node, err := contextNode()
 	if err != nil {
-		return refuse("the node executable " + statusQuote(nodeName) + " for the pack header cannot be found on PATH; install Node or set CODE_FORGE_NODE")
+		return refuse("the node executable " + statusQuote("node") + " for the pack header cannot be found on PATH; install Node or set CODE_FORGE_NODE")
 	}
 	metadata, err := os.ReadFile(filepath.Join(filepath.Dir(bin), "..", "package.json"))
 	var info struct {
@@ -442,4 +438,21 @@ func contextWriteOwner(dir string) error {
 		_ = os.Remove(temp)
 	}
 	return err
+}
+
+// contextNode resolves the node named in the pack header: CODE_FORGE_NODE
+// when it resolves, else node on PATH (B469).
+func contextNode() (string, error) {
+	if override := os.Getenv("CODE_FORGE_NODE"); override != "" {
+		if p, err := exec.LookPath(override); err == nil {
+			if p, err = filepath.EvalSymlinks(p); err == nil {
+				return p, nil
+			}
+		}
+	}
+	p, err := exec.LookPath("node")
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(p)
 }

@@ -192,10 +192,20 @@ test('close flags run natively with byte parity for process, signed state and gi
 
 test('still-handed-over close flags record exactly one row with the boundary reason', async () => {
   /** @type {[Record<string, any>, string[], string][]} */
+  // B451 runs --help=<value> and -h=<value> in Go; a token-like argument still hands the close to Node.
   const cases = [
-    [{}, ['--auto-claim', '--help=yes'], 'close-help'],
-    [{}, ['--remove-worktree', '-h=1'], 'close-help'],
+    [{}, ['--auto-claim', '--reason=sk-private'], 'close-unsupported-flag'],
+    [{}, ['--remove-worktree', '--reason=sk-private'], 'close-unsupported-flag'],
   ];
+  for (const flags of [['--auto-claim', '--help=yes'], ['--remove-worktree', '-h=1']]) {
+    const f = await fixture('auto-tree');
+    const parity = await runParity([...args, ...flags, '--json'], { fixture: f, goCommand: BINARY,
+      env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
+    assert.deepEqual(parity.diffs, [], `${flags}: Go matches Node`);
+    const result = await launch(f, [...args, ...flags, '--json'], { CODE_FORGE_HANDOVER_LOG: '1' });
+    assert.notEqual(result.code, 127, `${flags}: runs in Go with Node unavailable`);
+    await assert.rejects(readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8'), { code: 'ENOENT' }, `${flags}: no hand-over row`);
+  }
   // B380: an exact --help or -h prints Node's close usage natively, with no hand-over row.
   for (const flags of [['--help'], ['-h'], ['--auto-claim', '--help'], ['--remove-worktree', '-h']]) {
     const f = await fixture('auto-tree');

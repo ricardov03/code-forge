@@ -268,12 +268,42 @@ func TestB452ContextFormerHandoverRefusals(t *testing.T) {
 			t.Fatalf("code=%d stderr=%q want %q", code, errText, want)
 		}
 	})
+	// pathWith returns a PATH folder holding git and, when node is set, a
+	// node file, so the lookup sees exactly these tools.
+	pathWith := func(t *testing.T, node string) string {
+		dir := t.TempDir()
+		git, err := exec.LookPath("git")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(git, filepath.Join(dir, "git")); err != nil {
+			t.Fatal(err)
+		}
+		if node != "" {
+			if err := os.Symlink(node, filepath.Join(dir, "node")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
 	t.Run("no node on PATH is a clear refusal", func(t *testing.T) {
 		newContextFixture(t, map[string]any{"B1": map[string]any{}}, "version: 1\n")
 		t.Setenv("CODE_FORGE_NODE", "/nonexistent-b452-node")
+		t.Setenv("PATH", pathWith(t, ""))
 		code, _, errText := runCaptured(t, "context", "pack", "--run", "r-ctx", "--block", "B1")
 		if code != 1 || !strings.Contains(errText, "cannot be found on PATH; install Node or set CODE_FORGE_NODE; nothing was written") {
 			t.Fatalf("code=%d stderr=%q", code, errText)
+		}
+	})
+	// B469: a CODE_FORGE_NODE that names no executable (the /nonexistent
+	// speed-proof setting) falls back to node on PATH, as before B452.
+	t.Run("an unresolvable CODE_FORGE_NODE uses node on PATH", func(t *testing.T) {
+		f := newContextFixture(t, map[string]any{"B1": map[string]any{}}, "version: 1\n")
+		t.Setenv("CODE_FORGE_NODE", "/nonexistent-b452-node")
+		t.Setenv("PATH", pathWith(t, f.node))
+		code, out, errText := runCaptured(t, "context", "pack", "--run", "r-ctx", "--block", "B1")
+		if code != 0 || errText != "" || !strings.Contains(out, f.node) {
+			t.Fatalf("code=%d stdout=%q stderr=%q, want a pack naming %s", code, out, errText, f.node)
 		}
 	})
 }

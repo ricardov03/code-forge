@@ -157,7 +157,7 @@ test('B290 clause: local context packs match Node bytes, streams and signed writ
   } finally { child.kill('SIGKILL'); await rm(lock, { force: true }); }
 });
 
-test('B290 boundary: usage/refusals are exact and unported context cases hand over before writes', async () => {
+test('B290 boundary: usage/refusals are exact; B452 runs every former hand-over context case in Go with Node parity', async () => {
   const f = await fixture();
   const usage = launch(f, ['pack']);
   assert.equal(usage.status, 2, 'ported missing-argument usage runs without Node');
@@ -194,26 +194,35 @@ test('B290 boundary: usage/refusals are exact and unported context cases hand ov
   await chmod(path.join(f.home, '.code-forge/runs/sample.key'), 0o600);
   await rm(path.join(f.home, '.code-forge/runs/sample.key')); await parity(f, args);
   await writeFile(path.join(f.home, '.code-forge/runs/sample.key'), f.key, { mode: 0o600 });
+  // B452 ported every context form to Go: the former hand-over cases now run in Go with Node parity.
   for (const a of [[], ['unknown'], [...args, '--unknown'], ['--help'], ['pack', '--help'], ['pack', '--run', 'sample', '--block', 'B1\r']]) {
     const result = launch(f, a);
-    assert.equal(result.status, 127, JSON.stringify(a) + ': unported case exits 127 without Node');
-    assert.equal(result.stdout, '', 'handover has zero stdout bytes');
-    assert.match(result.stderr, /code-forge-native: node executable .* not found:/, 'handover reports missing Node');
-    await parity(f, a, { CODE_FORGE_NODE: process.execPath });
+    assert.notEqual(result.status, 127, JSON.stringify(a) + ': B452 runs the case in Go without Node');
+    assert.doesNotMatch(result.stderr, /code-forge-native: node executable/, JSON.stringify(a) + ': no hand-over');
+    await parity(f, a);
   }
-  await parity(f, args, { CODE_FORGE_NODE: process.execPath, CODE_FORGE_NO_ERROR_LOG: '0' });
-  assert.equal(launch(f, args, { CODE_FORGE_NO_ERROR_LOG: '0' }).status, 127, 'logging-enabled pack hands over before Go writes');
+  await parity(f, args, { CODE_FORGE_NO_ERROR_LOG: '0' });
   const files = await readdir(path.join(f.home, '.code-forge'));
-  assert.deepEqual(files, ['runs'], 'refusals and unavailable handovers create zero state directories');
-  assert.deepEqual(await readdir(path.join(f.config.tmp.root, 'sample')), [], 'refusals and unavailable handovers create zero pack files or temporary files');
+  assert.deepEqual(files, ['runs'], 'Go usage and help create zero state directories');
+  assert.deepEqual(await readdir(path.join(f.config.tmp.root, 'sample')), [], 'Go usage and help create zero pack files or temporary files');
   const handed = launch(f, ['unknown'], { CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1' });
-  assert.equal(handed.status, 127, 'telemetry-enabled unknown context is handed to unavailable Node');
+  assert.notEqual(handed.status, 127, 'telemetry-enabled unknown context runs in Go');
   const telemetry = spawnSync(binary, ['logs', 'handovers', '--json'], { cwd: f.repo, encoding: 'utf8', env: env({ HOME: f.home, CODE_FORGE_NATIVE: '0' }) });
   assert.equal(telemetry.status, 0, 'handover report reads the private fixture telemetry');
-  const reported = JSON.parse(telemetry.stdout);
-  assert.equal(reported.total, 1, 'exactly one handover was recorded');
-  assert.deepEqual(reported.rows.map(({ verb, sub, reason, count }) => ({ verb, sub, reason, count })), [{ verb: 'context', sub: 'unknown', reason: 'unrouted', count: 1 }], 'public handover reason is unrouted');
+  assert.deepEqual(JSON.parse(telemetry.stdout), { total: 0, rows: [] }, 'a context case Go runs records zero hand-overs');
   await rm(path.join(f.config.tmp.root, 'sample'), { recursive: true });
-  assert.equal(launch(f, args).status, 127, 'missing run root hands its owner protocol over to Node');
-  assert.deepEqual(await readdir(f.config.tmp.root), [], 'missing-root handover creates exactly zero run-root entries');
+  // B452: a missing run root runs in Go. owner.json records each process's own start
+  // time, so compare streams, exit, owner fields and pack bytes per engine on this fixture.
+  const missingRoot = async (/** @type {string} */ executable) => {
+    await rm(path.join(f.config.tmp.root, 'sample'), { recursive: true, force: true });
+    const r = launch(f, args, {}, executable);
+    const root = path.join(f.config.tmp.root, 'sample');
+    const owner = JSON.parse(await readFile(path.join(root, 'owner.json'), 'utf8'));
+    return { status: r.status, stdout: r.stdout, stderr: r.stderr, entries: (await readdir(root, { recursive: true })).sort(),
+      owner: Object.keys(owner).sort(), pack: await readFile(path.join(root, 'context/B1.md'), 'utf8') };
+  };
+  const nodeRoot = await missingRoot(process.execPath);
+  const goRoot = await missingRoot(binary);
+  assert.notEqual(goRoot.status, 127, 'B452: a missing run root runs in Go');
+  assert.deepEqual(goRoot, nodeRoot, 'missing run root: Go matches Node exit, streams, owner fields and pack bytes');
 });

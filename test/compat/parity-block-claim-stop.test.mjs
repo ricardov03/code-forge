@@ -231,13 +231,12 @@ test('claim and stop run natively with byte parity, signed concurrent writes and
   assert.deepEqual(rows[1].map(({ ts, mac, ...r }) => r), rows[0].map(({ ts, mac, ...r }) => r), 'all nonvolatile concurrent ledger fields match Node');
 });
 
-test('claim --auto and --auto-claim delegate without mutation and match Node', async () => {
+test('claim --auto and --auto-claim run in Go (B451) and match Node', async () => {
   const f = await fixture();
-  // Assert specific fallback flags; unrelated subcommands can become native.
   for (const flag of ['--auto', '--auto-claim']) {
     const args = [...claim(), flag];
-    await assertHandoverWithoutMutation(f, args, `claim ${flag} delegates`);
-    await parity(f, args, { CODE_FORGE_NODE: process.execPath });
+    assert.notEqual((await launch(await fixture(), args)).code, 127, `claim ${flag} runs in Go without Node`);
+    await parity(f, args);
   }
 });
 
@@ -263,9 +262,9 @@ test('claim and stop refusals and usage boundaries match Node without starting N
   await parity(await fixture((r) => { r.status = 'ended'; }), claim());
   await parity(await fixture(), [...stop, '--reason=']);
   for (const sub of ['claim', 'stop']) for (const help of ['--help', '-h']) await parity(f, ['block', sub, '--invalid', help]);
-  // Default error logging must preserve Node's scrubbed error records via fallback.
-  await assertHandoverWithoutMutation(f, ['block', 'claim'], 'default error logging delegates without mutation', { CODE_FORGE_NO_ERROR_LOG: '0' });
-  await parity(f, ['block', 'claim'], { CODE_FORGE_NODE: process.execPath, CODE_FORGE_NO_ERROR_LOG: '0' });
+  // B451: default error logging runs in Go and writes Node's scrubbed error records.
+  assert.notEqual((await launch(await fixture(), ['block', 'claim'], { env: { CODE_FORGE_NO_ERROR_LOG: '0' } })).code, 127, 'default error logging runs in Go without Node');
+  await parity(f, ['block', 'claim'], { CODE_FORGE_NO_ERROR_LOG: '0' });
   const blocked = await fixture();
   await mkdir(path.join(blocked.repo, '.code-forge'));
   await writeFile(path.join(blocked.repo, '.code-forge/runs'), 'mirror obstruction');

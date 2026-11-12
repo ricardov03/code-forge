@@ -133,7 +133,7 @@ test('explicit block open has native byte parity, signed rows, git isolation and
   assert.equal(git(concurrent, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads'), git(oracle, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads'), 'concurrent branch tips equal Node');
 });
 
-test('block open refusals and usage match Node; unsupported lanes hand over unchanged', async () => {
+test('block open refusals and usage match Node; --head runs in Go; unsupported lanes hand over unchanged', async () => {
   const refused = await launch(await fixture(), open(['--tests', '*.mjs']));
   assert.equal(refused.code, 2, 'native exact-path refusal works without Node');
   assert.equal(refused.stderr, 'block open: --tests takes exact paths (a file or a directory); "*" and "?" are refused: "*.mjs"\n');
@@ -155,9 +155,10 @@ test('block open refusals and usage match Node; unsupported lanes hand over unch
     assert.equal(result.code, args.includes('--level') ? 1 : 2, `${args.join(' ')} refuses natively without Node`);
     await parity(f, args);
   }
+  // B451: --head runs in Go with Node parity (it no longer hands over).
   for (const args of [open(['--head', 'HEAD'])]) {
-    assert.equal((await launch(f, args)).code, 127, `${args.join(' ')} hands original argv to missing Node`);
-    await parity(f, args, true);
+    assert.notEqual((await launch(await fixture(), args)).code, 127, `${args.join(' ')} runs in Go without Node`);
+    await parity(f, args);
   }
   for (const change of [(r) => { r.autopilot = { status: 'active', until: '2099-01-01T00:00:00.000Z' }; }, (r) => { r.autopilot_approvals = [{ status: 'active', until: '2000-01-01T00:00:00.000Z', approval_id: 'apr-test', key: 'budget.usd' }]; }]) {
     const delegated = await fixture({ change });

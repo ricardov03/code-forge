@@ -282,7 +282,9 @@ test('land records the specific close preflight hand-over reason without private
     assert.deepEqual(Object.keys(rows[0]).sort(), ['at', 'reason', 'sub', 'verb', 'version']);
     assert.equal(rows[0].verb, 'block');
     assert.equal(rows[0].sub, 'land');
-    assert.equal(rows[0].reason, 'close-light', 'specific close reason survives the land fallback');
+    // B451 checks light limits in Go, so the first close preflight that still hands
+    // over here is the unreadable private transcript.
+    assert.equal(rows[0].reason, 'close-transcript-read', 'specific close reason survives the land fallback');
     for (const privateValue of ['B1', RUN, f.repo, f.home, '/private/customer', 'secret-report', 'secret-transcript']) {
       assert.equal(data.includes(privateValue), false, 'hand-over record omits private values');
     }

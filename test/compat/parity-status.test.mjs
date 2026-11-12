@@ -206,10 +206,9 @@ test('direct Go status preserves Node bytes and exit codes across forms and daem
   assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), down, 'down daemon still serves direct status');
   await appendRow({ event: 'review.answered', run: f.run, block: 'B1' }, { slug: 'status-test' });
   const unsupported = await f.command(args, { CODE_FORGE_NATIVE: '0' });
-  assert.deepEqual(await f.command(args), unsupported, 'unsupported review state still hands over with exact Node bytes');
-  const handed = await f.command(args, { CODE_FORGE_NODE: '/nonexistent' });
-  assert.equal(handed.code, 127, 'unsupported review state must still start Node');
-  assert.equal(handed.stdout, '', 'handover emits no partial summary');
+  assert.deepEqual(await f.command(args), unsupported, 'review.answered state matches Node bytes');
+  // B452: Go serves the formerly unsupported review state itself, with Node's bytes.
+  assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), unsupported, 'review.answered state runs in Go without Node');
 });
 
 test('direct status ignores missing socket, bad JSON, timeout, oversized and odd daemon answers, leaving no processes or socket', async (t) => {

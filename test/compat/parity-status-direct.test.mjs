@@ -153,7 +153,7 @@ test('B273 clause: every status form reads disk without Node, with exact streams
   assert.deepEqual(await writerClosed, [0, null], 'concurrent writer releases its unchanged lock and exits zero');
 });
 
-test('B273 boundary: unknown runs and usage errors stay native; unsupported state hands over before output', async (t) => {
+test('B273 boundary: unknown runs and usage errors stay native; B452 serves review state in Go with Node parity', async (t) => {
   const f = await fixture(t);
   for (const args of [['--run', 'r-missing'], ['--run=../bad'], ['--run'], ['--run='], ['--json=true'], ['--json', '--json'],
     ['--run', 'a', '--run', 'b'], ['--wat'], ['positional'], ['--run', '--json'], ['positional', '--wat'], ['--run', ''], ['--'], ['--json', '--help']]) await parity(f, args);
@@ -161,12 +161,12 @@ test('B273 boundary: unknown runs and usage errors stay native; unsupported stat
   assert.deepEqual(native(f, ['--wat']), { code: 2, stdout: '', stderr: 'status: unknown flag "--wat"\nusage: code-forge status [--run <id>] [--json]\n' });
   await save(f, record(f));
   await rows(f, [{ event: 'review.answered', run: 'r-direct', block: 'B1' }]);
-  const handed = native(f, ['--run', 'r-direct']);
-  assert.equal(handed.code, 127, 'unsupported review state attempts Node exactly once');
-  assert.equal(handed.stdout, '', 'handover emits zero partial stdout bytes');
+  // B452: Go serves the formerly unsupported review state itself.
+  const served = native(f, ['--run', 'r-direct']);
+  assert.notEqual(served.code, 127, 'review.answered state runs in Go without Node');
   const result = await runParity(['status', '--run', 'r-direct'], { fixture: f, goCommand: binary,
-    env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } });
-  assert.deepEqual(result, { equal: true, diffs: [] }, 'handed-over review state has zero process and state differences');
+    env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
+  assert.deepEqual(result, { equal: true, diffs: [] }, 'Go review state has zero process and state differences from Node');
 });
 
 test('B273 F1: single workers pin warnings match Node with absent, stale and matching legacy worker', async (t) => {
