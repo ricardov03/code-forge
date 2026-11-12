@@ -282,6 +282,20 @@ func runLaunchWorkerEnv(runID, workspace, binary string, env []string) (int, str
 // cannot judge (B532); the child is killed and the caller hands over.
 var errRunLaunchUndecided = errors.New("worker registry undecided at launch")
 
+// runLaunchKillWait bounds the wait for a killed strict-launch child to be
+// reaped (B593), the 2 s stopWorker gives a SIGKILL in Node.
+var runLaunchKillWait = 2 * time.Second
+
+// runLaunchReaped waits (bounded) until the killed child is reaped: before
+// that its pid still answers signal 0, so a caller that hands over at once
+// would leave a live (or zombie) worker pid behind (B593).
+func runLaunchReaped(exited <-chan struct{}) {
+	select {
+	case <-exited:
+	case <-time.After(runLaunchKillWait):
+	}
+}
+
 // runLaunchWorkerJudged is runLaunchWorkerEnv; strict stops at a worker
 // registry Go cannot judge (errRunLaunchUndecided) instead of reading it as
 // "not announced yet".
@@ -309,6 +323,7 @@ func runLaunchWorkerJudged(runID, workspace, binary string, env []string, strict
 			}
 			if strict && !judged {
 				_ = procguard.Kill(-pid, syscall.SIGKILL)
+				runLaunchReaped(exited)
 				return 0, "", errRunLaunchUndecided
 			}
 			select {
@@ -325,6 +340,9 @@ func runLaunchWorkerJudged(runID, workspace, binary string, env []string, strict
 	}
 	other, judged := runLiveWorker(repoRoot, 0, false)
 	if strict && !judged {
+		if pid != 0 {
+			runLaunchReaped(exited)
+		}
 		return 0, "", errRunLaunchUndecided
 	}
 	if other != nil {
