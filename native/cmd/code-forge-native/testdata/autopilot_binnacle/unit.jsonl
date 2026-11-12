@@ -1,0 +1,47 @@
+{"run": "r-a", "event": "autopilot.grant", "grant_id": "ap-0000abcd", "delegate": "L2", "scopes": ["round:extra", "waive:nit"], "until": "2026-11-13T12:30:00.000Z", "ts": "2026-11-11T07:00:00.000Z"}
+{"run": "r-a", "event": "session", "role": "coder", "usd": 1.23456, "ts": "2026-11-11T07:30:00.000Z"}
+{"run": "r-a", "event": "session", "role": "delegate", "level": "L2", "provider": "anthropic", "status": "ok", "usd": 0.5, "ts": "2026-11-11T07:31:00.000Z"}
+{"run": "r-a", "event": "autopilot.decision", "acted": true, "scope": "round:extra", "decision": "allow", "confidence": 0.92, "decision_id": "d-1", "reason": "tests | pass\nnow", "subject": {"block": "B2", "file": "src/a.mjs"}, "ts": "2026-11-11T07:32:00.000Z"}
+{"run": "r-a", "event": "autopilot.decision", "acted": false, "scope": "waive:nit", "question": "Waive it? mail me at bob@example.com", "owner_reason": "low confidence", "confidence": 0.4, "decision_id": "d-2", "subject": {"block": "B2", "file": "src/b.mjs"}, "ts": "2026-11-11T07:33:00.000Z"}
+{"run": "r-a", "event": "autopilot.decision", "acted": false, "scope": "level", "failure": "model down"}
+{"run": "r-a", "event": "review.waived", "by": "autopilot", "finding": "F-1", "severity": "nit", "file": "src/c.mjs", "block": "B2", "issue": "https://github.com/x/y/issues/3", "decision_id": "d-3", "reason": "cosmetic", "ts": "2026-11-11T07:34:00.000Z"}
+{"run": "r-a", "event": "review.waived", "by": "human", "finding": "F-9", "file": "src/c.mjs", "block": "B2", "ts": "2026-11-11T07:34:30.000Z"}
+{"run": "r-a", "event": "autopilot.extra_round", "grant_id": "ap-0000abcd", "decision_id": "d-1", "file": "src/a.mjs", "block": "B2", "ts": "2026-11-11T07:35:00.000Z"}
+{"run": "r-a", "event": "autopilot.level", "level": "L1", "lane": "fast", "decision_id": "d-4", "block": "B10", "ts": "2026-11-11T07:36:00.000Z"}
+{"run": "r-a", "event": "autopilot.approve", "key": "review.max_rounds", "until": "2026-11-11T09:00:00.000Z", "approval_id": "apr-1", "ts": "2026-11-11T07:37:00.000Z"}
+{"run": "r-a", "event": "autopilot.restore", "approval_id": "apr-1", "ts": "2026-11-11T09:00:00.000Z"}
+{"run": "r-a", "event": "autopilot.restore_skipped", "key": "limits.x", "reason": "changed-by-hand", "ts": "2026-11-11T09:00:01.000Z"}
+{"run": "r-a", "event": "autopilot.restore_skipped", "approval_id": "apr-2", "reason": "other", "ts": "2026-11-11T09:00:02.000Z"}
+{"run": "r-a", "event": "autopilot.pause", "category": "review", "spent_usd": 4.6, "cap_usd": 5, "ts": "2026-11-11T09:01:00.000Z"}
+{"run": "r-a", "event": "autopilot.issue_failed", "finding": "F-2", "file": "src/d.mjs", "ts": "2026-11-11T09:02:00.000Z"}
+{"run": "r-a", "event": "block.close", "block": "B2", "status": "closed", "commit": "0123456789abcdef", "pr_url": "https://github.com/x/y/pull/7", "branch": "b2-main", "ts": "2026-11-11T09:03:00.000Z"}
+{"run": "r-a", "event": "review.session_timeout", "lens": "security", "attempt": 2, "retried": true, "ts": "2026-11-11T09:04:00.000Z"}
+{"run": "r-a", "event": "review.session_timeout", "role": "reviewer", "attempt": 3, "ts": "2026-11-11T09:04:30.000Z"}
+{"run": "r-a", "event": "review.schema_fallback", "trigger": "timeout", "lens": "logic", "from_model": "codex", "to_model": "opus", "refused": "closed-book", "ts": "2026-11-11T09:05:00.000Z"}
+{"run": "r-a", "event": "review.schema_fallback", "role": "reviewer", "from_model": "codex", "to_model": "opus", "ts": "2026-11-11T09:05:10.000Z"}
+{"run": "r-a", "event": "review.schema_fallback", "from_model": "codex", "refused": "weird", "ts": "2026-11-11T09:05:20.000Z"}
+{"run": "r-a", "event": "worker.down", "ts": "2026-11-11T09:06:00.000Z"}
+{"run": "r-a", "event": "worker.replaced", "ts": "2026-11-11T09:06:30.000Z"}
+{"run": "r-a", "event": "ledger.tamper", "block": "B10", "ts": "2026-11-11T09:07:00.000Z"}
+{"run": "r-a", "event": "budget.refused", "role": "coder", "spent_usd": 9.999, "budget_usd": 10, "ts": "2026-11-11T09:08:00.000Z"}
+{"run": "r-a", "event": "budget.refused", "ts": "2026-11-11T09:08:10.000Z"}
+{"run": "r-a", "event": "gate.red", "gate": "test", "code": 1, "block": "B10", "ts": "2026-11-11T09:09:00.000Z"}
+{"run": "r-a", "event": "gate.done", "stack": "node", "all_ok": true, "scope": "full", "reason": "threshold", "block": "B2", "ts": "2026-11-11T09:10:00.000Z"}
+{"run": "r-a", "event": "gate.done", "stack": "node", "all_ok": false, "scope": "related", "test_count": 4, "block": "B10", "ts": "2026-11-11T09:11:00.000Z"}
+{"run": "r-a", "event": "review.done", "block": "B10", "file": "src/e.mjs", "findings_by_severity": {"critical": 1}, "ts": "2026-11-11T09:12:00.000Z"}
+{"run": "r-a", "event": "review.done", "block": "B2", "file": "src/a.mjs", "findings_by_severity": {"critical": 2}, "ts": "2026-11-11T09:12:10.000Z"}
+{"run": "r-a", "event": "review.approved", "block": "B2", "file": "src/a.mjs", "ts": "2026-11-11T09:12:20.000Z"}
+{"run": "r-a", "event": "review.result", "block": "B2", "file": "src/a.mjs", "ts": "2026-11-11T09:12:30.000Z"}
+{"run": "r-a", "event": "proof", "block": "B2", "isolation": "worktree", "ts": "2026-11-11T09:13:00.000Z"}
+{"run": "r-a", "event": "proof", "block": "B2", "ts": "2026-11-11T09:13:10.000Z"}
+{"run": "r-a", "event": "autopilot.link", "grant_id": "ap-0000abcd", "link": "https://example.com/doc", "ts": "2026-11-11T09:14:00.000Z"}
+{"run": "r-a", "event": "autopilot.stop", "grant_id": "ap-0000abcd", "ts": "2026-11-11T09:15:00.000Z"}
+{"run": "r-a", "event": "autopilot.expire", "grant_id": "ap-0000abcd", "until": "x", "ts": "2026-11-11T09:15:00.000Z"}
+{"run": "r-a", "event": "autopilot.custom", "detail": "key sk-abcdefghijklmnop path $HOME$/x and $WS$/src op://vault/item/field id abcdefghijklmnopqrstuvwxyz", "block": "B1", "file": "$HOME$/f.txt", "ts": "2026-11-11T09:16:00+02:00"}
+{"run": "r-a", "event": "autopilot.decision", "acted": false, "scope": "waive:nit", "question": "use sk-abcdefghijklmnop xsk-abcdefghijklmnop ghp_abcdefghijklmnopqrstuvwxyz at $HOME$/x and $WS$/src, $WS$-other op://vault/item/field id abcdefghijklmnopqrstuvwxyz | x\r\ny eyJabcdefghijk.abcdefghijk.abcdef", "subject": {"file": "$WS$/z.go"}, "ts": "2026-11-11T09:16:30.000Z"}
+{"run": "r-a", "event": "autopilot.custom", "source": "shadow", "ts": "2026-11-11T09:17:00.000Z"}
+{"run": "r-b", "event": "autopilot.pause", "category": "coding", "spent_usd": 3, "cap_usd": 2, "ts": "2026-11-11T09:01:00.000Z"}
+{"run": "r-b", "event": "autopilot.grant", "grant_id": "ap-old", "until": "2026-11-11T09:00:00.000Z", "ts": "2026-11-11T07:00:00.000Z"}
+{"run": "r-b", "event": "session", "role": "coder", "usd": 2, "ts": "2026-11-11T07:30:00.000Z"}
+{"run": "r-b", "event": "review.waived", "by": "autopilot", "ts": "2026-11-11T07:34:00.000Z"}
+{"run": "r-a", "event": "gate.done", "stack": "node", "all_ok": true, "scope": "related", "block": "B2", "ts": "2026-11-11T09:20:00.000Z"}

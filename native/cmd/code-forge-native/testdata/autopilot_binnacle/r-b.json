@@ -1,0 +1,1 @@
+{"run_id": "r-b", "project": "unit", "workspace": "$WS$", "status": "active", "engine": "claude", "blocks": {"B2": {"status": "closed", "opened_at": "2026-11-11T08:00:00.000Z", "base_sha": "abcdef0123456789"}, "B10": {"status": "open", "opened_at": "2026-11-11T08:00:00.000Z"}, "b-x": {"status": "stopped"}, "B1": {"opened_at": "2026-11-11T07:00:00.000Z"}}}

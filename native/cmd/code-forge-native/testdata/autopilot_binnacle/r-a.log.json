@@ -1,0 +1,274 @@
+[
+  {
+    "time": "2026-11-11T09:20:00.000Z",
+    "event": "Gates finished",
+    "block": "B2",
+    "file": null,
+    "detail": "node · all green · related tests",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:16:30.000Z",
+    "event": "Question to the owner",
+    "block": null,
+    "file": null,
+    "detail": "waive:nit · to owner (unknown) · unknown",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:15:00.000Z",
+    "event": "Grant expired",
+    "block": null,
+    "file": null,
+    "detail": "grant ap-0000abcd · window ended x",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:15:00.000Z",
+    "event": "Grant stopped",
+    "block": null,
+    "file": null,
+    "detail": "grant ap-0000abcd",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:14:00.000Z",
+    "event": "Log link stored",
+    "block": null,
+    "file": null,
+    "detail": "grant ap-0000abcd",
+    "link": "https://example.com/doc"
+  },
+  {
+    "time": "2026-11-11T09:11:00.000Z",
+    "event": "Gates finished",
+    "block": "B10",
+    "file": null,
+    "detail": "node · not all green · related tests (4)",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:10:00.000Z",
+    "event": "Gates finished",
+    "block": "B2",
+    "file": null,
+    "detail": "node · all green · full suite (the block owns more files than the threshold)",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:09:00.000Z",
+    "event": "Gate red",
+    "block": "B10",
+    "file": null,
+    "detail": "test · exit 1",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:08:10.000Z",
+    "event": "Budget refused a session",
+    "block": null,
+    "file": null,
+    "detail": "session · spent unknown of unknown USD",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:08:00.000Z",
+    "event": "Budget refused a session",
+    "block": null,
+    "file": null,
+    "detail": "coder · spent 10.00 of 10.00 USD",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:07:00.000Z",
+    "event": "Ledger check failed",
+    "block": "B10",
+    "file": null,
+    "detail": "block B10 stopped",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:06:30.000Z",
+    "event": "Worker replaced",
+    "block": null,
+    "file": null,
+    "detail": "the pinned worker was replaced by another process",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:06:00.000Z",
+    "event": "Worker down",
+    "block": null,
+    "file": null,
+    "detail": "the pinned worker is not running",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:05:20.000Z",
+    "event": "Review answer off-schema twice",
+    "block": null,
+    "file": null,
+    "detail": "session · codex → unknown model · refused (weird)",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:05:10.000Z",
+    "event": "Review answer off-schema twice",
+    "block": null,
+    "file": null,
+    "detail": "reviewer · codex → opus · retried once",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:05:00.000Z",
+    "event": "Review broken twice (timeout)",
+    "block": null,
+    "file": null,
+    "detail": "logic · codex → opus · refused (closed-book)",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:04:30.000Z",
+    "event": "Review session timed out",
+    "block": null,
+    "file": null,
+    "detail": "reviewer · attempt 3 · gave up",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:04:00.000Z",
+    "event": "Review session timed out",
+    "block": null,
+    "file": null,
+    "detail": "security · attempt 2 · retried",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:03:00.000Z",
+    "event": "Block closed",
+    "block": "B2",
+    "file": null,
+    "detail": "status closed · commit 0123456",
+    "link": "https://github.com/x/y/pull/7"
+  },
+  {
+    "time": "2026-11-11T09:02:00.000Z",
+    "event": "Waiver issue failed",
+    "block": null,
+    "file": "src/d.mjs",
+    "detail": "finding F-2 · no issue opened",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:01:00.000Z",
+    "event": "Budget category paused",
+    "block": null,
+    "file": null,
+    "detail": "review · spent 4.60 of 5.00 USD",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:00:02.000Z",
+    "event": "Restore skipped",
+    "block": null,
+    "file": null,
+    "detail": "apr-2 · other",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:00:01.000Z",
+    "event": "Restore skipped",
+    "block": null,
+    "file": null,
+    "detail": "limits.x · changed by hand",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:00:00.000Z",
+    "event": "Approval restored",
+    "block": null,
+    "file": null,
+    "detail": "apr-1",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T07:37:00.000Z",
+    "event": "Owner approval",
+    "block": null,
+    "file": null,
+    "detail": "review.max_rounds · until 2026-11-11T09:00:00.000Z · apr-1",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T07:36:00.000Z",
+    "event": "Coder level chosen",
+    "block": "B10",
+    "file": null,
+    "detail": "L1 · lane fast · plan none · decision d-4",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T07:35:00.000Z",
+    "event": "Extra fix round",
+    "block": "B2",
+    "file": "src/a.mjs",
+    "detail": "grant ap-0000abcd · decision d-1",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T07:34:00.000Z",
+    "event": "Waiver by autopilot",
+    "block": "B2",
+    "file": "src/c.mjs",
+    "detail": "finding F-1 · nit · issue https://github.com/x/y/issues/3 · decision d-3",
+    "link": "https://github.com/x/y/issues/3"
+  },
+  {
+    "time": "2026-11-11T07:33:00.000Z",
+    "event": "Question to the owner",
+    "block": null,
+    "file": null,
+    "detail": "level · to owner (unknown) · unknown",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T07:33:00.000Z",
+    "event": "Question to the owner",
+    "block": null,
+    "file": null,
+    "detail": "waive:nit · to owner (low confidence) · confidence 0.4 · d-2",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T07:32:00.000Z",
+    "event": "Delegate decided",
+    "block": null,
+    "file": null,
+    "detail": "round:extra · acted · decision allow · confidence 0.92 · d-1",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T07:31:00.000Z",
+    "event": "Delegate session",
+    "block": null,
+    "file": null,
+    "detail": "L2 · anthropic · status ok",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T09:16:00+02:00",
+    "event": "autopilot.custom",
+    "block": "B1",
+    "file": "~/f.txt",
+    "detail": "",
+    "link": null
+  },
+  {
+    "time": "2026-11-11T07:00:00.000Z",
+    "event": "Grant started",
+    "block": null,
+    "file": null,
+    "detail": "grant ap-0000abcd · delegate L2 · allow round:extra, waive:nit · until 2026-11-13T12:30:00.000Z",
+    "link": null
+  }
+]

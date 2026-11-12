@@ -1,0 +1,390 @@
+{
+  "title": "Autopilot run r-a",
+  "byline": {
+    "date": "2026-11-11",
+    "owner": "Test Owner"
+  },
+  "status": [
+    {
+      "item": "Result",
+      "value": "1 of 4 blocks closed"
+    },
+    {
+      "item": "Stack/PRs",
+      "value": "https://github.com/x/y/pull/7"
+    },
+    {
+      "item": "Full suite",
+      "value": "green · no full suite since 2026-11-11T09:10:00.000Z"
+    },
+    {
+      "item": "Reviews",
+      "value": "1 result · 1 file approved · 1 waived by autopilot"
+    },
+    {
+      "item": "Files to read",
+      "value": "src/c.mjs, src/a.mjs, src/b.mjs, <project>/z.go"
+    },
+    {
+      "item": "Base",
+      "value": "abcdef0"
+    },
+    {
+      "item": "Spend",
+      "value": "coding 1.23 of 10.13 USD, review 0.50 of 5.00 USD"
+    },
+    {
+      "item": "Autopilot window",
+      "value": "active · grant ap-0000abcd · 2026-11-11T07:00:00.000Z to 2026-11-13T12:30:00.000Z · delegate L2 · allow round:extra, waive:nit"
+    },
+    {
+      "item": "Log link",
+      "value": "https://example.com/doc"
+    },
+    {
+      "item": "Clock note",
+      "value": "1 row carries no valid timestamp and takes the time of the row before it"
+    }
+  ],
+  "decisions": [
+    {
+      "time": "2026-11-11T07:32:00.000Z",
+      "decision": "round:extra: the delegate chose \"allow\" · B2 · src/a.mjs",
+      "why": "tests | pass\nnow (confidence 0.92)",
+      "reverse": "Overrule it: undo the action it allowed (see its own entry) and, to stop further ones, run code-forge autopilot stop --run r-a"
+    },
+    {
+      "time": "2026-11-11T07:33:00.000Z",
+      "decision": "Asked the owner (waive:nit): Waive it? mail me at <email>",
+      "why": "Not acted on: low confidence",
+      "reverse": "Nothing was done; answer it yourself (see Open questions)."
+    },
+    {
+      "time": "2026-11-11T07:33:00.000Z",
+      "decision": "Asked the owner (level): question not recorded",
+      "why": "Not acted on: model down",
+      "reverse": "Nothing was done; answer it yourself (see Open questions)."
+    },
+    {
+      "time": "2026-11-11T07:34:00.000Z",
+      "decision": "Waived F-1 (nit) in src/c.mjs, block B2",
+      "why": "cosmetic (decision d-3)",
+      "reverse": "Reopen the finding: fix it in src/c.mjs, then delete the waiver issue (https://github.com/x/y/issues/3)"
+    },
+    {
+      "time": "2026-11-11T07:35:00.000Z",
+      "decision": "One extra fix round for src/a.mjs, block B2",
+      "why": "The delegate allowed it (decision d-1)",
+      "reverse": "The round is spent; refuse further ones by stopping the grant or denying round:extra."
+    },
+    {
+      "time": "2026-11-11T07:36:00.000Z",
+      "decision": "Block B10 codes at L1",
+      "why": "Lane fast, plan level none (decision d-4)",
+      "reverse": "Open the block again with code-forge block open --level <other level>."
+    },
+    {
+      "time": "2026-11-11T07:37:00.000Z",
+      "decision": "You approved review.max_rounds until 2026-11-11T09:00:00.000Z",
+      "why": "Owner approval apr-1",
+      "reverse": "It restores itself at 2026-11-11T09:00:00.000Z; or set the old value back in .code-forge.yml and run code-forge run reload."
+    },
+    {
+      "time": "2026-11-11T09:16:30.000Z",
+      "decision": "Asked the owner (waive:nit): use [REDACTED] xsk-abcdefghijklmnop [REDACTED] at ~/x and <project>/src, $WS$-other op://<ref> id <item-id> | x\r\ny [REDACTED]",
+      "why": "Not acted on: unknown",
+      "reverse": "Nothing was done; answer it yourself (see Open questions)."
+    }
+  ],
+  "blocks": [
+    {
+      "block": "b-x",
+      "branch": "not recorded",
+      "review": "none yet",
+      "tests": "not recorded",
+      "gates": "none yet",
+      "state": "Stopped"
+    },
+    {
+      "block": "B1",
+      "branch": "not recorded",
+      "review": "none yet",
+      "tests": "not recorded",
+      "gates": "none yet",
+      "state": "unknown"
+    },
+    {
+      "block": "B10",
+      "branch": "not recorded",
+      "review": "none yet",
+      "tests": "not recorded",
+      "gates": "red",
+      "state": "Open"
+    },
+    {
+      "block": "B2",
+      "branch": "b2-main · commit 0123456 · https://github.com/x/y/pull/7",
+      "review": "1 result · 1 approved · 1 waived",
+      "tests": "2 proof runs",
+      "gates": "green",
+      "state": "Closed, ready for you to mark ready and merge"
+    }
+  ],
+  "open_questions": [
+    "Waive it? mail me at <email> (waive:nit, low confidence)",
+    "question not recorded (level, unknown)",
+    "use [REDACTED] xsk-abcdefghijklmnop [REDACTED] at ~/x and <project>/src, $WS$-other op://<ref> id <item-id> | x\r\ny [REDACTED] (waive:nit, unknown)",
+    "Budget coding stopped at 0.00 of 0.00 USD: raise the cap or leave it?",
+    "Budget review stopped at 4.60 of 5.00 USD: raise the cap or leave it?"
+  ],
+  "owner_actions": [
+    {
+      "text": "Answer: Waive it? mail me at <email> (waive:nit)",
+      "done": false
+    },
+    {
+      "text": "Answer: question not recorded (level)",
+      "done": false
+    },
+    {
+      "text": "Answer: use [REDACTED] xsk-abcdefghijklmnop [REDACTED] at ~/x and <project>/src, $WS$-other op://<ref> id <item-id> | x\r\ny [REDACTED] (waive:nit)",
+      "done": false
+    },
+    {
+      "text": "Decide the critical finding in src/e.mjs (block B10): critical findings are never delegated",
+      "done": false
+    },
+    {
+      "text": "Budget coding is paused: raise the cap or leave it (only you can raise a budget)",
+      "done": false
+    },
+    {
+      "text": "Budget review is paused: raise the cap or leave it (only you can raise a budget)",
+      "done": false
+    },
+    {
+      "text": "Check limits.x: it was changed by hand, so it was not restored",
+      "done": false
+    },
+    {
+      "text": "Check apr-2: it was changed by hand, so it was not restored",
+      "done": false
+    },
+    {
+      "text": "Mark block B2 ready and merge it (https://github.com/x/y/pull/7)",
+      "done": false
+    }
+  ],
+  "incidents": [
+    {
+      "time": "2026-11-11T09:01:00.000Z",
+      "what": "Budget category review reached its stop at 4.60 of 5.00 USD",
+      "effect": "Delegated actions in review stopped.",
+      "fix": "Raise the cap or leave it paused."
+    },
+    {
+      "time": "2026-11-11T09:02:00.000Z",
+      "what": "The waiver issue for F-2 in src/d.mjs could not be opened",
+      "effect": "The waiver stands without an issue.",
+      "fix": "Open the tracking issue by hand."
+    },
+    {
+      "time": "2026-11-11T09:04:00.000Z",
+      "what": "A security session timed out (attempt 2)",
+      "effect": "It was retried.",
+      "fix": "None needed unless it repeats."
+    },
+    {
+      "time": "2026-11-11T09:04:30.000Z",
+      "what": "A reviewer session timed out (attempt 3)",
+      "effect": "No retry left; the review was marked unavailable.",
+      "fix": "Run the review again."
+    },
+    {
+      "time": "2026-11-11T09:05:00.000Z",
+      "what": "A logic session broke twice on the same packet, the second time by timing out (codex)",
+      "effect": "The second-level try was refused (closed-book); the review stays unavailable.",
+      "fix": "Set a second level that can run closed-book (not Codex), or review the file by hand."
+    },
+    {
+      "time": "2026-11-11T09:05:10.000Z",
+      "what": "A reviewer answer failed the schema twice on the same packet (codex)",
+      "effect": "It was retried once on the second level (opus).",
+      "fix": "Check the file's next review result."
+    },
+    {
+      "time": "2026-11-11T09:05:20.000Z",
+      "what": "A review answer failed the schema twice on the same packet (codex)",
+      "effect": "The second-level try was refused (weird); the review stays unavailable.",
+      "fix": "Review the file by hand."
+    },
+    {
+      "time": "2026-11-11T09:06:00.000Z",
+      "what": "The pinned worker was down",
+      "effect": "Reviews wait until the worker is back.",
+      "fix": "Restart the worker for this run."
+    },
+    {
+      "time": "2026-11-11T09:06:30.000Z",
+      "what": "The pinned worker was replaced",
+      "effect": "Reviews wait until the worker is back.",
+      "fix": "Restart the worker for this run."
+    },
+    {
+      "time": "2026-11-11T09:07:00.000Z",
+      "what": "A ledger check failed for block B10",
+      "effect": "The block was stopped.",
+      "fix": "Look at the block before reopening it."
+    },
+    {
+      "time": "2026-11-11T09:08:00.000Z",
+      "what": "A coder session was refused: budget 10.00 of 10.00 USD",
+      "effect": "The session did not run.",
+      "fix": "Raise the budget (only you can) or finish by hand."
+    },
+    {
+      "time": "2026-11-11T09:08:10.000Z",
+      "what": "A session session was refused: budget unknown of unknown USD",
+      "effect": "The session did not run.",
+      "fix": "Raise the budget (only you can) or finish by hand."
+    }
+  ],
+  "timeline": [
+    {
+      "time": "2026-11-11T09:20:00.000Z",
+      "event": "Gates finished · B2 — node · all green · related tests"
+    },
+    {
+      "time": "2026-11-11T09:16:30.000Z",
+      "event": "Question to the owner — waive:nit · to owner (unknown) · unknown"
+    },
+    {
+      "time": "2026-11-11T09:15:00.000Z",
+      "event": "Grant expired — grant ap-0000abcd · window ended x"
+    },
+    {
+      "time": "2026-11-11T09:15:00.000Z",
+      "event": "Grant stopped — grant ap-0000abcd"
+    },
+    {
+      "time": "2026-11-11T09:14:00.000Z",
+      "event": "Log link stored — grant ap-0000abcd"
+    },
+    {
+      "time": "2026-11-11T09:11:00.000Z",
+      "event": "Gates finished · B10 — node · not all green · related tests (4)"
+    },
+    {
+      "time": "2026-11-11T09:10:00.000Z",
+      "event": "Gates finished · B2 — node · all green · full suite (the block owns more files than the threshold)"
+    },
+    {
+      "time": "2026-11-11T09:09:00.000Z",
+      "event": "Gate red · B10 — test · exit 1"
+    },
+    {
+      "time": "2026-11-11T09:08:10.000Z",
+      "event": "Budget refused a session — session · spent unknown of unknown USD"
+    },
+    {
+      "time": "2026-11-11T09:08:00.000Z",
+      "event": "Budget refused a session — coder · spent 10.00 of 10.00 USD"
+    },
+    {
+      "time": "2026-11-11T09:07:00.000Z",
+      "event": "Ledger check failed · B10 — block B10 stopped"
+    },
+    {
+      "time": "2026-11-11T09:06:30.000Z",
+      "event": "Worker replaced — the pinned worker was replaced by another process"
+    },
+    {
+      "time": "2026-11-11T09:06:00.000Z",
+      "event": "Worker down — the pinned worker is not running"
+    },
+    {
+      "time": "2026-11-11T09:05:20.000Z",
+      "event": "Review answer off-schema twice — session · codex → unknown model · refused (weird)"
+    },
+    {
+      "time": "2026-11-11T09:05:10.000Z",
+      "event": "Review answer off-schema twice — reviewer · codex → opus · retried once"
+    },
+    {
+      "time": "2026-11-11T09:05:00.000Z",
+      "event": "Review broken twice (timeout) — logic · codex → opus · refused (closed-book)"
+    },
+    {
+      "time": "2026-11-11T09:04:30.000Z",
+      "event": "Review session timed out — reviewer · attempt 3 · gave up"
+    },
+    {
+      "time": "2026-11-11T09:04:00.000Z",
+      "event": "Review session timed out — security · attempt 2 · retried"
+    },
+    {
+      "time": "2026-11-11T09:03:00.000Z",
+      "event": "Block closed · B2 — status closed · commit 0123456"
+    },
+    {
+      "time": "2026-11-11T09:02:00.000Z",
+      "event": "Waiver issue failed · src/d.mjs — finding F-2 · no issue opened"
+    },
+    {
+      "time": "2026-11-11T09:01:00.000Z",
+      "event": "Budget category paused — review · spent 4.60 of 5.00 USD"
+    },
+    {
+      "time": "2026-11-11T09:00:02.000Z",
+      "event": "Restore skipped — apr-2 · other"
+    },
+    {
+      "time": "2026-11-11T09:00:01.000Z",
+      "event": "Restore skipped — limits.x · changed by hand"
+    },
+    {
+      "time": "2026-11-11T09:00:00.000Z",
+      "event": "Approval restored — apr-1"
+    },
+    {
+      "time": "2026-11-11T07:37:00.000Z",
+      "event": "Owner approval — review.max_rounds · until 2026-11-11T09:00:00.000Z · apr-1"
+    },
+    {
+      "time": "2026-11-11T07:36:00.000Z",
+      "event": "Coder level chosen · B10 — L1 · lane fast · plan none · decision d-4"
+    },
+    {
+      "time": "2026-11-11T07:35:00.000Z",
+      "event": "Extra fix round · B2 · src/a.mjs — grant ap-0000abcd · decision d-1"
+    },
+    {
+      "time": "2026-11-11T07:34:00.000Z",
+      "event": "Waiver by autopilot · B2 · src/c.mjs — finding F-1 · nit · issue https://github.com/x/y/issues/3 · decision d-3"
+    },
+    {
+      "time": "2026-11-11T07:33:00.000Z",
+      "event": "Question to the owner — level · to owner (unknown) · unknown"
+    },
+    {
+      "time": "2026-11-11T07:33:00.000Z",
+      "event": "Question to the owner — waive:nit · to owner (low confidence) · confidence 0.4 · d-2"
+    },
+    {
+      "time": "2026-11-11T07:32:00.000Z",
+      "event": "Delegate decided — round:extra · acted · decision allow · confidence 0.92 · d-1"
+    },
+    {
+      "time": "2026-11-11T07:31:00.000Z",
+      "event": "Delegate session — L2 · anthropic · status ok"
+    },
+    {
+      "time": "2026-11-11T09:16:00+02:00",
+      "event": "autopilot.custom · B1 · ~/f.txt"
+    },
+    {
+      "time": "2026-11-11T07:00:00.000Z",
+      "event": "Grant started — grant ap-0000abcd · delegate L2 · allow round:extra, waive:nit · until 2026-11-13T12:30:00.000Z"
+    }
+  ]
+}

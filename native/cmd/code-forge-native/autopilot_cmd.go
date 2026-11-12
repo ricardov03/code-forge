@@ -24,9 +24,11 @@ import (
 // B461: `code-forge autopilot` in Go (src/cli/autopilot.mjs). Help, usage
 // errors and flag errors of every subcommand, status (no grant, or a grant
 // with a stored link), stop (refusals, and a grant with a stored link) and
-// start (--yes, or the no-terminal refusal) run here. The binnacle files, the
-// terminal prompt, ask, waive, round, level, approve, binnacle and log keep
-// their hand-over to Node with their own reasons.
+// start (--yes, or the no-terminal refusal) run here. B478 adds the terminal
+// prompt of start, binnacle and log (autopilot_binnacle.go) and the binnacle
+// files that status and stop write for a grant with no link. Ask, waive,
+// round, level and approve keep their hand-over to Node with their own
+// reasons, and so does a binnacle whose data Go cannot read the way Node does.
 func init() { routes["autopilot"] = runAutopilot }
 
 const autopilotUsage = "usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]\n"
@@ -235,8 +237,6 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 		return nil, hAutopilotAction
 	case "approve":
 		return nil, hAutopilotApprove
-	case "binnacle", "log":
-		return nil, hAutopilotBinnacle
 	}
 	if sub == "start" && !flags.bools["yes"] && autopilotIsTTY() && !autopilotPromptable() {
 		return nil, hAutopilotPrompt // stdin is a terminal but stdout is not: clack's output stays with Node
@@ -252,6 +252,9 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 		// checkApprovals answers nothing for no-run and bad-run-id; the
 		// subcommand's own read then refuses (start validates its input first).
 		return func(o *runOut) int {
+			if (sub == "binnacle" || sub == "log") && flags.bools["json"] && flags.bools["markdown"] {
+				return autopilotReport(o, sub, autopilotUsageFail("give --json or --markdown, not both"))
+			}
 			if sub == "start" {
 				if _, invalid := autopilotValidate(flags, now); invalid != nil {
 					return autopilotReport(o, sub, invalid)
@@ -270,19 +273,33 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 	if err != nil {
 		return nil, hAutopilotShape // approvals to restore, or a grant shape Go does not read
 	}
-	if read.Grant != nil && !runTruthy(read.Grant.Get("link")) && (sub == "status" || sub == "stop" && read.State == "active") {
-		return nil, hAutopilotFiles // the Markdown files are the record: binnacle.mjs writes them
+	files := read.Grant != nil && !runTruthy(read.Grant.Get("link")) && (sub == "status" || sub == "stop" && read.State == "active")
+	if files || sub == "binnacle" || sub == "log" || sub == "status" && read.Grant != nil {
+		rows, ok := autopilotRows(home, record, runID)
+		if !ok {
+			return nil, hAutopilotLedger
+		}
+		// the Markdown files and the binnacle read every row: one Go reads
+		// differently from Node keeps the command on Node
+		if (files || sub == "binnacle" || sub == "log") && !bnSupported(home, runID, rows, record, now) {
+			if files {
+				return nil, hAutopilotFiles
+			}
+			return nil, hAutopilotBinnacle
+		}
+	}
+	if text, has := flags.values["link"]; has && sub == "binnacle" {
+		if _, _, known := bnParseLink(text); !known {
+			return nil, hAutopilotBinnacle // a URL whose WHATWG form Go does not know
+		}
 	}
 	switch sub {
 	case "status":
-		if read.Grant != nil {
-			if _, ok := autopilotRows(home, record, runID); !ok {
-				return nil, hAutopilotLedger
-			}
-		}
 		return func(o *runOut) int { return autopilotStatus(o, home, runID, flags, now) }, 0
 	case "stop":
 		return func(o *runOut) int { return autopilotStop(o, home, runID, now) }, 0
+	case "binnacle", "log":
+		return func(o *runOut) int { return autopilotBinnacle(o, home, runID, sub, flags) }, 0
 	}
 	return func(o *runOut) int { return autopilotStart(o, home, runID, flags, now) }, 0
 }
@@ -493,6 +510,7 @@ func autopilotStatus(o *runOut, home, runID string, flags autopilotFlags, now ti
 		{Key: "coding", Value: autopilotCategorySpend(rows, runID, "coding", since)},
 		{Key: "review", Value: autopilotCategorySpend(rows, runID, "review", since)},
 	}
+	files := autopilotRecordFiles(o, home, runID, grant, now)
 	stateName := checked.State
 	if stateName != "run-ended" {
 		stateName, _ = autopilot.GrantState(grant, now)
@@ -518,7 +536,7 @@ func autopilotStatus(o *runOut, home, runID string, flags autopilotFlags, now ti
 		{Key: "until", Value: grant.Get("until")}, {Key: "time_left_s", Value: left}, {Key: "scopes", Value: grant.Get("scopes")},
 		{Key: "deny", Value: grant.Get("deny")}, {Key: "fixed_deny", Value: autopilotFixedDenyScopes()}, {Key: "caps", Value: grant.Get("caps")},
 		{Key: "stop_at", Value: grant.Get("stop_at")}, {Key: "spend", Value: spend}, {Key: "paused", Value: pausedAny},
-		{Key: "link", Value: grant.Get("link")}, {Key: "files", Value: nil}, {Key: "started_at", Value: grant.Get("started_at")},
+		{Key: "link", Value: grant.Get("link")}, {Key: "files", Value: autopilotFilesValue(files)}, {Key: "started_at", Value: grant.Get("started_at")},
 	}...)
 	// JSON.stringify leaves out a key whose value is undefined.
 	for _, key := range []string{"stopped_at", "expired_at"} {
@@ -565,7 +583,7 @@ func autopilotStatus(o *runOut, home, runID string, flags autopilotFlags, now ti
 		"  deny      " + strings.Join(deny, ", ") + "\n" +
 		"  budget    " + autopilotCaps(caps) + " · stop at " + autopilotPercent(grant.Get("stop_at")) + "%\n" +
 		"  spend     " + strings.Join(spendParts, ", ") + " · paused " + pausedText + "\n" +
-		"  link      " + autopilotText(grant.Get("link")) + "\n")
+		autopilotRecordText(grant.Get("link"), files))
 	return 0
 }
 
@@ -609,7 +627,7 @@ func autopilotStop(o *runOut, home, runID string, now time.Time) int {
 	if err != nil {
 		return autopilotReport(o, "stop", err)
 	}
-	o.out("autopilot run " + runID + ": grant " + autopilotText(stopped.Get("grant_id")) + " stopped\n  link      " + autopilotText(stopped.Get("link")) + "\n")
+	o.out("autopilot run " + runID + ": grant " + autopilotText(stopped.Get("grant_id")) + " stopped\n" + autopilotRecordText(stopped.Get("link"), autopilotRecordFiles(o, home, runID, stopped, now)))
 	return 0
 }
 
