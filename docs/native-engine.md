@@ -113,7 +113,11 @@ even when the native binary row is `OK`.
 
 These rows check availability. They do not say that a public verb ran fully
 in Go. The `native-status.mjs` helper reads data from the daemon on standard
-input. It does not report which engine started a command. Although help
+input. It does not report which engine started a command. Since B503 the
+daemon's `status` answer no longer starts that helper: Go writes the same
+answer, including `status-unreadable` for a run record or ledger Node cannot
+read and a `null` spend that overflows. Only a block id outside printable
+ASCII, which needs Node's sort order, still uses the helper. Although help
 lists `native-status`, it is a private helper with no public command handler; it runs in Go since B501.
 Use `code-forge status` to check run progress.
 

@@ -4,7 +4,9 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,8 +16,9 @@ import (
 	"github.com/ricardov03/code-forge/native/runstatus"
 )
 
-// Complex review-clearing rules still use one long-lived Node companion. The
-// common path below computes status in Go over the daemon's cached rows.
+// The status answer is computed in Go over the daemon's cached rows. Only a
+// block id that needs Node's ICU order still uses one long-lived Node
+// companion (src/cli/native-status.mjs).
 type statusProcess struct {
 	cmd    *exec.Cmd
 	input  io.WriteCloser
@@ -42,6 +45,9 @@ func (s *server) status() object {
 		if err == nil && json.Unmarshal(data, &decoded) == nil {
 			return object{"runs": []any{decoded}}
 		}
+	}
+	if result, ok := s.statusBrief(); ok {
+		return result
 	}
 	if s.statusProcess == nil {
 		executable, err := os.Executable()
@@ -101,6 +107,33 @@ func (s *server) status() object {
 	}
 	s.closeStatus()
 	return failure("status-unreadable")
+}
+
+// statusBrief is the Node companion's answer in Go (B503, after B501's
+// native-status rules): statusOf(record, rows, {gateDetails: false}), a throw
+// written as status-unreadable, a non-finite spend written as null by
+// JSON.stringify, then the daemon's own gate details. ok is false only for a
+// block id outside printable ASCII, which needs Node's ICU localeCompare, or a
+// summary Go cannot encode.
+func (s *server) statusBrief() (object, bool) {
+	summary, err := runstatus.ComputeBriefErr(s.record, s.rows, s.home)
+	if errors.Is(err, runstatus.ErrUnorderedBlockID) {
+		return nil, false
+	}
+	if err != nil {
+		return failure("status-unreadable"), true
+	}
+	if n, ok := summary.Get("spent_usd").(float64); ok && (math.IsInf(n, 0) || math.IsNaN(n)) {
+		summary.Set("spent_usd", nil)
+	}
+	data, err := json.Marshal(summary)
+	var decoded object
+	if err != nil || json.Unmarshal(data, &decoded) != nil {
+		return nil, false
+	}
+	result := object{"runs": []any{decoded}}
+	s.statusGateDetails(result)
+	return result, true
 }
 
 // Match Node timeoutStatus using the ledger rows already cached by refresh.
