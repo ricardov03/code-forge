@@ -227,6 +227,8 @@ type prepared struct {
 	packet *Packet
 	stepUp ledger.Object
 	head   ledger.Object
+	// sections: a Markdown file over the budget, one packet per section
+	sections []sectionPacket
 }
 
 // prepare is reviewFile before any write: the diff, the risk, the plan, the
@@ -308,7 +310,7 @@ func prepare(in Input) (*prepared, error) {
 	}
 	if packet.Status == "split_required" {
 		if markdownFile.MatchString(diff.File) {
-			return nil, unsupported("Markdown section review is not ported")
+			return prepareSections(p, diff, packet, in, paired, result)
 		}
 		p.early = result(ledger.Object{{Key: "status", Value: "split_required"}, {Key: "approved", Value: false}},
 			ledger.Field{Key: "tokens_in", Value: float64(packet.TokensIn)}, ledger.Field{Key: "budget", Value: float64(packet.Budget)}, ledger.Field{Key: "sessions", Value: []any{}})
@@ -350,38 +352,69 @@ func File(in Input, deps Deps) (ledger.Object, error) {
 	if p.early != nil {
 		return p.early, nil
 	}
-	spec, depth, risk, packet, stepUp := p.spec, p.depth, p.risk, p.packet, p.stepUp
 	result := func(fields ledger.Object, tail ...ledger.Field) ledger.Object {
 		out := append(ledger.Object{}, fields...)
 		out = append(out, p.head...)
 		return append(out, tail...)
 	}
-	plan := ledger.Object{{Key: "event", Value: "review.plan"}, {Key: "depth_unconstrained", Value: depth}, {Key: "depth_chosen", Value: depth},
-		{Key: "degrade_step", Value: 0.0}, {Key: "risk", Value: risk}, {Key: "context_mode", Value: packet.ContextMode}, {Key: "forecast_tokens", Value: float64(packet.TokensIn)}}
-	deps.note(append(plan, stepUp...))
-	done, err := runOneWith(spec, packet.Text, packet, in, deps, true)
+	if p.sections != nil {
+		return fileSections(p, in, deps, result)
+	}
+	part, err := reviewPart(p, p.packet, in, deps, p.stepUp)
 	if err != nil {
 		return nil, err
 	}
-	if done, err = needsFileRound(done, spec, packet, in, deps); err != nil {
-		return nil, err
+	sessions := []any{}
+	for _, s := range part.sessions {
+		sessions = append(sessions, s)
 	}
-	sessions := []any{publicSummary(done)}
+	if !part.reviewed {
+		return result(ledger.Object{{Key: "status", Value: "unavailable"}, {Key: "reason", Value: part.reason}, {Key: "approved", Value: false}}, ledger.Field{Key: "sessions", Value: sessions}), nil
+	}
+	return result(ledger.Object{{Key: "status", Value: "reviewed"}, {Key: "approved", Value: part.approved}},
+		ledger.Field{Key: "summary", Value: part.summary}, ledger.Field{Key: "findings", Value: part.findings}, ledger.Field{Key: "sessions", Value: sessions}), nil
+}
+
+// partOutcome is engine.mjs reviewPart's answer for one packet.
+type partOutcome struct {
+	reviewed bool
+	reason   any
+	approved bool
+	summary  any
+	findings any
+	sessions []ledger.Object
+}
+
+// reviewPart is engine.mjs reviewPart with one reviewer and no judge: the
+// review.plan row (rowExtra appended), the session, its needs_file round.
+func reviewPart(p *prepared, packet *Packet, in Input, deps Deps, rowExtra ledger.Object) (partOutcome, error) {
+	spec := p.spec
+	plan := ledger.Object{{Key: "event", Value: "review.plan"}, {Key: "depth_unconstrained", Value: p.depth}, {Key: "depth_chosen", Value: p.depth},
+		{Key: "degrade_step", Value: 0.0}, {Key: "risk", Value: p.risk}, {Key: "context_mode", Value: packet.ContextMode}, {Key: "forecast_tokens", Value: float64(packet.TokensIn)}}
+	deps.note(append(plan, rowExtra...))
+	done, err := runOneWith(spec, packet.Text, packet, in, deps, true)
+	if err != nil {
+		return partOutcome{}, err
+	}
+	if done, err = needsFileRound(done, spec, packet, in, deps); err != nil {
+		return partOutcome{}, err
+	}
+	out := partOutcome{sessions: []ledger.Object{publicSummary(done)}}
 	if done.Get("status") != "ok" {
-		reason := done.Get("reason")
-		deps.note(append(ledger.Object{{Key: "event", Value: "review.unavailable"}, {Key: "reason", Value: reason}, {Key: "lens", Value: done.Get("lens")}}, stepUp...))
-		return result(ledger.Object{{Key: "status", Value: "unavailable"}, {Key: "reason", Value: reason}, {Key: "approved", Value: false}}, ledger.Field{Key: "sessions", Value: sessions}), nil
+		out.reason = done.Get("reason")
+		deps.note(append(ledger.Object{{Key: "event", Value: "review.unavailable"}, {Key: "reason", Value: out.reason}, {Key: "lens", Value: done.Get("lens")}}, rowExtra...))
+		return out, nil
 	}
 	review := done.Get("review").(ledger.Object)
 	findings, _ := review.Get("findings").([]any)
-	approved := review.Get("passed") == true
+	out.reviewed, out.approved = true, review.Get("passed") == true
 	for _, f := range findings {
 		if fo, _ := f.(ledger.Object); fo.Get("severity") != "nit" {
-			approved = false
+			out.approved = false
 		}
 	}
-	return result(ledger.Object{{Key: "status", Value: "reviewed"}, {Key: "approved", Value: approved}},
-		ledger.Field{Key: "summary", Value: review.Get("summary")}, ledger.Field{Key: "findings", Value: review.Get("findings")}, ledger.Field{Key: "sessions", Value: sessions}), nil
+	out.summary, out.findings = review.Get("summary"), review.Get("findings")
+	return out, nil
 }
 
 // timeoutRetries is B30's same-model retry count.

@@ -289,6 +289,7 @@ func TestReviewFileUnsupportedBeforeSpawn(t *testing.T) {
 	fx := readFixture(t, "packet_fixture.json")
 	fx.After["pkg/thing_test.txt"] = "one\n"
 	fx.After["README.md"] = strings.Repeat("# head\nsome words here\n", 200)
+	fx.After["emoji.md"] = "# " + strings.Repeat("a", 117) + "\U0001F600 tail\n" + strings.Repeat("some words here\n", 200)
 	repo := buildRepo(t, fx)
 	if err := os.Remove(filepath.Join(repo, "same.txt")); err != nil {
 		t.Fatal(err)
@@ -313,7 +314,9 @@ func TestReviewFileUnsupportedBeforeSpawn(t *testing.T) {
 		{"consensus-code-kind", Input{File: "notes.txt", Cfg: withReview(map[string]any{"multimodel": true, "single_reviewer_max_risk": 0.0}), Risk: f(2), Kind: "code"}},
 		{"deleted", Input{File: "same.txt", Cfg: baseCfg(), Risk: f(1)}},
 		{"test-file", Input{File: "pkg/thing_test.txt", Cfg: baseCfg(), Risk: f(1)}},
-		{"markdown-split", Input{File: "README.md", Cfg: withReview(map[string]any{"budgets": map[string]any{"full_in": 100.0}}), Risk: f(1)}},
+		// B545: a Markdown file over the budget reviews by section (TestB545MarkdownSectionsMatchNode);
+		// only a heading Node cuts inside a surrogate pair stays with Node
+		{"markdown-heading-surrogate-cut", Input{File: "emoji.md", Cfg: withReview(map[string]any{"budgets": map[string]any{"full_in": 100.0}}), Risk: f(1)}},
 		{"related-files", Input{File: "app.js", Cfg: baseCfg(), Risk: f(1)}},
 	}
 	for _, c := range cases {

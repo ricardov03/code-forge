@@ -1,0 +1,764 @@
+{
+ "commit": {
+  "doc.md": "---\ntitle: Guide\n# not a heading (front matter)\n---\nIntro paragraph.\nintro line 0 plain text words\nintro line 1 plain text words\nintro line 2 plain text words\nintro line 3 plain text words\n\n# Setup\n\nsetup line 0 plain text words\nsetup line 1 plain text words\nsetup line 2 plain text words\nsetup line 3 plain text words\nsetup line 4 plain text words\nsetup line 5 plain text words\nsetup line 6 plain text words\nsetup line 7 plain text words\nsetup line 8 plain text words\nsetup line 9 plain text words\nsetup line 10 plain text words\nsetup line 11 plain text words\n\n```sh\n# a shell comment, not a heading\necho hi\n```\n\n## Install\n\ninstall line 0 plain text words\ninstall line 1 plain text words\ninstall line 2 plain text words\ninstall line 3 plain text words\ninstall line 4 plain text words\ninstall line 5 plain text words\ninstall line 6 plain text words\ninstall line 7 plain text words\ninstall line 8 plain text words\ninstall line 9 plain text words\ninstall line 10 plain text words\ninstall line 11 plain text words\n\n~~~\n## inside tilde fence\n~~~\n\n## Usage\n\nusage line 0 plain text words\nusage line 1 plain text words\nusage line 2 plain text words\nusage line 3 plain text words\nusage line 4 plain text words\nusage line 5 plain text words\nusage line 6 plain text words\nusage line 7 plain text words\nusage line 8 plain text words\nusage line 9 plain text words\nusage line 10 plain text words\nusage line 11 plain text words\n\n### Deep `code` heading\n\ndeep line 0 plain text words\ndeep line 1 plain text words\ndeep line 2 plain text words\ndeep line 3 plain text words\ndeep line 4 plain text words\ndeep line 5 plain text words\n",
+  "crlf.md": "---\r\ntitle: Guide\r\n# not a heading (front matter)\r\n---\r\nIntro paragraph.\r\nintro line 0 plain text words\r\nintro line 1 plain text words\r\nintro line 2 plain text words\r\nintro line 3 plain text words\r\n\r\n# Setup\r\n\r\nsetup line 0 plain text words\r\nsetup line 1 plain text words\r\nsetup line 2 plain text words\r\nsetup line 3 plain text words\r\nsetup line 4 plain text words\r\nsetup line 5 plain text words\r\nsetup line 6 plain text words\r\nsetup line 7 plain text words\r\nsetup line 8 plain text words\r\nsetup line 9 plain text words\r\nsetup line 10 plain text words\r\nsetup line 11 plain text words\r\n\r\n```sh\r\n# a shell comment, not a heading\r\necho hi\r\n```\r\n\r\n## Install\r\n\r\ninstall line 0 plain text words\r\ninstall line 1 plain text words\r\ninstall line 2 plain text words\r\ninstall line 3 plain text words\r\ninstall line 4 plain text words\r\ninstall line 5 plain text words\r\ninstall line 6 plain text words\r\ninstall line 7 plain text words\r\ninstall line 8 plain text words\r\ninstall line 9 plain text words\r\ninstall line 10 plain text words\r\ninstall line 11 plain text words\r\n\r\n~~~\r\n## inside tilde fence\r\n~~~\r\n\r\n## Usage\r\n\r\nusage line 0 plain text words\r\nusage line 1 plain text words\r\nusage line 2 plain text words\r\nusage line 3 plain text words\r\nusage line 4 plain text words\r\nusage line 5 plain text words\r\nusage line 6 plain text words\r\nusage line 7 plain text words\r\nusage line 8 plain text words\r\nusage line 9 plain text words\r\nusage line 10 plain text words\r\nusage line 11 plain text words\r\n\r\n### Deep `code` heading\r\n\r\ndeep line 0 plain text words\r\ndeep line 1 plain text words\r\ndeep line 2 plain text words\r\ndeep line 3 plain text words\r\ndeep line 4 plain text words\r\ndeep line 5 plain text words\r\n"
+ },
+ "after": {
+  "doc.md": "---\ntitle: Guide\n# not a heading (front matter)\n---\nIntro paragraph.\nintro line 0 CHANGED words here\nintro line 1 plain text words\nintro line 2 plain text words\nintro line 3 CHANGED words here\n\n# Setup\n\nsetup line 0 CHANGED words here\nsetup line 1 plain text words\nsetup line 2 plain text words\nsetup line 3 CHANGED words here\nsetup line 4 plain text words\nsetup line 5 plain text words\nsetup line 6 CHANGED words here\nsetup line 7 plain text words\nsetup line 8 plain text words\nsetup line 9 CHANGED words here\nsetup line 10 plain text words\nsetup line 11 plain text words\n\n```sh\n# a shell comment, not a heading\necho hi\n```\n\n## Install\n\ninstall line 0 CHANGED words here\ninstall line 1 plain text words\ninstall line 2 plain text words\ninstall line 3 CHANGED words here\ninstall line 4 plain text words\ninstall line 5 plain text words\ninstall line 6 CHANGED words here\ninstall line 7 plain text words\ninstall line 8 plain text words\ninstall line 9 CHANGED words here\ninstall line 10 plain text words\ninstall line 11 plain text words\n\n~~~\n## inside tilde fence\n~~~\n\n## Usage\n\nusage line 0 CHANGED words here\nusage line 1 plain text words\nusage line 2 plain text words\nusage line 3 CHANGED words here\nusage line 4 plain text words\nusage line 5 plain text words\nusage line 6 CHANGED words here\nusage line 7 plain text words\nusage line 8 plain text words\nusage line 9 CHANGED words here\nusage line 10 plain text words\nusage line 11 plain text words\n\n### Deep `code` heading\n\ndeep line 0 CHANGED words here\ndeep line 1 plain text words\ndeep line 2 plain text words\ndeep line 3 CHANGED words here\ndeep line 4 plain text words\ndeep line 5 plain text words\n",
+  "crlf.md": "---\r\ntitle: Guide\r\n# not a heading (front matter)\r\n---\r\nIntro paragraph.\r\nintro line 0 CHANGED words here\r\nintro line 1 plain text words\r\nintro line 2 plain text words\r\nintro line 3 CHANGED words here\r\n\r\n# Setup\r\n\r\nsetup line 0 CHANGED words here\r\nsetup line 1 plain text words\r\nsetup line 2 plain text words\r\nsetup line 3 CHANGED words here\r\nsetup line 4 plain text words\r\nsetup line 5 plain text words\r\nsetup line 6 CHANGED words here\r\nsetup line 7 plain text words\r\nsetup line 8 plain text words\r\nsetup line 9 CHANGED words here\r\nsetup line 10 plain text words\r\nsetup line 11 plain text words\r\n\r\n```sh\r\n# a shell comment, not a heading\r\necho hi\r\n```\r\n\r\n## Install\r\n\r\ninstall line 0 CHANGED words here\r\ninstall line 1 plain text words\r\ninstall line 2 plain text words\r\ninstall line 3 CHANGED words here\r\ninstall line 4 plain text words\r\ninstall line 5 plain text words\r\ninstall line 6 CHANGED words here\r\ninstall line 7 plain text words\r\ninstall line 8 plain text words\r\ninstall line 9 CHANGED words here\r\ninstall line 10 plain text words\r\ninstall line 11 plain text words\r\n\r\n~~~\r\n## inside tilde fence\r\n~~~\r\n\r\n## Usage\r\n\r\nusage line 0 CHANGED words here\r\nusage line 1 plain text words\r\nusage line 2 plain text words\r\nusage line 3 CHANGED words here\r\nusage line 4 plain text words\r\nusage line 5 plain text words\r\nusage line 6 CHANGED words here\r\nusage line 7 plain text words\r\nusage line 8 plain text words\r\nusage line 9 CHANGED words here\r\nusage line 10 plain text words\r\nusage line 11 plain text words\r\n\r\n### Deep `code` heading\r\n\r\ndeep line 0 CHANGED words here\r\ndeep line 1 plain text words\r\ndeep line 2 plain text words\r\ndeep line 3 CHANGED words here\r\ndeep line 4 plain text words\r\ndeep line 5 plain text words\r\n",
+  "new.md": "# New doc\n\na line 0 plain text words\na line 1 plain text words\na line 2 plain text words\na line 3 plain text words\na line 4 plain text words\na line 5 plain text words\na line 6 plain text words\na line 7 plain text words\na line 8 plain text words\na line 9 plain text words\n\n## Part two\n\nb line 0 plain text words\nb line 1 plain text words\nb line 2 plain text words\nb line 3 plain text words\nb line 4 plain text words\nb line 5 plain text words\nb line 6 plain text words\nb line 7 plain text words\nb line 8 plain text words\nb line 9 plain text words\n\n## Part three\n\nc line 0 plain text words\nc line 1 plain text words\nc line 2 plain text words\nc line 3 plain text words\nc line 4 plain text words\nc line 5 plain text words\nc line 6 plain text words\nc line 7 plain text words\nc line 8 plain text words\nc line 9 plain text words\n"
+ },
+ "cases": [
+  {
+   "name": "md-sections-approve",
+   "file": "doc.md",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 900,
+      "quick_in": 700
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "one",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "two",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F1",
+        "file": "doc.md",
+        "line_start": 30,
+        "line_end": 30,
+        "severity": "nit",
+        "category": "docs",
+        "claim": "c",
+        "evidence": "e",
+        "fix": "x"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "three",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "four",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "five",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "six",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "md-sections-major",
+   "file": "doc.md",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 900,
+      "quick_in": 700
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "one",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "two",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F1",
+        "file": "doc.md",
+        "line_start": 40,
+        "line_end": 40,
+        "severity": "warning",
+        "category": "logic",
+        "claim": "c",
+        "evidence": "e",
+        "fix": "y"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "three",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "four",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "five",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "six",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "md-section-unavailable",
+   "file": "doc.md",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 900,
+      "quick_in": 700
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "one",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "exit",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 1
+    },
+    {
+     "status": "exit",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 1
+    },
+    {
+     "status": "exit",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 1
+    },
+    {
+     "status": "exit",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 1
+    },
+    {
+     "status": "exit",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 1
+    }
+   ]
+  },
+  {
+   "name": "md-group-too-big",
+   "file": "doc.md",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 760,
+      "quick_in": 700
+     }
+    }
+   },
+   "script": []
+  },
+  {
+   "name": "md-named-too-big",
+   "file": "doc.md",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 815,
+      "quick_in": 700
+     }
+    }
+   },
+   "script": []
+  },
+  {
+   "name": "md-new-file",
+   "file": "new.md",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 900,
+      "quick_in": 700
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "n1",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "n2",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "n3",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "n4",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "md-crlf",
+   "file": "crlf.md",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 900,
+      "quick_in": 700
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "c1",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "c2",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "c3",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "c4",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "c5",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "c6",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "md-step-up",
+   "file": "doc.md",
+   "risk": 0,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 900,
+      "quick_in": 700
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "s1",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "s2",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "s3",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "s4",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "s5",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "s6",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  }
+ ]
+}
