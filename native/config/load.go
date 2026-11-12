@@ -35,6 +35,13 @@ func Load(cwd string) (map[string]any, error) {
 }
 
 // LoadFile parses a particular file without searching for a project root.
+// LoadUnchecked is Load without the merge-gate settings check: the parse,
+// root and version steps of loadProjectConfig only, which makes no such check.
+func LoadUnchecked(cwd string) (map[string]any, error) {
+	mapping, _, err := LoadOrdered(cwd)
+	return mapping, err
+}
+
 func LoadFile(path string) (map[string]any, error) {
 	mapping, _, err := LoadFileOrdered(path)
 	if err != nil {

@@ -178,10 +178,6 @@ func TestB458GoAnswers(t *testing.T) {
 
 // The forms Go does not serve yet keep the hand-over, each with its own reason.
 func TestB458HandOvers(t *testing.T) {
-	configDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(configDir, ".code-forge.yml"), []byte("version: 1\nproof:\n  runners: []\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	cases := []struct {
 		args   []string
 		reason string
@@ -193,7 +189,6 @@ func TestB458HandOvers(t *testing.T) {
 		{[]string{"author", "--job", "plan", "--brief", "b.md"}, "author-session"},
 		{[]string{"s2", "--packet", "p.json"}, "system-two-session"},
 		{[]string{"jev", "ask", "lane", "--state", "s.json"}, "jev-ask"},
-		{[]string{"proof", "tier", "--file", "a", "--risk", "1", "--cwd", configDir}, "proof-config"},
 	}
 	for _, c := range cases {
 		home := t.TempDir()

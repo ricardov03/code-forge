@@ -15,15 +15,15 @@ import (
 // written with JS's whitespace (\s) and line-terminator classes.
 
 const (
-	jsWS  = `[\t\n\v\f\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]`
+	rgJSWS  = `[\t\n\v\f\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]`
 	jsEOL = `[\n\r\x{2028}\x{2029}]`
-	jsDot = `[^\n\r\x{2028}\x{2029}]`
+	rgJSDot = `[^\n\r\x{2028}\x{2029}]`
 	jsBOL = `(?:^|` + jsEOL + `)` // ^ under the m flag (only tested, never sliced)
 	jsEOM = `(?:$|` + jsEOL + `)` // $ under the m flag
 )
 
 func jsRe(pattern string) *regexp.Regexp {
-	r := strings.NewReplacer(`\s`, jsWS, `<BOL>`, jsBOL, `<EOL>`, jsEOM, `<DOT>`, jsDot)
+	r := strings.NewReplacer(`\s`, rgJSWS, `<BOL>`, jsBOL, `<EOL>`, jsEOM, `<DOT>`, rgJSDot)
 	return regexp.MustCompile(r.Replace(pattern))
 }
 
@@ -36,7 +36,7 @@ func jsSpace(r rune) bool {
 	return r >= 0x2000 && r <= 0x200a
 }
 
-func jsTrim(s string) string    { return strings.TrimFunc(s, jsSpace) }
+func rgJSTrim(s string) string    { return strings.TrimFunc(s, jsSpace) }
 func jsTrimEnd(s string) string { return strings.TrimRightFunc(s, jsSpace) }
 
 // jsDecode is Buffer.toString('utf8'): every maximal invalid subpart is one
@@ -353,7 +353,7 @@ func proofDeleteAssertions(file string, data []byte) ([]byte, error) {
 			return nil, refuse(i)
 		}
 		for _, nextLine := range lexed[last+1:] {
-			trimmed := jsTrim(nextLine.masked)
+			trimmed := rgJSTrim(nextLine.masked)
 			if trimmed == "" {
 				continue
 			}

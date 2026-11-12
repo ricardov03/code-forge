@@ -15,15 +15,15 @@ import (
 // with native/config and checked as validateConfig does (schema plus the
 // error-severity domain rules). Only the count of errors and their places
 // (schema path, else rule id) reach the refusal, so the rules below count
-// issues and never build their messages. A config that needs a rule Go has
-// not ported (review.routes under multimodel, coder.sandbox.add_dirs,
-// proof.runners) or a merge-gate check Node's loader does not make still
-// runs in Node.
+// issues and never build their messages. B481: the proof.runners,
+// review.routes multimodel and coder.sandbox.add_dirs rules are counted too,
+// and the config loads without the merge-gate check (Node's loader makes
+// none), so only an error that is not a loader error still runs in Node.
 
 // proofConfigAt returns the config ({} when no file), a refusal message, or
 // a hand-over reason.
 func proofConfigAt(dir string) (map[string]any, string, handoverReason) {
-	cfg, err := config.Load(dir)
+	cfg, err := config.LoadUnchecked(dir)
 	if err != nil {
 		var cfgErr *config.Error
 		if !errors.As(err, &cfgErr) {
@@ -35,9 +35,6 @@ func proofConfigAt(dir string) (map[string]any, string, handoverReason) {
 		case "read-error", "parse-error", "migrate-error":
 			return nil, config.Filename + " does not load (" + cfgErr.Kind + ") — run code-forge validate", 0
 		}
-		return nil, "", hProofConfig
-	}
-	if proofConfigUnported(cfg) {
 		return nil, "", hProofConfig
 	}
 	var where []string
@@ -63,22 +60,6 @@ func proofConfigAt(dir string) (map[string]any, string, handoverReason) {
 		return nil, fmt.Sprintf("%s is invalid (%d error(s) at %s) — run code-forge validate", config.Filename, count, strings.Join(where, ", ")), 0
 	}
 	return cfg, "", 0
-}
-
-// proofConfigUnported names the configs whose domain rules Go does not count.
-func proofConfigUnported(cfg map[string]any) bool {
-	review := jsObject(cfg["review"])
-	if routes, ok := review["routes"].([]any); ok && len(routes) > 0 && review["multimodel"] == true {
-		return true
-	}
-	if sandbox := jsObject(jsObject(cfg["coder"])["sandbox"]); sandbox != nil {
-		if dirs, ok := sandbox["add_dirs"].([]any); ok && len(dirs) > 0 {
-			return true
-		}
-	}
-	proof := jsObject(cfg["proof"])
-	_, runners := proof["runners"]
-	return runners
 }
 
 func jsObject(value any) map[string]any { out, _ := value.(map[string]any); return out }
@@ -233,6 +214,7 @@ var proofDomainRules = []struct {
 		}
 		return n
 	}},
+	{"proof-runners-invalid", proofRunnersIssues},
 	{"review-routes-invalid", func(cfg map[string]any) int {
 		routes, present := jsObject(cfg["review"])["routes"]
 		if !present || routes == nil {
@@ -264,9 +246,13 @@ var proofDomainRules = []struct {
 				}
 				seen[key] = true
 			}
+			if jsObject(cfg["review"])["multimodel"] == true && level == "L2" {
+				n += proofRouteMultimodel(cfg, rule)
+			}
 		}
 		return n
 	}},
+	{"sandbox-dir-refused", proofSandboxIssues},
 }
 
 // proofBadEffort is checkEffort's refusals (invalid, unsupported, empty) for a

@@ -415,7 +415,7 @@ func (rg *proofRG) redGreen(workDir string, stderr io.Writer) (*proofRGResult, e
 		if res.ok() {
 			continue
 		}
-		tail := jsTrim(res.stdout + "\n" + res.stderr + "\n" + res.err)
+		tail := rgJSTrim(res.stdout + "\n" + res.stderr + "\n" + res.err)
 		if units := utf16.Encode([]rune(tail)); len(units) > 4000 {
 			tail = string(utf16.Decode(units[len(units)-4000:]))
 		}
