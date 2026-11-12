@@ -1,0 +1,7 @@
+plan:
+  codex: npm install -g @openai/codex
+
+$ npm install -g @openai/codex
+added 1 package
+
+codex   installed (not on PATH yet — open a new shell)

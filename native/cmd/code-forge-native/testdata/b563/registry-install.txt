@@ -1,0 +1,2 @@
+npm install <PID> SEEN -rw------- drwx------ <PID>.json 
+{"pid":<PID>,"start_time":"<START>","argv0":"npm"}

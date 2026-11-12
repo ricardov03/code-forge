@@ -1,0 +1,12 @@
+claude --version <PID> SEEN -rw------- drwx------ <PID>.json 
+{"pid":<PID>,"start_time":"<START>","argv0":"claude"}
+codex --version <PID> SEEN -rw------- drwx------ <PID>.json 
+{"pid":<PID>,"start_time":"<START>","argv0":"codex"}
+gemini --version <PID> SEEN -rw------- drwx------ <PID>.json 
+{"pid":<PID>,"start_time":"<START>","argv0":"gemini"}
+grok --version <PID> SEEN -rw------- drwx------ <PID>.json 
+{"pid":<PID>,"start_time":"<START>","argv0":"grok"}
+op --version <PID> SEEN -rw------- drwx------ <PID>.json 
+{"pid":<PID>,"start_time":"<START>","argv0":"op"}
+solo --version <PID> SEEN -rw------- drwx------ <PID>.json 
+{"pid":<PID>,"start_time":"<START>","argv0":"solo"}

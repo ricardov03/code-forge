@@ -30,8 +30,46 @@ func init() {
 		subUsage: map[string]string{
 			"install": "usage: code-forge tools install [<id>...] [--yes] [--dry-run]\n  (install asks one yes, default no; answering no prints \"cancelled — nothing installed\" and exits 1)\n",
 		},
-		prepare: prepareTools,
+		prepare: prepareToolsRegistered,
 	}.run
+}
+
+// prepareToolsRegistered is prepareTools with exec's pid registry (B563):
+// every version probe and install child is recorded in this process's lazy
+// run root (logs report's lrRegisterChild, src/util/exec.mjs + reaper.mjs)
+// while it runs, and the root is released once its children have settled
+// (tmp.mjs releaseLazyRoot at exit). The tmp root comes from the config
+// first, as bin/code-forge.mjs applies it before any verb runs.
+func prepareToolsRegistered(args []string) (func(stdout, stderr io.Writer) int, handoverReason, bool) {
+	contextApplyTmpRoot()
+	lrRoot = ""
+	body, reason, ok := prepareTools(args)
+	toolsReleaseRoot()
+	if body == nil {
+		return body, reason, ok
+	}
+	return func(stdout, stderr io.Writer) int {
+		defer toolsReleaseRoot()
+		return body(stdout, stderr)
+	}, reason, ok
+}
+
+// toolsExec is exec in src/util/exec.mjs for the tools rows: runChild with
+// the pid registry hook.
+func toolsExec(argv []string, timeout time.Duration) childResult {
+	return runChildHooked(argv, timeout, lrRegisterChild)
+}
+
+// toolsReleaseRoot is releaseLazyRoot: the lazy run root goes once no entry
+// is left in its registry; a root kept stays this process's root.
+func toolsReleaseRoot() {
+	if lrRoot == "" {
+		return
+	}
+	spawnReleaseRoot(lrRoot)
+	if _, err := os.Lstat(lrRoot); os.IsNotExist(err) {
+		lrRoot = ""
+	}
 }
 
 // toolRow is one row of TOOLS in src/install/tools.mjs.
@@ -247,7 +285,7 @@ func jsSlice16(s string, n int) (string, bool) {
 // else of stderr, cut to 120 UTF-16 units; ok is false when that cut splits
 // a surrogate pair (Node then prints a lone surrogate).
 func toolVersion(tool toolRow) (version string, found, ok bool) {
-	res := runChild([]string{tool.command, "--version"}, 10*time.Second)
+	res := toolsExec([]string{tool.command, "--version"}, 10*time.Second)
 	if !res.ok {
 		return "", false, true
 	}
@@ -483,7 +521,7 @@ func prepareToolsInstall(args []string, usageError func(string) func(_, stderr i
 		failed := 0
 		for _, r := range runs {
 			fmt.Fprintf(stdout, "\n$ %s\n", strings.Join(r.argv, " "))
-			res := runChild(r.argv, 600*time.Second)
+			res := toolsExec(r.argv, 600*time.Second)
 			if res.stdout != "" {
 				fmt.Fprint(stdout, ensureNewline(nodeUTF8(res.stdout)))
 			}

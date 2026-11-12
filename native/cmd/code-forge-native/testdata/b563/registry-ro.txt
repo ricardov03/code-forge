@@ -1,0 +1,6 @@
+claude --version <PID> NOENTRY
+codex --version <PID> NOENTRY
+gemini --version <PID> NOENTRY
+grok --version <PID> NOENTRY
+op --version <PID> NOENTRY
+solo --version <PID> NOENTRY

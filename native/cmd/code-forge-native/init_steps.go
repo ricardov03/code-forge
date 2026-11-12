@@ -18,9 +18,10 @@ import (
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
-// initInstallTool is step 1's installer: exec(argv, {timeoutMs: 600_000}).
-// Tests stand in for it.
-var initInstallTool = func(argv []string) childResult { return runChild(argv, 600*time.Second) }
+// initInstallTool is step 1's installer: exec(argv, {timeoutMs: 600_000}),
+// recorded in the pid registry like every exec child (B563). Tests stand in
+// for it.
+var initInstallTool = func(argv []string) childResult { return toolsExec(argv, 600*time.Second) }
 
 // initJevAuto is what resolveKey('jev', {store, env}) gives a run with no
 // Jev flag and no keys.jev: the env variable, else the file store
@@ -120,6 +121,9 @@ func initFailureReason(res childResult) string {
 // its --yes-tool, or missing with its install command or hint.
 func initToolLines(solo bool, yes []string) []string {
 	var lines []string
+	lrRoot = ""
+	defer toolsReleaseRoot()
+	applied := false
 	for _, tool := range toolRows {
 		if (tool.id == "solo" && solo) || detectTool(tool) {
 			lines = append(lines, "tool "+tool.id+": present")
@@ -128,6 +132,11 @@ func initToolLines(solo bool, yes []string) []string {
 		argv, hint := toolInstallPlan(tool)
 		switch {
 		case argv != nil && slices.Contains(yes, tool.id):
+			if !applied {
+				// bin/code-forge.mjs applyTmpRoot: the base the registry lives under.
+				contextApplyTmpRoot()
+				applied = true
+			}
 			res := initInstallTool(argv)
 			result := "installed"
 			if !res.ok {

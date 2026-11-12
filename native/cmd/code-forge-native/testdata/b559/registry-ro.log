@@ -1,0 +1,3 @@
+npm view <PID> NOENTRY
+gh auth <PID> NOENTRY
+gh issue <PID> NOENTRY

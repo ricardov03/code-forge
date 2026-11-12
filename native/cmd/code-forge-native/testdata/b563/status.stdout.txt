@@ -1,0 +1,6 @@
+claude  installed  claude 1.2.3
+codex   installed  codex 1.2.3
+gemini  installed  gemini 1.2.3
+grok    installed  grok 1.2.3
+op      installed  op 1.2.3 — turn on 1Password app → Settings → Developer → "Integrate with 1Password CLI"
+solo    installed  solo 1.2.3

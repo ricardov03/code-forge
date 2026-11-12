@@ -1,0 +1,8 @@
+npm view <PID> SEEN -rw------- drwx------ <PID>.json 
+{"pid":<PID>,"start_time":"<START>","argv0":"npm"}
+gh auth <PID> SEEN -rw------- drwx------ <PID>.json 
+{"pid":<PID>,"start_time":"<START>","argv0":"gh"}
+gh issue <PID> SEEN -rw------- drwx------ <PID>.json 
+{"pid":<PID>,"start_time":"<START>","argv0":"gh"}
+gh issue <PID> SEEN -rw------- drwx------ <PID>.json 
+{"pid":<PID>,"start_time":"<START>","argv0":"gh"}
