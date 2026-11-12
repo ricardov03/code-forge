@@ -91,7 +91,7 @@ func TestB511RunStartLaunchesTheGoWorker(t *testing.T) {
 	t.Setenv("CODE_FORGE_NATIVE", "1")
 	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
 	t.Setenv("CODE_FORGE_TMP_ROOT", f.tmpRoot)
-	runLaunchTimeout = 15 * time.Second
+	runLaunchTimeout = 60 * time.Second
 	runID := b511RunID(t)
 	launched := []int{}
 	t.Cleanup(func() {

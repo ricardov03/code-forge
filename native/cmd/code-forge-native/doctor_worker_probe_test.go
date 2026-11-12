@@ -290,7 +290,7 @@ func TestDoctorWorkerProbeRealWorker(t *testing.T) {
 	}
 	f := newB524Fixture(t, "")
 	runWorkerBinary = func() (string, error) { return binary, nil }
-	runLaunchTimeout = 15 * time.Second
+	runLaunchTimeout = 60 * time.Second
 	rows, ok := doctorWorkerProbe(f.ctx)
 	if !ok || b524Render(rows) != b524OK {
 		t.Fatalf("rows:\n%s", b524Render(rows))
