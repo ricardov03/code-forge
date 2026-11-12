@@ -16,10 +16,10 @@ import (
 
 const (
 	rgJSWS  = `[\t\n\v\f\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]`
-	jsEOL = `[\n\r\x{2028}\x{2029}]`
+	jsEOL   = `[\n\r\x{2028}\x{2029}]`
 	rgJSDot = `[^\n\r\x{2028}\x{2029}]`
-	jsBOL = `(?:^|` + jsEOL + `)` // ^ under the m flag (only tested, never sliced)
-	jsEOM = `(?:$|` + jsEOL + `)` // $ under the m flag
+	jsBOL   = `(?:^|` + jsEOL + `)` // ^ under the m flag (only tested, never sliced)
+	jsEOM   = `(?:$|` + jsEOL + `)` // $ under the m flag
 )
 
 func jsRe(pattern string) *regexp.Regexp {
@@ -36,7 +36,7 @@ func jsSpace(r rune) bool {
 	return r >= 0x2000 && r <= 0x200a
 }
 
-func rgJSTrim(s string) string    { return strings.TrimFunc(s, jsSpace) }
+func rgJSTrim(s string) string  { return strings.TrimFunc(s, jsSpace) }
 func jsTrimEnd(s string) string { return strings.TrimRightFunc(s, jsSpace) }
 
 // jsDecode is Buffer.toString('utf8'): every maximal invalid subpart is one
