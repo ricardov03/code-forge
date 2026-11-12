@@ -171,3 +171,107 @@ func TestB498DecisionPrintsInParseOrder(t *testing.T) {
 		t.Fatalf("an object decision without its parse order must stay unknown: %+v", res.Blockers)
 	}
 }
+
+func b498SameBlocker(a, b Blocker) bool {
+	return a.Code == b.Code && a.File == b.File && a.Finding == b.Finding && a.Detail == b.Detail
+}
+
+// b498Repr is JSON.stringify(value) ?? "undefined" for a blocker field.
+func b498Repr(v any, has bool) string {
+	if !has {
+		return "undefined"
+	}
+	data, _ := ledger.Stringify(v, false)
+	return string(data)
+}
+
+func b498Refusals(res Result) []string {
+	out := []string{}
+	for _, b := range res.Blockers {
+		file, finding := b498Repr(b.File, b.File != ""), b498Repr(b.Finding, b.Finding != "")
+		if b.Raw != nil {
+			file, finding = b498Repr(b.Raw.File, b.Raw.HasFile), b498Repr(b.Raw.Finding, b.Raw.HasFinding)
+		}
+		out = append(out, b.Code+"|"+file+"|"+finding+"|"+b.Detail)
+	}
+	return out
+}
+
+// B498: a late or cap row whose file is "", null, a number or false, or
+// whose finding is missing or not text, is read as Node reads it. Expected
+// refusals measured with Node's checkBlockReviews on the same signed lines
+// (testdata/b498_latecap.mjs over the B498_LATECAP_DUMP lines).
+func TestB498LateAndCapRowValues(t *testing.T) {
+	key := []byte(strings.Repeat("k", 32))
+	approved := func() Row { return Row{"event": "review.approved", "file": "a.mjs", "content_hash": "h2"} }
+	late := func(extra Row) Row {
+		r := Row{"event": "review.late_finding", "severity": "warning"}
+		for k, v := range extra {
+			r[k] = v
+		}
+		return r
+	}
+	cases := []struct {
+		name string
+		rows []Row
+		want []string
+	}{
+		{"late file empty", []Row{approved(), late(Row{"file": "", "finding": "L1"})}, []string{"late_unruled|\"\"|\"L1\"|late finding L1 in  has no ruling"}},
+		{"late file null", []Row{approved(), late(Row{"file": nil, "finding": "L1"})}, []string{"late_unruled|null|\"L1\"|late finding L1 in null has no ruling"}},
+		{"late file number", []Row{approved(), late(Row{"file": 7.0, "finding": "L1"})}, []string{"late_unruled|7|\"L1\"|late finding L1 in 7 has no ruling"}},
+		{"late file false finding null", []Row{approved(), late(Row{"file": false, "finding": nil})}, []string{"late_unruled|false|null|late finding null in false has no ruling"}},
+		{"late finding missing", []Row{approved(), late(Row{"file": "a.mjs"})}, []string{"late_unruled|\"a.mjs\"|undefined|late finding undefined in a.mjs has no ruling"}},
+		{"late finding number", []Row{approved(), late(Row{"file": "a.mjs", "finding": 5.0})}, []string{"late_unruled|\"a.mjs\"|5|late finding 5 in a.mjs has no ruling"}},
+		{"late finding empty", []Row{approved(), late(Row{"file": "a.mjs", "finding": ""})}, []string{"late_unruled|\"a.mjs\"|\"\"|late finding  in a.mjs has no ruling"}},
+		{"late number finding waived by human", []Row{approved(), late(Row{"file": "a.mjs", "finding": 5.0}),
+			{"event": "review.waived", "file": "a.mjs", "finding": 5.0, "by": "human", "reason": "ok"}}, []string{}},
+		{"late text waiver does not clear number finding", []Row{approved(), late(Row{"file": "a.mjs", "finding": 5.0}),
+			{"event": "review.waived", "file": "a.mjs", "finding": "5", "by": "human", "reason": "ok"}}, []string{"late_unruled|\"a.mjs\"|5|late finding 5 in a.mjs has no ruling"}},
+		{"late missing finding waived by row with no finding", []Row{approved(), late(Row{"file": "a.mjs"}),
+			{"event": "review.waived", "file": "a.mjs", "by": "human", "reason": "ok"}}, []string{}},
+		{"late nit ruling on number file", []Row{approved(), late(Row{"file": 7.0, "finding": "L1", "severity": "nit"}),
+			{"event": "review.late_ruling", "file": 7.0, "finding": "L1", "ruling": "nit"}}, []string{}},
+		{"late autopilot waiver on number file", []Row{approved(), late(Row{"file": 7.0, "finding": "L1"}),
+			{"event": "review.waived", "file": 7.0, "finding": "L1", "severity": "warning", "by": "autopilot", "grant_id": "ag-1", "decision_id": "d-1", "reason": "style", "ts": "2026-11-11T10:00:00.000Z"}}, []string{"autopilot_waiver_invalid|7|\"L1\"|the autopilot waiver of L1 in 7 does not count: no signed autopilot.grant row for grant ag-1 in this run"}},
+		{"cap file empty", []Row{approved(), {"event": "review.cap", "file": "", "open": []any{"F1"}}}, []string{"review_cap|\"\"|\"F1\"| stopped at review_cap; finding F1 is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose"}},
+		{"cap file number open values", []Row{approved(), {"event": "review.cap", "file": 3.0, "open": []any{1.0, nil, "F2", true, ""}}}, []string{"review_cap|3|1|3 stopped at review_cap; finding 1 is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose", "review_cap|3|null|3 stopped at review_cap; finding null is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose", "review_cap|3|\"F2\"|3 stopped at review_cap; finding F2 is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose", "review_cap|3|true|3 stopped at review_cap; finding true is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose", "review_cap|3|\"\"|3 stopped at review_cap; finding  is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose"}},
+		{"cap current file open number", []Row{approved(), {"event": "review.cap", "file": "a.mjs", "open": []any{1.0, "F1"}}}, []string{"not_approved|\"a.mjs\"|\"F1\"|the latest review of a.mjs's current content left F1 open and it is not waived", "review_cap|\"a.mjs\"|1|a.mjs stopped at review_cap; finding 1 is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose"}},
+		{"cap file null open not a list", []Row{approved(), {"event": "review.cap", "file": nil, "open": "F1"}}, []string{}},
+	}
+	dump := os.Getenv("B498_LATECAP_DUMP")
+	for _, c := range cases {
+		rows := b380Rows(t, key, c.rows...)
+		if !Supported(rows) {
+			t.Fatalf("%s: not supported", c.name)
+		}
+		if dump != "" {
+			lines := []string{}
+			for _, r := range rows {
+				data, _ := ledger.Stringify(r, false)
+				lines = append(lines, string(data))
+			}
+			f, err := os.OpenFile(dump, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, _ := json.Marshal(lines)
+			f.Write(append(data, '\n'))
+			f.Close()
+		}
+		res := b380Eval(rows, key, nil, "")
+		got := b498Refusals(res)
+		if res.Unknown || strings.Join(got, "\n") != strings.Join(c.want, "\n") {
+			t.Errorf("%s: unknown %v\n got %q\nwant %q", c.name, res.Unknown, got, c.want)
+		}
+	}
+	for _, bad := range []Row{
+		late(Row{"file": map[string]any{}, "finding": "L1"}),
+		late(Row{"file": "a.mjs", "finding": []any{"L1"}}),
+		{"event": "review.cap", "file": "a.mjs", "open": []any{map[string]any{"id": "F1"}}},
+		{"event": "review.cap", "file": 1e21, "open": []any{"F1"}},
+	} {
+		if Supported(b380Rows(t, key, bad)) {
+			t.Errorf("%v stays a hand-over", bad)
+		}
+	}
+}

@@ -76,19 +76,21 @@ func closeWithFlags(args []string) int {
 	if !closeTextSafe(strings.Join(args, "\n")) {
 		return blockHandover(append([]string{"close"}, args...), hCloseUnsupportedFlag)
 	}
-	var stdout bytes.Buffer
+	// B498: both streams are held in one sequence and written in the order
+	// the close wrote them, as Node writes them to a shared terminal (an
+	// --auto-claim --json claim line on stderr comes before the JSON line).
+	held := &closeHeld{}
 	stderr := &closeErrorBuffer{}
 	reason := hCloseAutoClaim
 	var endHook func()
-	code := closeFlagsStep(args, &landStep{stdout: &stdout, stderr: stderr}, &reason, &endHook)
+	code := closeFlagsStep(args, &landStep{stdout: closeHeldStream{held, nil}, stderr: closeHeldStream{held, stderr}}, &reason, &endHook)
 	if code == landHandover {
 		// Nothing was printed or written before the read-only boundary, so Node
 		// runs the whole close once.
 		return blockHandover(append([]string{"close"}, args...), reason)
 	}
 	before := gatesBreadcrumbName("block close")
-	fmt.Fprint(os.Stdout, stdout.String())
-	fmt.Fprint(os.Stderr, stderr.String())
+	held.flush(os.Stdout, os.Stderr)
 	if endHook != nil {
 		endHook()
 	}
@@ -100,6 +102,38 @@ func closeWithFlags(args []string) int {
 		nativeVerbFailure("block", "close", args, code, message, before)
 	}
 	return code
+}
+
+// closeHeld keeps a close's stdout and stderr writes in the order they came.
+type closeHeld struct{ chunks []closeChunk }
+type closeChunk struct {
+	toErr bool
+	data  []byte
+}
+
+func (h *closeHeld) flush(stdout, stderr io.Writer) {
+	for _, c := range h.chunks {
+		if c.toErr {
+			stderr.Write(c.data)
+		} else {
+			stdout.Write(c.data)
+		}
+	}
+}
+
+// closeHeldStream writes into the sequence; err non-nil marks stderr and also
+// keeps its last write.
+type closeHeldStream struct {
+	held *closeHeld
+	err  *closeErrorBuffer
+}
+
+func (w closeHeldStream) Write(data []byte) (int, error) {
+	w.held.chunks = append(w.held.chunks, closeChunk{w.err != nil, bytes.Clone(data)})
+	if w.err != nil {
+		w.err.Write(data)
+	}
+	return len(data), nil
 }
 
 // Retain the last write, as the Node router does, rather than treating an earlier
@@ -131,7 +165,9 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 	if preflight == landHandover {
 		return preflight
 	}
-	if preflight != 0 || flags["no-require-reviews"] == true {
+	// B498: a refusal Node reaches only after its claims (transcript read,
+	// --worker-pid, ...) still claims first, as Node does.
+	if (preflight != 0 && !dry.pastClaim) || flags["no-require-reviews"] == true {
 		return closeStep(step)
 	}
 	home, err := os.UserHomeDir()

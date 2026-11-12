@@ -339,6 +339,11 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	if err != nil {
 		return fail(err)
 	}
+	// B498: Node's --auto-claim claims after the ledger, run-ended and key
+	// reads; every refusal from here on comes after its claims.
+	if step != nil && step.preflight {
+		step.pastClaim = true
+	}
 	transcript, missing, err := closeTranscript(record, entry, id, blockString(flags["transcript"]))
 	if err != nil {
 		// B466: Node's readFile error ends the close (exit 1, no state written).
@@ -1440,6 +1445,10 @@ func closeDash(v any) any {
 	if v == nil {
 		return "-"
 	}
+	if _, isText := v.(string); !isText {
+		// Node prints a late or cap row's file as String(file).
+		return gatecheck.JSString(v, true)
+	}
 	return v
 }
 func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[string]any, entry ledger.Object) []any {
@@ -1450,7 +1459,12 @@ func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[s
 		if p.Code == "unowned_change" {
 			detailKey = ""
 		}
-		encoded, _ := ledger.Stringify([]string{p.Code, p.File, p.Finding, detailKey}, false)
+		file, finding := closeBlockerValues(p)
+		var detailValue any = detailKey
+		if p.Code == "unowned_change" {
+			detailValue = nil
+		}
+		encoded, _ := ledger.Stringify([]any{p.Code, file, finding, detailValue}, false)
 		if seen[string(encoded)] {
 			continue
 		}
@@ -1528,10 +1542,6 @@ func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[s
 		if argv != nil {
 			fix = closeCommand(argv)
 		}
-		var file any
-		if p.File != "" {
-			file = p.File
-		}
 		detail := p.Detail
 		if detail == "" {
 			detail = p.Finding
@@ -1547,6 +1557,28 @@ func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[s
 		out = append(out, o)
 	}
 	return out
+}
+
+// closeBlockerValues is a blocker's file and finding as Node keys and prints
+// them: the row's own values for a late or cap row (undefined is null), and
+// null for an empty Go field otherwise.
+func closeBlockerValues(p gatecheck.Blocker) (file, finding any) {
+	if p.Raw != nil {
+		if p.Raw.HasFile {
+			file = p.Raw.File
+		}
+		if p.Raw.HasFinding {
+			finding = p.Raw.Finding
+		}
+		return file, finding
+	}
+	if p.File != "" {
+		file = p.File
+	}
+	if p.Finding != "" {
+		finding = p.Finding
+	}
+	return file, finding
 }
 
 func closeWriteDone(home, run, id string, record ledger.Object, result blockclose.Result, lines []any, rows []gatecheck.Row, key []byte, writers ...io.Writer) string {

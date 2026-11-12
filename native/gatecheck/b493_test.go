@@ -19,13 +19,20 @@ func TestB493LateFindingWithNoFile(t *testing.T) {
 	if !Supported(b380Rows(t, key, approved, late)) {
 		t.Fatal("a late row with no file is supported")
 	}
-	for _, bad := range []any{"", nil, 7} {
+	// B498: "", null and numbers are read as Node reads them; objects and
+	// arrays still hand over.
+	for _, file := range []any{"", nil, 7} {
+		if !Supported(b380Rows(t, key, Row{"event": "review.late_finding", "file": file, "finding": "L1"})) {
+			t.Fatalf("a late row with file %#v is supported", file)
+		}
+	}
+	for _, bad := range []any{map[string]any{}, []any{}} {
 		if Supported(b380Rows(t, key, Row{"event": "review.late_finding", "file": bad, "finding": "L1"})) {
 			t.Fatalf("a late row with file %#v stays unsupported", bad)
 		}
 	}
 	res := b380Eval(b380Rows(t, key, approved, late), key, nil, "")
-	if res.Unknown || len(res.Blockers) != 1 || res.Blockers[0] != (Blocker{"late_unruled", "", "L1", "late finding L1 in undefined has no ruling"}) {
+	if res.Unknown || len(res.Blockers) != 1 || !b498SameBlocker(res.Blockers[0], Blocker{Code: "late_unruled", Finding: "L1", Detail: "late finding L1 in undefined has no ruling"}) {
 		t.Fatalf("late finding with no file: %+v", res)
 	}
 	named := Row{"event": "review.late_ruling", "file": "a.mjs", "finding": "L1", "ruling": "nit"}

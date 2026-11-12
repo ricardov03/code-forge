@@ -27,6 +27,9 @@ type landStep struct {
 	stdout, stderr io.Writer
 	ctx            context.Context
 	record         ledger.Object
+	// pastClaim: a close preflight got past the point where Node's
+	// --auto-claim signs its claims (B498).
+	pastClaim bool
 }
 
 func (s *landStep) writers() (io.Writer, io.Writer) {

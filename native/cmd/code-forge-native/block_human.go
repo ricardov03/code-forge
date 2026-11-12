@@ -68,6 +68,14 @@ func humanDecisions(run, id, reason string, gate gatecheck.Result, rows []gatech
 		if b.Code != "not_approved" && b.Code != "late_unruled" {
 			continue
 		}
+		if b.Raw != nil {
+			// A late row's file or finding that is not text: Node decides
+			// it only when both are truthy, with the values as they are.
+			if b.File != "" && gatecheck.Truthy(b.Raw.Finding, b.Raw.HasFinding) {
+				return nil, nil, false
+			}
+			continue
+		}
 		if b.File == "" || b.Finding == "" || b.Finding == "proof" {
 			continue
 		}

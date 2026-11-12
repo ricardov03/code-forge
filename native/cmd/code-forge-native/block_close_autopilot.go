@@ -91,6 +91,14 @@ func autopilotDecisions(run, id, reason, transcript string, grant ledger.Object,
 			decisions = append(decisions, humanDecision{fmt.Sprintf("accept rule_break %s at transcript line %d", m[2], line), row})
 			ruleBreaks = append(ruleBreaks, ledger.Object{{Key: "rule", Value: m[2]}, {Key: "line", Value: line}})
 		case "not_approved", "late_unruled":
+			if b.Raw != nil {
+				// A late row's file or finding that is not text: Node decides
+				// it only when both are truthy, with the values as they are.
+				if b.File != "" && gatecheck.Truthy(b.Raw.Finding, b.Raw.HasFinding) {
+					return nil, nil, "", false
+				}
+				continue
+			}
 			if b.File == "" || b.Finding == "" || b.Finding == "proof" {
 				continue
 			}

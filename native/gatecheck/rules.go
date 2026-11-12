@@ -88,6 +88,26 @@ func strictEq(a, b jv) bool {
 
 func str(s string) jv { return jv{s, true} }
 
+func nonEmptyText(v jv) bool { s, isText := v.v.(string); return v.ok && isText && s != "" }
+
+// Truthy is JavaScript's Boolean(v) for a JSON value; has false is undefined.
+func Truthy(v any, has bool) bool {
+	if !has {
+		return false
+	}
+	switch x := v.(type) {
+	case nil:
+		return false
+	case string:
+		return x != ""
+	case bool:
+		return x
+	case float64:
+		return x != 0 && x == x
+	}
+	return true
+}
+
 // jsString is String(v) for a JSON value.
 func jsString(v jv) string {
 	if !v.ok {
@@ -577,13 +597,13 @@ func (g *gate) latestOf(file, hash string) latest {
 
 // matches is Node's r.finding === id && r.file === file; file may be
 // undefined (a late finding row with no file).
-func (g *gate) matches(r Row, file jv, id string) bool {
-	return r["finding"] == id && strictEq(prop(r, "file"), file)
+func (g *gate) matches(r Row, file, id jv) bool {
+	return strictEq(prop(r, "finding"), id) && strictEq(prop(r, "file"), file)
 }
 
-func (g *gate) answered(fileV jv, id string, severity any) bool {
+func (g *gate) answered(fileV, id jv, severity any) bool {
 	file, isText := fileV.v.(string)
-	if id == "proof" || !answerable(severity) || !isText {
+	if strictEq(id, str("proof")) || !answerable(severity) || !isText || !fileV.ok {
 		return false
 	}
 	now, has := g.current[file]
@@ -592,7 +612,7 @@ func (g *gate) answered(fileV jv, id string, severity any) bool {
 	}
 	for _, r := range g.answers {
 		by, isString := r["by_file"].(string)
-		if r["file"] == file && r["content_hash"] == now && isString && by != file && r["finding"] == id {
+		if r["file"] == file && r["content_hash"] == now && isString && by != file && strictEq(prop(r, "finding"), id) {
 			if target, ok := g.current[by]; ok && r["by_hash"] == target {
 				return true
 			}
@@ -604,18 +624,18 @@ func (g *gate) answered(fileV jv, id string, severity any) bool {
 // waiverOf is reviewRules' waiverOf: "human", "answer", "agent", "autopilot"
 // or "" with why the autopilot waivers do not count.
 func (g *gate) waiverOf(file, id string, severity, answerSeverity any) (string, string) {
-	return g.waiverOfValue(str(file), id, severity, answerSeverity)
+	return g.waiverOfValue(str(file), str(id), severity, answerSeverity)
 }
 
-func (g *gate) waiverOfValue(file jv, id string, severity, answerSeverity any) (string, string) {
+func (g *gate) waiverOfValue(file, id jv, severity, answerSeverity any) (string, string) {
 	if slices.ContainsFunc(g.human, func(r Row) bool { return g.matches(r, file, id) }) {
 		return "human", ""
 	}
 	if g.answered(file, id, answerSeverity) {
 		return "answer", ""
 	}
-	if id != "proof" && (delegable(severity) || severity == "critical") {
-		recorded, _ := recordedSeverity(g.mine, str(g.in.Block), file, str(id), g.ok)
+	if !strictEq(id, str("proof")) && (delegable(severity) || severity == "critical") {
+		recorded, _ := recordedSeverity(g.mine, str(g.in.Block), file, id, g.ok)
 		may := delegable(severity) && (recorded == "warning" || recorded == "nit") || severity == "critical" && recorded == "critical"
 		if may && slices.ContainsFunc(g.agent, func(r Row) bool { return g.matches(r, file, id) && r["severity"] == recorded }) {
 			return "agent", ""
@@ -647,10 +667,10 @@ func (g *gate) waiverOfValue(file jv, id string, severity, answerSeverity any) (
 }
 
 func (g *gate) waiverFor(file, id string, answerSeverity any) (bool, string) {
-	return g.waiverForValue(str(file), id, answerSeverity)
+	return g.waiverForValue(str(file), str(id), answerSeverity)
 }
 
-func (g *gate) waiverForValue(file jv, id string, answerSeverity any) (bool, string) {
+func (g *gate) waiverForValue(file, id jv, answerSeverity any) (bool, string) {
 	by, invalid := g.waiverOfValue(file, id, nil, answerSeverity)
 	return by != "", invalid
 }
@@ -938,7 +958,7 @@ func Evaluate(in Input) Result {
 	g := &gate{in: in, v: &verifier{in.Key, map[uintptr]bool{}}, current: map[string]string{}}
 	result := Result{Blockers: []Blocker{}, Waived: []Waived{}, Accepted: []AcceptedHit{}}
 	add := func(code, file, id, detail string) {
-		result.Blockers = append(result.Blockers, Blocker{code, file, id, detail})
+		result.Blockers = append(result.Blockers, Blocker{Code: code, File: file, Finding: id, Detail: detail})
 	}
 	amendedAt := -1
 	for i, r := range in.Rows {
@@ -983,6 +1003,30 @@ func Evaluate(in Input) Result {
 	}
 	if in.NoChanges {
 		add("no_changes", "", "", "block "+in.Block+" changed no owned file and has no reviews")
+	}
+	// addValue adds a late or cap blocker whose file and finding are the
+	// row's own values: Blocker.File is String(file) when truthy, Finding the
+	// finding when it is text, and Raw keeps both when either is not a
+	// non-empty string (Node prints and keys them as they are).
+	addValue := func(code string, file, id jv, detail string) {
+		b := Blocker{Code: code, Detail: detail}
+		if Truthy(file.v, file.ok) {
+			b.File = jsString(file)
+		}
+		if s, isText := id.v.(string); isText && id.ok {
+			b.Finding = s
+		}
+		if !nonEmptyText(file) || !nonEmptyText(id) {
+			b.Raw = &Raw{File: file.v, HasFile: file.ok, Finding: id.v, HasFinding: id.ok}
+		}
+		result.Blockers = append(result.Blockers, b)
+	}
+	orInvalidValue := func(code string, file, id jv, detail, invalid string) {
+		if invalid == "" {
+			addValue(code, file, id, detail)
+		} else {
+			addValue("autopilot_waiver_invalid", file, id, "the autopilot waiver of "+jsString(id)+" in "+jsString(file)+" does not count: "+invalid)
+		}
 	}
 	orInvalid := func(code, file, id, detail, invalid string) {
 		if invalid == "" {
@@ -1072,13 +1116,12 @@ func Evaluate(in Input) Result {
 		if r["event"] != "review.late_finding" {
 			continue
 		}
-		// Supported lets through a late row with no file: Node reads
-		// late.file as undefined and prints it as "undefined".
-		fileV, id := prop(r, "file"), Text(r["finding"])
-		file := Text(fileV.v)
+		// Node reads late.file and late.finding as they are: undefined,
+		// null, a number or "" print as String(value).
+		fileV, idV := prop(r, "file"), prop(r, "finding")
 		if r["severity"] == "warning" || r["severity"] == "nit" {
 			if slices.ContainsFunc(g.mine, func(ruling Row) bool {
-				return ruling["event"] == "review.late_ruling" && g.matches(ruling, fileV, id) && ruling["ruling"] == "nit" && g.ok(ruling)
+				return ruling["event"] == "review.late_ruling" && g.matches(ruling, fileV, idV) && ruling["ruling"] == "nit" && g.ok(ruling)
 			}) {
 				continue
 			}
@@ -1087,18 +1130,18 @@ func Evaluate(in Input) Result {
 		if s, ok := r["severity"].(string); ok {
 			severity = s
 		}
-		if waived, invalid := g.waiverForValue(fileV, id, severity); !waived && invalid != "" && !fileV.ok {
-			add("autopilot_waiver_invalid", "", id, "the autopilot waiver of "+id+" in undefined does not count: "+invalid)
-		} else if !waived {
-			orInvalid("late_unruled", file, id, fmt.Sprintf("late finding %s in %s has no ruling", id, jsString(fileV)), invalid)
+		if waived, invalid := g.waiverForValue(fileV, idV, severity); !waived {
+			orInvalidValue("late_unruled", fileV, idV, "late finding "+jsString(idV)+" in "+jsString(fileV)+" has no ruling", invalid)
 		}
 	}
 	for i, cap := range g.mine {
 		if cap["event"] != "review.cap" || g.superseded(i) {
 			continue
 		}
-		file := Text(cap["file"])
+		fileV := prop(cap, "file")
+		file, isText := fileV.v.(string)
 		hash, has := hashOf[file]
+		has = has && isText && fileV.ok
 		if has {
 			l := g.latestOf(file, hash)
 			if l.lastApproval > i && l.denial == nil {
@@ -1106,16 +1149,16 @@ func Evaluate(in Input) Result {
 			}
 		}
 		for _, v := range array(cap["open"]) {
-			id := Text(v)
-			if notApproved[file+"\x00"+id] {
+			idV := jv{v, true}
+			if notApproved[jsString(fileV)+"\x00"+jsString(idV)] {
 				continue
 			}
 			severity := "unknown"
-			if has {
+			if id, isID := v.(string); has && isID {
 				severity = g.refusalSeverity(file, hash, id)
 			}
-			if waived, invalid := g.waiverFor(file, id, severity); !waived {
-				orInvalid("review_cap", file, id, file+" stopped at review_cap; finding "+id+" is open and not waived; "+stopExitsLine, invalid)
+			if waived, invalid := g.waiverForValue(fileV, idV, severity); !waived {
+				orInvalidValue("review_cap", fileV, idV, jsString(fileV)+" stopped at review_cap; finding "+jsString(idV)+" is open and not waived; "+stopExitsLine, invalid)
 			}
 		}
 	}

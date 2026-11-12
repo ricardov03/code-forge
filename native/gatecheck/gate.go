@@ -15,7 +15,18 @@ import (
 
 type Row = map[string]any
 type File struct{ File, Hash string }
-type Blocker struct{ Code, File, Finding, Detail string }
+type Blocker struct {
+	Code, File, Finding, Detail string
+	// Raw is set when a late or cap blocker's file or finding is not a
+	// non-empty string: Node prints and keys those values as they are.
+	Raw *Raw
+}
+
+// Raw holds a ledger row's file and finding values; Has* false is undefined.
+type Raw struct {
+	File, Finding       any
+	HasFile, HasFinding bool
+}
 type Waived struct {
 	File, Hash         string
 	Findings, Answered []string
@@ -40,31 +51,51 @@ func NeverReviewed(r Row) bool {
 }
 
 // Supported is false when a row has a shape whose Node reading Go does not
-// reproduce byte for byte (a late row or cap row that names no file or
-// finding). The close passes only the block's own rows, the rows Node reads;
-// it hands the rest over before any write.
+// reproduce byte for byte: a late or cap row whose file or finding is an
+// object or array (Node prints and keys it by its JavaScript form), or whose
+// file is not text and prints with a character Node's command quoting cannot
+// handle (Node throws building the fix line). The close passes only the
+// block's own rows, the rows Node reads; it hands the rest over before any
+// write.
 func Supported(rows []Row) bool {
 	for _, r := range rows {
 		event := Text(r["event"])
 		if event == "review.late_finding" || event == "review.late_ruling" {
-			// A row with no file key is read as Node reads undefined; a
-			// file that is empty or not text is not.
-			if _, has := r["file"]; (has && Text(r["file"]) == "") || Text(r["finding"]) == "" {
+			if !plainValue(r["file"]) || !plainValue(r["finding"]) || !quotableFile(r["file"]) {
 				return false
 			}
 		}
 		if event == "review.cap" {
-			if Text(r["file"]) == "" {
+			if !plainValue(r["file"]) || !quotableFile(r["file"]) {
 				return false
 			}
 			for _, id := range array(r["open"]) {
-				if Text(id) == "" {
+				if !plainValue(id) {
 					return false
 				}
 			}
 		}
 	}
 	return true
+}
+
+func plainValue(v any) bool {
+	switch v.(type) {
+	case map[string]any, []any:
+		return false
+	}
+	return true
+}
+
+var shellWord = regexp.MustCompile(`^[\w./:@=-]+$`)
+
+// quotableFile: Node's landCommand calls replaceAll on a value that fails
+// its word test; a value that is not text has none.
+func quotableFile(v any) bool {
+	if _, isText := v.(string); isText || !Truthy(v, true) {
+		return true
+	}
+	return shellWord.MatchString(JSString(v, true))
 }
 
 var findingID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`)
@@ -98,7 +129,11 @@ func Reason(blockers []Blocker) string {
 		if b.File != "" {
 			text += " " + b.File
 		}
-		if b.Finding != "" {
+		if b.Raw != nil {
+			if Truthy(b.Raw.Finding, b.Raw.HasFinding) {
+				text += " " + JSString(b.Raw.Finding, true)
+			}
+		} else if b.Finding != "" {
 			text += " " + b.Finding
 		}
 		reasons = append(reasons, text)
