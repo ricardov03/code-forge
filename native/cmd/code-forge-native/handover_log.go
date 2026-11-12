@@ -233,6 +233,15 @@ const (
 	hUpgradeVersionOrder
 	hUpgradeCopyEntry
 	hUpgradePathEncoding
+	hWorkerServe
+	hWorkerHome
+	hWorkerRecord
+	hSpawnSession
+	hSpawnHome
+	hSpawnConfig
+	hSpawnSchema
+	hReviewFlow
+	hReviewGit
 )
 
 var handoverReasons = [...]string{
@@ -445,6 +454,15 @@ var handoverReasons = [...]string{
 	hUpgradeVersionOrder:       "upgrade-version-order",
 	hUpgradeCopyEntry:          "upgrade-copy-entry",
 	hUpgradePathEncoding:       "upgrade-path-encoding",
+	hWorkerServe:               "worker-serve",
+	hWorkerHome:                "worker-home",
+	hWorkerRecord:              "worker-record",
+	hSpawnSession:              "spawn-session",
+	hSpawnHome:                 "spawn-home",
+	hSpawnConfig:               "spawn-config",
+	hSpawnSchema:               "spawn-schema",
+	hReviewFlow:                "review-flow",
+	hReviewGit:                 "review-git",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
