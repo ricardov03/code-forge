@@ -1,0 +1,299 @@
+{
+ "fixture": {
+  "commit": {
+   "src/lib.js": "export function scale(v) {\n  return v * 2;\n}\nexport function average(items) {\n  const total = items.reduce((a, b) => a + b, 0);\n  const count = items.length;\n  const mean = total / count;\n  return Math.round(mean * 100) / 100;\n}\n",
+   "src/use.js": "import { scale } from './lib.js';\n\nexport function go(x) {\n  return scale(x);\n}\n",
+   "src/rate.js": "export function rate(n) {\n  return n / 10;\n}\n",
+   "src/fmt.js": "export function fmt(n) {\n  return String(n);\n}\n",
+   "src/unrelated.js": "export const U = 1;\n",
+   "src/calc.js": "import { rate } from './rate.js';\n\nexport function calc(n) {\n  return rate(n);\n}\n",
+   "src/src.js": "// src\nexport function median(items) {\n  const total = items.reduce((a, b) => a + b, 0);\n  const count = items.length;\n  const mean = total / count;\n  return Math.round(mean * 100) / 100;\n}\nexport const S = 1;\n",
+   "src/dest.js": "// dest\nexport const D = 1;\n"
+  },
+  "after": {
+   "src/lib.js": "export function scale(v) {\n  return v * 3;\n}\n",
+   "src/use.js": "import { scale } from './lib.js';\n\nexport function go(x) {\n  const y = scale(x);\n  return y + 1;\n}\nexport function average(items) {\n  const total = items.reduce((a, b) => a + b, 0);\n  const count = items.length;\n  const mean = total / count;\n  return Math.round(mean * 100) / 100;\n}\n",
+   "src/rate.js": "export function rate(n) {\n  return n / 100;\n}\n",
+   "src/fmt.js": "export function fmt(n) {\n  return String(n).padStart(4);\n}\n",
+   "src/unrelated.js": "export const U = 2;\n",
+   "src/calc.js": "import { rate } from './rate.js';\n\nexport function calc(n) {\n  const r = rate(n);\n  return r * 2;\n}\n",
+   "src/src.js": "// src\nexport const S = 1;\n",
+   "src/dest.js": "// dest\nexport const D = 1;\nexport function median(items) {\n  const total = items.reduce((a, b) => a + b, 0);\n  const count = items.length;\n  const mean = total / count;\n  return Math.round(mean * 100) / 100;\n}\n"
+  },
+  "deleted": []
+ },
+ "cases": [
+  {
+   "name": "one-peer",
+   "file": "src/calc.js",
+   "base": true,
+   "peers": [
+    "src/rate.js"
+   ],
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/calc.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "rate result is scaled wrong",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "several-peers",
+   "file": "src/calc.js",
+   "base": true,
+   "peers": [
+    "src/rate.js",
+    "src/fmt.js",
+    "src/unrelated.js",
+    "src/lib.js"
+   ],
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/calc.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "fmt.js pads the rate wrong",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "moved-only",
+   "file": "src/dest.js",
+   "base": true,
+   "peers": [
+    "src/src.js"
+   ],
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/dest.js",
+     "line_start": 3,
+     "line_end": 3,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "median of empty list",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "moved-and-evidence",
+   "file": "src/use.js",
+   "base": true,
+   "peers": [
+    "src/lib.js"
+   ],
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/use.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "scale result off by one",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "moved-and-evidence-many",
+   "file": "src/use.js",
+   "base": true,
+   "peers": [
+    "src/lib.js",
+    "src/rate.js",
+    "src/fmt.js",
+    "src/unrelated.js"
+   ],
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/use.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "rate.js and fmt.js disagree with scale",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "over-budget-cut",
+   "file": "src/use.js",
+   "base": true,
+   "peers": [
+    "src/lib.js"
+   ],
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 900
+     }
+    }
+   },
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/use.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "scale result off by one",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "over-budget-none",
+   "file": "src/use.js",
+   "base": true,
+   "peers": [
+    "src/lib.js"
+   ],
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 870
+     }
+    }
+   },
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/use.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "scale result off by one",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "no-peers",
+   "file": "src/calc.js",
+   "base": true,
+   "peers": [],
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/calc.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "rate result is scaled wrong",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "no-base",
+   "file": "src/use.js",
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/use.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "scale result off by one",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "unchanged-with-peers",
+   "file": "src/use.js",
+   "base": true,
+   "peers": [
+    "src/unrelated.js"
+   ],
+   "reviewedIsCurrent": true,
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/use.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "scale result off by one",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  },
+  {
+   "name": "unchanged-evidence-only",
+   "file": "src/use.js",
+   "base": true,
+   "peers": [
+    "src/lib.js"
+   ],
+   "reviewedIsCurrent": true,
+   "open": [
+    {
+     "id": "F1",
+     "file": "src/use.js",
+     "line_start": 4,
+     "line_end": 4,
+     "severity": "warning",
+     "category": "logic",
+     "claim": "scale result off by one",
+     "evidence": "e",
+     "fix": "f"
+    }
+   ],
+   "kind": "recheck"
+  }
+ ]
+}
