@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -255,7 +256,12 @@ func TestB485DrainFairShare(t *testing.T) {
 			if fair {
 				want = []string{a1, b1}
 			}
-			if got := runs.startedList(); !reflect.DeepEqual(got, want) {
+			// B519: the two tickets start in parallel, so their start order is not
+			// fixed; the pick (which two tickets) is the behaviour under test.
+			got := append([]string(nil), runs.startedList()...)
+			sort.Strings(got)
+			sort.Strings(want)
+			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("fair=%v started %v, want %v", fair, got, want)
 			}
 			for _, id := range []string{a1, a2, b1} {
