@@ -92,9 +92,10 @@ test('R14: stryker.config.mjs does not exist and no npm script runs stryker', as
   assert.equal(pkg.scripts['bench:block'], 'node scripts/bench-block.mjs');
   assert.equal(pkg.scripts['bench:review'], 'node scripts/bench-review.mjs');
   assert.equal(pkg.scripts['bench:verbs'], 'node scripts/bench-verbs.mjs');
-  assert.equal(pkg.scripts.release, 'node scripts/release.mjs');
-  assert.equal(pkg.scripts['release:site'], 'node scripts/release-site.mjs');
-  assert.equal(pkg.scripts.changelog, 'node scripts/changelog.mjs');
+  assert.equal(pkg.scripts.release, 'sh scripts/cf-release.sh release');
+  assert.equal(pkg.scripts['release:site'], 'sh scripts/cf-release.sh release-site');
+  assert.equal(pkg.scripts.changelog, 'sh scripts/cf-release.sh changelog');
+  assert.equal(pkg.scripts['docs-block'], 'sh scripts/cf-release.sh docs-block');
   assert.equal(pkg.scripts['known-fix'], 'node scripts/known-fix.mjs');
   assert.equal(pkg.scripts.setup, 'node scripts/setup.mjs');
 });

@@ -90,6 +90,17 @@ The version argument is `patch`, `minor`, `major` or an explicit `x.y.z`. Option
 | `--no-checks` | skip the docs block preflight and the checks in step 4, with loud warnings. For emergencies only |
 | `--allow-branch <name>` | release from a branch other than `main` |
 
+### The release tools run in Go
+
+`npm run release`, `npm run release:site`, `npm run docs-block` and `npm run changelog` run
+`scripts/cf-release.sh`, which builds `native/cmd/cf-release` with `go` (CGO off) into
+`node_modules/.cache/code-forge/cf-release` and runs it from the current folder. You need Go to
+release. The commands, arguments, output, exit codes, file edits and git commands are the same as
+the Node scripts they replace; parity tests in `native/cmd/cf-release` compare each case with a
+golden recorded from the Node script. The Node scripts stay in `scripts/` because tests,
+`scripts/gen-site-data.mjs` and the release workflow still use them. Neither the Go tool nor
+`scripts/cf-release.sh` ships in the npm package (B570).
+
 ## The docs block
 
 Before each release, open a docs block after the code blocks have landed. Use `--kind docs`
@@ -294,7 +305,8 @@ command to finish by hand.
 
 Each version gets a GitHub release whose body is its CHANGELOG section plus two links: the
 version's npm page and the CHANGELOG at the tag. `node scripts/release.mjs notes vX.Y.Z [--out
-<file>]` prints that body (exit 1 when the CHANGELOG has no such version).
+<file>]` prints that body (exit 1 when the CHANGELOG has no such version); `npm run release --
+notes vX.Y.Z` prints the same bytes from the Go tool.
 
 - **Automatic (tag push).** `.github/workflows/release.yml` runs on every `v*` tag. It checks
   that the tag equals `v` + the `package.json` version, writes the notes with the command above,

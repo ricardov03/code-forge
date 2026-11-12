@@ -92,7 +92,8 @@ function fixture({ delay = 0, never = false, fail = '', modules = false, nested 
     return r.stdout.trim();
   };
   for (const dir of [work, site, bin, env.HOME]) mkdirSync(dir, { recursive: true });
-  const script = JSON.parse(readFileSync(path.join(REPO, 'package.json'), 'utf8')).scripts['release:site'];
+  // The npm script runs the Go port since B570; this fixture drives the Node script it mirrors.
+  const script = JSON.parse(readFileSync(path.join(REPO, 'package.json'), 'utf8')).scripts['release:site'] ? 'node scripts/release-site.mjs' : undefined;
   put(work, 'package.json', JSON.stringify({ name: '@example/pkg', version: '0.21.0', scripts: script ? { 'release:site': script } : {} }));
   // --if-present models the old release workflow: no site step, and no child crash.
   if (existsSync(path.join(REPO, 'scripts/release-site.mjs'))) {

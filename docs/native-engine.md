@@ -488,6 +488,13 @@ Contributors can rebuild from the repository root with Go installed:
 node scripts/build-native.mjs --host
 ```
 
+## Release tools (B570)
+
+The maintainer commands `npm run release`, `release:site`, `docs-block` and `changelog` run a
+separate Go program, `native/cmd/cf-release`, built from source by `scripts/cf-release.sh` on each
+call. It is not part of the code-forge binary or the npm package, and it has no hand-over: it
+does not fall back to Node. See [Releasing](releasing.md).
+
 ## How we keep Go and Node the same
 
 Contributors use parity tests. Parity means that both paths give the same
