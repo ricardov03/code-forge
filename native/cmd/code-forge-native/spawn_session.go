@@ -115,8 +115,8 @@ func spawnSessionPlan(cwd string, parsed cliParsed, makeRoot func() (string, boo
 		}
 		opts.Schema = schema
 	}
-	if err := session.Check(opts); session.IsCodexStep(err) && (role == "coder" || role == "facts") {
-		return nil, hSpawnCodexStep
+	if err := session.Check(opts); session.IsCodexSandbox(err) {
+		return nil, hSpawnCodexSandbox
 	} else if session.IsUnsupported(err) {
 		return nil, hSpawnSession
 	}

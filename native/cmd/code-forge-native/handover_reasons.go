@@ -371,6 +371,8 @@ const (
 	hReviewTmpRoot
 	hReviewSelf
 	hReviewWorkerHandOff
+	// B551r
+	hSpawnCodexSandbox
 )
 
 var handoverReasons = [...]string{
@@ -744,4 +746,6 @@ var handoverReasons = [...]string{
 	hReviewTmpRoot:         "review-tmp-root",
 	hReviewSelf:            "review-self-binary",
 	hReviewWorkerHandOff:   "review-worker-handoff",
+	// B551r
+	hSpawnCodexSandbox: "spawn-codex-sandbox",
 }

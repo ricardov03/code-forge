@@ -1,0 +1,38 @@
+== code 0
+== out
+{"status":"ok","answer":"built it\nTESTS go test ./... exit=0\n===BLOCK B1 COMPLETE===","usage":{"tokens_in":100,"tokens_out":20,"tokens_source":"reported"},"duration_ms":N,"exit_code":0,"stderr":"","provider":"openai","model":"gpt-x","effort":"high","fallback_step":0,"row":{"event":"session","role":"facts","level":"L3","provider":"openai","model":"gpt-x","effort":"high","fallback_step":0,"run":null,"block":null,"status":"ok","tokens_in":100,"tokens_out":20,"tokens_source":"reported","usd":0.003,"cost_source":"estimated","duration_ms":N},"attempts":[{"fallback_step":0,"provider":"openai","model":"gpt-x","status":"ok","reason":null}]}
+== err
+level=L3 provider=openai model=gpt-x effort=high fallback_step=0
+== ledger
+{"event":"session","role":"facts","level":"L3","provider":"openai","model":"gpt-x","effort":"high","fallback_step":0,"run":null,"block":null,"status":"ok","tokens_in":100,"tokens_out":20,"tokens_source":"reported","usd":0.003,"cost_source":"estimated","duration_ms":N}
+== files
+home/.code-forge/ledger/repo.jsonl
+== codex.argv
+exec
+-m
+gpt-x
+-c
+model_reasoning_effort=high
+-s
+read-only
+--ephemeral
+--ignore-rules
+--ignore-user-config
+-C
+<ws>/tmp/code-forge/proc-N/sessions/facts-T-R/cwd
+--skip-git-repo-check
+-o
+<ws>/tmp/code-forge/proc-N/sessions/facts-T-R/out.json
+--json
+-
+== codex.cwd
+<ws>/tmp/code-forge/proc-N/sessions/facts-T-R/cwd
+== codex.stdin
+Build block one.
+Keep it small.
+
+== codex.home
+CODEX_HOME=<ws>/codexhome
+.
+./auth.json
+auth:{"token":"t"}

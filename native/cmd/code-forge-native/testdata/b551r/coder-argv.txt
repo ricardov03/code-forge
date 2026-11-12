@@ -1,0 +1,6 @@
+== code 0
+== out
+{"argv":["codex","exec","-m","gpt-x","-c","model_reasoning_effort=high","-s","workspace-write","-c","sandbox_workspace_write.exclude_tmpdir_env_var=true","-c","sandbox_workspace_write.exclude_slash_tmp=true","-c","approval_policy=\"never\"","-C","<ws>/repo","--json","-o","<session>/out.json","<session>/coder-brief.md"],"cwd":"<ws>/repo","provider":"openai","model":"gpt-x","effort":"high","fallback_step":0}
+== err
+== ledger
+== files

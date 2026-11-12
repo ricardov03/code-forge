@@ -4,10 +4,11 @@
 // fallback ladder, the provider slot, the rate-limit backoff, the unsigned
 // `session` ledger row and Node's result object. Every case it does not port
 // is refused BEFORE anything runs (IsUnsupported), so a caller can still hand
-// the session to Node: the coder and facts roles, a background session, an
-// openai step the open-book opt-in would run, a schema other than
-// finding.schema.json, and a level Node's resolveLevel or argv builders would
-// throw on. B482: a run-pinned session passes budgetGate (gate.go) first.
+// the session to Node: the coder and facts roles, a background session, a
+// schema other than finding.schema.json, and a level Node's resolveLevel or
+// argv builders would throw on. B482: a run-pinned session passes budgetGate
+// (gate.go) first. B551: an openai step the open-book opt-in runs goes
+// through the codex CLI (codex.go).
 package session
 
 import (
@@ -88,11 +89,15 @@ func IsUnsupported(err error) bool {
 	return errors.As(err, &u)
 }
 
-// IsCodexStep reports an unsupported ladder because a step runs on openai
-// (the Codex CLI, left to Node).
-func IsCodexStep(err error) bool {
+// codexSandboxWhy is the refusal of a Codex coder step under a coder.sandbox
+// config (B93's checkSandboxDirs, not ported).
+const codexSandboxWhy = "a Codex coder with coder.sandbox"
+
+// IsCodexSandbox reports an unsupported ladder because a coder step runs on
+// openai with a coder.sandbox config (left to Node, B551r).
+func IsCodexSandbox(err error) bool {
 	var u *unsupportedError
-	return errors.As(err, &u) && u.why == `provider "openai"`
+	return errors.As(err, &u) && u.why == codexSandboxWhy
 }
 
 // Opts is spawn.mjs SessionOpts for the ported path.
@@ -293,7 +298,7 @@ func plan(o Opts) ([]step, int, error) {
 	}
 	var steps []step
 	for _, s := range kept {
-		if s.provider != "anthropic" && s.provider != "xai" {
+		if s.provider != "anthropic" && s.provider != "xai" && s.provider != "openai" {
 			return nil, 0, unsupported("provider " + strconv.Quote(s.provider))
 		}
 		if s.effort != nil {
@@ -303,6 +308,17 @@ func plan(o Opts) ([]step, int, error) {
 			}
 			if e != "" && s.provider == "anthropic" && !contains(anthropicEfforts, e) {
 				return nil, 0, unsupported("an effort the claude builder refuses")
+			}
+			if s.provider == "openai" && !codexEffortOK(e) {
+				return nil, 0, unsupported("an effort the codex builder refuses")
+			}
+		}
+		if s.provider == "openai" {
+			if _, err := codexSchemaPlan(o); err != nil {
+				return nil, 0, err
+			}
+			if o.Role == "coder" && section(o.Cfg, "coder")["sandbox"] != nil {
+				return nil, 0, unsupported(codexSandboxWhy)
 			}
 		}
 		steps = append(steps, s)
@@ -316,15 +332,18 @@ func Check(o Opts) error {
 	return err
 }
 
-// FirstCLI is the CLI name of the ladder's first step ("claude" or "grok";
-// "" when plan refuses the options).
+// FirstCLI is the CLI name of the ladder's first step ("claude", "codex" or
+// "grok"; "" when plan refuses the options), as cliNameForProvider names it.
 func FirstCLI(o Opts) string {
 	steps, _, err := plan(o)
 	if err != nil {
 		return ""
 	}
-	if steps[0].provider == "anthropic" {
+	switch steps[0].provider {
+	case "anthropic":
 		return "claude"
+	case "openai":
+		return "codex"
 	}
 	return "grok"
 }
@@ -336,6 +355,10 @@ type built struct {
 	stdin     bool   // pipe the prompt file's bytes
 	stdinFile string // the file piped (closed-book roles)
 	env       []string
+	outPath   string // codex: the -o answer file, read and removed after the run
+	// codexHome is a coder's per-session CODEX_HOME, removed after the run
+	// (runForeground's finally) under codexRunRoot.
+	codexHome, codexRunRoot string
 }
 
 // factsExtraWriteVerbRules is claude.mjs FACTS_EXTRA_WRITE_VERB_RULES.
@@ -352,6 +375,8 @@ func buildStep(o Opts, s step, sessionDir string) (built, error) {
 		return built{}, err
 	}
 	switch s.provider {
+	case "openai":
+		return codexClosedBook(o, s.model, effort, cwd, sessionDir, o.Schema)
 	case "anthropic":
 		argv := []string{"claude", "-p", "--model", s.model}
 		if effort != "" {
@@ -421,6 +446,9 @@ func buildCoder(o Opts, s step, sessionDir, effort string) (built, error) {
 			return built{}, err
 		}
 	}
+	if s.provider == "openai" {
+		return codexCoder(o, s.model, effort, cwd, promptPath, sessionDir)
+	}
 	rules := claudeRuleStrings(forbiddenMerged())
 	if s.provider == "anthropic" {
 		argv := []string{"claude", "-p", "--model", s.model}
@@ -474,7 +502,11 @@ func Preview(o Opts, deps Deps) (ledger.Object, error) {
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
-	b, err := buildStep(o, s, dir)
+	// previewArgv builds with {...opts, runRoot: sessionDir}: a Codex coder's
+	// home goes under the preview dir and dies with it
+	po := o
+	po.RunRoot = dir
+	b, err := buildStep(po, s, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -866,17 +898,41 @@ func foreground(b built, o Opts, deps Deps) (ledger.Object, error) {
 		runner = run
 	}
 	res := runner(eo)
+	if b.codexHome != "" {
+		// B4.1: the Codex coder's per-session CODEX_HOME dies with the session
+		if err := codexRemoveHome(b.codexHome, b.codexRunRoot); err != nil {
+			return nil, err
+		}
+	}
 	duration := deps.now() - started
-	parsed, text, answer, hasAnswer := readAnswer(res.Stdout)
+	var outText *string
+	if b.outPath != "" {
+		outText = codexReadOut(b.outPath)
+	}
+	var (
+		parsed, answer any
+		text           string
+		hasAnswer      bool
+		usage          ledger.Object
+	)
+	if b.cli == "codex" {
+		parsed, text, answer, hasAnswer, usage = codexReadAnswer(res.Stdout, outText)
+	} else {
+		parsed, text, answer, hasAnswer = readAnswer(res.Stdout)
+		usage = parseUsage(b.cli, parsed)
+	}
 	inputBytes := len(input)
 	if input == nil {
 		if st, err := os.Stat(o.PromptPath); err == nil {
 			inputBytes = int(st.Size())
 		}
 	}
-	usage := parseUsage(b.cli, parsed)
 	if usage == nil {
-		usage = ledger.Object{{Key: "tokens_in", Value: ceilQuarter(inputBytes)}, {Key: "tokens_out", Value: ceilQuarter(len(res.Stdout))}, {Key: "tokens_source", Value: "estimated"}}
+		outBytes := len(res.Stdout)
+		if outText != nil {
+			outBytes += len(*outText)
+		}
+		usage = ledger.Object{{Key: "tokens_in", Value: ceilQuarter(inputBytes)}, {Key: "tokens_out", Value: ceilQuarter(outBytes)}, {Key: "tokens_source", Value: "estimated"}}
 	}
 	common := ledger.Object{{Key: "usage", Value: usage}, {Key: "duration_ms", Value: duration}, {Key: "text", Value: text}, {Key: "exit_code", Value: res.Code}, {Key: "stderr", Value: res.Stderr}}
 	with := func(head ledger.Object, tail ...ledger.Field) ledger.Object {
@@ -930,6 +986,30 @@ func foreground(b built, o Opts, deps Deps) (ledger.Object, error) {
 			value = answer
 		}
 		return with(ledger.Object{{Key: "status", Value: "ok"}, {Key: "answer", Value: value}, {Key: "sentinel", Value: ParseSentinel(text)}}), nil
+	}
+	if o.Schema != nil && b.cli == "codex" && o.Validate == nil {
+		// strict: drop the optional nulls to the source shape, coerce, then
+		// check the answer as given against the strict schema
+		var raw any
+		if hasAnswer {
+			raw = answer
+		}
+		source := codexDropNulls(raw, o.Schema)
+		coercedAnswer, coerced := review.CoerceReviewPassed(source)
+		providerAnswer := raw
+		if coerced {
+			p := raw.(ledger.Object).Clone()
+			p.Set("passed", coercedAnswer.(ledger.Object).Get("passed"))
+			providerAnswer = p
+		}
+		if !hasAnswer || !codexFindingValid(providerAnswer, o.Schema) {
+			return with(ledger.Object{{Key: "status", Value: "invalid-output"}, {Key: "reason", Value: "answer does not match the schema"}, {Key: "answer", Value: nil}}), nil
+		}
+		var tail []ledger.Field
+		if coerced {
+			tail = append(tail, ledger.Field{Key: "passed_coerced", Value: true})
+		}
+		return with(ledger.Object{{Key: "status", Value: "ok"}, {Key: "answer", Value: coercedAnswer}}, tail...), nil
 	}
 	if o.Schema != nil && o.Validate != nil {
 		if !hasAnswer || !o.Validate(answer) {

@@ -83,8 +83,12 @@ func startBackground(b built, sessionDir, runRoot string, deps Deps) (ledger.Obj
 	if t := filelock.ProcessStartTime(pid); t != nil {
 		start = *t
 	}
-	data, err := ledger.Stringify(ledger.Object{{Key: "pid", Value: float64(pid)}, {Key: "start_time", Value: start}, {Key: "argv0", Value: b.argv[0]},
-		{Key: "log", Value: logPath}, {Key: "errLog", Value: errLogPath}}, false)
+	entry := ledger.Object{{Key: "pid", Value: float64(pid)}, {Key: "start_time", Value: start}, {Key: "argv0", Value: b.argv[0]},
+		{Key: "log", Value: logPath}, {Key: "errLog", Value: errLogPath}}
+	if b.outPath != "" {
+		entry.Set("outPath", b.outPath) // B551r: a Codex session's -o answer file
+	}
+	data, err := ledger.Stringify(entry, false)
 	if err != nil {
 		return nil, err
 	}

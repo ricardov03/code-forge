@@ -89,9 +89,10 @@ func spawnPlan(args []string) (func(o *runOut) int, handoverReason) {
 		if !spawnRunID.MatchString(runID) {
 			return fail(2, "spawn: a run id is one path segment of letters, digits, \".\", \"_\" or \"-\"\n")
 		}
-		// B549: a ladder with a Codex step is decided before the run root is made
+		// B549/B551r: a Codex coder step under coder.sandbox is decided before
+		// the run root is made
 		if spawnCodexLadder(cwd, parsed) {
-			return nil, hSpawnCodexStep
+			return nil, hSpawnCodexSandbox
 		}
 		// B549: checkRunSandbox (a coder only) is decided before the run root
 		// is made, so its hand-over writes nothing

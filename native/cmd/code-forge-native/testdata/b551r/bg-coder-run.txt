@@ -1,0 +1,59 @@
+== code 0
+== out
+{"status":"started","pid":N,"pidFile":"<ws>/tmp/code-forge/r1/sessions/coder-T-R/pid.json","logPath":"<ws>/tmp/code-forge/r1/sessions/coder-T-R/session.log","errLogPath":"<ws>/tmp/code-forge/r1/sessions/coder-T-R/session.err.log","sessionDir":"<ws>/tmp/code-forge/r1/sessions/coder-T-R","provider":"openai","model":"gpt-x","effort":"high","fallback_step":0,"attempts":[]}
+== err
+level=L3 provider=openai model=gpt-x effort=high fallback_step=0
+== ledger
+{"event":"session.background","role":"coder","level":"L3","provider":"openai","model":"gpt-x","effort":"high","fallback_step":0,"run":"r1","block":null,"pid":N,"status":"started","usd":null,"usd_unknown":true,"tokens_source":null,"cost_source":null}
+== files
+home/.code-forge/ledger/repo.jsonl
+tmp/code-forge/r1/codex-homes/coder-H/auth.json
+tmp/code-forge/r1/codex-homes/coder-H/rules/code-forge.rules
+tmp/code-forge/r1/owner.json
+tmp/code-forge/r1/pids/N.json
+tmp/code-forge/r1/sessions/coder-T-R/out.json
+tmp/code-forge/r1/sessions/coder-T-R/pid.json
+tmp/code-forge/r1/sessions/coder-T-R/session.err.log
+tmp/code-forge/r1/sessions/coder-T-R/session.log
+== pid.json
+{"pid":N,"start_time":"S","argv0":"codex","log":"<ws>/tmp/code-forge/r1/sessions/coder-T-R/session.log","errLog":"<ws>/tmp/code-forge/r1/sessions/coder-T-R/session.err.log","outPath":"<ws>/tmp/code-forge/r1/sessions/coder-T-R/out.json"}
+== pids entry
+{"pid":N,"start_time":"S","argv0":"codex"}
+== session.err.log
+== session.log
+{"type":"thread.started","thread_id":"t1"}
+{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":20}}
+== codex.argv
+exec
+-m
+gpt-x
+-c
+model_reasoning_effort=high
+-s
+workspace-write
+-c
+sandbox_workspace_write.exclude_tmpdir_env_var=true
+-c
+sandbox_workspace_write.exclude_slash_tmp=true
+-c
+approval_policy="never"
+-C
+<ws>/repo
+--json
+-o
+<ws>/tmp/code-forge/r1/sessions/coder-T-R/out.json
+<ws>/repo/brief.md
+== codex.cwd
+<ws>/repo
+== codex.prompt
+Build block one.
+Keep it small.
+
+== codex.home
+CODEX_HOME=<ws>/tmp/code-forge/r1/codex-homes/coder-H
+.
+./auth.json
+./rules
+./rules/code-forge.rules
+rules:1534559860 10949
+auth:{"token":"t"}

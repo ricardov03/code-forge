@@ -170,14 +170,12 @@ func TestB477SpawnCliMissingIsUnavailable(t *testing.T) {
 	}
 }
 
-// The cases Go does not serve keep a named hand-over (B549: --background runs in Go).
+// The cases Go does not serve keep a named hand-over (B549: --background runs
+// in Go; B551r: a coder or facts ladder with a Codex step runs in Go too).
 func TestB477SpawnUnportedCasesHandOver(t *testing.T) {
 	f, _ := newB477Fixture(t)
 	b460Write(t, "other.json", `{"type":"object"}`)
 	for _, args := range [][]string{
-		{"spawn", "--level", "L1", "--role", "coder", "--brief", "brief.md", "--run", "r-x"}, // B482: other roles' --run runs in Go
-		{"spawn", "--level", "L1", "--role", "coder", "--brief", "brief.md"},
-		{"spawn", "--level", "L1", "--role", "facts", "--brief", "brief.md"},
 		{"spawn", "--level", "L1", "--role", "reviewer", "--brief", "brief.md", "--schema", "other.json"},
 		{"spawn", "--level", "L1", "--role", "reviewer", "--brief", "missing.md"},
 		{"spawn", "--level", "L0", "--role", "reviewer", "--brief", "brief.md"},
@@ -187,8 +185,7 @@ func TestB477SpawnUnportedCasesHandOver(t *testing.T) {
 		}
 	}
 	got := b460Handovers(t, f.home)
-	// B549: a coder or facts ladder with a Codex step hands over as spawn-codex-step
-	want := "spawn spawn-codex-step,spawn spawn-codex-step,spawn spawn-codex-step,spawn spawn-session,spawn spawn-session,spawn spawn-session"
+	want := "spawn spawn-session,spawn spawn-session,spawn spawn-session"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("hand-overs = %v", got)
 	}

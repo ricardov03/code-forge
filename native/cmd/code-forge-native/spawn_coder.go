@@ -18,11 +18,12 @@ import (
 // checkRunSandbox, src/session/spawn.mjs coderPromptFor). Every case Go
 // cannot answer byte-equal hands over before anything is written.
 
-// spawnCodexLadder: the coder or facts session's ladder has a Codex (openai)
-// step, which stays with Node (hSpawnCodexStep).
+// spawnCodexLadder: the coder session's ladder has a Codex (openai) step
+// under a coder.sandbox config, which stays with Node (hSpawnCodexSandbox,
+// B551r; every other Codex coder or facts step runs in Go).
 func spawnCodexLadder(cwd string, parsed cliParsed) bool {
 	role := parsed.values["role"]
-	if role != "coder" && role != "facts" {
+	if role != "coder" {
 		return false
 	}
 	cfg, err := config.Load(cwd)
@@ -31,7 +32,7 @@ func spawnCodexLadder(cwd string, parsed cliParsed) bool {
 	}
 	placeholder := ""
 	o := session.Opts{Cfg: cfg, Level: parsed.values["level"], Role: role, PromptPath: "/brief", Background: parsed.booleans["background"], CoderPrompt: &placeholder}
-	return session.IsCodexStep(session.Check(o))
+	return session.IsCodexSandbox(session.Check(o))
 }
 
 // spawnCheckRunSandbox is checkRunSandbox for `--role coder --run <id>`:
