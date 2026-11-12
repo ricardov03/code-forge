@@ -367,6 +367,9 @@ func (d Deps) skipNote(skipped int) {
 	}
 }
 
+// ProviderLimit is spawn.mjs providerLimit (B485: the worker's session cap).
+func ProviderLimit(cfg map[string]any, provider string) int { return providerLimit(cfg, provider) }
+
 // providerLimit is spawn.mjs providerLimit.
 func providerLimit(cfg map[string]any, provider string) int {
 	set, ok := section(section(cfg, "review"), "provider_concurrency")[provider].(float64)
