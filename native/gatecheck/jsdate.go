@@ -54,8 +54,10 @@ func jsDateString(value string) (ms float64, ok, known bool) {
 	if m[3] != "" {
 		day, _ = strconv.Atoi(m[3])
 	}
-	if month < 1 || month > 12 || day < 1 || day > time.Date(year, time.Month(month)+1, 0, 0, 0, 0, 0, time.UTC).Day() {
-		return math.NaN(), false, false
+	// B498: V8 takes any day 1-31 and rolls it over (2026-02-30 is 2 March);
+	// a month or day outside that range is NaN (checked against Node's table).
+	if month < 1 || month > 12 || day < 1 || day > 31 {
+		return math.NaN(), false, true
 	}
 	hour, minute, second, milli := 0, 0, 0, 0
 	if m[4] != "" {
@@ -115,9 +117,11 @@ func jsDateString(value string) (ms float64, ok, known bool) {
 // form with a GMT offset and an optional zone name. V8's legacy parser skips
 // the leading weekday word and the parenthesised name. Each form names its
 // zone, so local time plays no part. Other legacy forms stay unknown.
+// B498: one- or two-digit day and time fields and two- to four-digit years
+// follow V8's legacy reader (checked against a table Node generated).
 var (
-	utcDate    = regexp.MustCompile(`^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), )?(\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{4}) (\d{2}):(\d{2}):(\d{2}) (?:GMT|UTC)$`)
-	stringDate = regexp.MustCompile(`^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) )?(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{2}) (\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT([+-])(\d{2})(\d{2})(?: \([A-Za-z ]*\))?$`)
+	utcDate    = regexp.MustCompile(`^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), )?(\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{2,4}) (\d{1,2}):(\d{1,2})(?::(\d{1,2}))? (?:GMT|UTC)$`)
+	stringDate = regexp.MustCompile(`^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) )?(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2}) (\d{2,4}) (\d{1,2}):(\d{1,2})(?::(\d{1,2}))? GMT([+-])(\d{2})(\d{2})(?: \([A-Za-z ]*\))?$`)
 	monthNames = "JanFebMarAprMayJunJulAugSepOctNovDec"
 )
 
@@ -151,13 +155,28 @@ func jsLegacyDate(value string) (ms float64, ok, known bool) {
 			month = i + 1
 		}
 	}
-	// V8 rolls an overflowing day or time over; Go proves only the plain range.
-	// V8 reads a year below 100 as 19xx or 20xx in this form.
-	if y < 100 || d < 1 || d > time.Date(y, time.Month(month)+1, 0, 0, 0, 0, 0, time.UTC).Day() || h > 23 || mi > 59 || sec > 59 {
+	// V8 reads a minute or second of 60 or more in ways Go does not model,
+	// and a day outside 1-31 can make it read the numbers in another order.
+	if sec > 59 || mi > 59 || d < 1 || d > 31 {
 		return math.NaN(), false, false
 	}
+	// V8's legacy reader takes any day 1-31 and rolls it over (31 Nov is
+	// 1 Dec), allows 24:00 for the next midnight, and refuses other hours.
+	if h > 24 || h == 24 && (mi != 0 || sec != 0) {
+		return math.NaN(), false, true
+	}
+	// A year below 100 is 20xx up to 49 and 19xx from 50, however it is written.
+	if y <= 49 {
+		y += 2000
+	} else if y <= 99 {
+		y += 1900
+	}
 	t := time.Date(y, time.Month(month), d, h, mi, sec, 0, time.FixedZone("", offset*60))
-	return float64(t.UnixMilli()), true, true
+	ms = float64(t.UnixMilli())
+	if math.Abs(ms) > maxDateMs {
+		return math.NaN(), false, true
+	}
+	return ms, true, true
 }
 
 // JSDateParse exposes jsDateParse to callers outside the gate checker.

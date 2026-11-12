@@ -471,7 +471,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	if deciding && !confirmed && (!scopeChecked || len(scopeWarnings) > 0 || len(reviewed) > 0 && !slices.ContainsFunc(changed, func(file string) bool { return gatecheck.Owns(prefix, entry, file) })) {
 		return fallback(hCloseDecide)
 	}
-	gateInput := gatecheck.Input{Run: run, Block: id, Files: files, Rows: rows, Key: key, HighPaths: highPaths, Unowned: unowned, NoChanges: noChanges, Hits: hits, Transcript: transcript, ResultFiles: gatecheck.LoadResultFiles(mainTop, run, id, rows, key)}
+	gateInput := gatecheck.Input{Run: run, Block: id, Files: files, Rows: rows, Key: key, HighPaths: highPaths, Unowned: unowned, NoChanges: noChanges, Hits: hits, Transcript: transcript, ResultFiles: gatecheck.LoadResultFiles(mainTop, run, id, rows, key), Ordered: closeOrderedRows(ledgerDir, blockString(record.Get("project")), all)}
 	if external != "" {
 		// Node judges an external reviewer's close with no review files; the
 		// files still prove the block changed something.

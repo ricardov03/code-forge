@@ -103,17 +103,32 @@ func TestB493CloseLateFindingWithNoFile(t *testing.T) {
 }
 
 func b493AckFixture(t *testing.T, match bool) *closeReviewFixture {
+	if !match {
+		return b493AckFiles(t, nil, "é.txt", "e.txt", "ä.txt")
+	}
+	return b493AckFiles(t, []int{2, 1, 0}, "é.txt", "e.txt", "ä.txt")
+}
+
+// b493AckFiles signs agent waivers of F1 on files (in that ledger order, at a
+// fixed ts so the MACs are the same each run) and an ack whose digest is over
+// the waivers in digest order (indices into files), or "0000" when nil.
+func b493AckFiles(t *testing.T, digestOrder []int, files ...string) *closeReviewFixture {
 	f := newCloseReviewFixture(t, 1)
 	b493Approve(t, f)
 	b493SetConfig(t, f, ledger.Object{{Key: "review", Value: ledger.Object{{Key: "close_wait_s", Value: 1}, {Key: "agent_waivers", Value: ledger.Object{{Key: "require_ack", Value: true}}}}}, {Key: "context", Value: ledger.Object{{Key: "require_coder_tests", Value: true}}}})
-	set := []any{}
-	for _, file := range []string{"é.txt", "e.txt", "ä.txt"} {
-		rows := b493Sign(t, f, ledger.Object{{Key: "event", Value: "review.triage"}, {Key: "block", Value: "B1"}, {Key: "file", Value: file}, {Key: "finding", Value: "F1"}, {Key: "severity", Value: "warning"}},
-			ledger.Object{{Key: "event", Value: "review.waived"}, {Key: "block", Value: "B1"}, {Key: "file", Value: file}, {Key: "finding", Value: "F1"}, {Key: "by", Value: "agent"}, {Key: "verdict", Value: "agree"}, {Key: "severity", Value: "warning"}, {Key: "reason", Value: "minor"}})
-		set = append([]any{[]any{file, "F1", rows[1].Get("mac")}}, set...)
+	const ts = "2026-11-11T10:00:00.000Z"
+	items := []any{}
+	for _, file := range files {
+		rows := b493Sign(t, f, ledger.Object{{Key: "event", Value: "review.triage"}, {Key: "block", Value: "B1"}, {Key: "file", Value: file}, {Key: "finding", Value: "F1"}, {Key: "severity", Value: "warning"}, {Key: "ts", Value: ts}},
+			ledger.Object{{Key: "event", Value: "review.waived"}, {Key: "block", Value: "B1"}, {Key: "file", Value: file}, {Key: "finding", Value: "F1"}, {Key: "by", Value: "agent"}, {Key: "verdict", Value: "agree"}, {Key: "severity", Value: "warning"}, {Key: "reason", Value: "minor"}, {Key: "ts", Value: ts}})
+		items = append(items, []any{file, "F1", rows[1].Get("mac")})
 	}
 	digest := "0000"
-	if match {
+	if digestOrder != nil {
+		set := []any{}
+		for _, i := range digestOrder {
+			set = append(set, items[i])
+		}
 		data, err := ledger.Stringify(set, false)
 		if err != nil {
 			t.Fatal(err)
@@ -121,19 +136,22 @@ func b493AckFixture(t *testing.T, match bool) *closeReviewFixture {
 		sum := sha256.Sum256(data)
 		digest = hex.EncodeToString(sum[:])
 	}
-	b493Sign(t, f, ledger.Object{{Key: "event", Value: "agent_waivers.acked"}, {Key: "block", Value: "B1"}, {Key: "by", Value: "human"}, {Key: "digest", Value: digest}})
+	b493Sign(t, f, ledger.Object{{Key: "event", Value: "agent_waivers.acked"}, {Key: "block", Value: "B1"}, {Key: "by", Value: "human"}, {Key: "digest", Value: digest}, {Key: "ts", Value: ts}})
 	return f
 }
 
 // B493: agent waivers on non-ASCII file names with a signed ack digest that
 // matches no order: Node refuses agent-waivers-not-acked, and so does Go.
-// A digest that matches one order keeps its own hand-over reason.
+// A digest that matches one order of names Go cannot collate keeps its own
+// hand-over reason.
 func TestB493CloseAckDigestNonASCII(t *testing.T) {
 	code, out, errs, reason := b493Close(b493AckFixture(t, false))
 	if reason != 0 || code != 1 || out != "agent-waivers-not-acked - agent-waivers-not-acked\n  fix: code-forge block ack-waivers B1 --run r-close-fixture\n" || errs != "block B1 open: agent-waivers-not-acked\n" {
 		t.Fatalf("exit=%d reason=%v\nout=%q\nerr=%q", code, reason, out, errs)
 	}
-	code, out, errs, reason = b493Close(b493AckFixture(t, true))
+	// B498: Latin file names sort in Go as Node sorts them; another script
+	// (Cyrillic) whose digest matches one order still hands over.
+	code, out, errs, reason = b493Close(b493AckFiles(t, []int{1, 0, 2}, "б.txt", "а.txt", "в.txt"))
 	if reason != hCloseAckDigestOrder || out != "" || errs != "" {
 		t.Fatalf("matching order: exit=%d reason=%v out=%q err=%q; want the close-ack-digest-order hand-over before any output", code, reason, out, errs)
 	}

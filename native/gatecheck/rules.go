@@ -48,7 +48,14 @@ type Input struct {
 	Hits        []Blocker
 	Transcript  string
 	ResultFiles map[string]*ResultFile
+	// Ordered holds a row's JSON.parse property order, keyed by the row's
+	// map pointer (OrderedKey). B498: an object or array decision prints
+	// with JSON.stringify in that order; without it the result is unknown.
+	Ordered map[uintptr]ledger.Object
 }
+
+// OrderedKey is the Input.Ordered key of a row.
+func OrderedKey(r Row) uintptr { return reflect.ValueOf(r).Pointer() }
 
 // jv is a JSON value as JavaScript reads a property: ok false is undefined.
 type jv struct {
@@ -762,8 +769,13 @@ func (g *gate) decisionProblem(w Row, scope string, at float64) string {
 		if v, has := row["decision"]; has {
 			switch v.(type) {
 			case map[string]any, []any:
-				// Go maps lose JSON.stringify's key order.
-				g.unknown = true
+				// Go maps lose JSON.stringify's key order: print the value
+				// as JSON.parse read it (B498), or mark the result unknown.
+				if ordered, has := g.in.Ordered[OrderedKey(row)]; has && hasOrderedField(ordered, "decision") {
+					v = ordered.Get("decision")
+				} else if containsMap(v) {
+					g.unknown = true
+				}
 			}
 			data, _ := ledger.Stringify(v, false)
 			said = string(data)
@@ -1174,3 +1186,27 @@ func LoadResultFiles(mainTop, run, block string, rows []Row, key []byte) map[str
 
 // JSString is String(v) for a JSON value; present false is undefined.
 func JSString(v any, present bool) string { return jsString(jv{v, present}) }
+
+func hasOrderedField(o ledger.Object, key string) bool {
+	for _, f := range o {
+		if f.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// containsMap is true when v holds an object, whose key order a Go map lost.
+func containsMap(v any) bool {
+	switch x := v.(type) {
+	case map[string]any:
+		return true
+	case []any:
+		for _, item := range x {
+			if containsMap(item) {
+				return true
+			}
+		}
+	}
+	return false
+}

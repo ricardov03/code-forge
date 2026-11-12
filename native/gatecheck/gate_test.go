@@ -258,8 +258,13 @@ func TestB380LocaleLessMatchesNode(t *testing.T) {
 			t.Errorf("localeLess(%q, %q) = %v, %v; Node says %v", c.a, c.b, less, ok, c.less)
 		}
 	}
-	if _, ok := localeLess("café", "cafe"); ok {
-		t.Error("non-ASCII text must be unknown, not guessed")
+	// B498: Latin letters with marks follow ICU ("café".localeCompare("cafe") is 1);
+	// other scripts stay unknown, not guessed.
+	if less, ok := localeLess("café", "cafe"); !ok || less {
+		t.Errorf("localeLess(café, cafe) = %v %v; Node says false", less, ok)
+	}
+	if _, ok := localeLess("кафе", "cafe"); ok {
+		t.Error("Cyrillic text must be unknown, not guessed")
 	}
 }
 
@@ -277,7 +282,11 @@ func TestB380JSDateParseMatchesNode(t *testing.T) {
 			t.Errorf("jsDateParse(%q) = %v %v %v; Node says %v", c.in, ms, ok, known, c.ms)
 		}
 	}
-	for _, in := range []string{"Nov 10 2026", "2000-02-30", "2000-01-01T00:00:00+24:00"} {
+	// B498: "2000-02-30" rolls over to 1 March, as in V8 (951868800000).
+	if ms, ok, known := jsDateParse("2000-02-30", true); !ok || !known || ms != 951868800000 {
+		t.Errorf("jsDateParse(2000-02-30) = %v %v %v; Node says 951868800000", ms, ok, known)
+	}
+	for _, in := range []string{"Nov 10 2026", "2000-01-01T00:00:00+24:00"} {
 		if _, _, known := jsDateParse(in, true); known {
 			t.Errorf("jsDateParse(%q) must be unknown", in)
 		}
@@ -500,7 +509,11 @@ func TestB466JSDateParseFullISOFormat(t *testing.T) {
 		}
 	}
 	// Legacy-parser forms and calendar roll-overs stay unknown.
-	for _, in := range []string{"2026-02-29", "2026-11-11t10:00Z", "2026-11-11 10:00Z", "2026-11-11T10:00:00+0100", "2026-1", "999", "2026-11-11T24:00:01Z", "2026-11-11T10:00:00z"} {
+	// B498: "2026-02-29" rolls over to 1 March, as in V8 (1772323200000).
+	if ms, ok, known := jsDateParse("2026-02-29", true); !ok || !known || ms != 1772323200000 {
+		t.Errorf("jsDateParse(2026-02-29) = %v %v %v; Node says 1772323200000", ms, ok, known)
+	}
+	for _, in := range []string{"2026-11-11t10:00Z", "2026-11-11 10:00Z", "2026-11-11T10:00:00+0100", "2026-1", "999", "2026-11-11T24:00:01Z", "2026-11-11T10:00:00z"} {
 		if _, _, known := jsDateParse(in, true); known {
 			t.Errorf("jsDateParse(%q) must be unknown", in)
 		}

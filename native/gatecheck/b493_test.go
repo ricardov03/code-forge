@@ -64,22 +64,22 @@ func TestB493JSDateParseLegacyForms(t *testing.T) {
 			t.Errorf("jsDateParse(%q) = %v %v %v; Node says %v", c.in, ms, ok, known, c.ms)
 		}
 	}
-	// V8 rolls these over, reads a short year as 19xx/20xx, or reads other
-	// spellings; Go does not guess them.
-	for _, in := range []string{"Fri Feb 28 0099 01:02:03 GMT+1400", "Tue, 11 Nov 0050 10:00:00 GMT", "Tue, 31 Nov 2026 10:00:00 GMT", "Tue, 11 Nov 2026 24:00:00 GMT", "tue, 11 nov 2026 10:00:00 gmt", "Tue, 11 Nov 2026 10:00 GMT", "Nov 11 2026 10:00:00 GMT+2400", "Wed Nov 11 2026 10:00:00 GMT+0100 (CET) extra", "Nov 10 2026"} {
+	// V8 reads other spellings; Go does not guess them. (B498 reads the
+	// roll-overs, short years, 24:00 and no-seconds forms; see b498_test.go.)
+	for _, in := range []string{"tue, 11 nov 2026 10:00:00 gmt", "Nov 11 2026 10:00:00 GMT+2400", "Wed Nov 11 2026 10:00:00 GMT+0100 (CET) extra", "Nov 10 2026"} {
 		if _, _, known := jsDateParse(in, true); known {
 			t.Errorf("jsDateParse(%q) must be unknown", in)
 		}
 	}
 }
 
-// B493: with a non-ASCII file name Go cannot sort like localeCompare, but a
-// signed digest that matches no order means Node does not ack either; a
-// digest that matches some order stays unknown.
+// B493: a signed digest that matches no order means Node does not ack.
+// B498: Go now sorts Latin letters with marks like localeCompare, so the
+// digest of Node's order acks and the digest of another order does not.
 func TestB493AckDigestNonASCII(t *testing.T) {
 	key := []byte(strings.Repeat("k", 32))
 	base := []Row{}
-	for _, file := range []string{"é.txt", "e.txt", "ä.txt"} {
+	for _, file := range []string{"é.txt", "f.txt", "ä.txt"} {
 		base = append(base, Row{"event": "review.triage", "file": file, "finding": "F1", "severity": "warning"},
 			Row{"event": "review.waived", "file": file, "finding": "F1", "severity": "warning", "verdict": "agree", "by": "agent", "reason": "minor"})
 	}
@@ -89,7 +89,8 @@ func TestB493AckDigestNonASCII(t *testing.T) {
 		t.Fatalf("no order matches: not acked and known, got %v %v", acked, known)
 	}
 	set := []any{}
-	for _, i := range []int{5, 3, 1} {
+	// Node: ["ä.txt",…] < ["é.txt",…] < ["f.txt",…] whatever the macs.
+	for _, i := range []int{5, 1, 3} {
 		set = append(set, []any{rows[i]["file"], rows[i]["finding"], rows[i]["mac"]})
 	}
 	data, err := ledger.Stringify(set, false)
@@ -98,8 +99,18 @@ func TestB493AckDigestNonASCII(t *testing.T) {
 	}
 	sum := sha256.Sum256(data)
 	match := append(append([]Row{}, rows...), b380Rows(t, key, Row{"event": "agent_waivers.acked", "digest": hex.EncodeToString(sum[:]), "by": "human"})...)
-	if _, known := AgentWaiversAcked(true, "r1", "B1", match, key); known {
-		t.Fatal("a digest of one order stays unknown: Go cannot prove Node sorts to it")
+	if acked, known := AgentWaiversAcked(true, "r1", "B1", match, key); !acked || !known {
+		t.Fatalf("the digest of Node's order acks: %v %v", acked, known)
+	}
+	reverse := []any{set[2], set[1], set[0]}
+	data, err = ledger.Stringify(reverse, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversed := sha256.Sum256(data)
+	other := append(append([]Row{}, rows...), b380Rows(t, key, Row{"event": "agent_waivers.acked", "digest": hex.EncodeToString(reversed[:]), "by": "human"})...)
+	if acked, known := AgentWaiversAcked(true, "r1", "B1", other, key); acked || !known {
+		t.Fatalf("the digest of another order does not ack: %v %v", acked, known)
 	}
 	unsigned := append(append([]Row{}, rows...), Row{"event": "agent_waivers.acked", "block": "B1", "run": "r1", "digest": hex.EncodeToString(sum[:]), "by": "human"})
 	if acked, known := AgentWaiversAcked(true, "r1", "B1", unsigned, key); acked || !known {
