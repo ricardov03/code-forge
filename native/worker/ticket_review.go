@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"time"
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/canon"
@@ -27,16 +28,37 @@ import (
 	"encoding/hex"
 )
 
+// ConfigRetry is loop.mjs CONFIG_RETRY_MS: configFor's wait before its one
+// retry of a failed run-record read.
+const ConfigRetry = 200 * time.Millisecond
+
 // configFor is loop.mjs configFor: the ticket's config snapshot (its pin,
 // or the run's hash on a retry), the boot config when the run has no record
 // or no snapshot, and bad=true where snapshotFor throws (`config-snapshot`).
 func (w *TicketRunner) configFor(id string, retry bool) (cfg map[string]any, bad bool, err error) {
-	rec, syntax, err := w.readRecord()
-	if err != nil {
-		return nil, false, err
+	var rec ledger.Object
+	var notObject bool
+	for attempt := 1; ; attempt++ {
+		var syntax bool
+		rec, syntax, notObject, err = w.readRecordValue()
+		if IsUnsupported(err) {
+			return nil, false, err
+		}
+		if err == nil && !syntax {
+			break
+		}
+		// configRecord: a transient read error gets ONE retry after CONFIG_RETRY_MS
+		if attempt >= 2 {
+			return nil, true, nil
+		}
+		sleep := w.Sleep
+		if sleep == nil {
+			sleep = time.Sleep
+		}
+		sleep(ConfigRetry)
 	}
-	if syntax {
-		return nil, false, unsupported("run record unreadable at the config read (Node retries)")
+	if notObject {
+		rec = nil
 	}
 	boot := func() (map[string]any, bool, error) {
 		if w.Cfg == nil {
@@ -101,6 +123,7 @@ func (w *TicketRunner) readRows() ([]any, error) {
 	if w.ReadRows != nil {
 		return w.ReadRows()
 	}
+	// a nodeIOError is kept: the routing step (B90) and the route rows name it
 	lines, err := w.ledgerLines()
 	if err != nil {
 		return nil, err
@@ -142,7 +165,7 @@ func (w *TicketRunner) readObjects() ([]ledger.Object, error) {
 	}
 	lines, err := w.ledgerLines()
 	if err != nil {
-		return nil, err
+		return nil, keepHandover(err)
 	}
 	for _, l := range lines {
 		var v any
@@ -167,7 +190,16 @@ func (w *TicketRunner) ledgerLines() ([][]byte, error) {
 	dir := filepath.Join(w.Home, ".code-forge", "ledger")
 	entries, err := os.ReadDir(dir)
 	if err != nil && !os.IsNotExist(err) {
+		if ne := nodeOpenError(err, "scandir"); ne != nil {
+			return nil, ne
+		}
 		return nil, unsupported("ledger listing: " + err.Error())
+	}
+	// createTailReader opens the live file before the rotated ones
+	if f, err := os.Open(filepath.Join(dir, w.Slug+".jsonl")); err == nil {
+		_ = f.Close()
+	} else if ne := nodeOpenError(err, "open"); ne != nil {
+		return nil, ne
 	}
 	rotated := regexp.MustCompile(`^` + regexp.QuoteMeta(w.Slug) + `\.(\d+)\.jsonl$`)
 	type part struct {
@@ -190,6 +222,9 @@ func (w *TicketRunner) ledgerLines() ([][]byte, error) {
 			continue
 		}
 		if err != nil {
+			if ne := nodeOpenError(err, "open"); ne != nil {
+				return nil, ne
+			}
 			return nil, unsupported("ledger read: " + err.Error())
 		}
 		data = data[:bytes.LastIndexByte(data, '\n')+1]
@@ -223,6 +258,11 @@ func (w *TicketRunner) reviewWith(id string, t ledger.Object, cfg map[string]any
 	} else {
 		var rows []any
 		if rows, err = w.readRows(); err != nil {
+			// B90: a failure the routing step names ends worker-error with its text
+			var ne *nodeIOError
+			if errors.As(err, &ne) {
+				return nil, &StepError{Step: "routing", Name: "Error", Message: ne.message}
+			}
 			return nil, err
 		}
 		r, err = adaptiveRoutes(cfg, lines, deleted, timeoutS, rows, id, w.RunID, w.now())
@@ -273,6 +313,11 @@ func truthy(v any) bool {
 func (w *TicketRunner) writeRouteRows(id string, t ledger.Object, rows []ledger.Object) (bool, error) {
 	existing, err := w.readRows()
 	if err != nil {
+		// Node's try around the read answers route-row for any throw
+		var ne *nodeIOError
+		if errors.As(err, &ne) {
+			return false, nil
+		}
 		return false, err
 	}
 	have := map[string]bool{}
@@ -322,6 +367,9 @@ func (w *TicketRunner) engineRefusal(t ledger.Object, cfg map[string]any, conten
 	// packetDirFor: never null for an id readTicket accepted (24 hex)
 	rec, syntax, err := w.readRecord()
 	if err != nil {
+		if !IsUnsupported(err) {
+			err = unsupported("run record read inside the engine: " + err.Error())
+		}
 		return nil, nil, err
 	}
 	var revision any
@@ -362,6 +410,9 @@ func (w *TicketRunner) engineRefusal(t ledger.Object, cfg map[string]any, conten
 	// read: a record that changed between the two is left to Node
 	root, code, err := w.contentRootFor(block)
 	if err != nil {
+		if !IsUnsupported(err) {
+			err = unsupported("content root failure inside the engine: " + err.Error())
+		}
 		return nil, nil, err
 	}
 	if code != "" || canonicalPath(root) != canonicalPath(contentRoot) {

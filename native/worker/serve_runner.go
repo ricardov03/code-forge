@@ -126,4 +126,7 @@ func (w *TicketRunner) RunRecord() (ledger.Object, error) {
 }
 
 // LedgerRows is the project ledger view (runActivityAt's createTailReader).
-func (w *TicketRunner) LedgerRows() ([]any, error) { return w.readRows() }
+func (w *TicketRunner) LedgerRows() ([]any, error) {
+	rows, err := w.readRows()
+	return rows, keepHandover(err)
+}

@@ -42,6 +42,7 @@ func b488Normalize(s string) string {
 
 type b488Fix struct {
 	home, root string
+	workspace  string // B507: a run workspace other than root (empty: root)
 	key        []byte
 	rows       []ledger.Object
 }
@@ -278,10 +279,6 @@ func TestB488UnsupportedWritesNothing(t *testing.T) {
 			id := strings.Repeat("c", 24)
 			writeJSON(t, filepath.Join(QueueDir(fx.root), id+".json"), `{"ticket":"`+id+`","run":"r1","block":"B1","file":"a.txt","content_hash":"`+real+`","kind":"answers","by_file":"b.txt","by_hash":"x","answers":["F1"]}`+"\n")
 			return id
-		},
-		"worktree check code (not a git worktree)": func() string {
-			fx.record(t, `{"run_id":"r1","project":"unit","workspace":"`+fx.root+`","status":"active","blocks":{"B9":{"worktree":{"path":"`+fx.root+`","branch":"b","base_sha":"`+strings.Repeat("a", 40)+`"}}}}`)
-			return fx.ticket(t, "r1", "B9", "a.txt", real)
 		},
 	}
 	for name, mk := range cases {

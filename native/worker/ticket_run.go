@@ -18,11 +18,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/filelock"
+	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/proof"
@@ -74,6 +76,10 @@ type TicketRunner struct {
 	// Pool (B489) holds every review session to the worker's caps
 	// (loop.mjs spawnPooled); nil runs sessions without them.
 	Pool *Pool
+	// B507 seams: ReadRecordFile reads the run record (nil: os.ReadFile);
+	// Sleep is configFor's wait before its one retry (nil: time.Sleep).
+	ReadRecordFile func(string) ([]byte, error)
+	Sleep          func(time.Duration)
 }
 
 type attempt struct {
@@ -123,7 +129,7 @@ func (w *TicketRunner) RunTicket(id string) (completed int, poison bool, err err
 		if IsUnsupported(runErr) {
 			return 0, false, runErr
 		}
-		return w.workerError(id, a)
+		return w.workerError(id, a, runErr)
 	}
 	return w.finish(id, outcome, a)
 }
@@ -133,19 +139,61 @@ func (w *TicketRunner) finish(id string, outcome ledger.Object, a *attempt) (int
 		return 0, false, nil
 	}
 	if err := w.complete(id, outcome, a); err != nil {
-		return w.workerError(id, a)
+		return w.workerError(id, a, err)
 	}
 	return 1, false, nil
 }
 
 // workerError is runOne's catch: a signed `unavailable` / `worker-error`
-// result, else the ticket is poisoned.
-func (w *TicketRunner) workerError(id string, a *attempt) (int, bool, error) {
-	outcome := ledger.Object{{Key: "event", Value: "review.result"}, {Key: "status", Value: "unavailable"}, {Key: "reason", Value: "worker-error"}, {Key: "approved", Value: false}}
+// result, else the ticket is poisoned. A *StepError (B90) keeps its step and
+// text, redacted, as the result's `detail`.
+func (w *TicketRunner) workerError(id string, a *attempt, cause error) (int, bool, error) {
+	outcome := ledger.Object{{Key: "event", Value: "review.result"}, {Key: "status", Value: "unavailable"}, {Key: "reason", Value: "worker-error"}}
+	var step *StepError
+	if errors.As(cause, &step) {
+		outcome = append(outcome, ledger.Field{Key: "detail", Value: gates.Mask(step.Error(), w.secrets())})
+	}
+	outcome = append(outcome, ledger.Field{Key: "approved", Value: false})
 	if err := w.complete(id, outcome, a); err != nil {
 		return 0, true, nil
 	}
 	return 1, false, nil
+}
+
+// StepError is loop.mjs StepError: an unexpected failure inside a named
+// worker step (today: routing). Its text is `<step>: <name>: <message>`.
+type StepError struct {
+	Step string
+	// Name and Message are the JavaScript error's name and message.
+	Name, Message string
+}
+
+func (e *StepError) Error() string { return e.Step + ": " + e.Name + ": " + e.Message }
+
+// nodeIOError is a file-system failure Node throws with this exact message
+// (libuv's `<CODE>: <description>, <syscall> '<path>'`); its name is Error.
+type nodeIOError struct{ message string }
+
+func (e *nodeIOError) Error() string { return e.message }
+
+// nodeOpenError is Node's message for an open/scandir failure Go can name
+// byte for byte (EACCES); nil for any other failure.
+func nodeOpenError(err error, syscallName string) error {
+	var pe *os.PathError
+	if errors.As(err, &pe) && errors.Is(pe.Err, syscall.EACCES) {
+		return &nodeIOError{"EACCES: permission denied, " + syscallName + " '" + pe.Path + "'"}
+	}
+	return nil
+}
+
+// keepHandover turns a nodeIOError a caller has no Node mapping for into
+// ErrUnsupported, as before B507.
+func keepHandover(err error) error {
+	var ne *nodeIOError
+	if errors.As(err, &ne) {
+		return unsupported("ledger read: " + ne.message)
+	}
+	return err
 }
 
 func (w *TicketRunner) now() time.Time {
@@ -340,35 +388,49 @@ func (w *TicketRunner) resultExists(id string) bool {
 // (nil, true, nil) for a record JSON.parse rejects; an object, or a JSON value
 // that is not one (null, a number, an array as an empty object).
 func (w *TicketRunner) readRecord() (rec ledger.Object, syntax bool, err error) {
-	data, err := os.ReadFile(filepath.Join(w.Home, ".code-forge", "runs", w.RunID+".json"))
+	rec, syntax, notObject, err := w.readRecordValue()
+	return rec, syntax || notObject, err
+}
+
+// readRecordValue is readRecord telling a JSON.parse failure (syntax) from a
+// record that parses to a non-object (notObject: null, a number, a string, a
+// boolean). An I/O failure other than a missing file is a plain error: Node
+// rethrows it (B507).
+func (w *TicketRunner) readRecordValue() (rec ledger.Object, syntax, notObject bool, err error) {
+	read := w.ReadRecordFile
+	if read == nil {
+		read = os.ReadFile
+	}
+	data, err := read(filepath.Join(w.Home, ".code-forge", "runs", w.RunID+".json"))
 	if os.IsNotExist(err) {
-		return nil, false, nil
+		return nil, false, false, nil
 	}
 	if err != nil {
-		return nil, false, unsupported("run record read: " + err.Error())
+		return nil, false, false, fmt.Errorf("run record read: %w", err)
 	}
 	if !utf8.Valid(data) || loneSurrogate.Match(data) {
-		return nil, false, unsupported("run record bytes Node would decode with replacements")
+		return nil, false, false, unsupported("run record bytes Node would decode with replacements")
 	}
 	var v any
 	if json.Unmarshal(data, &v) != nil {
-		return nil, true, nil
+		return nil, true, false, nil
 	}
 	switch v.(type) {
 	case map[string]any:
 		rec, err := ledger.DecodeObject(data)
 		if err != nil {
-			return nil, false, unsupported("run record decode")
+			return nil, false, false, unsupported("run record decode")
 		}
-		return rec, false, nil
+		return rec, false, false, nil
 	case []any:
-		return ledger.Object{}, false, nil
+		return ledger.Object{}, false, false, nil
 	}
-	return nil, true, nil
+	return nil, false, true, nil
 }
 
 // contentRootFor is engine.mjs contentRootFor: the root, or an unavailable
-// code. A worktree Node would reject with a code Go cannot name is ErrUnsupported.
+// code (run-record-unreadable or a proof.TreeError code). A failure Node
+// rethrows is a plain error: the ticket ends worker-error (B507).
 func (w *TicketRunner) contentRootFor(block string) (string, string, error) {
 	rec, syntax, err := w.readRecord()
 	if err != nil {
@@ -405,16 +467,12 @@ func (w *TicketRunner) contentRootFor(block string) (string, string, error) {
 	}
 	tree, err := proof.BlockTree(workspace, entry)
 	if err != nil {
-		// proof.BlockTree names no codes: only the messages Node's codes map to one for one
-		wt, _ := entry.Get("worktree").(ledger.Object)
-		p, _ := wt.Get("path").(string)
-		switch err.Error() {
-		case "malformed worktree record (it needs an absolute path, a branch and a base_sha)":
-			return "", "worktree-malformed", nil
-		case fmt.Sprintf("the worktree %s is gone (removed or moved)", p):
-			return "", "worktree-missing", nil
+		// treeTopOf: a TREE_CODES refusal is the ticket's reason; any other
+		// failure (an I/O error) is rethrown, so the ticket ends worker-error
+		if code := proof.TreeCode(err); code != "" {
+			return "", code, nil
 		}
-		return "", "", unsupported("worktree check code not ported: " + err.Error())
+		return "", "", err
 	}
 	if tree == nil {
 		return w.RepoRoot, "", nil
