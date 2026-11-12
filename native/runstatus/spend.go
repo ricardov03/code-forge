@@ -29,3 +29,10 @@ func RunSpend(rows []ledger.Row, id string) (usd float64, unknown int, ok bool) 
 	}
 	return round(sum), unknown, true
 }
+
+// RowUSD is Node's rowUsd for an object row: its dollars, or false when the
+// price is unknown.
+func RowUSD(row map[string]any) (float64, bool) { return rowUSD(row) }
+
+// RoundUSD is Node's roundUsd: Math.round(n * 10000) / 10000.
+func RoundUSD(n float64) float64 { return round(n) }

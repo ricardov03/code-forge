@@ -5,9 +5,9 @@
 // `session` ledger row and Node's result object. Every case it does not port
 // is refused BEFORE anything runs (IsUnsupported), so a caller can still hand
 // the session to Node: the coder and facts roles, a background session, an
-// openai step the open-book opt-in would run, a run-pinned session (the budget
-// and autopilot gate), a schema other than finding.schema.json, and a level
-// Node's resolveLevel or argv builders would throw on.
+// openai step the open-book opt-in would run, a schema other than
+// finding.schema.json, and a level Node's resolveLevel or argv builders would
+// throw on. B482: a run-pinned session passes budgetGate (gate.go) first.
 package session
 
 import (
@@ -101,8 +101,8 @@ type Opts struct {
 	Slug       string // "" with no Deps.WriteRow = no row
 	RowExtra   ledger.Object
 	RunRoot    string // "" = Deps.RunRoot()
-	// RunGateClear says the caller checked that a run-pinned session has no
-	// budget.usd and no autopilot category cap (spawn.mjs budgetGate is a no-op).
+	// RunGateClear skips the run-pinned gate (budget.usd and the autopilot
+	// category cap): the caller checked that spawn.mjs budgetGate is a no-op.
 	RunGateClear bool
 }
 
@@ -118,7 +118,17 @@ type Deps struct {
 	Bins     map[string]string         // replaces argv[0] by CLI name
 	RunID    string                    // CODE_FORGE_RUN_ID for the child when the env has none
 	RunRoot  func() (string, error)    // the lazy proc root when Opts.RunRoot is ""
+	// PidsRoot is exec.mjs pidsDir()'s root (currentRunRoot) when it is not
+	// Opts.RunRoot (a --run session registers its child in the process's lazy
+	// root); nil = Opts.RunRoot. An error registers no entry, as Node's catch.
+	PidsRoot func() (string, error)
 	Exec     func(execOpts) execResult // nil = run
+	// ReadRows is the run-pinned gate's ledger read (spawn.mjs deps.readRows);
+	// nil = every row of the session's slug ledger under Home.
+	ReadRows func() ([]ledger.Row, error)
+	// Warn is the error log's warning line (logWarning) of the budget.usd 80 %
+	// warning; nil = a session that would warn hands over (IsUnsupported).
+	Warn func(warning, message string)
 }
 
 func (d Deps) now() float64 {
@@ -175,9 +185,6 @@ func plan(o Opts) ([]step, int, error) {
 	}
 	if o.Role == "coder" || o.Role == "facts" {
 		return nil, 0, unsupported("the " + o.Role + " role")
-	}
-	if o.Run != nil && !o.RunGateClear {
-		return nil, 0, unsupported("a run-pinned session (budget and autopilot gate)")
 	}
 	if o.Schema != nil && o.Schema.Get("$id") != FindingSchemaID {
 		return nil, 0, unsupported("a schema other than finding.schema.json")
@@ -461,7 +468,28 @@ func Spawn(o Opts, deps Deps) (ledger.Object, error) {
 	for i := 0; i < len(steps); i++ {
 		s := steps[i]
 		release := acquire(s.provider, providerLimit(o.Cfg, s.provider))
-		res, waitMs, err := attempt(o, deps, s, i+1 == len(steps), runRoot, writeRow, &attempts, &waits, random)
+		// B40/B41/B48: the provider slot first, then the run-pinned gate
+		releaseGate := func() {}
+		if !o.RunGateClear {
+			refused, rel, err := budgetGate(o, deps, writeRow, s)
+			if err != nil {
+				release()
+				return nil, err
+			}
+			if refused != nil {
+				release()
+				out := refused.Clone()
+				out.Set("provider", s.provider)
+				out.Set("model", s.model)
+				out.Set("effort", s.effortValue())
+				out.Set("fallback_step", float64(s.fallbackStep))
+				out.Set("attempts", append([]any{}, attempts...))
+				return out, nil
+			}
+			releaseGate = rel
+		}
+		res, waitMs, err := attempt(o, deps, s, i+1 == len(steps), runRoot, writeRow, &attempts, &waits, random, releaseGate)
+		releaseGate()
 		release()
 		if err != nil || res != nil {
 			return res, err
@@ -485,7 +513,7 @@ func randomHex() string {
 
 // attempt is runAttempt: a result ends the session; waitMs ≥ 0 retries the
 // step after the wait; waitMs < 0 goes to the next step.
-func attempt(o Opts, deps Deps, s step, isLast bool, runRoot string, writeRow func(ledger.Object) error, attempts *[]any, waits *int, random func() float64) (ledger.Object, float64, error) {
+func attempt(o Opts, deps Deps, s step, isLast bool, runRoot string, writeRow func(ledger.Object) error, attempts *[]any, waits *int, random func() float64, releaseGate func()) (ledger.Object, float64, error) {
 	sessionDir := filepath.Join(runRoot, "sessions", o.Role+"-"+strconv.FormatInt(int64(deps.now()), 10)+"-"+randomHex())
 	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
 		return nil, -1, err
@@ -542,10 +570,13 @@ func attempt(o Opts, deps Deps, s step, isLast bool, runRoot string, writeRow fu
 		row.Set("l3_fallback", true)
 	}
 	if writeRow != nil {
-		if err := writeRow(row); err != nil {
+		err := writeRow(row)
+		releaseGate() // B41: the row now carries the spend (or the write failed)
+		if err != nil {
 			return nil, -1, err
 		}
 	}
+	releaseGate()
 	var reasonValue any
 	if reason != "" {
 		reasonValue = reason
@@ -624,7 +655,11 @@ func foreground(b built, o Opts, deps Deps) (ledger.Object, error) {
 	if o.Role == "reviewer" || o.Role == "judge" {
 		eo.SilenceMs = silenceMs
 	}
-	if o.RunRoot != "" {
+	if deps.PidsRoot != nil {
+		if dir, err := deps.PidsRoot(); err == nil {
+			eo.PidsDir = filepath.Join(dir, "pids")
+		}
+	} else if o.RunRoot != "" {
 		eo.PidsDir = filepath.Join(o.RunRoot, "pids")
 	}
 	runner := deps.Exec

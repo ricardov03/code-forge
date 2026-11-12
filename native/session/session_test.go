@@ -137,7 +137,8 @@ func TestReviewSpawnRunsAClosedBookReviewer(t *testing.T) {
 	}
 	run := "r-1"
 	o.Run = &run
-	if err := CheckReview(o, "L1", "reviewer"); !IsUnsupported(err) {
-		t.Fatalf("CheckReview with a run and no gate = %v, want unsupported", err)
+	// B482: the run-pinned gate runs in Go, so a run is served
+	if err := CheckReview(o, "L1", "reviewer"); err != nil {
+		t.Fatalf("CheckReview with a run = %v, want nil", err)
 	}
 }

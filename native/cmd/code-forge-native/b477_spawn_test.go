@@ -175,8 +175,9 @@ func TestB477SpawnUnportedCasesHandOver(t *testing.T) {
 	f, _ := newB477Fixture(t)
 	b460Write(t, "other.json", `{"type":"object"}`)
 	for _, args := range [][]string{
-		{"spawn", "--level", "L1", "--role", "reviewer", "--brief", "brief.md", "--run", "r-x"},
+		{"spawn", "--level", "L1", "--role", "coder", "--brief", "brief.md", "--run", "r-x"}, // B482: other roles' --run runs in Go
 		{"spawn", "--level", "L1", "--role", "reviewer", "--brief", "brief.md", "--background"},
+		{"spawn", "--level", "L1", "--role", "reviewer", "--brief", "brief.md", "--run", "r-x", "--background"},
 		{"spawn", "--level", "L1", "--role", "coder", "--brief", "brief.md"},
 		{"spawn", "--level", "L1", "--role", "facts", "--brief", "brief.md"},
 		{"spawn", "--level", "L1", "--role", "reviewer", "--brief", "brief.md", "--schema", "other.json"},
@@ -188,7 +189,7 @@ func TestB477SpawnUnportedCasesHandOver(t *testing.T) {
 		}
 	}
 	got := b460Handovers(t, f.home)
-	if len(got) != 7 || strings.Count(strings.Join(got, ","), "spawn spawn-session") != 7 {
+	if len(got) != 8 || strings.Count(strings.Join(got, ","), "spawn spawn-session") != 8 {
 		t.Fatalf("hand-overs = %v", got)
 	}
 }

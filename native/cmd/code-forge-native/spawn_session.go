@@ -40,8 +40,37 @@ func spawnFindingSchema(data []byte) (ledger.Object, bool) {
 	return given, true
 }
 
-func spawnSessionPlan(cwd string, parsed cliParsed) (func(o *runOut) int, handoverReason) {
-	if _, ok := parsed.values["run"]; ok || parsed.booleans["background"] {
+// spawnRunRoot is runRootFor(--run, cfg.tmp.root) for a run id that passed
+// the id rule; false = a case Go leaves to Node (a tmp.root that is not a
+// string, or a root runRoot refuses).
+func spawnRunRoot(cwd, run string) (string, bool) {
+	cfg, err := config.Load(cwd)
+	if err != nil {
+		return "", false
+	}
+	var root *string
+	if tmp, ok := cfg["tmp"].(map[string]any); ok {
+		if value, present := tmp["root"]; present && value != nil {
+			text, isString := value.(string)
+			if !isString {
+				return "", false
+			}
+			root = &text
+		}
+	}
+	dir, err := contextRunRoot(run, root)
+	if err != nil {
+		return "", false
+	}
+	return dir, true
+}
+
+// spawnSessionPlan plans the session; runRoot is the --run's root ("" = none).
+func spawnSessionPlan(cwd string, parsed cliParsed, runRoot string) (func(o *runOut) int, handoverReason) {
+	if parsed.booleans["background"] {
+		return nil, hSpawnSession
+	}
+	if _, ok := parsed.values["run"]; ok && runRoot == "" {
 		return nil, hSpawnSession
 	}
 	cfg, err := config.Load(cwd)
@@ -60,6 +89,9 @@ func spawnSessionPlan(cwd string, parsed cliParsed) (func(o *runOut) int, handov
 	}
 	if block, ok := parsed.values["block"]; ok {
 		opts.Block = &block
+	}
+	if run, ok := parsed.values["run"]; ok {
+		opts.Run, opts.RunRoot = &run, runRoot
 	}
 	if file, ok := parsed.values["schema"]; ok {
 		data, err := os.ReadFile(spawnResolve(cwd, file))
@@ -81,13 +113,26 @@ func spawnSessionPlan(cwd string, parsed cliParsed) (func(o *runOut) int, handov
 
 func spawnSessionRun(o *runOut, opts session.Opts, preview bool) int {
 	var procRoot string
-	deps := session.Deps{Stderr: spawnStderr{o}, RunID: os.Getenv("CODE_FORGE_RUN_ID"),
-		RunRoot: func() (string, error) {
-			contextApplyTmpRoot()
-			dir, err := contextRunRoot("proc-"+strconv.Itoa(os.Getpid())+"-"+strconv.FormatInt(time.Now().UnixMilli(), 10), nil)
-			procRoot = dir
-			return dir, err
-		}}
+	// currentRunRoot: the process's lazy root, made once
+	lazyRoot := func() (string, error) {
+		if procRoot != "" {
+			return procRoot, nil
+		}
+		contextApplyTmpRoot()
+		dir, err := contextRunRoot("proc-"+strconv.Itoa(os.Getpid())+"-"+strconv.FormatInt(time.Now().UnixMilli(), 10), nil)
+		procRoot = dir
+		return dir, err
+	}
+	runID, hasRunID := os.LookupEnv("CODE_FORGE_RUN_ID")
+	deps := session.Deps{Stderr: spawnStderr{o}, RunID: runID, Warn: spawnLogWarning, RunRoot: lazyRoot}
+	if opts.Run != nil {
+		// exec.mjs: the child's CODE_FORGE_RUN_ID is the env's, else the --run
+		// argument; its pid entry goes in the process's lazy root
+		if !hasRunID {
+			deps.RunID = *opts.Run
+		}
+		deps.PidsRoot = lazyRoot
+	}
 	defer func() {
 		if procRoot != "" {
 			spawnReleaseRoot(procRoot)

@@ -176,6 +176,21 @@ func canonical(file string) (string, error) {
 // WriteSigned signs an ordered row with the run key and appends to the project's
 // ledger. The caller may override run, matching Node's {run: runID, ...row}.
 func WriteSigned(home, runID string, row ledger.Object) (ledger.Object, error) {
+	stamped, err := SignRow(home, runID, row)
+	if err != nil {
+		return nil, err
+	}
+	record, err := ReadRun(home, runID)
+	if err != nil {
+		return nil, err
+	}
+	slug, _ := record.Get("project").(string)
+	return ledger.AppendObject(filepath.Join(home, ".code-forge", "ledger"), slug, stamped, ledger.DefaultRotateAtBytes)
+}
+
+// SignRow is the signing half of writeSigned: {run, ...row} with ts and mac
+// from the run's key, for a caller that writes the row through its own writer.
+func SignRow(home, runID string, row ledger.Object) (ledger.Object, error) {
 	file, err := recordPath(home, runID)
 	if err != nil {
 		return nil, err
@@ -209,10 +224,5 @@ func WriteSigned(home, runID string, row ledger.Object) (ledger.Object, error) {
 	stamped.Set("ts", signed["ts"])
 	stamped.Delete("mac")
 	stamped.Set("mac", signed["mac"])
-	record, err := ReadRun(home, runID)
-	if err != nil {
-		return nil, err
-	}
-	slug, _ := record.Get("project").(string)
-	return ledger.AppendObject(filepath.Join(home, ".code-forge", "ledger"), slug, stamped, ledger.DefaultRotateAtBytes)
+	return stamped, nil
 }
