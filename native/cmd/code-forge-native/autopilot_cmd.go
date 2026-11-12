@@ -233,7 +233,7 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 	switch sub {
 	case "ask":
 		return nil, hAutopilotAsk
-	case "waive", "round", "level":
+	case "waive":
 		return nil, hAutopilotAction
 	case "approve":
 		return nil, hAutopilotApprove
@@ -249,11 +249,24 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 		if !errors.As(err, &stateErr) {
 			return nil, hAutopilotRecord
 		}
+		if sub == "level" && !levelPlanKnown(flags) {
+			return nil, hAutopilotAction
+		}
 		// checkApprovals answers nothing for no-run and bad-run-id; the
 		// subcommand's own read then refuses (start validates its input first).
 		return func(o *runOut) int {
 			if (sub == "binnacle" || sub == "log") && flags.bools["json"] && flags.bools["markdown"] {
 				return autopilotReport(o, sub, autopilotUsageFail("give --json or --markdown, not both"))
+			}
+			if sub == "round" {
+				if _, invalid := roundUsage(flags); invalid != nil {
+					return autopilotReport(o, sub, invalid)
+				}
+			}
+			if sub == "level" {
+				if _, _, _, _, invalid := levelUsage(flags); invalid != nil {
+					return autopilotReport(o, sub, invalid)
+				}
 			}
 			if sub == "start" {
 				if _, invalid := autopilotValidate(flags, now); invalid != nil {
@@ -272,6 +285,28 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 	read, err := autopilot.Read(record, now)
 	if err != nil {
 		return nil, hAutopilotShape // approvals to restore, or a grant shape Go does not read
+	}
+	if sub == "round" {
+		project, _ := record.Get("project").(string)
+		rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), project)
+		if err != nil {
+			return nil, hAutopilotLedger
+		}
+		if !roundSupported(home, runID, record, flags, rows) {
+			return nil, hAutopilotAction
+		}
+		return func(o *runOut) int { return autopilotRound(o, home, runID, flags) }, 0
+	}
+	if sub == "level" {
+		project, _ := record.Get("project").(string)
+		rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), project)
+		if err != nil {
+			return nil, hAutopilotLedger
+		}
+		if !levelSupported(home, runID, record, flags, rows) {
+			return nil, hAutopilotAction
+		}
+		return func(o *runOut) int { return autopilotLevel(o, home, runID, flags) }, 0
 	}
 	files := read.Grant != nil && !runTruthy(read.Grant.Get("link")) && (sub == "status" || sub == "stop" && read.State == "active")
 	if files || sub == "binnacle" || sub == "log" || sub == "status" && read.Grant != nil {
