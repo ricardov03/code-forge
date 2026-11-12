@@ -5,7 +5,8 @@ package main
 // links, Jev key resolution and the reviewer performance rows) with Node's
 // text, JSON, redaction and exit codes. The full run (live Jev call, provider
 // CLI probes, worker start/stop, signer, sweep, native daemon) keeps the Node
-// hand-over (doctor-full-run), as do the --quick cases named in prepareDoctor.
+// hand-over (B487 names why: doctor-live-probes, doctor-full-no-config,
+// doctor-full-run), as do the --quick cases named in prepareDoctor.
 
 import (
 	"encoding/json"
@@ -88,19 +89,19 @@ func prepareDoctor(args []string) (func(stdout, stderr io.Writer) int, handoverR
 	if len(positionals) > 0 {
 		return func(_, stderr io.Writer) int { fmt.Fprint(stderr, doctorUsage); return 2 }, 0, true
 	}
-	if flags["quick"] != true {
-		return nil, hDoctorFullRun, false
-	}
-	home := os.Getenv("HOME")
-	if home == "" {
-		return nil, hDoctorNoHome, false // Node falls back to the passwd entry
-	}
 	cwd := physicalCwd()
 	if dir, ok := flags["cwd"].(string); ok {
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(cwd, dir)
 		}
 		cwd = filepath.Clean(dir)
+	}
+	if flags["quick"] != true {
+		return nil, doctorFullRunReason(cwd), false
+	}
+	home := os.Getenv("HOME")
+	if home == "" {
+		return nil, hDoctorNoHome, false // Node falls back to the passwd entry
 	}
 	now := doctorNow()
 	rows, cfg, reason := doctorConfigRow(cwd)

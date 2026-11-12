@@ -168,8 +168,8 @@ func TestB474DoctorQuickReviewerRows(t *testing.T) {
 func TestB474DoctorHandsOverUnportedCases(t *testing.T) {
 	plain := "provider: anthropic\n" + b474Levels
 	b474Project(t, plain, 0)
-	expectHandover(t, "doctor-full-run", "doctor")
-	expectHandover(t, "doctor-full-run", "doctor", "--json")
+	expectHandover(t, "doctor-live-probes", "doctor")
+	expectHandover(t, "doctor-live-probes", "doctor", "--json")
 
 	b474Project(t, plain, 0)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")

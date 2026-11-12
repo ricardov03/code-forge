@@ -296,6 +296,8 @@ const (
 	hSweepHome
 	hSweepRoot
 	hSweepIdle
+	hDoctorLiveProbes
+	hDoctorFullNoConfig
 )
 
 var handoverReasons = [...]string{
@@ -571,6 +573,8 @@ var handoverReasons = [...]string{
 	hSweepHome:                 "sweep-home",
 	hSweepRoot:                 "sweep-root-unreadable",
 	hSweepIdle:                 "sweep-idle-unknown",
+	hDoctorLiveProbes:          "doctor-live-probes",
+	hDoctorFullNoConfig:        "doctor-full-no-config",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
