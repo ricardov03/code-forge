@@ -250,14 +250,15 @@ func TestAutopilotRestoreLockedInGo(t *testing.T) {
 	apNoHandover(t, f)
 }
 
-// B490: a restore that needs the YAML write or the run reload stays with
-// Node, with its own reason, before Go writes anything (even for another
+// B490: a restore that needs the run reload, or (B494) a YAML write of a
+// shape Go does not serve, stays with Node, with its own reason, before Go writes anything (even for another
 // approval of the same check that Go could end).
 func TestAutopilotRestoreHandsOverInGo(t *testing.T) {
 	f := newAutopilotFixture(t)
 	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
 	t.Setenv("CODE_FORGE_NATIVE", "1")
-	apWriteConfig(t, f, "review:\n  max_rounds_per_file: 4\nbudget:\n  coding: 9\n")
+	// B494: an anchor is a shape yamledit does not write: the ended run's write stays with Node
+	apWriteConfig(t, f, "review:\n  max_rounds_per_file: 4\nbudget:\n  coding: 9\nx: &a 1\ny: *a\n")
 	skip := apApproval("apr-s", "budget.coding", "")
 	f.record(t, "r-reload", "active", `,"autopilot_approvals":[`+skip+`,`+apApproval("apr-1", "review.max_rounds_per_file", "")+`]`)
 	f.record(t, "r-write", "ended", `,"autopilot_approvals":[`+apApproval("apr-1", "review.max_rounds_per_file", "")+`]`)
@@ -390,6 +391,134 @@ func TestAutopilotApproveAtTerminalInGo(t *testing.T) {
 		t.Fatalf("rows = %#v", rows)
 	}
 	if data, _ := os.ReadFile(filepath.Join(f.workspace, ".code-forge.yml")); string(data) != "review:\n  max_rounds_per_file: 2\n" {
+		t.Fatalf("config = %q", data)
+	}
+}
+
+// B494: an ended run whose .code-forge.yml needs the old value back is
+// written in Go with the yaml package's bytes (the expected text is what
+// parseDocument + setIn/deleteIn + String(doc) give for these files): the
+// file mode kept, no temp file left, the signed autopilot.restore row and
+// the approval ended, no hand-over.
+func TestAutopilotRestoreWritesInGo(t *testing.T) {
+	f := newAutopilotFixture(t)
+	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
+	t.Setenv("CODE_FORGE_NATIVE", "1")
+	file := filepath.Join(f.workspace, ".code-forge.yml")
+	apWriteConfig(t, f, "# head\nreview:\n  max_rounds_per_file: 4 # set by autopilot\n\nbudget: {coding: 9, extra: 4}\nharnesses:\n- claude\n")
+	if err := os.Chmod(file, 0640); err != nil {
+		t.Fatal(err)
+	}
+	f.record(t, "r-set", "ended", `,"autopilot_approvals":[`+apApproval("apr-1", "review.max_rounds_per_file", "")+`]`)
+	code, out, errText := autopilotCall(t, "status", "--run", "r-set")
+	if code != 0 || out != "autopilot run r-set: no grant\n" || errText != "autopilot: approval apr-1 expired; the old value is back\n" {
+		t.Fatalf("set = %d %q %q", code, out, errText)
+	}
+	want := "# head\nreview:\n  max_rounds_per_file: 3\n\nbudget: { coding: 9, extra: 4 }\nharnesses:\n  - claude\n"
+	if data, _ := os.ReadFile(file); string(data) != want {
+		t.Fatalf("config = %q, want %q", data, want)
+	}
+	if info, err := os.Stat(file); err != nil || info.Mode().Perm() != 0640 {
+		t.Fatalf("mode = %v %v", info.Mode(), err)
+	}
+	if tmps, _ := filepath.Glob(file + ".*.tmp"); len(tmps) != 0 {
+		t.Fatalf("temp files left: %v", tmps)
+	}
+	a := apApprovalAt(t, f, "r-set", 0)
+	if a["status"] != "restored" || a["ended_at"] != "2026-11-11T10:00:00.000Z" || a["restoring"] != true || a["finish_pending"] != nil {
+		t.Fatalf("approval = %#v", a)
+	}
+	rows := apSignedRows(t, f)
+	if len(rows) != 1 || rows[0]["event"] != "autopilot.restore" || rows[0]["restored"] != float64(3) || rows[0]["old_absent"] != false ||
+		rows[0]["reloaded"] != false || rows[0]["new_hash"] != nil || rows[0]["approval_id"] != "apr-1" || rows[0]["ts"] != "2026-11-11T10:00:00.000Z" {
+		t.Fatalf("rows = %#v", rows)
+	}
+
+	// old_absent: the key removed and its emptied parent pruned
+	apWriteConfig(t, f, "caps:\n  # only\n  extra: 4\nengine: auto\n")
+	absent := strings.Replace(apApproval("apr-2", "caps.extra", ""), `"old":3,"old_absent":false,"prune":0`, `"old":null,"old_absent":true,"prune":1`, 1)
+	f.record(t, "r-del", "ended", `,"autopilot_approvals":[`+absent+`]`)
+	code, _, errText = autopilotCall(t, "status", "--run", "r-del")
+	if code != 0 || errText != "autopilot: approval apr-2 expired; the old value is back\n" {
+		t.Fatalf("remove = %d %q", code, errText)
+	}
+	if data, _ := os.ReadFile(file); string(data) != "engine: auto\n" {
+		t.Fatalf("config = %q", data)
+	}
+	rows = apSignedRows(t, f)
+	if len(rows) != 2 || rows[1]["restored"] != nil || rows[1]["old_absent"] != true {
+		t.Fatalf("rows = %#v", rows)
+	}
+	apNoHandover(t, f)
+}
+
+// B494: Node's refusals of the write are WARN lines in Go too: a parent
+// that is not a mapping (editDoc's usage error) and a file that cannot be
+// written (the fs error's message); the restore is recorded as started,
+// the approval stays active and nothing else is written.
+func TestAutopilotRestoreWriteFailsInGo(t *testing.T) {
+	f := newAutopilotFixture(t)
+	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
+	t.Setenv("CODE_FORGE_NATIVE", "1")
+	file := filepath.Join(f.workspace, ".code-forge.yml")
+	apWriteConfig(t, f, "engine: auto\n")
+	f.record(t, "r-nm", "ended", `,"autopilot_approvals":[`+apApproval("apr-1", "engine.mode", `,"restoring":true`)+`]`)
+	code, out, errText := autopilotCall(t, "status", "--run", "r-nm")
+	if code != 0 || out != "autopilot run r-nm: no grant\n" || errText != "autopilot: WARN approval apr-1 could not be restored yet (engine.mode cannot be set: a parent of it is not a mapping in .code-forge.yml)\n" {
+		t.Fatalf("not a mapping = %d %q %q", code, out, errText)
+	}
+	if a := apApprovalAt(t, f, "r-nm", 0); a["status"] != "active" || a["restoring"] != true {
+		t.Fatalf("approval = %#v", a)
+	}
+
+	apWriteConfig(t, f, "review:\n  max_rounds_per_file: 4\n")
+	f.record(t, "r-ro", "ended", `,"autopilot_approvals":[`+apApproval("apr-2", "review.max_rounds_per_file", "")+`]`)
+	// the run record's mirror goes to <workspace>/.code-forge/runs, which stays writable
+	if err := os.MkdirAll(filepath.Join(f.workspace, ".code-forge", "runs"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(f.workspace, 0555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(f.workspace, 0755) })
+	code, out, errText = autopilotCall(t, "status", "--run", "r-ro")
+	prefix := "autopilot: WARN approval apr-2 could not be restored yet (EACCES: permission denied, open '" + file + "."
+	if code != 0 || out != "autopilot run r-ro: no grant\n" || !strings.HasPrefix(errText, prefix) || !strings.HasSuffix(errText, ".tmp')\n") || strings.Count(errText, "\n") != 1 {
+		t.Fatalf("read-only = %d %q %q", code, out, errText)
+	}
+	if a := apApprovalAt(t, f, "r-ro", 0); a["status"] != "active" || a["restoring"] != true {
+		t.Fatalf("approval = %#v", a)
+	}
+	if data, _ := os.ReadFile(file); string(data) != "review:\n  max_rounds_per_file: 4\n" {
+		t.Fatalf("config = %q", data)
+	}
+	if rows := apSignedRows(t, f); len(rows) != 0 {
+		t.Fatalf("rows = %#v", rows)
+	}
+	apNoHandover(t, f)
+}
+
+// B494: Node reads the file again for each due approval; after a Go write
+// the next read would see Go's own bytes, so that check stays with Node,
+// before Go writes anything.
+func TestAutopilotRestoreSecondReadHandsOver(t *testing.T) {
+	f := newAutopilotFixture(t)
+	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
+	t.Setenv("CODE_FORGE_NATIVE", "1")
+	config := "review:\n  max_rounds_per_file: 4\nbudget:\n  coding: 4\n"
+	apWriteConfig(t, f, config)
+	f.record(t, "r-two", "ended", `,"autopilot_approvals":[`+apApproval("apr-1", "review.max_rounds_per_file", "")+`,`+apApproval("apr-2", "budget.coding", "")+`]`)
+	before := apRecordBytes(t, f, "r-two")
+	if code, out, _ := autopilotCall(t, "status", "--run", "r-two"); code != 127 || out != "" {
+		t.Fatalf("two = %d %q", code, out)
+	}
+	if got := apHandoverReasons(t, f); strings.Join(got, " ") != "autopilot-restore-write" {
+		t.Fatalf("reasons = %v", got)
+	}
+	if !bytes.Equal(before, apRecordBytes(t, f, "r-two")) {
+		t.Fatal("record changed")
+	}
+	if data, _ := os.ReadFile(filepath.Join(f.workspace, ".code-forge.yml")); string(data) != config {
 		t.Fatalf("config = %q", data)
 	}
 }

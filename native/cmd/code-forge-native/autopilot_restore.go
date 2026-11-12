@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -18,6 +20,7 @@ import (
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
+	"github.com/ricardov03/code-forge/native/yamledit"
 )
 
 // B490: checkApprovals (src/autopilot/limits.mjs), the lazy restore every
@@ -26,10 +29,12 @@ import (
 // row is still missing (finish_pending), a key with a prototype segment, a
 // workspace config that cannot be read, a value changed by hand (the signed
 // autopilot.restore_skipped row) and an ended run whose file already holds
-// the old value (the signed autopilot.restore row). A due approval that
-// needs the YAML write (byte-equal to the yaml package's) or the reload
-// (validateConfig and reloadRun) keeps the whole check on Node, before Go
-// writes anything.
+// the old value (the signed autopilot.restore row). B494: an ended run
+// whose file needs the old value back is written in Go too (yamledit gives
+// the yaml package's bytes; writeText's temp file and rename). A due
+// approval that needs the reload (validateConfig and reloadRun, an active
+// run), a YAML shape yamledit does not serve, or a second read of the file
+// after a Go write keeps the whole check on Node, before Go writes anything.
 
 // autopilotApprovalsLockTimeout is LOCK_TIMEOUT_MS (a seam for tests).
 var autopilotApprovalsLockTimeout = 10 * time.Second
@@ -107,32 +112,39 @@ func autopilotWithApprovalsLock(home, runID string, fn func() error) (err error)
 // does: an error code Go does not name, bytes that are not UTF-8 or start
 // with a BOM, or a document the Go parser refuses.
 func autopilotReadWorkspace(workspace string) (js map[string]any, refusal error, ok bool) {
+	js, _, refusal, ok = autopilotReadWorkspaceText(workspace)
+	return js, refusal, ok
+}
+
+// autopilotReadWorkspaceText is autopilotReadWorkspace with the file's text
+// (the text the YAML edit starts from).
+func autopilotReadWorkspaceText(workspace string) (js map[string]any, text string, refusal error, ok bool) {
 	data, err := os.ReadFile(filepath.Join(workspace, config.Filename))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, &state.Error{Code: "no-config", Message: "no .code-forge.yml in the workspace"}, true
+			return nil, "", &state.Error{Code: "no-config", Message: "no .code-forge.yml in the workspace"}, true
 		}
 		var errno syscall.Errno
 		if !errors.As(err, &errno) || blockErrno(errno) == "UNKNOWN" {
-			return nil, nil, false
+			return nil, "", nil, false
 		}
-		return nil, &state.Error{Code: "config-read", Message: ".code-forge.yml could not be read (" + blockErrno(errno) + ")"}, true
+		return nil, "", &state.Error{Code: "config-read", Message: ".code-forge.yml could not be read (" + blockErrno(errno) + ")"}, true
 	}
 	if !utf8.Valid(data) || bytes.HasPrefix(data, []byte("\xef\xbb\xbf")) {
-		return nil, nil, false
+		return nil, "", nil, false
 	}
 	value, err := config.ParseYAML(string(data))
 	if err != nil {
-		return nil, nil, false
+		return nil, "", nil, false
 	}
 	if !autopilotFinite(value) {
-		return nil, nil, false // canonicalJSON drops a non-finite member; Go would compare it as null
+		return nil, "", nil, false // canonicalJSON drops a non-finite member; Go would compare it as null
 	}
 	mapping, isMapping := value.(map[string]any)
 	if !isMapping {
-		return nil, &state.Error{Code: "config-parse", Message: ".code-forge.yml could not be parsed"}, true
+		return nil, "", &state.Error{Code: "config-parse", Message: ".code-forge.yml could not be parsed"}, true
 	}
-	return mapping, nil, true
+	return mapping, string(data), nil, true
 }
 
 // autopilotFinite reports whether every number in a YAML value is finite.
@@ -223,13 +235,49 @@ const (
 	apStepRead           // the workspace config cannot be read
 	apStepSkip           // changed by hand
 	apStepRestore        // an ended run whose file holds the old value
+	apStepRewrite        // an ended run whose file gets the old value back (B494)
 )
 
 type autopilotStep struct {
 	kind   int
 	id     string
 	entry  ledger.Object
-	reason string
+	reason string // apStepRewrite: editDoc's refusal (nothing is written)
+	file   string // apStepRewrite: the workspace .code-forge.yml
+	text   string // apStepRewrite: the bytes String(doc) gives after the edit
+}
+
+// autopilotRevert is revertChange applied with editDoc: the text with the
+// approval's old value back (a set, or a remove with its prune). reason is
+// editDoc's usage error when a parent is not a mapping; handOver is true
+// for a shape Go does not write byte-equal to the yaml package.
+func autopilotRevert(text, key string, segs []string, a ledger.Object) (out, reason string, handOver bool) {
+	var err error
+	if a.Get("old_absent") == true {
+		prune := 0
+		switch p := a.Get("prune").(type) {
+		case nil: // i < undefined: no prune
+		case float64:
+			if math.IsNaN(p) || math.IsInf(p, 0) || p > 64 {
+				return "", "", true
+			}
+			if p > 0 {
+				prune = int(math.Ceil(p)) // i < 1.5 runs twice
+			}
+		default:
+			return "", "", true // i < "2" coerces: left to Node
+		}
+		out, err = yamledit.Remove(text, segs, prune)
+	} else {
+		out, err = yamledit.Set(text, segs, a.Get("old"))
+	}
+	switch {
+	case err == nil:
+		return out, "", false
+	case errors.Is(err, yamledit.ErrNotMapping):
+		return "", key + " cannot be set: a parent of it is not a mapping in .code-forge.yml", false
+	}
+	return "", "", true
 }
 
 // autopilotRestorePlan reads checkApprovals' steps for the due approvals of
@@ -247,6 +295,7 @@ func autopilotRestorePlan(record ledger.Object, now time.Time) ([]autopilotStep,
 	}
 	values, _ := record.Get("autopilot_approvals").([]any)
 	steps := []autopilotStep{}
+	rewritten := false // Node reads the file again for each approval: after a Go write, the next read stays with Node
 	for _, value := range values {
 		a, isObject := value.(ledger.Object)
 		if !isObject {
@@ -287,7 +336,10 @@ func autopilotRestorePlan(record ledger.Object, now time.Time) ([]autopilotStep,
 			steps = append(steps, step)
 			continue
 		}
-		js, refusal, ok := autopilotReadWorkspace(workspace)
+		if rewritten {
+			return nil, hAutopilotRestoreWrite
+		}
+		js, text, refusal, ok := autopilotReadWorkspaceText(workspace)
 		if !ok {
 			return nil, hAutopilotRestoreConfig
 		}
@@ -314,7 +366,14 @@ func autopilotRestorePlan(record ledger.Object, now time.Time) ([]autopilotStep,
 			return nil, hAutopilotRestoreReload // validateConfig and reloadRun stay with Node
 		}
 		if !holdsOld {
-			return nil, hAutopilotRestoreWrite // the YAML edit stays with Node
+			out, reason, handOver := autopilotRevert(text, key, segs, a)
+			if handOver {
+				return nil, hAutopilotRestoreWrite // a YAML shape Go does not write like the yaml package
+			}
+			step.kind, step.reason, step.file, step.text = apStepRewrite, reason, filepath.Join(workspace, config.Filename), out
+			rewritten = reason == ""
+			steps = append(steps, step)
+			continue
 		}
 		step.kind = apStepRestore
 		steps = append(steps, step)
@@ -354,7 +413,7 @@ func autopilotRestore(home, runID string, record ledger.Object, now time.Time) (
 			case apStepSkip:
 				status = "restore_skipped"
 				row = ledger.Object{{Key: "event", Value: "autopilot.restore_skipped"}, {Key: "reason", Value: "changed-by-hand"}}
-			case apStepRestore:
+			case apStepRestore, apStepRewrite:
 				if step.entry.Get("restoring") != true {
 					// crash safety: the restore is recorded as started first
 					if err := state.WithRunLock(home, runID, func() error {
@@ -370,6 +429,18 @@ func autopilotRestore(home, runID string, record ledger.Object, now time.Time) (
 						return state.SaveRun(home, latest)
 					}); err != nil {
 						return err
+					}
+				}
+				if step.kind == apStepRewrite {
+					reason := step.reason
+					if reason == "" {
+						if err := autopilotWriteText(step.file, step.text); err != nil {
+							reason = autopilotFsMessage(err)
+						}
+					}
+					if reason != "" {
+						check.failed = append(check.failed, [2]string{step.id, reason})
+						continue
 					}
 				}
 				status = "restored"
@@ -399,6 +470,64 @@ func autopilotRestore(home, runID string, record ledger.Object, now time.Time) (
 		return nil, nil, late // nothing was written
 	}
 	return check, err, 0
+}
+
+// autopilotWriteText is writeText: an atomic write through a temp file next
+// to file (<file>.<pid>.<6 hex>.tmp) that keeps the file's mode (0644 when
+// it cannot be read); the temp file is removed when a step fails.
+func autopilotWriteText(file, text string) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(file); err == nil {
+		mode = info.Mode() & (os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
+	}
+	var suffix [3]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return err
+	}
+	tmp := fmt.Sprintf("%s.%d.%s.tmp", file, os.Getpid(), hex.EncodeToString(suffix[:]))
+	err := func() error {
+		fh, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode&os.ModePerm)
+		if err != nil {
+			return err
+		}
+		if _, err := fh.WriteString(text); err != nil {
+			fh.Close()
+			return err
+		}
+		if err := fh.Close(); err != nil {
+			return err
+		}
+		if err := os.Chmod(tmp, mode); err != nil { // the umask may have narrowed it
+			return err
+		}
+		return os.Rename(tmp, file)
+	}()
+	if err != nil {
+		_ = os.Remove(tmp)
+	}
+	return err
+}
+
+// autopilotFsMessage is the message of Node's fs error for err: "<CODE>:
+// <libuv text>, <syscall> '<path>'" (rename names both paths).
+func autopilotFsMessage(err error) string {
+	texts := map[syscall.Errno]string{syscall.EACCES: "permission denied", syscall.EPERM: "operation not permitted", syscall.ENOENT: "no such file or directory",
+		syscall.ENOTDIR: "not a directory", syscall.EISDIR: "illegal operation on a directory", syscall.ENOSPC: "no space left on device",
+		syscall.EROFS: "read-only file system", syscall.ENAMETOOLONG: "name too long", syscall.ELOOP: "too many symbolic links encountered", syscall.EEXIST: "file already exists"}
+	var errno syscall.Errno
+	if !errors.As(err, &errno) || texts[errno] == "" {
+		return err.Error()
+	}
+	head := blockErrno(errno) + ": " + texts[errno]
+	var link *os.LinkError
+	if errors.As(err, &link) {
+		return head + ", " + link.Op + " '" + link.Old + "' -> '" + link.New + "'"
+	}
+	var path *fs.PathError
+	if errors.As(err, &path) {
+		return head + ", " + path.Op + " '" + path.Path + "'"
+	}
+	return head
 }
 
 // autopilotStored finds an approval by id in a record (approvalsOf + find).
