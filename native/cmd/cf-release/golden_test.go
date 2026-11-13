@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 type parityCase struct {
@@ -158,6 +159,11 @@ func (f *fixture) runGo(c parityCase) runResult {
 	f.use(c.env)
 	var out, errb bytes.Buffer
 	a := newApp(&out, &errb)
+	// B595: the goldens hold the date const; a release with no --date takes today's local date,
+	// so pin the clock to that day (real time still passes, so waits end).
+	start := time.Now()
+	day, _ := time.ParseInLocation("2006-01-02", date, time.Local)
+	a.now = func() time.Time { return day.Add(12 * time.Hour).Add(time.Since(start)) }
 	code := run(a, c.args, f.repo)
 	return runResult{code, out.String(), errb.String()}
 }
