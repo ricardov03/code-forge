@@ -1489,7 +1489,7 @@ test('releasing docs record changes only in CHANGELOG and describe the optional 
   assert.equal(occurrences(releasing, '**README.** Only the version in the optional `Latest:` line is updated; all other bytes stay the same.'), 1);
   assert.equal(occurrences(releasing, 'Without that line, README is unchanged and omitted from the release commit.'), 1);
   assert.equal(occurrences(releasing, '`## [Unreleased]` in `CHANGELOG.md` has at least one entry'), 1);
-  assert.equal(occurrences(releasing, '`node scripts/gen-config-doc.mjs --check`'), 1);
+  assert.equal(occurrences(releasing, 'node scripts/gen-config-doc.mjs --check'), 1); // B600: a sh block since B580
   assert.equal(occurrences(index, 'release history lives only in CHANGELOG; releases update the optional README `Latest:` line'), 1);
   assert.equal(occurrences(index, '[releasing.md](releasing.md)'), 1);
   for (const [rel, text] of [['docs/releasing.md', releasing], ['docs/README.md', index]]) {

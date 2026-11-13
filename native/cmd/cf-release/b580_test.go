@@ -148,6 +148,10 @@ func TestB580NativeBuildWithoutGoRollsBack(t *testing.T) {
 	if err := os.Remove(filepath.Join(f.bin, "go")); err != nil {
 		t.Fatal(err)
 	}
+	f.use(nil)
+	if p, err := exec.LookPath("go"); err == nil {
+		t.Skipf("a go outside the fixture is on its PATH: %s", p) // B600: Ubuntu CI has /usr/bin/go
+	}
 	before := f.state()
 	r := b580Run(f, nil, 0, "release", "minor", "--date", date)
 	want := "\nFAILED: build-native failed (exit 1): build-native: Go is required to build native release binaries: install Go and put go on PATH (npm users do not need Go).\nrolled back 7 files; nothing was committed or tagged\n"
