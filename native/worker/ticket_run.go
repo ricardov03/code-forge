@@ -24,6 +24,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/filelock"
+	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/jev"
@@ -281,8 +282,13 @@ func (w *TicketRunner) decideRead(id string) (ledger.Object, ledger.Object, erro
 		if !ok {
 			return refusal("refused", "bad-ticket"), nil, nil
 		}
-		if _, err := time.Parse(time.RFC3339Nano, s); err != nil {
+		// readTicket: a reopen stamp Date.parse cannot read is bad-ticket (B623)
+		_, parsed, known := gatecheck.JSDateParse(s, true)
+		if !known {
 			return nil, nil, unsupported("reopened_at Date.parse undecided")
+		}
+		if !parsed {
+			return refusal("refused", "bad-ticket"), nil, nil
 		}
 		p.ReopenedAt = &s
 	}

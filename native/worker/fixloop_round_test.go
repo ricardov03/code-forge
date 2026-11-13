@@ -113,7 +113,7 @@ func TestPlayRoundHashMoved(t *testing.T) {
 	b496Repo(t, repo)
 	l := &b496Ledger{t: t, tk: FixLoopTicket{Block: "B1", File: "a.go", ContentHash: strings.Repeat("f", 64)}}
 	r := b496Request(t, home, repo, l, func(func(ledger.Object) error) (ledger.Object, error) { return b496Clean(), nil })
-	got, err := playRound(l.tk, r, review.NewFileState("a.go", "L2", false), "full", 0)
+	got, err := playRound(l.tk, r, review.NewFileState("a.go", "L2", false), "full", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestPlayRoundHashMoved(t *testing.T) {
 	// the real hash: the approval is written
 	l2 := &b496Ledger{t: t, tk: FixLoopTicket{Block: "B1", File: "b.go", ContentHash: b496Hash(t, repo, "b.go")}}
 	r2 := b496Request(t, home, repo, l2, func(func(ledger.Object) error) (ledger.Object, error) { return b496Clean(), nil })
-	got, err = playRound(l2.tk, r2, review.NewFileState("b.go", "L2", false), "full", 0)
+	got, err = playRound(l2.tk, r2, review.NewFileState("b.go", "L2", false), "full", 0, 0)
 	if err != nil || !got.ApprovalWritten {
 		t.Fatalf("played %+v %v", got, err)
 	}
@@ -152,7 +152,7 @@ func TestPlayRoundCrashSavesRetry(t *testing.T) {
 		l := &b496Ledger{t: t, tk: FixLoopTicket{Block: "B1", File: "a.go", ContentHash: b496Hash(t, repo, "a.go")}}
 		r := b496Request(t, home, repo, l, func(func(ledger.Object) error) (ledger.Object, error) { return nil, c.err })
 		r.Secrets = []string{"", "sk-123"}
-		got, err := playRound(l.tk, r, review.NewFileState("a.go", "L2", false), "full", 2)
+		got, err := playRound(l.tk, r, review.NewFileState("a.go", "L2", false), "full", 2, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -182,7 +182,7 @@ func TestPlayRoundPassesUnsupported(t *testing.T) {
 	r := b496Request(t, home, repo, l, func(func(ledger.Object) error) (ledger.Object, error) {
 		return nil, unsupported("the rules risk is not ported")
 	})
-	if _, err := playRound(l.tk, r, review.NewFileState("a.go", "L2", false), "full", 0); !IsUnsupported(err) || len(l.rows) != 0 {
+	if _, err := playRound(l.tk, r, review.NewFileState("a.go", "L2", false), "full", 0, 0); !IsUnsupported(err) || len(l.rows) != 0 {
 		t.Fatalf("%v %d rows", err, len(l.rows))
 	}
 }

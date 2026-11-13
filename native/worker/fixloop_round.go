@@ -114,7 +114,7 @@ type played struct {
 // playRound is engine.mjs playRound up to the state save: the round
 // (review.RunRound) with the approval check on its rows, a throw saved as
 // next: retry, the stop's content hash, then saveState at seq.
-func playRound(t FixLoopTicket, r FixLoopRequest, state ledger.Object, kind string, seq int) (played, error) {
+func playRound(t FixLoopTicket, r FixLoopRequest, state ledger.Object, kind string, seq, extraRounds int) (played, error) {
 	out := played{}
 	write := func(row ledger.Object) error {
 		if row.Get("event") == "review.approved" {
@@ -134,7 +134,7 @@ func playRound(t FixLoopTicket, r FixLoopRequest, state ledger.Object, kind stri
 	if err != nil {
 		return out, err
 	}
-	deps := review.LoopDeps{RepoRoot: r.ContentRoot, Cfg: r.Cfg, WriteRow: write, Review: func() (ledger.Object, error) {
+	deps := review.LoopDeps{RepoRoot: r.ContentRoot, Cfg: r.Cfg, ExtraRounds: extraRounds, WriteRow: write, Review: func() (ledger.Object, error) {
 		res, err := r.Review(write)
 		if err == nil {
 			out.Engine = res

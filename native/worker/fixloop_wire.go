@@ -10,11 +10,12 @@ package worker
 // unavailable (crash or retry).
 //
 // Go serves a ticket only when every part it needs is ported. A dry pass
-// (no writes) decides first, so a ticket that needs a `block reopen` row, an
-// autopilot extra round or a recheck part not ported (review.CheckLoop)
-// returns ErrUnsupported with nothing written. B517: a split stop a new
-// packet budget reopens, a cap stop a raised cap reopens (reopenForExtraRound
-// with no extra round) and the recheck / patch_check rounds run in Go.
+// (no writes) decides first, so a ticket that needs a recheck part not ported
+// (review.CheckLoop) returns ErrUnsupported with nothing written. B517: a
+// split stop a new packet budget reopens, a cap stop a raised cap reopens
+// (reopenForExtraRound) and the recheck / patch_check rounds run in Go.
+// B623: a signed `block reopen` row and autopilot extra rounds run in Go too
+// (fixloop_reopen.go).
 
 import (
 	"math"
@@ -44,6 +45,8 @@ type prepared struct {
 	seq       int
 	underLock bool
 	spawns    bool // the round runs a review or recheck session
+	// extraRounds is extraRoundsFor: the autopilot rounds past the cap
+	extraRounds int
 }
 
 func lateLen(state ledger.Object) (float64, bool) {
@@ -118,9 +121,6 @@ func (r FixLoopRequest) prepare(t FixLoopTicket, rows []ledger.Object, loaded Lo
 			continue
 		}
 		ev := row.Get("event")
-		if row.Get("file") == t.File && (ev == "review.reopened" || (ev == "autopilot.extra_round" && isString(row.Get("grant_id")))) {
-			return prepared{}, unsupported("a " + ev.(string) + " row for the file (block reopen, autopilot extra round)")
-		}
 		if (ev != "block.acceptance_amended" && !(ev == StateEvent && row.Get("file") == t.File)) || !verified(row, r.Key) {
 			continue
 		}
@@ -130,7 +130,9 @@ func (r FixLoopRequest) prepare(t FixLoopTicket, rows []ledger.Object, loaded Lo
 			anchoredAt = i
 		}
 	}
-	reopened := amendedAt > anchoredAt
+	// B72: a signed `block reopen` row for the file's latest anchor seq restarts it (B623)
+	at := reopenAt{runID: r.RunID, block: t.Block, file: t.File, key: r.Key, loaded: loaded, contentHash: t.ContentHash}
+	reopened := amendedAt > anchoredAt || at.reopenRowFor(rows) != nil
 	if loaded.Status == "lost" && !reopened {
 		return prepared{outcome: fixLoopRefusal("refused", "review-state-lost", LostMessage)}, nil
 	}
@@ -157,7 +159,13 @@ func (r FixLoopRequest) prepare(t FixLoopTicket, rows []ledger.Object, loaded Lo
 	if _, ok := lateLen(state); !ok {
 		return prepared{}, unsupported("a review state whose late is not an array")
 	}
-	reopenForExtraRound(&state, r.Cfg)
+	// B47: an autopilot extra round raises the file's cap (B623)
+	extra, err := extraRoundsFor(rows, r.RunID, t.Block, t.File, r.Key)
+	if err != nil {
+		return prepared{}, err
+	}
+	p.extraRounds = extra
+	reopenForExtraRound(&state, extra, r.Cfg)
 	next, _ := state.Get("next").(ledger.Object)
 	if state.Get("status") == "stopped" {
 		p.outcome = append(stoppedOutcome(state, "", loopFields(state, "")),
@@ -181,7 +189,7 @@ func (r FixLoopRequest) prepare(t FixLoopTicket, rows []ledger.Object, loaded Lo
 		kind = "patch_check"
 		state.Set("l3_rung_used", true) // the orchestrator ran this file's one L3 patch before this ticket
 	}
-	spawns, err := review.CheckLoop(state, kind, review.LoopDeps{RepoRoot: r.ContentRoot, Cfg: r.Cfg, Input: r.Input, Session: r.Session, Jev: r.Jev})
+	spawns, err := review.CheckLoop(state, kind, review.LoopDeps{RepoRoot: r.ContentRoot, Cfg: r.Cfg, ExtraRounds: extra, Input: r.Input, Session: r.Session, Jev: r.Jev})
 	if err != nil {
 		return prepared{}, unsupported(err.Error())
 	}
@@ -190,13 +198,10 @@ func (r FixLoopRequest) prepare(t FixLoopTicket, rows []ledger.Object, loaded Lo
 	return p, nil
 }
 
-func isString(v any) bool { _, ok := v.(string); return ok }
-
-// reopenForExtraRound is fixloop.mjs reopenForExtraRound with no autopilot
-// extra round (Go hands a file with one over before this): a recheck's split
+// reopenForExtraRound is fixloop.mjs reopenForExtraRound: a recheck's split
 // stop reopens when its budget is not full_in's any more, a cap stop when the
-// cap is above its round now.
-func reopenForExtraRound(sp *ledger.Object, cfg map[string]any) bool {
+// cap (with the autopilot extra rounds) is above its round now.
+func reopenForExtraRound(sp *ledger.Object, extraRounds int, cfg map[string]any) bool {
 	state := *sp
 	defer func() { *sp = state }()
 	if state.Get("status") != "stopped" {
@@ -221,7 +226,7 @@ func reopenForExtraRound(sp *ledger.Object, cfg map[string]any) bool {
 		return false
 	}
 	// JS: state.round >= cap is false for a round that is not a number
-	if round, ok := state.Get("round").(float64); ok && round >= float64(review.RoundCap(cfg, 0)) {
+	if round, ok := state.Get("round").(float64); ok && round >= float64(review.RoundCap(cfg, extraRounds)) {
 		return false
 	}
 	state.Set("status", "open")
@@ -282,7 +287,7 @@ func roundOutcome(state ledger.Object, kind string, pl played) ledger.Object {
 }
 
 func (r FixLoopRequest) round(t FixLoopTicket, p prepared) (ledger.Object, error) {
-	pl, err := playRound(t, r, p.state, p.kind, p.seq)
+	pl, err := playRound(t, r, p.state, p.kind, p.seq, p.extraRounds)
 	if err != nil {
 		return nil, err
 	}

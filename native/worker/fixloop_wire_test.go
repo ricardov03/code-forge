@@ -30,7 +30,14 @@ func deepClone(t *testing.T, v ledger.Object) ledger.Object {
 // The one ticket Go does not serve (cap-stop-then-stopped's second ticket: a
 // patch_check) returns ErrUnsupported with nothing written.
 func TestFixLoopRoundMatchesNode(t *testing.T) {
-	for _, sc := range b496Scenarios(t) {
+	replayFixLoopGolden(t, b496Scenarios(t))
+}
+
+// replayFixLoopGolden replays fix-loop golden scenarios (see
+// TestFixLoopRoundMatchesNode) through FixLoopRound.
+func replayFixLoopGolden(t *testing.T, scenarios []ledger.Object) {
+	t.Helper()
+	for _, sc := range scenarios {
 		name := sc.Get("name").(string)
 		cfg, _ := plainMap(sc.Get("cfg").(ledger.Object))
 		t.Run(name, func(t *testing.T) {
@@ -149,25 +156,13 @@ func TestFixLoopRoundReadFails(t *testing.T) {
 
 // Tickets that need a part Go does not port return ErrUnsupported before
 // anything is written (no budget row, no restored state, no round): a
-// `block reopen` row, an autopilot extra round, a recheck with no work dir,
-// and a stop the raised cap reopens into such a recheck. (B537 ported the
+// recheck with no work dir, and a stop the raised cap reopens into such a
+// recheck. (B623 ported the `block reopen` row and the autopilot extra
+// round: see TestB623FixLoopReopenAndExtraRoundMatchNode.) (B537 ported the
 // review.recheck_scope file and base-with-peers rechecks: see
 // TestFixLoopRoundRecheckScopeAndPeersRun.)
 func TestFixLoopRoundUnsupportedWritesNothing(t *testing.T) {
-	sign := func(row ledger.Object) ledger.Object {
-		signed, err := signAt(append(ledger.Object{{Key: "run", Value: "r1"}}, row...), b496Key, b496Clock())
-		if err != nil {
-			t.Fatal(err)
-		}
-		return signed
-	}
 	cases := map[string]func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest){
-		"reopen row": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) {
-			l.rows = append(l.rows, sign(ledger.Object{{Key: "event", Value: "review.reopened"}, {Key: "block", Value: "B1"}, {Key: "file", Value: "a.go"}, {Key: "by", Value: "human"}}))
-		},
-		"extra round row": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) {
-			l.rows = append(l.rows, sign(ledger.Object{{Key: "event", Value: "autopilot.extra_round"}, {Key: "block", Value: "B1"}, {Key: "file", Value: "a.go"}, {Key: "grant_id", Value: "g1"}}))
-		},
 		"recheck with no work dir": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) { b517Warn(t, l, r) },
 		"stop the cap reopens": func(t *testing.T, home, repo string, l *b496Ledger, r *FixLoopRequest) {
 			state := ledger.Object{{Key: "file", Value: "a.go"}, {Key: "level", Value: "L2"}, {Key: "round", Value: 1.0}, {Key: "rounds_at_level", Value: 1.0},

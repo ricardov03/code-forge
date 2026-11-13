@@ -89,6 +89,8 @@ func (fx *b488Fix) ticket(t *testing.T, run, block, file, hash string, extra ...
 			p.Tree = &s
 		case "acceptance_revision":
 			p.AcceptanceRevision = &s
+		case "reopened_at":
+			p.ReopenedAt = &s
 		}
 	}
 	id := ticket.ReviewID(p)

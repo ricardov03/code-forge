@@ -24,7 +24,17 @@ func b496Clock() time.Time { return time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC
 
 func b496Scenarios(t *testing.T) []ledger.Object {
 	t.Helper()
-	data, err := os.ReadFile("testdata/b496_fixloop_golden.json")
+	out := fixLoopGoldenScenarios(t, "testdata/b496_fixloop_golden.json")
+	if len(out) != 23 {
+		t.Fatalf("golden has %d scenarios", len(out))
+	}
+	return out
+}
+
+// fixLoopGoldenScenarios reads one fix-loop golden file's scenarios.
+func fixLoopGoldenScenarios(t *testing.T, path string) []ledger.Object {
+	t.Helper()
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,9 +45,6 @@ func b496Scenarios(t *testing.T) []ledger.Object {
 	out := []ledger.Object{}
 	for _, s := range wrapped.Get("s").([]any) {
 		out = append(out, s.(ledger.Object))
-	}
-	if len(out) != 23 {
-		t.Fatalf("golden has %d scenarios", len(out))
 	}
 	return out
 }
