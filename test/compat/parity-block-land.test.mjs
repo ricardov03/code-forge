@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -17,7 +17,9 @@ import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CLI = path.join(ROOT, 'bin/code-forge.mjs');
-const scratch = await mkdtemp(path.join(os.tmpdir(), 'cf-land-'));
+// B603: git records worktree links by real path (macOS: /var -> /private/var). The
+// fixture must use the same spelling, or the parity copy and ticket ids miss the tree.
+const scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cf-land-')));
 const BINARY = path.join(scratch, 'package/native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
 const RUN = 'r-land-fixture';
 const args = ['block', 'land', 'B1', '--run', RUN, '--report', 'report.txt', '--transcript', 'transcript.txt'];

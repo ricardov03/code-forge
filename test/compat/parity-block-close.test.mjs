@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -19,7 +19,8 @@ import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CLI = path.join(ROOT, 'bin/code-forge.mjs');
-const scratch = await mkdtemp(path.join(os.tmpdir(), 'cf-close-'));
+// B603: real path, so paths git records (macOS: /var -> /private/var) match the fixture's.
+const scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cf-close-')));
 const BINARY = path.join(scratch, 'package/native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
 const PROBE = path.join(scratch, 'argv-node');
 const LOCK_WAIT = 'TEST: waiting on run lock\n';
