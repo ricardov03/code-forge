@@ -1,0 +1,2 @@
+worker: WARN the autopilot expiry check failed in a worker drain; it runs again at the next drain (TypeError)
+worker: drained 0 ticket(s)

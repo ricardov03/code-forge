@@ -45,6 +45,12 @@ type Loop struct {
 	CleanOrphans func()
 	// Idle is the idle exit (nil: never).
 	Idle *Idle
+	// ApprovalsServed tells, before any write, whether CheckApprovals serves
+	// checkApprovals on record at now; CheckApprovals runs it and reports a
+	// hand-over it found before writing (B616). nil: an approval that is not
+	// quiet hands the worker to Node.
+	ApprovalsServed func(record ledger.Object, now time.Time) bool
+	CheckApprovals  func(now time.Time) (handOver bool, err error)
 
 	mu      sync.Mutex
 	handoff string
@@ -106,34 +112,46 @@ func (l *Loop) RunOne(id string) (int, bool) {
 	return n, poison
 }
 
-// ExpiryCheck is expiryChecks for the pool: the autopilot grant expiry in Go;
-// an approval or a grant Go does not decide hands the worker to Node.
+// ExpiryCheck is expiryChecks for the pool (B48): the grant's lazy expiry,
+// then checkApprovals and its restore (B616: both in Go). A grant until or
+// an approval Go does not read like Node hands the worker to Node, decided
+// before anything is written.
 func (l *Loop) ExpiryCheck() error {
 	home, run := l.Runner.Home, l.Runner.RunID
+	now := l.now()
 	record, err := state.ReadRun(home, run)
 	if err != nil {
-		var se *state.Error
-		if errors.As(err, &se) && (se.Code == "no-run" || se.Code == "bad-run-id") {
+		if autopilot.IsNoRun(err) {
 			return nil
 		}
 		return err
 	}
-	if _, has := record.Get("autopilot_approvals").([]any); record.Get("autopilot_approvals") != nil && (!has || !approvalsQuiet(record)) {
+	if !autopilot.ExpireSupported(record, now) {
+		l.HandOff("autopilot grant")
+		return nil
+	}
+	if !approvalsQuiet(record) && (l.CheckApprovals == nil || l.ApprovalsServed == nil || !l.ApprovalsServed(record, now)) {
 		l.HandOff("autopilot approvals")
 		return nil
 	}
-	if _, err := autopilot.CheckExpiry(home, run, l.now()); err != nil {
-		var se *state.Error
-		if errors.As(err, &se) && (se.Code == "no-run" || se.Code == "bad-run-id") {
-			return nil
-		}
+	if err := autopilot.ExpireAny(home, run, now); err != nil {
 		if errors.Is(err, autopilot.ErrUnsupported) {
-			l.HandOff("autopilot grant")
+			l.HandOff("autopilot grant") // the record changed between the reads
 			return nil
 		}
-		return err
+		if !autopilot.IsNoRun(err) {
+			return err
+		}
 	}
-	return nil
+	if l.CheckApprovals == nil {
+		return nil
+	}
+	handOver, err := l.CheckApprovals(now)
+	if handOver {
+		l.HandOff("autopilot approvals")
+		return nil
+	}
+	return err
 }
 
 // approvalsQuiet: no approval is active (checkApprovals has nothing to do).

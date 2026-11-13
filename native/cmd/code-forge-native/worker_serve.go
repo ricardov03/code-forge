@@ -299,6 +299,8 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 		CleanOrphans: workerOrphans(a.runID)}
 	pool.RunOne = loop.RunOne
 	pool.Stop = loop.Stop
+	loop.ApprovalsServed = workerApprovalsServed(home, a.runID)
+	loop.CheckApprovals = workerCheckApprovals(home, a.runID)
 	pool.ExpiryCheck = loop.ExpiryCheck
 	pool.WatchTick = (&worker.Watch{Runner: runner, HandOff: loop.HandOff}).Tick
 	if a.once {

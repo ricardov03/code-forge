@@ -1,0 +1,2 @@
+{"run":"r-fix","event":"autopilot.expire","grant_id":"ap-0000abcd","until":"2026-11-11T12:30:00.000Z","ts":"2026-11-13T22:38:37.419Z","mac":"008ddd68aae95381b5a607f18e892ce087286b071f9c64f293191b1262d0683c","tokens_source":null,"cost_source":null}
+{"run":"r-fix","approval_id":"apr-0000bbb1","key":"review.max_rounds_per_file","until":"2026-11-11T11:00:00.000Z","event":"autopilot.restore_skipped","reason":"changed-by-hand","ts":"2026-11-13T22:38:37.419Z","mac":"f0ed88845be87220d38ad5daaa11ff650e2006c499a8e3d88130ccb51a4338fc","tokens_source":null,"cost_source":null}
