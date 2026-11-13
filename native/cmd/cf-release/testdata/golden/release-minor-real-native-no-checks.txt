@@ -73,7 +73,7 @@ native darwin-x64: 20 bytes (v0.22.0)
 native linux-x64: 19 bytes (v0.22.0)
 native linux-arm64: 19 bytes (v0.22.0)
 ok    build-native: all four release targets
-ok    package size: 1234567 bytes (1.23 MB; limit <20 MB)
+ok    package size: 1234567 bytes (1.23 MB; limit <35 MB)
 ok    npm pack --dry-run: @example/pkg@0.22.0, 7 files
 WARN  !!! --no-checks: the CI run for HEAD (npm test, typecheck, gen-config-doc and gen-commands-doc --check), npm ls and plugin validate were NOT checked; native build and package size checked !!!
 

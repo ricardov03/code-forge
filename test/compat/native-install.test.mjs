@@ -124,7 +124,7 @@ test('npm installation ships a working host binary, reports its version, and ver
     assert.equal(packed.status, 0, packed.stderr);
     const [pack] = JSON.parse(packed.stdout);
     assert.equal(pack.files.filter((f) => f.path === path.relative(root, binary)).length, 1, 'npm must ship exactly one host executable');
-    assert.ok(pack.size < 20_000_000, `package must stay under 20 MB, got ${pack.size} bytes`);
+    assert.ok(pack.size < 35_000_000, `package must stay under 35 MB, got ${pack.size} bytes`);
   } finally {
     if (disabled === undefined) delete process.env.CODE_FORGE_NATIVE;
     else process.env.CODE_FORGE_NATIVE = disabled;

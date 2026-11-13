@@ -69,7 +69,7 @@ docs/step-by-step.md: version pins: 0.21.0 → 1.0.0
 
 == 4. checks ==
 ok    CI for HEAD 8a15962788ece72ef64a2215357f61f94b9682f7: completed, success (npm test, npm run typecheck, gen-config-doc and gen-commands-doc --check)
-ok    package size: 1234567 bytes (1.23 MB; limit <20 MB)
+ok    package size: 1234567 bytes (1.23 MB; limit <35 MB)
 ok    npm pack --dry-run: @example/pkg@1.0.0, 7 files
 ok    npm ls: 0 invalid, 0 missing
 WARN  the claude CLI is not on PATH: "claude plugin validate ." was skipped; install it and run "claude plugin validate ." before you publish

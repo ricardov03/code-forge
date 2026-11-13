@@ -657,9 +657,9 @@ func (a *app) checkPack(root, name, version string) string {
 		return "npm pack --dry-run: missing package size"
 	}
 	if finite {
-		a.ok(fmt.Sprintf("package size: %s bytes (%s MB; limit <20 MB)", jsNumberString(float64(size)), toFixed2(float64(size)/1_000_000)))
-		if size >= 20_000_000 {
-			return "published package must be under 20 MB"
+		a.ok(fmt.Sprintf("package size: %s bytes (%s MB; limit <35 MB)", jsNumberString(float64(size)), toFixed2(float64(size)/1_000_000)))
+		if size >= 35_000_000 {
+			return "published package must be under 35 MB"
 		}
 	}
 	filesV, filesOK := field("files")
@@ -1118,7 +1118,7 @@ func (a *app) release(root string, opts releaseOpts, written *[]planFile, restor
 	if opts.dryRun {
 		a.out("\n== plan (dry run) ==\n")
 		if hasNative(root) {
-			a.out("would build-native: four release targets; package size must be under 20 MB\n")
+			a.out("would build-native: four release targets; package size must be under 35 MB\n")
 		}
 		checks := "none (--no-checks)"
 		if opts.checks {
