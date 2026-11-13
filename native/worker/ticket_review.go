@@ -361,6 +361,12 @@ func (w *TicketRunner) engineRefusal(t ledger.Object, cfg map[string]any, conten
 	if err != nil {
 		return nil, nil, err
 	}
+	if rule == "" && t.Get("kind") == "answers" {
+		byFile, _ := t.Get("by_file").(string)
+		if rule, err = w.exclusion(byFile, cfg); err != nil {
+			return nil, nil, err
+		}
+	}
 	if rule != "" {
 		return out("excluded", "review.exclude "+rule), nil, nil
 	}
@@ -403,7 +409,8 @@ func (w *TicketRunner) engineRefusal(t ledger.Object, cfg map[string]any, conten
 	ticketRev, ticketSet := t.Get("acceptance_revision").(string)
 	entryRev, entryIsString := revision.(string)
 	same := (!ticketSet && !revisionSet) || (ticketSet && revisionSet && entryIsString && entryRev == ticketRev)
-	if !same {
+	// B609: an answers ticket skips the acceptance check (`!ticket.kind`)
+	if !same && t.Get("kind") != "answers" {
 		return out("stale", "acceptance-amended"), nil, nil
 	}
 	// treeTopOf and the contentRoot check read the same record contentRootFor
@@ -420,6 +427,13 @@ func (w *TicketRunner) engineRefusal(t ledger.Object, cfg map[string]any, conten
 	}
 	if syntax || (rec != nil && !hasKey(rec, "blocks")) {
 		return nil, nil, unsupported("run record changed between the content root and the engine")
+	}
+	if t.Get("kind") == "answers" {
+		outcome, plan, err := w.ansDry(t, rec, cfg, contentRoot, timeoutS)
+		if plan == nil {
+			return outcome, nil, err
+		}
+		return nil, &enginePlan{answers: plan, workDir: plan.workDir}, nil
 	}
 	return w.planEngine(t, rec, cfg, contentRoot, timeoutS)
 }

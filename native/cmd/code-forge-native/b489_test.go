@@ -122,10 +122,10 @@ func (f *b489Fix) ticket(t *testing.T, block, file, text string) string {
 	return id
 }
 
-func (f *b489Fix) answers(t *testing.T) string {
+func (f *b489Fix) unported(t *testing.T) string {
 	t.Helper()
 	id := strings.Repeat("c", 24)
-	b460Write(t, filepath.Join(worker.QueueDir(f.root), id+".json"), `{"ticket":"`+id+`","run":"r1","block":"B1","file":"a.txt","content_hash":"`+b489Sha("hello\nworld\n")+`","kind":"answers","by_file":"b.txt","by_hash":"x","answers":["F1"],"enqueued_at":"2026-11-11T09:00:00.000Z"}`+"\n")
+	b460Write(t, filepath.Join(worker.QueueDir(f.root), id+".json"), `{"ticket":"`+id+`","run":"r1","block":"B1","file":"a.txt","content_hash":"`+b489Sha("hello\nworld\n")+`","reopened_at":"Nov 11 2026","enqueued_at":"2026-11-11T09:00:00.000Z"}`+"\n")
 	return id
 }
 
@@ -186,7 +186,7 @@ func TestB489WorkerOnceServesInGo(t *testing.T) {
 // Node to review once.
 func TestB489WorkerUnportedTicketHandsOver(t *testing.T) {
 	f := newB489Fix(t)
-	id := f.answers(t)
+	id := f.unported(t)
 	code, out, _ := b460Call(t, "worker", "--run", "r1", "--once")
 	if code != 127 || out != "" {
 		t.Fatalf("worker = %d %q, want the Node hand-over (127)", code, out)

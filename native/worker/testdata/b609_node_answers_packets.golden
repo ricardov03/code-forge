@@ -1,0 +1,64 @@
+# Answered findings
+
+A review of `b.txt` left the findings below open. The coder says the change in `d.txt` resolves them.
+For EACH finding id, decide whether that change resolves it: `resolved` only when the change clearly removes the problem the finding names; otherwise `not_resolved`. Give a short reason for each.
+Reply with ONE JSON object: {"verdicts": [{"id": string, "verdict": "resolved" | "not_resolved", "reason": string}]}, one entry per id below.
+
+## Finding F1
+
+- file: b.txt
+- lines: 2-2
+- severity: warning
+- claim: a warning
+- evidence: the line says WARNME
+- fix: remove it
+
+Source lines 1-3:
+```
+1: one
+2: WARNME
+3: 
+```
+
+## The change in d.txt
+
+(its diff against the block base)
+```
+--- a/d.txt
++++ b/d.txt
+@@ -1 +1,2 @@
+ x
++y
+
+```
+==
+# Answered findings
+
+A review of `b.txt` left the findings below open. The coder says the change in `c.txt` resolves them.
+For EACH finding id, decide whether that change resolves it: `resolved` only when the change clearly removes the problem the finding names; otherwise `not_resolved`. Give a short reason for each.
+Reply with ONE JSON object: {"verdicts": [{"id": string, "verdict": "resolved" | "not_resolved", "reason": string}]}, one entry per id below.
+
+## Finding F1
+
+- file: b.txt
+- lines: 2-2
+- severity: warning
+- claim: a warning
+- evidence: the line says WARNME
+- fix: remove it
+
+Source lines 1-3:
+```
+1: one
+2: WARNME
+3: 
+```
+
+## The change in c.txt
+
+(a new file: its full content)
+```
+fixed
+
+```
+==

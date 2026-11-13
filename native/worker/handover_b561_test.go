@@ -87,7 +87,7 @@ func TestB561HandOverFallbacks(t *testing.T) {
 func TestB561OnceHandOverKeepsAnnouncement(t *testing.T) {
 	clock := fixedNow
 	fx, w, _ := b497Fixture(t, &clock)
-	b489Answers(t, fx, 0)
+	b489Unported(t, fx, 0)
 	l := b489Loop(t, fx, w, 1)
 	l.Worker.o.Pid = 4242
 	l.Worker.o.Probes = fakeProbes(map[int]string{4242: "Thu Nov 12 13:40:00 2026"})

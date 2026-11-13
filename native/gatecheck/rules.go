@@ -558,6 +558,8 @@ type gate struct {
 	answers   []Row
 	runRows   []Row
 	unknown   bool
+	// except: the answers ticket whose own rows answered leaves out (B609)
+	except *string
 }
 
 func (g *gate) ok(r Row) bool { return g.v.ok(r) }
@@ -642,6 +644,9 @@ func (g *gate) answered(fileV, id jv, severity any) bool {
 	}
 	for _, r := range g.answers {
 		by, isString := r["by_file"].(string)
+		if g.except != nil && r["ticket"] == *g.except {
+			continue
+		}
 		if r["file"] == file && r["content_hash"] == now && isString && by != file && strictEq(prop(r, "finding"), id) {
 			if target, ok := g.current[by]; ok && r["by_hash"] == target {
 				return true
@@ -979,17 +984,9 @@ func (g *gate) waivedAll(file, hash string) *Waived {
 	return &w
 }
 
-// Evaluate is gate-check.mjs checkBlockReviews. Result.Unknown is true when a
-// date or value needed an engine detail Go cannot reproduce; callers hand over.
-func Evaluate(in Input) Result {
-	if in.ProofFiles == nil {
-		in.ProofFiles = in.Files
-	}
+// newGate is reviewRules' setup (B609: shared with the worker's answers check).
+func newGate(in Input) *gate {
 	g := &gate{in: in, v: &verifier{in.Key, map[uintptr]bool{}}, current: map[string]string{}}
-	result := Result{Blockers: []Blocker{}, Waived: []Waived{}, Accepted: []AcceptedHit{}}
-	add := func(code, file, id, detail string) {
-		result.Blockers = append(result.Blockers, Blocker{Code: code, File: file, Finding: id, Detail: detail})
-	}
 	amendedAt := -1
 	for i, r := range in.Rows {
 		if r["event"] == "block.acceptance_amended" && r["block"] == in.Block && r["run"] == in.Run && g.ok(r) {
@@ -1009,10 +1006,6 @@ func Evaluate(in Input) Result {
 	for _, f := range append(slices.Clone(in.ProofFiles), in.Files...) {
 		g.current[f.File] = f.Hash
 	}
-	hashOf := map[string]string{}
-	for _, f := range in.Files {
-		hashOf[f.File] = f.Hash
-	}
 	for _, r := range g.mine {
 		if r["event"] != "review.waived" || r["by"] != "human" || !g.ok(r) {
 			continue
@@ -1027,6 +1020,24 @@ func Evaluate(in Input) Result {
 		if r["event"] == "review.answered" && g.ok(r) && r["run"] == in.Run {
 			g.answers = append(g.answers, r)
 		}
+	}
+	return g
+}
+
+// Evaluate is gate-check.mjs checkBlockReviews. Result.Unknown is true when a
+// date or value needed an engine detail Go cannot reproduce; callers hand over.
+func Evaluate(in Input) Result {
+	if in.ProofFiles == nil {
+		in.ProofFiles = in.Files
+	}
+	g := newGate(in)
+	hashOf := map[string]string{}
+	for _, f := range in.Files {
+		hashOf[f.File] = f.Hash
+	}
+	result := Result{Blockers: []Blocker{}, Waived: []Waived{}, Accepted: []AcceptedHit{}}
+	add := func(code, file, id, detail string) {
+		result.Blockers = append(result.Blockers, Blocker{Code: code, File: file, Finding: id, Detail: detail})
 	}
 	for _, file := range in.Unowned {
 		add("unowned_change", file, "", file+" changed but no block of the run owns it — block claim it, or put it back")

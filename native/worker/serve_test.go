@@ -40,10 +40,10 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	return l.w.Write(p)
 }
 
-func b489Answers(t *testing.T, fx *b488Fix, n int) string {
+func b489Unported(t *testing.T, fx *b488Fix, n int) string {
 	t.Helper()
 	id := strings.Repeat(string(rune('c'+n)), 24)
-	writeJSON(t, filepath.Join(QueueDir(fx.root), id+".json"), `{"ticket":"`+id+`","run":"r1","block":"B1","file":"a.txt","content_hash":"`+sha("hello\nworld\n")+`","kind":"answers","by_file":"b.txt","by_hash":"x","answers":["F1"],"enqueued_at":"2026-11-11T09:00:00.000Z"}`+"\n")
+	writeJSON(t, filepath.Join(QueueDir(fx.root), id+".json"), `{"ticket":"`+id+`","run":"r1","block":"B1","file":"a.txt","content_hash":"`+sha("hello\nworld\n")+`","reopened_at":"Nov 11 2026","enqueued_at":"2026-11-11T09:00:00.000Z"}`+"\n")
 	return id
 }
 
@@ -78,13 +78,13 @@ func TestB489SplitRuleEachTicketReviewedOnce(t *testing.T) {
 				fx.ticket(t, "r1", "B1", "a.txt", sha("hello\nworld\n")),
 				fx.ticket(t, "r1", "B2", "b.txt", sha("one\nWARNME\n")),
 			}
-			unported := []string{b489Answers(t, fx, 0), b489Answers(t, fx, 1)}
+			unported := []string{b489Unported(t, fx, 0), b489Unported(t, fx, 1)}
 			all := append(append([]string{}, ported...), unported...)
 			l := b489Loop(t, fx, w, parallel)
 			if _, err := l.Once(); err != nil {
 				t.Fatal(err)
 			}
-			if !strings.HasPrefix(l.Handoff(), "ticket ") || !strings.Contains(l.Handoff(), "not ported to Go: answers ticket") {
+			if !strings.HasPrefix(l.Handoff(), "ticket ") || !strings.Contains(l.Handoff(), "not ported to Go: reopened_at Date.parse undecided") {
 				t.Fatalf("handoff = %q, want an unsupported ticket", l.Handoff())
 			}
 			var goDone, left []string

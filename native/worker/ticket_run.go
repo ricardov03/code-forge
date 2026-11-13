@@ -4,10 +4,10 @@ package worker
 // reviewOne → complete) for the outcomes Go decides byte-equal to Node: a
 // ticket that cannot be read, a ticket of another run, a content root or
 // worktree that cannot be used, a path refusal, stale content and a config
-// snapshot that does not match its hash. A ticket that would reach the review
-// engine (routing, the fix loop, an answers ticket) returns ErrUnsupported
-// BEFORE anything is written, so the loop leaves it to Node: no lost ticket,
-// no double review.
+// snapshot that does not match its hash. Later blocks serve the review engine
+// (B492/B497 routing and reviews, B609 answers tickets: ticket_answers.go). A
+// case Go does not reproduce returns ErrUnsupported BEFORE anything is
+// written, so the loop leaves it to Node: no lost ticket, no double review.
 
 import (
 	"crypto/sha256"
@@ -259,11 +259,15 @@ func (w *TicketRunner) decideRead(id string) (ledger.Object, ledger.Object, erro
 		if t.Get("kind") != "answers" {
 			return refusal("refused", "bad-ticket"), nil, nil
 		}
-		return nil, nil, unsupported("answers ticket")
 	}
 	p := ticket.Parts{Run: run, Block: block, File: file, ContentHash: hash}
 	if tree, ok := t.Get("tree").(string); ok {
 		p.Tree = &tree
+	}
+	if hasKey(t, "kind") {
+		// B609: readTicket's answers branch returns before the revision checks
+		out, read := ansReadTicket(id, t, p)
+		return out, read, nil
 	}
 	if hasKey(t, "acceptance_revision") {
 		s, ok := t.Get("acceptance_revision").(string)
@@ -359,6 +363,9 @@ func (w *TicketRunner) reviewOne(id string, t ledger.Object) (ledger.Object, err
 		return base("stale", "missing-file"), nil
 	}
 	if current != hash {
+		if t.Get("kind") == "answers" {
+			return base("stale", "source-changed"), nil
+		}
 		return base("stale", ""), nil
 	}
 	retry := t.Get("started_at") != nil || w.resultExists(id)

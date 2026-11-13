@@ -141,7 +141,7 @@ func TestB561WaitSurvivesWorkerHandOverToNode(t *testing.T) {
 	waited := make(chan reviewFileRun, 1)
 	go func() { waited <- reviewFileExec(t, f.root, f.home, false, "--wait", ticket, "--max", "30s") }()
 	time.Sleep(300 * time.Millisecond)
-	f.answers(t)
+	f.unported(t)
 
 	var got reviewFileRun
 	select {

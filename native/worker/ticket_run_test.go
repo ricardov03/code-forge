@@ -275,9 +275,9 @@ func TestB488UnsupportedWritesNothing(t *testing.T) {
 	real := sha("hello\n")
 	cases := map[string]func() string{
 		"review engine (no snapshot: the boot config)": func() string { return fx.ticket(t, "r1", "B1", "a.txt", real) },
-		"answers ticket": func() string {
+		"reopened_at Date.parse undecided": func() string {
 			id := strings.Repeat("c", 24)
-			writeJSON(t, filepath.Join(QueueDir(fx.root), id+".json"), `{"ticket":"`+id+`","run":"r1","block":"B1","file":"a.txt","content_hash":"`+real+`","kind":"answers","by_file":"b.txt","by_hash":"x","answers":["F1"]}`+"\n")
+			writeJSON(t, filepath.Join(QueueDir(fx.root), id+".json"), `{"ticket":"`+id+`","run":"r1","block":"B1","file":"a.txt","content_hash":"`+real+`","reopened_at":"Nov 11 2026"}`+"\n")
 			return id
 		},
 	}

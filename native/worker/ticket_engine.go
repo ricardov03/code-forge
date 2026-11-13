@@ -145,6 +145,8 @@ type enginePlan struct {
 	// only the batch was planned
 	light    *lightPlan
 	ordinary bool
+	// answers: an answers ticket's one session (B609)
+	answers *ansPlan
 }
 
 // jevAsk is engine.mjs jevWith: askJev with the worker's key bound (the key
@@ -397,6 +399,16 @@ func (w *TicketRunner) planOrdinary(t ledger.Object, cfg map[string]any, content
 // mapping; the packet directory is removed after (reviewTicket's finally).
 func (w *TicketRunner) runEngine(p *enginePlan, base func(string, string) ledger.Object) (ledger.Object, error) {
 	defer os.RemoveAll(p.workDir)
+	if p.answers != nil {
+		outcome, err := w.ansRun(p.answers)
+		if err != nil {
+			if IsUnsupported(err) {
+				return nil, err
+			}
+			return base("unavailable", "engine-error"), nil
+		}
+		return w.engineResult(outcome, base), nil
+	}
 	if p.light != nil {
 		outcome, ordinary, err := w.lightRun(p.light)
 		if err != nil {
