@@ -37,6 +37,8 @@ find-generic-password)
 add-generic-password)
   IFS= read -r a; IFS= read -r b
   [ "$a" = "$b" ] || exit 2
+  # B643: a read-only store exits 1 on every shell (dash exits 2 on a failed redirect)
+  [ -w "$KC" ] || exit 1
   printf '%s' "$a" > "$KC/$4.$6" ;;
 delete-generic-password)
   [ -f "$KC/$3.$5" ] || exit 44
