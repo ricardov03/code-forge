@@ -31,6 +31,10 @@ func run(args []string) (int, error) {
 			args = append([]string{"version"}, args[1:]...)
 		}
 		if route, ok := routes[args[0]]; ok {
+			// B613: `<command> --help` adds the Description and Options around the usage.
+			if name, ok := helpTarget(args); ok {
+				return helpWrap(name, args[1:], route), nil
+			}
 			return route(args[1:]), nil
 		}
 	}

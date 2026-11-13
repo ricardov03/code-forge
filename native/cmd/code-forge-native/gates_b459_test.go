@@ -80,7 +80,7 @@ func TestB459GatesHelpAndUsage(t *testing.T) {
 		t.Run(strings.Join(c.args, " "), func(t *testing.T) {
 			f := b459Setup(t)
 			code, out, errOut := f.call(nil, append([]string{"gates"}, c.args...)...)
-			b459Native(t, f, code, out, errOut, c.code, c.out, c.err)
+			b459Native(t, f, code, out, errOut, c.code, helpExpect(t, append([]string{"gates"}, c.args...), c.code, c.out), c.err)
 		})
 	}
 }

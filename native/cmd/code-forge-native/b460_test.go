@@ -100,8 +100,8 @@ func TestB460WorkerAnswersInGo(t *testing.T) {
 		code     int
 		out, err string
 	}{
-		{[]string{"worker", "--help"}, 0, workerUsage, ""},
-		{[]string{"worker", "-h", "--bogus"}, 0, workerUsage, ""},
+		{[]string{"worker", "--help"}, 0, helpWrapped(t, "worker", workerUsage), ""},
+		{[]string{"worker", "-h", "--bogus"}, 0, helpWrapped(t, "worker", workerUsage), ""},
 		{[]string{"worker"}, 2, "", workerUsage},
 		{[]string{"worker", "extra", "--run", "r-live"}, 2, "", workerUsage},
 		{[]string{"worker", "--bogus"}, 2, "", "worker: unknown flag \"--bogus\"\n" + workerUsage},
@@ -166,7 +166,7 @@ func TestB460SpawnAnswersInGo(t *testing.T) {
 		out  string
 		err  string
 	}{
-		{[]string{"spawn", "--help"}, 0, spawnUsage, ""},
+		{[]string{"spawn", "--help"}, 0, helpWrapped(t, "spawn", spawnUsage), ""},
 		{[]string{"spawn"}, 2, "", spawnUsage},
 		{[]string{"spawn", "--level", "L1", "--role", "coder"}, 2, "", spawnUsage},
 		{with("extra"), 2, "", spawnUsage},
@@ -243,7 +243,7 @@ func TestB460ReviewUsageInGo(t *testing.T) {
 		out  string
 		err  string
 	}{
-		{[]string{"review", "--help"}, 0, reviewUsage, ""},
+		{[]string{"review", "--help"}, 0, helpWrapped(t, "review", reviewUsage), ""},
 		{[]string{"review", "--json", "--help"}, 0, reviewUsage, ""},
 		{[]string{"review", "x"}, 2, "", "review: unexpected argument \"x\"\n" + reviewUsage},
 		{[]string{"review", "--nope"}, 2, "", "review: unknown flag \"--nope\"\n" + reviewUsage},

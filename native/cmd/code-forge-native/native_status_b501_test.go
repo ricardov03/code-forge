@@ -176,7 +176,7 @@ func TestB501NativeStatusHelpInGo(t *testing.T) {
 	for _, flag := range []string{"--help", "-h"} {
 		b501Stdin(t, "{}\n")
 		code, out, errText := runCaptured(t, "native-status", flag)
-		if code != 0 || out != "usage: code-forge native-status\n  Internal daemon companion: reads JSON records and rows from standard input.\n" || errText != "" {
+		if code != 0 || out != helpExpect(t, []string{"native-status", flag}, 0, "usage: code-forge native-status\n  Internal daemon companion: reads JSON records and rows from standard input.\n") || errText != "" {
 			t.Fatalf("%s: code=%d stdout=%q stderr=%q", flag, code, out, errText)
 		}
 	}
