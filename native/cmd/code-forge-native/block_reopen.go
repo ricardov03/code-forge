@@ -120,6 +120,7 @@ func runBlockReopen(args []string) int {
 		}
 	case loaded.State["status"] == "open" && len(blockstate.Array(loaded.State["open"])) > 0:
 		from = "open"
+		fromHash = current
 	default:
 		what := "has no review state"
 		if loaded.State != nil {
@@ -130,6 +131,7 @@ func runBlockReopen(args []string) int {
 	if loaded.Seq < 0 {
 		return p.refusal("reopen-tampered", fmt.Sprintf("reopen-tampered: the review state of %s has no valid anchor seq; nothing was recorded", file))
 	}
+	var earlier gatecheck.Row
 	for i := len(rows) - 1; i >= 0; i-- {
 		r := rows[i]
 		if r["event"] != "review.reopened" || r["block"] != p.id || r["file"] != file || r["at_seq"] != loaded.Seq || !gatecheck.Verified(r, key) {
@@ -142,6 +144,7 @@ func runBlockReopen(args []string) int {
 		if r["to_hash"] != current {
 			return p.refusal("reopen-already-recorded", fmt.Sprintf("reopen-already-recorded: %s was already reopened at state seq %.0f for other content; run review-file, or the content changed since the reopen; nothing was recorded", file, loaded.Seq))
 		}
+		earlier = r
 		break
 	}
 	evidence := blockstate.Evidence(reason, root, previewEntryMap(entry))
@@ -163,5 +166,6 @@ func runBlockReopen(args []string) int {
 	if !readable {
 		return p.refusal("reopen-yes-disagreed", "reopen-yes-disagreed: The current file cannot be read; nothing was recorded")
 	}
-	return p.fallback() // The judge runs even when an earlier reopen has the same hash.
+	// The judge runs even when an earlier reopen has the same hash.
+	return p.bjReopen(bjReopenCase{top: top, root: root, file: file, reason: reason, from: from, stopReason: stopReason, fromHash: fromHash, current: current, content: bytes, loaded: loaded, earlier: earlier, cfg: cfg})
 }

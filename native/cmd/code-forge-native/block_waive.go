@@ -226,10 +226,13 @@ func runBlockWaive(args []string) int {
 		return p.fallback()
 	}
 	reason := blockString(p.flags["reason"])
+	test := ""
 	if severity == "critical" {
-		if code := p.criticalTest(reason, root, entry, rows, key); code >= 0 {
+		cited, code := p.criticalTest(reason, root, entry, rows, key)
+		if code >= 0 {
 			return code
 		}
+		test = cited
 		if !slices.Contains(blockstate.Cited(reason, root), file) {
 			return p.refusal("waive-yes-no-evidence", fmt.Sprintf("waive-yes-no-evidence: cite the finding's path %s with :line or :start-end; nothing was recorded", file))
 		}
@@ -239,12 +242,14 @@ func runBlockWaive(args []string) int {
 	if _, ok := blockstate.ReadFile(root, file); !ok {
 		return p.refusal("waive-yes-disagreed", "waive-yes-disagreed: The current file cannot be read; nothing was recorded")
 	}
-	return p.fallback() // fresh model judge; no writes before this boundary
+	return p.bjWaive(bjWaiveCase{entry: entry, top: top, root: root, file: file, finding: finding, severity: severity, reason: reason, test: test, rows: rows, key: key})
 }
 
-func (p *blockPreview) criticalTest(reason, root string, entry ledger.Object, rows []gatecheck.Row, key []byte) int {
-	refuse := func(detail string) int {
-		return p.refusal("waive-yes-critical-no-test", "waive-yes-critical-no-test: "+detail+"; nothing was recorded")
+// criticalTest returns the cited acceptance test the latest passing gate
+// covers (passingAcceptanceTest), or a refusal's exit code.
+func (p *blockPreview) criticalTest(reason, root string, entry ledger.Object, rows []gatecheck.Row, key []byte) (string, int) {
+	refuse := func(detail string) (string, int) {
+		return "", p.refusal("waive-yes-critical-no-test", "waive-yes-critical-no-test: "+detail+"; nothing was recorded")
 	}
 	cited := blockstate.CitedTests(reason, root, blockstate.Array(previewEntryMap(entry)["acceptance"]))
 	if len(cited) == 0 {
@@ -268,7 +273,7 @@ func (p *blockPreview) criticalTest(reason, root string, entry ledger.Object, ro
 	}
 	listed, err := gates.List(root)
 	if err != nil {
-		return p.fallback()
+		return "", p.fallback()
 	}
 	baseline := gates.Baseline(root, entry, listed)
 	recorded, ok := latest["files"].(map[string]any)
@@ -286,7 +291,7 @@ func (p *blockPreview) criticalTest(reason, root string, entry ledger.Object, ro
 	}
 	for _, file := range cited {
 		if recorded[file] != nil && (latest["scope"] == "full" || latest["scope"] == "related" && scope.Kind == "related" && slices.Contains(scope.Files, file)) {
-			return -1
+			return file, -1
 		}
 	}
 	return refuse("the latest passing gate record must cover the cited acceptance test file and its current content")
