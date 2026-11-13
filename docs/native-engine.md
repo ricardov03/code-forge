@@ -8,9 +8,10 @@ You do not need to install Go. You still need Node.js 22 or newer.
 
 The command works in three steps:
 
-1. The shell entry finds `native/bin/<platform>-<arch>/code-forge-native`
-   inside the installed package. The platform is the operating system.
-   The architecture, or arch, is the processor type.
+1. The shell entry finds `code-forge-native` for `<platform>-<arch>`.
+   The platform is the operating system. The architecture, or arch, is the
+   processor type. The binary ships in its own npm package (B606); see
+   [Platforms with a binary](#platforms-with-a-binary) for where it looks.
 2. If that file exists and can run, the entry starts it. The binary is
    required (B569): with no binary for this platform and arch, a missing file
    or one without execute permission, the entry runs no Node. It prints one
@@ -229,14 +230,32 @@ stays after the run. Use `--json`, or `--out <file>`, to get JSON.
 
 ## Platforms with a binary
 
-Release builds supply these four targets:
+Release builds supply these four targets. Since B606 each target's binary is
+its own npm package, an optional dependency of `@codedology/code-forge` at the
+same exact version. npm installs only the package whose `os` and `cpu` match
+your machine, so the main package carries no binary and stays under 5 MB.
 
-| System | Processor | Package directory |
+| System | Processor | npm package |
 |---|---|---|
-| macOS | Apple silicon | `native/bin/darwin-arm64/` |
-| macOS | Intel 64-bit | `native/bin/darwin-x64/` |
-| Linux | x86 64-bit | `native/bin/linux-x64/` |
-| Linux | ARM 64-bit | `native/bin/linux-arm64/` |
+| macOS | Apple silicon | `@codedology/code-forge-darwin-arm64` |
+| macOS | Intel 64-bit | `@codedology/code-forge-darwin-x64` |
+| Linux | x86 64-bit | `@codedology/code-forge-linux-x64` |
+| Linux | ARM 64-bit | `@codedology/code-forge-linux-arm64` |
+
+Each platform package holds `bin/code-forge-native`, a README and the
+license; it has no install script. `bin/code-forge`, `scripts/install.sh`,
+`code-forge setup` and the Go binary look for the binary in this order, with
+`<pkg>` the installed main package:
+
+1. `<pkg>/node_modules/@codedology/code-forge-<target>/bin/code-forge-native`
+   (npm nested it under the main package).
+2. `<pkg>/../code-forge-<target>/bin/code-forge-native` (npm hoisted it
+   beside the main package, as in a global install).
+3. `<pkg>/native/bin/<target>/code-forge-native` (a local dev build).
+
+A source checkout (it has `native/go.mod`) uses step 3 only, so a published
+binary that `npm ci` put in `node_modules` never hides your own build. When no
+step finds a file, the message names the first path it tried.
 
 If the shell entry finds no binary for your platform and architecture, or
 the file is missing or lacks execute permission, it stops with exit 69 and
@@ -249,7 +268,7 @@ npm runs no install script. After `npm install -g @codedology/code-forge`,
 run `code-forge setup` yourself. It checks the binary for this system and
 processor. It works offline; it downloads nothing.
 
-1. It picks `native/bin/<platform>-<arch>/code-forge-native` from the package.
+1. It finds the binary for `<platform>-<arch>` in the order above (B606).
 2. It checks that the file exists. If the file lost its execute permission,
    setup restores mode 755.
 3. It compares the binary's version with the package version.
@@ -272,8 +291,9 @@ like any other verb, and Node reports the version mismatch.
 ### Repair the binary: `scripts/install.sh`
 
 When `code-forge` itself stops with exit 69, run the install script that ships
-in the package. It needs no Node, no network and no sudo, and writes nothing
-outside the package's `native/bin`:
+in the package. It needs no Node, no network and no sudo, and changes nothing
+but the binary's execute bit. It finds the binary in the same order as the
+entry (B606):
 
 ```sh
 sh "$(npm root -g)/@codedology/code-forge/scripts/install.sh"
@@ -527,8 +547,9 @@ call. It is not part of the code-forge binary or the npm package, and it has no 
 does not fall back to Node. Since B574 the Node scripts it replaced are deleted and the release
 workflow runs it for the GitHub release notes. Since B580 `npm run release` runs no Node on the
 laptop: it builds the four native targets with `go build` itself and accepts a green `CI` run for
-HEAD in place of the local `npm test`, `npm run typecheck` and generated-doc checks. See
-[Releasing](releasing.md).
+HEAD in place of the local `npm test`, `npm run typecheck` and generated-doc checks. Since B606
+it also writes one platform package per target to `dist/npm/<target>/` and checks every pack size.
+See [Releasing](releasing.md).
 
 ## How we keep Go and Node the same
 

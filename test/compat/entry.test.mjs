@@ -85,7 +85,9 @@ test('npm entry selects Go or Node and preserves all process inputs and outputs'
 
 /** B569: the launcher's message when the Go binary cannot run. @param {{dir: string, binary: string}} f @param {string} state */
 function missingEngine(f, state) {
-  return `code-forge: the Go engine for ${host} is ${state}\n  expected: ${f.binary}\n  fix: sh '${f.dir}/scripts/install.sh'\n  if that fails, reinstall: npm i -g @codedology/code-forge\n`;
+  // B606: with no binary anywhere, the launcher names the platform package path under the main package.
+  const expected = state === 'missing' ? path.join(f.dir, 'node_modules', '@codedology', `code-forge-${host}`, 'bin', 'code-forge-native') : f.binary;
+  return `code-forge: the Go engine for ${host} is ${state}\n  expected: ${expected}\n  fix: sh '${f.dir}/scripts/install.sh'\n  if that fails, reinstall: npm i -g @codedology/code-forge\n`;
 }
 
 test('empty public route table hands unknown verbs and aliases to Node through linked entries', (t) => {

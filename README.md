@@ -14,6 +14,7 @@ You approve the plan and keep control of budgets, permissions, and landing the r
 ## Install
 
 Requires Node.js >= 22 and git. Install the CLI with `npm install -g @codedology/code-forge`.
+The Go binary for your system comes in its own small package, `@codedology/code-forge-<platform>-<arch>` (darwin-arm64, darwin-x64, linux-x64 or linux-arm64). npm installs only the one that matches your machine, as an optional dependency, so the main package stays under 5 MB.
 npm runs no install script, so then run `code-forge setup`: it checks the Go binary for your system and prints `OK` or the one command that fixes it.
 The Go binary is required: with no usable binary, `code-forge` stops with exit 69 and names the fix. To check or repair the binary on its own, run `sh "$(npm root -g)/@codedology/code-forge/scripts/install.sh"`; if that fails, run `npm i -g @codedology/code-forge` again.
 macOS: worktrees default to a `.noindex` folder so Spotlight does not index them.

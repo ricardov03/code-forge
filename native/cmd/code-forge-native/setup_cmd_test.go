@@ -141,8 +141,10 @@ func TestSetupCheckMissingUnsupportedAndExecBits(t *testing.T) {
 		return code, out.String(), errOut.String()
 	}
 	binary := filepath.Join(pkg, "native", "bin", "linux-arm64", "code-forge-native")
+	// B606: with no binary anywhere the message names the platform package path.
+	nested := filepath.Join(pkg, "node_modules", "@codedology", "code-forge-linux-arm64", "bin", "code-forge-native")
 	code, out, errOut := check("linux-arm64", "2.0.0")
-	if want := "code-forge setup: Go binary is missing: " + binary + "\nfix: npm install -g @codedology/code-forge@2.0.0\n"; code != 1 || out != "" || errOut != want {
+	if want := "code-forge setup: Go binary is missing: " + nested + "\nfix: npm install -g @codedology/code-forge@2.0.0\n"; code != 1 || out != "" || errOut != want {
 		t.Fatalf("missing = %d %q %q; want 1 and %q", code, out, errOut, want)
 	}
 	code, _, errOut = check("freebsd-x64", "2.0.0")

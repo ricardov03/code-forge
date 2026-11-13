@@ -142,9 +142,11 @@ test('launcher: `code-forge setup` with a broken or missing Go binary names the 
     const real = realpathSync(pkg);
     const r = spawnSync(path.join(pkg, 'bin', 'code-forge'), ['setup'], { encoding: 'utf8', cwd: pkg });
     const state = opts.binary === undefined ? 'is missing' : 'failed to run setup (exit 3)';
+    // B606: a missing binary names the platform package path under the main package.
+    const expected = opts.binary === undefined ? path.join(real, 'node_modules', '@codedology', `code-forge-${HOST}`, 'bin', 'code-forge-native') : path.join(real, path.relative(pkg, binary));
     assert.equal(r.status, 69, r.stderr);
     assert.equal(r.stdout, '');
-    assert.equal(r.stderr, `code-forge: the Go engine for ${HOST} ${state}\n  expected: ${path.join(real, path.relative(pkg, binary))}\n  fix: sh '${real}/scripts/install.sh'\n  if that fails, reinstall: npm i -g @codedology/code-forge\n`);
+    assert.equal(r.stderr, `code-forge: the Go engine for ${HOST} ${state}\n  expected: ${expected}\n  fix: sh '${real}/scripts/install.sh'\n  if that fails, reinstall: npm i -g @codedology/code-forge\n`);
   }
 });
 

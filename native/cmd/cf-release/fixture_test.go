@@ -64,15 +64,21 @@ run)
     echo "built site with $(cat src/data/site-data.json)"; exit "${FAKE_BUILD_EXIT:-0}" ;;
   esac ;;
 pack)
-  seen pack
-  if [ -n "$FAKE_NPM_PACK_EXIT" ]; then echo "npm error pack broke" >&2; exit "$FAKE_NPM_PACK_EXIT"; fi
+  if [ -n "$FAKE_NPM_PACK_EXIT" ]; then seen pack; echo "npm error pack broke" >&2; exit "$FAKE_NPM_PACK_EXIT"; fi
   name=$(sed -n 's/^  "name": "\(.*\)",$/\1/p' package.json | head -n 1)
   version=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' package.json | head -n 1)
   files='{"path":"package.json"}'
-  if [ -d native ]; then
-    for t in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do files="$files,{\"path\":\"native/bin/$t/code-forge-native\"}"; done
+  # B606: a platform package (dist/npm/<target>) ships its binary; FAKE_NPM_PACK_BIG=<target> makes it 40 MB.
+  if [ -f bin/code-forge-native ]; then
+    files="$files,{\"path\":\"bin/code-forge-native\"}"
+    size=7654321
+    [ "$(basename "$(pwd)")" != "$FAKE_NPM_PACK_BIG" ] || size=40000000
+  else
+    seen pack
+    size=${FAKE_NPM_PACK_SIZE:-1234567}
+    [ -z "$FAKE_NPM_PACK_NATIVE_BIN" ] || files="$files,{\"path\":\"native/bin/linux-x64/code-forge-native\"}"
   fi
-  printf '[{"name":"%s","version":"%s","size":1234567,"entryCount":7,"files":[%s]}]\n' "$name" "$version" "$files"
+  printf '[{"name":"%s","version":"%s","size":%s,"entryCount":7,"files":[%s]}]\n' "$name" "$version" "$size" "$files"
   exit 0 ;;
 ls) echo '{"name":"x","dependencies":{"a":{"version":"1.0.0","dependencies":{"b":{"version":"2.0.0"}}}}}'; exit 0 ;;
 ci) echo "fake npm ci"; exit 0 ;;
@@ -195,6 +201,26 @@ const fixtureShrinkwrap = `{
 }
 `
 
+// nativeFixtureManifests are package.json and npm-shrinkwrap.json of a package with a native
+// build (B606): the four platform packages are optional dependencies pinned to the version.
+func nativeFixtureManifests() (string, string) {
+	var deps, entries string
+	for i, t := range []string{"darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"} {
+		sep := ","
+		if i == 3 {
+			sep = ""
+		}
+		osName, cpu, _ := strings.Cut(t, "-")
+		deps += "    \"@example/pkg-" + t + "\": \"0.21.0\"" + sep + "\n"
+		entries += ",\n    \"node_modules/@example/pkg-" + t + "\": {\n      \"version\": \"0.21.0\",\n      \"cpu\": [\n        \"" + cpu +
+			"\"\n      ],\n      \"optional\": true,\n      \"os\": [\n        \"" + osName + "\"\n      ]\n    }"
+	}
+	pkg := strings.TrimSuffix(fixturePackage, "\n}\n") + ",\n  \"optionalDependencies\": {\n" + deps + "  }\n}\n"
+	shrink := strings.Replace(fixtureShrinkwrap, "      \"version\": \"0.21.0\"\n    }\n  }\n}\n",
+		"      \"version\": \"0.21.0\",\n      \"optionalDependencies\": {\n"+strings.ReplaceAll(deps, "    \"", "        \"")+"      }\n    }"+entries+"\n  }\n}\n", 1)
+	return pkg, shrink
+}
+
 const fixtureStepByStep = "# Step by step\n\nInstall:\n\n    npx @codedology/code-forge@0.21.0 init\n\n```\n" +
 	"@codedology/code-forge 0.21.0\n```\n\nNot a pin: @codedology/code-forge@0.21.0x stays.\n"
 
@@ -291,7 +317,8 @@ func newFixture(t *testing.T, o fixtureOpts) *fixture {
 	}
 	if o.native {
 		files["native/go.mod"] = "module example.invalid/native\n\ngo 1.22\n"
-		files[".gitignore"] = ".code-forge-tmp/\nnative/bin/\n"
+		files[".gitignore"] = ".code-forge-tmp/\nnative/bin/\n/dist/npm/\n"
+		files["package.json"], files["npm-shrinkwrap.json"] = nativeFixtureManifests()
 	}
 	for name, body := range files {
 		f.write(filepath.Join(f.repo, name), body)

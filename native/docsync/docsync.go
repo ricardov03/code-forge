@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/ricardov03/code-forge/native/pkgroot"
 )
 
 // DefaultURL is the published docs file; CODE_FORGE_DOCS_URL overrides it.
@@ -56,19 +58,10 @@ func URL() string {
 	return DefaultURL
 }
 
-// PackageRoot is the installed package root: the binary lives at
+// PackageRoot is the installed package root: the main package of the
+// platform package that holds this binary (B606), or the root above
 // <root>/native/bin/<platform>-<arch>/code-forge-native.
-func PackageRoot() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	exe, err = filepath.EvalSymlinks(exe)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(exe), "..", "..", "..")), nil
-}
+func PackageRoot() (string, error) { return pkgroot.Root() }
 
 // InstalledVersion reads the version field of <root>/package.json.
 func InstalledVersion(root string) (string, error) {

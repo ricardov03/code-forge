@@ -2,7 +2,8 @@
 // B463: check the Go binary this package ships for the host OS/arch.
 //   code-forge setup      (the Go binary serves it; bin/code-forge runs this file when the binary
 //                          is missing, not executable or crashes, and src/cli/setup.mjs imports it)
-// Picks native/bin/<platform>-<arch>/code-forge-native, restores lost exec bits, runs
+// Picks the @codedology/code-forge-<platform>-<arch> package's binary (under or beside this
+// package), else native/bin/<platform>-<arch>/code-forge-native (B606), restores lost exec bits, runs
 // `<binary> internal version` and compares its version to package.json. Success prints one OK
 // line (exit 0). A failure prints the problem and one `fix:` line (exit 1). Usage errors exit 2.
 // Local checks only: no network. npm runs no install script: customers run `code-forge setup`.
@@ -24,11 +25,27 @@ class Problem extends Error {
   }
 }
 
+/**
+ * B606: the same lookup as bin/code-forge and src/util/native.mjs, kept here so this file runs on
+ * its own: the platform package under this package, then beside it, then native/bin/<target>; a
+ * git checkout (native/go.mod) uses its own build only. Missing names the first candidate.
+ * @param {string} pkg @param {string} target
+ */
+function findBinary(pkg, target) {
+  const dev = path.join(pkg, 'native', 'bin', target, 'code-forge-native');
+  const candidates = existsSync(path.join(pkg, 'native', 'go.mod')) ? [dev] : [
+    path.join(pkg, 'node_modules', '@codedology', `code-forge-${target}`, 'bin', 'code-forge-native'),
+    path.join(path.dirname(path.resolve(pkg)), `code-forge-${target}`, 'bin', 'code-forge-native'),
+    dev,
+  ];
+  return candidates.find((c) => existsSync(c) && statSync(c).isFile()) ?? candidates[0];
+}
+
 /** @param {string} pkg @returns {string} the OK line */
 function check(pkg) {
   const { name, version } = JSON.parse(readFileSync(path.join(pkg, 'package.json'), 'utf8'));
   const target = `${process.platform}-${process.arch}`;
-  const binary = path.join(pkg, 'native', 'bin', target, 'code-forge-native');
+  const binary = findBinary(pkg, target);
   const sourceCheckout = existsSync(path.join(pkg, 'native', 'go.mod'));
   const reinstall = sourceCheckout ? 'node scripts/build-native.mjs --host' : `npm install -g ${name}@${version}`;
   if (!TARGETS.includes(target)) {

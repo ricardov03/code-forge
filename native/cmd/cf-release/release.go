@@ -218,9 +218,32 @@ type foundLoc struct {
 	bump                func(string) (string, error)
 }
 
-func readLocations(root, current string) ([]foundLoc, error) {
+// platformPins are the version fields of the four platform packages (B606) that a release with a
+// native build bumps with the package version: package.json optionalDependencies and the
+// shrinkwrap's root optionalDependencies and node_modules entries.
+func platformPins(file, name string) [][]string {
+	var keys [][]string
+	for _, t := range bnTargets {
+		pkg := name + "-" + t[0] + "-" + t[1]
+		switch file {
+		case "package.json":
+			keys = append(keys, []string{"optionalDependencies", pkg})
+		case "npm-shrinkwrap.json":
+			keys = append(keys, []string{"packages", "", "optionalDependencies", pkg}, []string{"packages", "node_modules/" + pkg, "version"})
+		}
+	}
+	return keys
+}
+
+func readLocations(root, name, current string) ([]foundLoc, error) {
 	var found []foundLoc
 	for _, loc := range locations {
+		pins := 0
+		if hasNative(root) {
+			extra := platformPins(loc.file, name)
+			pins = len(extra)
+			loc.json = append(append([][]string{}, loc.json...), extra...)
+		}
 		abs := filepath.Join(root, loc.file)
 		if !exists(abs) {
 			if loc.required {
@@ -257,6 +280,9 @@ func readLocations(root, current string) ([]foundLoc, error) {
 				return nil, &refusal{loc.file + ": " + fieldLabel(keys) + " is " + shown + ", package.json says " + current}
 			}
 			labels = append(labels, fieldLabel(keys))
+		}
+		if pins > 0 {
+			labels = append(labels[:len(labels)-pins], "platform package pins")
 		}
 		found = append(found, foundLoc{file: loc.file, label: strings.Join(labels, ", "), before: before,
 			bump: func(v string) (string, error) {
@@ -615,7 +641,98 @@ func (a *app) buildNative(root string) string {
 	return ""
 }
 
-func (a *app) checkPack(root, name, version string) string {
+// Package size limits (B606): the main package ships no Go binaries; each platform package ships one.
+const (
+	mainPackLimit     = 5_000_000
+	platformPackLimit = 35_000_000
+)
+
+// platformDir is where the release writes a target's platform package (gitignored).
+func platformDir(root, target string) string { return filepath.Join(root, "dist", "npm", target) }
+
+// writePlatformPackages writes dist/npm/<target>/ for each release target after the native build
+// (B606): package.json (<name>-<target>, the release version, os, cpu, files ["bin"], no scripts),
+// a short README.md, the LICENSE and bin/code-forge-native.
+func (a *app) writePlatformPackages(root string, pkg *jsObject, version string) string {
+	nameV, nameOK := pkg.get("name")
+	name := jsTemplate(nameV, nameOK)
+	license, _ := os.ReadFile(filepath.Join(root, "LICENSE"))
+	for _, t := range bnTargets {
+		target := t[0] + "-" + t[1]
+		dir := platformDir(root, target)
+		failure := func() error {
+			if err := os.RemoveAll(dir); err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+				return err
+			}
+			manifest := &jsObject{vals: map[string]any{}}
+			manifest.set("name", name+"-"+target)
+			manifest.set("version", version)
+			manifest.set("description", "The "+target+" Go engine of "+name+". Install "+name+"; npm adds this package on "+target+".")
+			for _, k := range []string{"license", "repository", "homepage"} {
+				if v, ok := pkg.get(k); ok {
+					manifest.set(k, v)
+				}
+			}
+			manifest.set("os", []any{t[0]})
+			manifest.set("cpu", []any{t[1]})
+			manifest.set("files", []any{"bin"})
+			manifest.set("publishConfig", func() *jsObject {
+				o := &jsObject{vals: map[string]any{}}
+				o.set("access", "public")
+				return o
+			}())
+			if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(jsStringify(manifest, "  ")+"\n"), 0o644); err != nil {
+				return err
+			}
+			readme := "# " + name + "-" + target + "\n\nThe " + target + " Go binary of [" + name + "](https://www.npmjs.com/package/" + name +
+				"), version " + version + ".\n\nDo not install it by hand: `npm i -g " + name + "` adds it on " + target + ".\n"
+			if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(readme), 0o644); err != nil {
+				return err
+			}
+			if len(license) > 0 {
+				if err := os.WriteFile(filepath.Join(dir, "LICENSE"), license, 0o644); err != nil {
+					return err
+				}
+			}
+			binary, err := os.ReadFile(filepath.Join(root, "native", "bin", target, "code-forge-native"))
+			if err != nil {
+				return err
+			}
+			dest := filepath.Join(dir, "bin", "code-forge-native")
+			if err := os.WriteFile(dest, binary, 0o755); err != nil {
+				return err
+			}
+			return os.Chmod(dest, 0o755)
+		}()
+		if failure != nil {
+			return "platform package " + target + ": " + failure.Error()
+		}
+		a.ok("platform package " + name + "-" + target + "@" + version + ": dist/npm/" + target)
+	}
+	return ""
+}
+
+// checkPacks runs npm pack --dry-run on each platform package (native builds) and then on the
+// main package.
+func (a *app) checkPacks(root, name, version string) string {
+	if hasNative(root) {
+		for _, t := range bnTargets {
+			target := t[0] + "-" + t[1]
+			if f := a.checkPack(platformDir(root, target), name+"-"+target, version, true); f != "" {
+				return f
+			}
+		}
+	}
+	return a.checkPack(root, name, version, false)
+}
+
+// checkPack runs npm pack --dry-run --json in root. A platform package (dist/npm/<target>) must
+// ship bin/code-forge-native and stay under 35 MB; the main package must ship no native/bin file
+// and stay under 5 MB.
+func (a *app) checkPack(root, name, version string, platform bool) string {
 	r := runCmd(root, 0, "npm", "pack", "--dry-run", "--json")
 	if r.code != 0 {
 		return fmt.Sprintf("npm pack --dry-run failed (exit %d): %s", r.code, jsTrim(or(r.stderr, r.stdout)))
@@ -649,35 +766,40 @@ func (a *app) checkPack(root, name, version string) string {
 	if s, isStr := pv.(string); !pvOK || !isStr || s != version {
 		return "npm pack --dry-run: the tarball is " + jsTemplate(pn, pnOK) + "@" + jsTemplate(pv, pvOK) + ", expected " + name + "@" + version
 	}
-	native := hasNative(root)
+	native := platform || hasNative(root)
+	limit, limitMB := mainPackLimit, "5"
+	if platform {
+		limit, limitMB = platformPackLimit, "35"
+	}
 	sizeV, _ := field("size")
 	size, sizeOK := sizeV.(jsNum)
 	finite := sizeOK && !isNaNInf(float64(size))
 	if native && (!finite || size < 0) {
-		return "npm pack --dry-run: missing package size"
+		return "npm pack --dry-run: missing package size of " + name
 	}
 	if finite {
-		a.ok(fmt.Sprintf("package size: %s bytes (%s MB; limit <35 MB)", jsNumberString(float64(size)), toFixed2(float64(size)/1_000_000)))
-		if size >= 35_000_000 {
-			return "published package must be under 35 MB"
+		a.ok(fmt.Sprintf("package size: %s %s bytes (%s MB; limit <%s MB)", name, jsNumberString(float64(size)), toFixed2(float64(size)/1_000_000), limitMB))
+		if size >= jsNum(limit) {
+			return name + " must be under " + limitMB + " MB to publish"
 		}
 	}
 	filesV, filesOK := field("files")
 	files, _ := filesV.([]any)
-	if native {
-		for _, target := range []string{"darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"} {
-			found := false
-			for _, f := range files {
-				if o, isObj := f.(*jsObject); isObj {
-					if p, _ := o.get("path"); p == "native/bin/"+target+"/code-forge-native" {
-						found = true
-					}
-				}
+	found := false
+	for _, f := range files {
+		if o, isObj := f.(*jsObject); isObj {
+			p, _ := o.get("path")
+			path, _ := p.(string)
+			if platform && path == "bin/code-forge-native" {
+				found = true
 			}
-			if !found {
-				return "npm pack --dry-run: missing native binary " + target
+			if !platform && strings.HasPrefix(path, "native/bin/") {
+				return "npm pack --dry-run: " + name + " ships " + path + "; the Go binaries ship in the platform packages (dist/npm/<target>)"
 			}
 		}
+	}
+	if platform && !found {
+		return "npm pack --dry-run: " + name + " is missing bin/code-forge-native"
 	}
 	count, countOK := field("entryCount")
 	shown := ""
@@ -729,7 +851,7 @@ func (a *app) failed(root, label string, r result) string {
 // The Node checks (gen-config-doc and gen-commands-doc --check, npm test, npm run typecheck) run in
 // GitHub CI, and ciCheck reads that run before anything is written (B580).
 func (a *app) runChecks(root, name, version string) (string, error) {
-	if f := a.checkPack(root, name, version); f != "" {
+	if f := a.checkPacks(root, name, version); f != "" {
 		return f, nil
 	}
 
@@ -1039,7 +1161,7 @@ func (a *app) release(root string, opts releaseOpts, written *[]planFile, restor
 		dry = " (dry run: nothing is written)"
 	}
 	a.out("release " + name + ": " + current + " → " + next + dry + "\n\n== 1. preflight ==\n")
-	locs, err := readLocations(root, current)
+	locs, err := readLocations(root, name, current)
 	if err != nil {
 		return 0, err
 	}
@@ -1118,7 +1240,7 @@ func (a *app) release(root string, opts releaseOpts, written *[]planFile, restor
 	if opts.dryRun {
 		a.out("\n== plan (dry run) ==\n")
 		if hasNative(root) {
-			a.out("would build-native: four release targets; package size must be under 35 MB\n")
+			a.out("would build-native: four release targets, each written as a platform package to dist/npm/<target> (under 35 MB each); the main package must be under 5 MB\n")
 		}
 		checks := "none (--no-checks)"
 		if opts.checks {
@@ -1164,6 +1286,11 @@ func (a *app) release(root string, opts releaseOpts, written *[]planFile, restor
 	if f := a.buildNative(root); f != "" {
 		return rollback(f)
 	}
+	if hasNative(root) {
+		if f := a.writePlatformPackages(root, pkg, next); f != "" {
+			return rollback(f)
+		}
+	}
 	if opts.checks {
 		f, err := a.runChecks(root, name, next)
 		if err != nil {
@@ -1174,7 +1301,7 @@ func (a *app) release(root string, opts releaseOpts, written *[]planFile, restor
 		}
 	} else {
 		if hasNative(root) {
-			if f := a.checkPack(root, name, next); f != "" {
+			if f := a.checkPacks(root, name, next); f != "" {
 				return rollback(f)
 			}
 			a.warn("!!! --no-checks: the CI run for HEAD (npm test, typecheck, gen-config-doc and gen-commands-doc --check), npm ls and plugin validate were NOT checked; native build and package size checked !!!")
@@ -1226,7 +1353,14 @@ func (a *app) release(root string, opts releaseOpts, written *[]planFile, restor
 	a.ok("annotated tag " + tag)
 
 	a.out("\n== 6. next steps (nothing was pushed or published) ==\n")
-	a.out("  publish to npm first, then push (the tag push only creates the GitHub release; CI never publishes):\n")
+	if hasNative(root) {
+		a.out("  publish the four platform packages first, then the main package, then push (the tag push only creates the GitHub release; CI never publishes):\n")
+		for _, t := range bnTargets {
+			a.out("      npm publish dist/npm/" + t[0] + "-" + t[1] + "\n")
+		}
+	} else {
+		a.out("  publish to npm first, then push (the tag push only creates the GitHub release; CI never publishes):\n")
+	}
 	a.out("      npm publish\n")
 	a.out("      npm run release:site\n")
 	a.out("      git push origin " + branch + " --follow-tags\n")

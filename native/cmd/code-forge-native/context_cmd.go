@@ -21,6 +21,7 @@ import (
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/pkgroot"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -211,7 +212,7 @@ func contextPack(args []string, stderr io.Writer) int {
 	if err != nil {
 		return refuse("this install's executable cannot be found (" + err.Error() + ")")
 	}
-	bin, err := filepath.EvalSymlinks(filepath.Join(filepath.Dir(executable), "..", "..", "..", "bin", "code-forge.mjs"))
+	bin, err := filepath.EvalSymlinks(filepath.Join(pkgroot.FromExecutable(executable), "bin", "code-forge.mjs"))
 	if err != nil {
 		return refuse("this install's bin/code-forge.mjs cannot be found (" + contextpack.Errno(err) + "); reinstall code-forge")
 	}

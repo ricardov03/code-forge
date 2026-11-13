@@ -1,11 +1,12 @@
 #!/bin/sh
 # code-forge install check (B569): `sh <package>/scripts/install.sh`
-# Finds the Go binary this package ships for the host OS/arch
-# (native/bin/<platform>-<arch>/code-forge-native), restores a lost execute bit, runs
+# Finds the Go binary for the host OS/arch (the @codedology/code-forge-<platform>-<arch> package
+# under or beside this one, else native/bin/<platform>-<arch>/code-forge-native; B606), restores a
+# lost execute bit, runs
 # `<binary> --version` and `<binary> internal version`, and compares the binary's version with
 # package.json. Prints one OK line (exit 0), or the problem and one `fix:` line (exit 1).
-# Usage errors exit 2. Local checks only: no network, no sudo, and no writes outside the
-# package's native/bin. npm runs no install script; run this after `npm i -g` or to repair.
+# Usage errors exit 2. Local checks only: no network, no sudo, and no writes except that
+# binary's mode. npm runs no install script; run this after `npm i -g` or to repair.
 
 usage='usage: sh scripts/install.sh\n'
 case "${1:-}" in
@@ -64,7 +65,24 @@ case "$mach" in
   *) arch=$mach ;;
 esac
 target=$platform-$arch
-binary=$pkg/native/bin/$target/code-forge-native
+# B606: each target's binary is its own npm package, @codedology/code-forge-<target>, an optional
+# dependency. Lookup order: (1) under this package (nested node_modules), (2) beside it (a hoisted or
+# global install), (3) the dev build native/bin/<target>. A git checkout (native/go.mod) uses its own
+# build only. Keep this lookup the same as bin/code-forge and the Go pkgroot package.
+nested=$pkg/node_modules/@codedology/code-forge-$target/bin/code-forge-native
+sibling=${pkg%/*}/code-forge-$target/bin/code-forge-native
+dev=$pkg/native/bin/$target/code-forge-native
+if [ -f "$pkg/native/go.mod" ]; then
+  binary=$dev
+elif [ -f "$nested" ]; then
+  binary=$nested
+elif [ -f "$sibling" ]; then
+  binary=$sibling
+elif [ -f "$dev" ]; then
+  binary=$dev
+else
+  binary=$nested
+fi
 
 case "$target" in
   darwin-arm64|darwin-x64|linux-arm64|linux-x64) ;;

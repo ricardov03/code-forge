@@ -7,10 +7,35 @@ import { fileURLToPath } from 'node:url';
 import pkg from '../../package.json' with { type: 'json' };
 import { exec } from './exec.mjs';
 
+const PKG_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+
+/**
+ * B606: the Go binary path, in the same order as bin/code-forge and the Go pkgroot package: the
+ * @codedology/code-forge-<target> package under this package, then beside it, then the dev build
+ * native/bin/<target>. A git checkout (native/go.mod) uses its own build only.
+ * @param {string} root package root @param {string} target <platform>-<arch>
+ * @returns {{binary: string, found: boolean}} found=false names the first candidate.
+ */
+export function findNativeBinary(root, target) {
+  const dev = path.join(root, 'native', 'bin', target, 'code-forge-native');
+  let candidates = [dev];
+  try { statSync(path.join(root, 'native', 'go.mod')); } catch {
+    candidates = [
+      path.join(root, 'node_modules', '@codedology', `code-forge-${target}`, 'bin', 'code-forge-native'),
+      path.join(path.dirname(path.resolve(root)), `code-forge-${target}`, 'bin', 'code-forge-native'),
+      dev,
+    ];
+  }
+  for (const binary of candidates) {
+    try { if (statSync(binary).isFile()) return { binary, found: true }; } catch { /* next */ }
+  }
+  return { binary: candidates[0], found: false };
+}
+
 /** @returns {string | null} the optional executable shipped for this host. */
 export function nativePath() {
   if (process.env.CODE_FORGE_NATIVE === '0') return null;
-  const binary = fileURLToPath(new URL(`../../native/bin/${process.platform}-${process.arch}/code-forge-native`, import.meta.url));
+  const { binary } = findNativeBinary(PKG_ROOT, `${process.platform}-${process.arch}`);
   try {
     if (!statSync(binary).isFile()) return null;
     accessSync(binary, constants.X_OK);

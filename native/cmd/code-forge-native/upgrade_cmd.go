@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/docsync"
+	"github.com/ricardov03/code-forge/native/pkgroot"
 )
 
 const upgradeUsage = "usage: code-forge upgrade [--source <path>] [--plain]\n"
@@ -53,7 +54,7 @@ func upgradeRealPackageRoot() (string, bool) {
 	if exe, err = filepath.EvalSymlinks(exe); err != nil {
 		return "", false
 	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(exe), "..", "..", ".."))
+	root := pkgroot.FromExecutable(exe)
 	module := filepath.Join(root, "src", "cli", "upgrade.mjs")
 	if real, err := filepath.EvalSymlinks(module); err != nil || real != module {
 		return "", false
@@ -62,7 +63,7 @@ func upgradeRealPackageRoot() (string, bool) {
 	if (runtime.GOOS != "darwin" && runtime.GOOS != "linux") || arch == "" {
 		return "", false
 	}
-	child := filepath.Join(root, "native", "bin", runtime.GOOS+"-"+arch, "code-forge-native")
+	child, _ := pkgroot.Find(root, runtime.GOOS+"-"+arch) // B606
 	if real, err := filepath.EvalSymlinks(child); err != nil || real != exe {
 		return "", false
 	}

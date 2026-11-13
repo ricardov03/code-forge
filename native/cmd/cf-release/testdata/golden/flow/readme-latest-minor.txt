@@ -273,7 +273,7 @@ docs/step-by-step.md: version pins: 0.21.0 → 0.22.0
 
 == 4. checks ==
 ok    CI for HEAD 65185a7ad12dfd6383161a9a517ec841565b4688: completed, success (npm test, npm run typecheck, gen-config-doc and gen-commands-doc --check)
-ok    package size: 1234567 bytes (1.23 MB; limit <35 MB)
+ok    package size: @example/pkg 1234567 bytes (1.23 MB; limit <5 MB)
 ok    npm pack --dry-run: @example/pkg@0.22.0, 7 files
 ok    npm ls: 0 invalid, 0 missing
 ok    claude plugin validate .

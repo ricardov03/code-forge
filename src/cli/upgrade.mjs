@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
+import { findNativeBinary } from '../util/native.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { installsPath, readInstalls, upgradeAll } from '../install/link.mjs';
 
@@ -192,7 +193,7 @@ export async function runUpgrade(
  * @returns {{line?: string, warning?: string}}
  */
 export function nativeDocsSync() {
-  const binary = path.join(__dirname, '..', '..', 'native', 'bin', `${process.platform}-${process.arch}`, 'code-forge-native');
+  const { binary } = findNativeBinary(path.join(__dirname, '..', '..'), `${process.platform}-${process.arch}`); // B606
   const result = spawnSync(binary, ['docs', 'sync'], { encoding: 'utf8', timeout: 10000 });
   if (result.error) return { warning: result.error.message };
   if (result.status !== 0) return { warning: `exit ${result.status ?? result.signal}` };
