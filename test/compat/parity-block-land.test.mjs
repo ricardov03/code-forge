@@ -200,11 +200,26 @@ async function prepareLand(copy, kind = 'clean', merge = false, checkUnsigned = 
   const blockContent = await readFile(path.join(tree, 'sample.mjs'), 'utf8');
   let joins = 0;
   let landExited = false;
+  // serveDaemon drops the connection when an answer throws; keep the first
+  // error so cleanup reports the fixture failure instead of a later count.
+  let answerError;
   const daemon = await serveDaemon(copy, RUN, async (req) => {
+    try { return await answer(req); } catch (err) { answerError ??= err; throw err; }
+  });
+  async function answer(req) {
     if (req.method === 'rows') return { rows: (await readFile(path.join(copy.home, '.code-forge/ledger/land-fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line)) };
     assert.equal(req.method, 'wait-block');
     joins++;
-    if (kind === 'moved' && joins === 1) git(tree, ['commit', '-q', '--allow-empty', '-m', 'during join']);
+    if (kind === 'moved' && joins === 1) {
+      // B601: the land's parallel gate runs `git status` in this worktree,
+      // which holds its index.lock while it refreshes the index; a porcelain
+      // `git commit` here then fails with "index.lock: File exists" (seen on
+      // Linux CI). The block's tree moves the same way through plumbing that
+      // never takes the index lock: a new commit object, then the branch ref.
+      const head = git(tree, ['rev-parse', 'HEAD']);
+      const moved = git(tree, ['commit-tree', head + '^{tree}', '-p', head, '-m', 'during join']);
+      git(tree, ['update-ref', '-m', 'commit: during join', 'HEAD', moved, head]);
+    }
     // Join refusals must follow gate completion, regardless of how long the
     // machine takes to schedule the gate. Child-exit cleanup ends the poll;
     // a hung fixture is left to the test runner's timeout.
@@ -226,10 +241,11 @@ async function prepareLand(copy, kind = 'clean', merge = false, checkUnsigned = 
     const queue = path.join(copy.repo, '.code-forge/queue');
     const marker = (await readdir(queue)).find((name) => name.endsWith('.done'));
     return { block: 'B1', files: [{ file: 'sample.mjs', ticket: marker.slice(0, -5), status: kind === 'findings' ? 'findings' : 'reviewed', outcome: kind === 'findings' ? 'findings' : 'approved' }, ...(kind === 'auto' ? [{ file: 'outsider.mjs', status: 'reviewed', outcome: 'approved' }] : [])], done: true };
-  });
+  }
   return async () => {
     landExited = true;
     await daemon.cleanup();
+    if (answerError) throw answerError;
     assert.equal(git(copy.repo, ['symbolic-ref', 'HEAD']), 'refs/heads/main', 'main remains checked out');
     const mainAfter = git(copy.repo, ['rev-parse', 'main']);
     if (merge) {
@@ -251,6 +267,19 @@ async function prepareLand(copy, kind = 'clean', merge = false, checkUnsigned = 
     assert.equal(rows.filter((r) => r.event === 'block.claim').length, kind === 'auto' ? 1 : 0);
     if (kind === 'findings') assert.equal(joins, 3, 'findings join retries are capped at three');
   };
+}
+// A land assertion is reported even when the fixture cleanup also fails; a
+// cleanup error alone is still a failure (B601: a cleanup count once hid the
+// real error).
+async function withCleanup(body, cleanup) {
+  let failure;
+  try { await body(); } catch (err) { failure = err; }
+  try { await cleanup(); } catch (err) {
+    if (!failure) throw err;
+    // The runner prints the stack, which already holds the message.
+    failure.stack = `${failure.stack}\nfixture cleanup also failed: ${err?.stack ?? err}`;
+  }
+  if (failure) throw failure;
 }
 for (const kind of ['clean', 'findings', 'red', 'moved', 'timeout', 'auto', 'orphan']) {
   test(`full native land: ${kind} has exact Node parity`, async () => {
@@ -281,7 +310,7 @@ test('ported land and optional merge succeed with Node unavailable', async () =>
     await cp(f.home, short, { recursive: true });
     const direct = { ...f, home: short };
     const cleanup = await prepareLand(direct, 'clean', extra.includes('--merge'));
-    try {
+    await withCleanup(async () => {
       const result = await native(direct, [...args, ...extra]);
       assert.equal(result.code, 0, result.stderr);
       assert.match(result.stdout, /closed|landed/);
@@ -291,7 +320,7 @@ test('ported land and optional merge succeed with Node unavailable', async () =>
       assert.equal(rows.filter((r) => r.event === 'block.close').length, 1);
       assert.equal(rows.filter((r) => r.event === 'land.timing').length, 1);
       assertLedgerSignatures(rows);
-    } finally { await cleanup(); await rm(short, { recursive: true, force: true }); }
+    }, async () => { await cleanup(); await rm(short, { recursive: true, force: true }); });
     const result = await runParity([...args, ...extra], { fixture: await openFixture(), goCommand: BINARY, tempRoot: '/tmp', samePaths: true,
       env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' }, prepare: prepareParityLand('clean', extra.includes('--merge')), goOnlyFields: GO_ONLY });
     assert.deepEqual(result.diffs, [], `merge flow ${extra}: exact Node parity`);
@@ -306,7 +335,7 @@ test('findings, red gates, tree moves and wait_timeout run in Go with Node unava
       await cp(f.home, home, { recursive: true });
       const direct = { ...f, home };
       const cleanup = await prepareLand(direct, kind);
-      try {
+      await withCleanup(async () => {
         const result = await native(direct, [...args, '--max', '1800s', ...(json ? ['--json'] : [])]);
         assert.equal(result.code, kind === 'moved' ? 0 : 1, `${kind} json=${json}: ${result.stderr}`);
         if (kind === 'moved') assert.match(result.stdout, /closed/);
@@ -314,7 +343,7 @@ test('findings, red gates, tree moves and wait_timeout run in Go with Node unava
           : kind === 'red' ? /land stopped at gates:/ : /land stopped at join: wait_timeout/);
         const record = JSON.parse(await readFile(path.join(home, '.code-forge/runs', RUN + '.json'), 'utf8'));
         assert.equal(record.blocks.B1.status, kind === 'moved' ? 'closed' : 'open');
-      } finally { await cleanup(); await rm(home, { recursive: true, force: true }); }
+      }, async () => { await cleanup(); await rm(home, { recursive: true, force: true }); });
     }
   }
 });
