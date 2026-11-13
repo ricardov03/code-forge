@@ -81,6 +81,7 @@ func TestLogsGoHelp(t *testing.T) {
 	}
 	for _, c := range cases {
 		code, out, errText := logsCall(t, c.args...)
+		c.out = helpExpect(t, append([]string{"logs"}, c.args...), 0, c.out) // B613 help page
 		if code != 0 || out != c.out || errText != "" {
 			t.Errorf("logs %v = %d %q %q; want 0 %q", c.args, code, out, errText, c.out)
 		}
