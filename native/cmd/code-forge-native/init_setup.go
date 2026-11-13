@@ -1094,6 +1094,9 @@ type initSetupWizard struct {
 	summary  []string
 	settings ledger.Object
 	blank    []string
+	// jev is step 5's answer the wizard gave for Jev auto (B611); nil reads
+	// the key chain here
+	jev *initWizJev
 }
 
 // initSetupLoad reads the existing config, the user config and the
@@ -1161,6 +1164,11 @@ func initSetupFinish(st initSetupState, parsed initParsed, jsonMode bool, wiz *i
 	var missing []string
 	switch v.jevMode {
 	case "auto":
+		if wiz != nil && wiz.jev != nil {
+			secrets = wiz.jev.secrets
+			jevRef, jevSource = wiz.jev.ref, wiz.jev.source
+			break
+		}
 		auto, reason := initJevAutoPlan(home)
 		if reason != 0 {
 			return initSetupResult{}, reason

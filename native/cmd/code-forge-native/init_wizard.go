@@ -234,6 +234,15 @@ func (u *initWizUI) text(message, initial string) (string, bool) {
 	return p.input, true
 }
 
+// password is clack's password prompt: the typed key shows masked.
+func (u *initWizUI) password(message string) (string, bool) {
+	p := &initWizPrompt{kind: "password", message: message}
+	if !u.ask(p) {
+		return "", false
+	}
+	return p.input, true
+}
+
 func initWizValues(values ...string) []initWizOption {
 	out := []initWizOption{}
 	for _, v := range values {
@@ -605,95 +614,118 @@ func initWizCloneValues(v initValues) initValues {
 // initWizardPrecheck decides, before the first prompt, every hand-over the
 // wizard can meet: the terminal, the setup steps Go does not serve, and the
 // shapes it does not draw like Node. It returns the EOF warning text.
-func initWizardPrecheck(st initSetupState, parsed initParsed, env initWizEnv, envOK bool) (string, handoverReason) {
+func initWizardPrecheck(st initSetupState, parsed initParsed, env initWizEnv, envOK bool) (string, initJevAuto, handoverReason) {
+	var auto initJevAuto
 	if !envOK || !initWizTerminalOK(env) {
-		return "", hInitInteractive
+		return "", auto, hInitInteractive
 	}
 	v := st.v
+	// B611: Jev auto reads the key chain once, here; with no key found,
+	// step 5 asks, and the dry runs cover each answer's shape (none, an
+	// environment variable, the stored key, a 1Password reference)
+	jevs := []*initWizJev{nil}
 	switch v.jevMode {
 	case "auto":
-		return "", hInitJevKey
+		var reason handoverReason
+		if auto, reason = initJevAutoPlan(st.home); reason != 0 {
+			return "", auto, reason
+		}
+		if auto.found {
+			jevs = []*initWizJev{{ref: auto.ref, source: auto.source, secrets: auto.secrets}}
+		} else {
+			// a pasted key updates the index row like Node's store
+			if !keyIndexReadable(st.home, "jev", false) {
+				return "", auto, hInitJevKey
+			}
+			jevs = []*initWizJev{{source: "none"}, {ref: "env:CODE_FORGE_KEY_JEV", source: "env"}, {ref: "user", source: "keychain"}, {ref: "op://vault/item/field", source: "op"}}
+		}
 	case "ref":
 		if !strings.HasPrefix(v.jevRef, "env:") && !initOpRef.MatchString(v.jevRef) && v.jevRef != "user" && !strings.HasPrefix(v.jevRef, "keychain:") {
-			return "", hInitJevOp
+			return "", auto, hInitJevOp
 		}
 	}
-	if v.doctor {
-		return "", hInitDoctor
-	}
 	if _, yes := parsed.initLast("--yes-tool"); yes {
-		return "", hInitWizardTools
+		return "", auto, hInitWizardTools
 	}
 	if v.refreshModels || func() bool { _, f := initLastFor(parsed, "refresh_models"); return !f }() {
 		if !modelsCacheWritable(st.home) {
-			return "", hInitWizardModels
+			return "", auto, hInitWizardModels
 		}
 		for _, source := range []string{".codex", ".grok"} {
 			if data, err := os.ReadFile(filepath.Join(st.home, source, "models_cache.json")); err == nil && !json.Valid(data) {
-				return "", hInitWizardModels
+				return "", auto, hInitWizardModels
 			}
 		}
 	}
 	// what the prompts and the summary show must be plain text Go measures
 	for _, l := range []string{"L0", "L1", "L2", "L3"} {
 		if _, ok := initWizLevelText(v.levels.Get(l)); !ok {
-			return "", hInitWizardShape
+			return "", auto, hInitWizardShape
 		}
 	}
 	if _, ok := initWizSoloText(v.soloProject); !ok {
-		return "", hInitWizardShape
+		return "", auto, hInitWizardShape
 	}
 	if _, ok := v.tools.(string); !ok {
-		return "", hInitWizardShape
+		return "", auto, hInitWizardShape
 	}
 	for _, name := range initGateNames {
 		if !initWizPlainText(strings.Join(initWizGateArgv(v.gates[name]), " ")) {
-			return "", hInitWizardShape
+			return "", auto, hInitWizardShape
 		}
 	}
 	for _, key := range initProofKeys {
 		if list, ok := initStrings(v.proof[key]); ok && !initWizPlainText(strings.Join(list, ",")) {
-			return "", hInitWizardShape
+			return "", auto, hInitWizardShape
 		}
 	}
 	_, _, lines := initSummary(v, st.ctx)
 	for _, l := range lines {
 		if !initWizPlainText(l) {
-			return "", hInitWizardShape
+			return "", auto, hInitWizardShape
 		}
 	}
 	for _, p := range initProviders {
 		if p == "" {
-			return "", hInitWizardShape
+			return "", auto, hInitWizardShape
 		}
 	}
 	eof := initWizEOFFile()
 	if eof == "" {
-		return "", hInitWizardEOF
+		return "", auto, hInitWizardEOF
 	}
-	// a dry run of the setup over every scope and method, with every harness
+	// a dry run of the setup over every scope and method, with every harness;
+	// the doctor plan and each Jev answer once
+	first := true
 	for _, scope := range []string{"project", "global"} {
 		for _, method := range []string{"symlink", "copy"} {
-			dry := initWizCloneValues(v)
-			if _, f := initLastFor(parsed, "harnesses"); !f {
-				dry.harnesses = append([]string{}, initHarnessIDs...)
+			for _, jev := range jevs {
+				if !first && jev != jevs[0] {
+					continue
+				}
+				dry := initWizCloneValues(v)
+				if _, f := initLastFor(parsed, "harnesses"); !f {
+					dry.harnesses = append([]string{}, initHarnessIDs...)
+				}
+				if _, f := initLastFor(parsed, "scope"); !f {
+					dry.scope = scope
+				}
+				if _, f := initLastFor(parsed, "method"); !f {
+					dry.method = method
+				}
+				dry.tools = "current"
+				dry.refreshModels = false
+				dry.doctor = v.doctor && first
+				s := st
+				s.v = dry
+				if _, reason := initSetupFinish(s, parsed, false, &initSetupWizard{jev: jev}); reason != 0 {
+					return "", auto, reason
+				}
 			}
-			if _, f := initLastFor(parsed, "scope"); !f {
-				dry.scope = scope
-			}
-			if _, f := initLastFor(parsed, "method"); !f {
-				dry.method = method
-			}
-			dry.tools = "current"
-			dry.refreshModels = false
-			s := st
-			s.v = dry
-			if _, reason := initSetupFinish(s, parsed, false, &initSetupWizard{}); reason != 0 {
-				return "", reason
-			}
+			first = false
 		}
 	}
-	return eof, 0
+	return eof, auto, 0
 }
 
 // initWizardServe runs the wizard: the prompts, the summary and the
@@ -708,7 +740,7 @@ func initWizardServe(parsed initParsed, home, cwd string, existingFile bool) (fu
 	if reason != 0 {
 		return nil, reason
 	}
-	eofText, reason := initWizardPrecheck(st, parsed, env, envOK)
+	eofText, auto, reason := initWizardPrecheck(st, parsed, env, envOK)
 	if reason != 0 {
 		return nil, reason
 	}
@@ -768,6 +800,40 @@ func initWizardServe(parsed initParsed, home, cwd string, existingFile bool) (fu
 			wiz.printed++
 		}
 		st.v = v
+		if v.jevMode == "auto" {
+			// step 5 (B611): the key the chain found, else the person's answer
+			jev := &initWizJev{ref: auto.ref, source: auto.source, secrets: auto.secrets}
+			if auto.pre != nil {
+				auto.pre()
+			}
+			wiz.jev = jev
+			if !auto.found {
+				ans, usage, storeErr, ok := u.askJevSource(home, stderr)
+				if !ok {
+					return initWizFail(u, ended, home, summary, wiz, stderr)
+				}
+				if ans.secret != "" {
+					jev.secrets = append(jev.secrets, ans.secret)
+				}
+				fail := func(code int, message string) int {
+					return initSetupRun(initSetupResult{home: home, lines: append(append([]string{}, summary...), wiz.said...), shown: len(summary), printed: wiz.printed,
+						code: code, err: message, settings: settings, blank: blank, secrets: jev.secrets})(env.out, stderr)
+				}
+				if usage != "" {
+					return fail(2, usage)
+				}
+				if storeErr != "" {
+					return fail(1, "unexpected error: "+storeErr)
+				}
+				jev.ref, jev.source = ans.ref, ans.source
+				if found := iwjDescribe(ans.found); found != "" {
+					wiz.said = append(wiz.said, "keys: jev from "+found)
+				}
+				if ans.ref == "" {
+					wiz.said = append(wiz.said, iwjLaterText)
+				}
+			}
+		}
 		r, reason := initSetupFinish(st, parsed, false, wiz)
 		if reason != 0 {
 			// the dry run before the first prompt covers every answer; a
@@ -781,7 +847,7 @@ func initWizardServe(parsed initParsed, home, cwd string, existingFile bool) (fu
 				return ended()
 			}
 			if !ok || !apply {
-				r = initSetupResult{home: home, lines: r.lines, shown: r.shown, printed: r.printed, code: 1, err: initWizCancelText, settings: settings, blank: blank}
+				r = initSetupResult{home: home, lines: r.lines, shown: r.shown, printed: r.printed, code: 1, err: initWizCancelText, settings: settings, blank: blank, secrets: r.secrets}
 			}
 		}
 		return initSetupRun(r)(env.out, stderr)
@@ -795,8 +861,12 @@ func initWizFail(u *initWizUI, ended func() int, home string, summary []string, 
 		return ended()
 	}
 	lines := append(append([]string{}, summary...), wiz.said...)
+	var secrets []string
+	if wiz.jev != nil {
+		secrets = wiz.jev.secrets
+	}
 	return initSetupRun(initSetupResult{home: home, lines: lines, shown: len(summary), printed: wiz.printed, code: 1, err: initWizCancelText,
-		settings: wiz.settings, blank: wiz.blank})(u.env.out, stderr)
+		settings: wiz.settings, blank: wiz.blank, secrets: secrets})(u.env.out, stderr)
 }
 
 // initWizToolLines is step 1 of runInit for `tools: recommended` without

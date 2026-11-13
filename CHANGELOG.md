@@ -8,6 +8,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- Interactive `init` at a terminal now runs its Jev key step and its doctor step in the Go engine instead of handing over to Node: the Jev key found from `CODE_FORGE_KEY_JEV`, the file store or the macOS keychain, else the Jev source prompt (skip, env variable, pasted key stored in the file store or keychain, or a 1Password reference, item ID or link), and the doctor after the setup unless `--skip-doctor`, with the same output, files and exit codes as Node (B611).
 - On macOS with the default key backends, the Go engine reads and writes the Jev key in the login keychain through `/usr/bin/security` (service `code-forge`, as Node's backends do) for `doctor`, non-interactive `init`, `worker` boot, `jev ask`, `keys test` and `keys remove`, instead of handing these runs to Node; off macOS or with a failing `security` they still hand over (B610)
 
 ## [0.23.0] — 2026-11-13

@@ -549,7 +549,7 @@ type initWizOption struct {
 }
 
 type initWizPrompt struct {
-	kind    string // select, multiselect, confirm, text
+	kind    string // select, multiselect, confirm, text, password
 	message string
 	options []initWizOption
 	cursor  int
@@ -596,6 +596,32 @@ func (p *initWizPrompt) frame(cols int) string {
 	cyan := initWizStyle(initWizBar, "cyan")
 	dim := func(s string) string { return initWizStyle(s, "dim") }
 	switch p.kind {
+	case "password":
+		// B611: @clack/prompts password: the input shown as one mask per
+		// UTF-16 unit, the cursor drawn on the mask
+		head := gray + "\n" + initWizSymbol(p.state) + "  " + p.message + "\n"
+		masked := initWizMask(p.input)
+		switch p.state {
+		case "submit":
+			n := ""
+			if masked != "" {
+				n = dim(masked)
+			}
+			return head + gray + "  " + n
+		case "cancel":
+			n, tail := "", ""
+			if masked != "" {
+				n = initWizStyle(masked, "strikethrough", "dim")
+				tail = "\n" + gray
+			}
+			return head + gray + "  " + n + tail
+		}
+		shown := masked + initWizStyle("_", "inverse", "hidden")
+		units, at := []rune(masked), initWizU16(string(p.rl.line[:min(p.rl.cursor, len(p.rl.line))]))
+		if at < len(units) {
+			shown = string(units[:at]) + initWizStyle(string(units[at]), "inverse") + string(units[at+1:])
+		}
+		return head + cyan + "  " + shown + "\n" + initWizStyle(initWizBarEnd, "cyan") + "\n"
 	case "text":
 		head := gray + "\n" + initWizSymbol(p.state) + "  " + p.message + "\n"
 		shown := initWizStyle("_", "inverse", "hidden")
@@ -720,6 +746,23 @@ func (p *initWizPrompt) frame(cols int) string {
 		strings.Join(initWizFooter([]string{dim("↑/↓") + " to navigate", dim("Space:") + " select", dim("Enter:") + " confirm"}), "\n") + "\n"
 }
 
+// initWizMask is PasswordPrompt.masked: userInput.replaceAll(/./g, mask),
+// one mask per UTF-16 unit except line terminators.
+func initWizMask(input string) string {
+	var b strings.Builder
+	for _, r := range input {
+		switch {
+		case r == '\n' || r == '\r' || r == 0x2028 || r == 0x2029:
+			b.WriteRune(r)
+		case r > 0xFFFF:
+			b.WriteString("▪▪")
+		default:
+			b.WriteString("▪")
+		}
+	}
+	return b.String()
+}
+
 func initWizMove(x, y int) string {
 	s := ""
 	if x < 0 {
@@ -810,7 +853,7 @@ func (t *initWizTerm) render(p *initWizPrompt) {
 func (t *initWizTerm) run(p *initWizPrompt) initWizOutcome {
 	p.state = "initial"
 	t.prevFrame = ""
-	if p.kind == "text" {
+	if p.kind == "text" || p.kind == "password" {
 		p.rl.line = []rune(p.input)
 		p.rl.cursor = len(p.rl.line)
 	}
@@ -834,14 +877,14 @@ func (t *initWizTerm) run(p *initWizPrompt) initWizOutcome {
 			if p.rl.eof {
 				return initWizEOF
 			}
-			if p.kind == "text" && k.name != "return" {
+			if (p.kind == "text" || p.kind == "password") && k.name != "return" {
 				if k.char == "\t" {
 					p.rl.key(initWizKey{name: "h", ctrl: true})
 				}
 				p.input = string(p.rl.line)
 			}
 			if k.name != "" {
-				if p.kind != "text" {
+				if p.kind != "text" && p.kind != "password" {
 					if alias := map[string]string{"k": "up", "j": "down", "h": "left", "l": "right", "escape": "cancel"}[k.name]; alias != "" {
 						p.cursorEvent(alias)
 					}

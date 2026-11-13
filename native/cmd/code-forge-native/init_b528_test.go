@@ -275,8 +275,6 @@ func TestB528InitWizardHandOvers(t *testing.T) {
 		env    map[string]string
 		reason string
 	}{
-		{"jev key lookup", []string{"--skip-doctor"}, nil, "init-jev-key"},
-		{"doctor", []string{"--no-jev"}, nil, "init-doctor"},
 		{"no colour", []string{"--skip-doctor", "--no-jev"}, map[string]string{"NO_COLOR": "1"}, "init-interactive"},
 		{"other terminal", []string{"--skip-doctor", "--no-jev"}, map[string]string{"TERM": "vt100"}, "init-interactive"},
 		{"tool installs", []string{"--skip-doctor", "--no-jev", "--yes-tool", "solo"}, nil, "init-wizard-tools"},
