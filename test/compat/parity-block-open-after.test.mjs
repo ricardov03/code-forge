@@ -74,19 +74,14 @@ async function rows(f) {
   return (await readFile(path.join(f.home, '.code-forge/ledger/after-fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
 }
 
-test('unported outcome syntax records exactly one reason-coded handover before exec', async () => {
+test('broken pipeline syntax runs in Go with no handover row and matches Node (B581, B464)', async () => {
   const f = await fixture({ pipeline: 'steps: [broken\n' });
   const before = await readFile(runFile(f));
   const result = await launch(f, open(['--after-outcome', 'design']), { handoverLog: true });
-  assert.equal(result.code, 127, 'unported outcome syntax delegates to missing Node');
-  assert.deepEqual(await readFile(runFile(f)), before, 'handover preserves exact run bytes');
-  const log = await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8');
-  assert.equal(log.endsWith('\n'), true, 'row is newline terminated');
-  const recorded = log.trimEnd().split('\n').map((line) => JSON.parse(line));
-  assert.equal(recorded.length, 1, 'one handover writes exactly one row');
-  const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
-  assert.deepEqual(recorded.map(({ at, ...row }) => row), [{ verb: 'block', sub: 'open', reason: 'open-after-outcome', version }]);
-  assert.equal(Number.isNaN(Date.parse(recorded[0].at)), false, 'row has a valid timestamp');
+  assert.equal(result.code, 1, 'Go answers the broken pipeline itself; Node is never needed');
+  assert.deepEqual(await readFile(runFile(f)), before, 'a refused open keeps the exact run bytes');
+  await assert.rejects(readFile(path.join(f.home, '.code-forge/native/handovers.jsonl')), { code: 'ENOENT' }, 'no handover row: open-after-outcome is gone (B464)');
+  await parity(f, open(['--after-outcome', 'design']), true);
 });
 
 test('open dependencies and recorded default levels run natively with byte parity and serialized writes', async () => {
@@ -152,7 +147,7 @@ test('open dependencies and recorded default levels run natively with byte parit
   }
 });
 
-test('dependency refusals preserve exact errors and JSON; unsupported cases hand over before Go writes', async () => {
+test('dependency refusals preserve exact errors and JSON; grant and schema cases match Node', async () => {
   const refused = await launch(await fixture(), open(['--after', 'Pending', '--json']));
   assert.equal(refused.code, 1, 'unmet dependency refuses natively without Node');
   assert.equal(refused.stderr, 'block open: block B1: --after dependencies not closed: Pending (open)\n');
@@ -181,15 +176,10 @@ test('dependency refusals preserve exact errors and JSON; unsupported cases hand
   ];
   for (const change of grants) {
     const f = await fixture({ change });
-    const before = await readFile(runFile(f));
-    assert.equal((await launch(f, open(['--after', 'Done']))).code, 127, 'grant cases delegate to missing Node');
-    assert.deepEqual(await readFile(runFile(f)), before, 'handover preserves exact run bytes');
-    assert.deepEqual((await readdir(path.join(f.home, '.code-forge'))).sort(), ['runs'], 'handover creates no Go ledger, queue or lock');
     await parity(f, open(['--after', 'Done']), true);
   }
   for (const options of [{ pipeline: 'steps: [broken\n' }, { outcome: { status: 'approved' } }]) {
     const f = await fixture(options);
-    assert.equal((await launch(f, open(['--after-outcome', 'design']))).code, 127, 'unported schema/syntax delegates');
     await parity(f, open(['--after-outcome', 'design']), true);
   }
 });

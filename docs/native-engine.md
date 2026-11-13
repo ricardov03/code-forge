@@ -192,7 +192,7 @@ reads as infinite, and line separators JavaScript reads differently. An unreadab
 file prints Node's error (for example `ENOENT: no such file or directory, open '<path>'`), exits 1
 and writes nothing, in Go. Review dates in every ECMAScript date-time form (year or month only,
 `±YYYYYY` years, `T24:00`, local time) are read like V8; only legacy forms stay `close-gates-format`.
-`close-help` now means only a `--help=value` or `-h=value` spelling.
+Go answers every `--help` spelling of `block close`, so `close-help` is never recorded; B464 removed it and 76 other reason codes no Go path returned.
 `land-merge-gate` is reserved for a full-suite gate configuration Go cannot run.
 If Go itself fails with an internal error (a Go panic) on the main goroutine, it never
 exits with the usage-error code 2 or prints a stack trace (B508). A command that writes no
