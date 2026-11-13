@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -16,7 +16,9 @@ import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 for (const key of ['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK']) delete process.env[key];
-const scratch = await mkdtemp(path.join(os.tmpdir(), 'cf-ready-waiver-'));
+// B603: git records worktree links by real path (macOS: /var -> /private/var); the
+// fixture must use the same spelling or the parity copy rewrites the link to a missing path.
+const scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cf-ready-waiver-')));
 const BINARY = path.join(scratch, 'package/native/bin/host/code-forge-native');
 const RUN = 'r-ready-fixture', KEY = Buffer.alloc(32, 37);
 const hash = (s) => createHash('sha256').update(s).digest('hex');
