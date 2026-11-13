@@ -36,7 +36,10 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/config"
+	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/jev"
+	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/worker"
 )
 
@@ -243,15 +246,28 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 	}
 	tail := []doctorRow{native}
 	daemon, indexing := "off", false
+	inForce, liveRun := cfg, ""
 	live, err := worker.Live(config.ProjectRootFor(cwd), worker.LiveOpts{}, worker.Probes{})
 	switch {
 	case errors.Is(err, worker.ErrUndecided):
 		return handover(hDoctorWorkerRegistry)
 	case err == nil && live != nil:
-		return handover(hDoctorFullLiveWorker) // the run's config may ping the daemon
+		// B617: the live worker's run config in force (else the loaded
+		// one); its daemon is pinged in the body
+		run, snapshot, ok := drunLiveConfig(home, live)
+		if !ok {
+			break // Node's catch: daemon off, no indexing row
+		}
+		if snapshot != nil {
+			inForce = snapshot
+		}
+		liveRun = run
+		if daemonclient.Enabled(inForce) {
+			daemon = "fallback"
+		}
+		indexing = drunPlatform == "darwin"
 	case err == nil:
-		native, _ := cfg["native"].(map[string]any)
-		if os.Getenv("CODE_FORGE_NATIVE") != "0" && native["daemon"] != false {
+		if daemonclient.Enabled(cfg) {
 			daemon = "fallback"
 		}
 		// the indexing check's git child runs in the body, after the
@@ -336,8 +352,11 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 			}
 			probes = append(probes, workerRows...)
 		}
+		if daemon == "fallback" && liveRun != "" && drunDaemonPing(liveRun) {
+			daemon = "live"
+		}
 		if indexing {
-			tail = append(tail, drunIndexingRows(cwd, snap.Path, cfg)...)
+			tail = append(tail, drunIndexingRows(cwd, snap.Path, inForce, liveRun)...)
 		}
 		tail = append(tail, doctorRow{"native_daemon", "INFO", "native daemon", daemon})
 		if root != "" {
@@ -367,6 +386,45 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 	}, 0, true
 }
 
+// drunLiveConfig is configInForce(await readRun(worker.run)) for the live
+// worker: the run id and the snapshot in force (nil for a record from
+// before snapshots or a JSON value that is not an object). ok is false where
+// Node throws (a bad or missing run, unreadable JSON, a snapshot that does
+// not match its hash): the CLI's catch leaves the daemon off.
+func drunLiveConfig(home string, live ledger.Object) (run string, snapshot map[string]any, ok bool) {
+	run, isString := live.Get("run").(string)
+	if !isString {
+		return "", nil, false
+	}
+	record, err := state.ReadRun(home, run)
+	if err != nil {
+		data, readErr := os.ReadFile(filepath.Join(home, ".code-forge", "runs", run+".json"))
+		if readErr != nil {
+			return "", nil, false
+		}
+		if _, jsonErr := ledger.DecodeValue(data); jsonErr != nil {
+			return "", nil, false
+		}
+		return run, nil, true // valid JSON, not an object: no snapshot
+	}
+	cfg, _, valid := sweepConfigInForce(record)
+	if !valid {
+		return "", nil, false
+	}
+	if cfg != nil {
+		snapshot, _ = runDeepMap(cfg).(map[string]any)
+	}
+	return run, snapshot, true
+}
+
+// drunDaemonPing is daemonRequest(run, {method: 'ping'}): true when the run's
+// daemon answers the version-negotiated ping.
+func drunDaemonPing(run string) bool {
+	daemonclient.Version = version
+	_, err := daemonclient.Request(run, map[string]any{"method": "ping"}, 0)
+	return err == nil
+}
+
 // drunPlatform is the platform the indexing check is gated on (Node's
 // deps.platform ?? process.platform, src/cli/doctor.mjs); tests set it (B597).
 var drunPlatform = runtime.GOOS
@@ -375,7 +433,7 @@ var drunPlatform = runtime.GOOS
 // config with no live worker: top is the repo top (realpath), else the config
 // file's folder. A non-string proof.worktree.dir makes path.resolve throw;
 // Node's catch prints no row.
-func drunIndexingRows(cwd, configPath string, cfg map[string]any) []doctorRow {
+func drunIndexingRows(cwd, configPath string, cfg map[string]any, runID string) []doctorRow {
 	top := filepath.Dir(configPath)
 	if out, ok := sweepGitHooked(cwd, lrRegisterChild, "rev-parse", "--show-toplevel"); ok {
 		if real, err := filepath.EvalSymlinks(strings.TrimSpace(out)); err == nil {
@@ -391,11 +449,17 @@ func drunIndexingRows(cwd, configPath string, cfg map[string]any) []doctorRow {
 	default:
 		return nil
 	}
-	branch, _ := wt["branch"].(string)
-	if branch == "" {
-		branch = "forge/{run}/{block}"
+	// wt.branch ?? DEFAULT_BRANCH_TEMPLATE; only a live worker's run reads
+	// it, where a non-string branch throws in replaceAll (no row)
+	branch := "forge/{run}/{block}"
+	if v, has := wt["branch"]; has && v != nil {
+		b, isString := v.(string)
+		if !isString && runID != "" && dir == nil {
+			return nil
+		}
+		branch = b
 	}
-	rows, ok := dfWorktreeIndexingRow(top, dir, branch, "")
+	rows, ok := dfWorktreeIndexingRow(top, dir, branch, runID)
 	if !ok {
 		return nil
 	}

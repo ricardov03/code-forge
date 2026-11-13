@@ -5,8 +5,9 @@ package session
 // fallback-free level with no slug and no run: one step, no ledger row, no
 // budget gate, the provider slot and the rate-limit backoff kept. It adds what
 // Spawn refuses and the pings need: the coder and facts roles, the S2 and
-// delegate schemas and the --max-budget-usd flag. A Codex (openai) session is
-// still refused (IsUnsupported) before anything is written.
+// delegate schemas and the --max-budget-usd flag. B617: a Codex (openai)
+// session runs through the codex builds of codex.go; only a Codex coder under
+// coder.sandbox is still refused (IsUnsupported) before anything is written.
 
 import (
 	"fmt"
@@ -213,6 +214,9 @@ func probeEffort(provider string, effort any) (string, bool) {
 	if provider == "anthropic" && !contains(anthropicEfforts, e) {
 		return "", false
 	}
+	if provider == "openai" && !codexEffortOK(e) {
+		return "", false
+	}
 	return e, true
 }
 
@@ -229,7 +233,8 @@ func ProbeClosedBookRefused(provider, role string, openBook bool) bool {
 }
 
 // ProbeCheck tells, before anything is written, whether Probe runs this
-// session in Go: an error IsUnsupported for a Codex session.
+// session in Go: an error IsUnsupported for a Codex coder under coder.sandbox
+// (B93's sandbox dirs, not ported).
 func ProbeCheck(cfg map[string]any, level, role string) error {
 	provider, _, _, ok := ProbeLevel(cfg, level)
 	if !ok {
@@ -238,10 +243,28 @@ func ProbeCheck(cfg map[string]any, level, role string) error {
 	if ProbeClosedBookRefused(provider, role, section(cfg, "review")["allow_open_book_codex"] == true) {
 		return nil
 	}
-	if provider == "openai" {
-		return unsupported("a Codex " + role + " session")
+	if provider == "openai" && role == "coder" && section(cfg, "coder")["sandbox"] != nil {
+		return unsupported(codexSandboxWhy)
 	}
 	return nil
+}
+
+// probeCodexSchema is the source schema a Codex probe step hands codex (the
+// strict compilation goes in <session>/schema.json): nil for no schema; an
+// error IsUnsupported where strict mode would change it (the S2 and delegate
+// schemas are already strict).
+func probeCodexSchema(schema string) (ledger.Object, error) {
+	if schema == "" {
+		return nil, nil
+	}
+	source, err := ledger.DecodeObject([]byte(probeSchemaJSON[schema]))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := codexSchemaPlan(Opts{Schema: source, Validate: func(any) bool { return true }}); err != nil {
+		return nil, err
+	}
+	return source, nil
 }
 
 // probeBuild is buildStep + the claude/grok builders for one probe step.
@@ -350,8 +373,13 @@ func Probe(o ProbeOpts, deps Deps) (ProbeResult, error) {
 	if ProbeClosedBookRefused(provider, o.Role, openBook) {
 		return probeError("closed-book"), nil
 	}
+	if err := ProbeCheck(o.Cfg, o.Level, o.Role); err != nil {
+		return ProbeResult{}, err
+	}
 	if provider == "openai" {
-		return ProbeResult{}, unsupported("a Codex " + o.Role + " session")
+		if _, err := probeCodexSchema(o.Schema); err != nil {
+			return ProbeResult{}, err
+		}
 	}
 	random := deps.Random
 	if random == nil {
@@ -397,7 +425,14 @@ func probeAttempt(o ProbeOpts, deps Deps, provider, model string, rawEffort any)
 	if !valid {
 		return probeError("TypeError"), nil
 	}
-	b, err := probeBuild(o, provider, model, effort, sessionDir)
+	so := Opts{Cfg: o.Cfg, Level: o.Level, Role: o.Role, PromptPath: o.PromptPath, TimeoutMs: o.TimeoutMs, RunRoot: o.RunRoot}
+	var b built
+	var err error
+	if provider == "openai" {
+		b, err = probeCodexBuild(o, &so, model, effort, sessionDir)
+	} else {
+		b, err = probeBuild(o, provider, model, effort, sessionDir)
+	}
 	if err != nil {
 		return ProbeResult{}, err
 	}
@@ -417,7 +452,6 @@ func probeAttempt(o ProbeOpts, deps Deps, provider, model string, rawEffort any)
 		effortText = jsNum(e)
 	}
 	deps.stderr(fmt.Sprintf("level=%s provider=%s model=%s effort=%s fallback_step=0\n", o.Level, provider, model, effortText))
-	so := Opts{Cfg: o.Cfg, Level: o.Level, Role: o.Role, PromptPath: o.PromptPath, TimeoutMs: o.TimeoutMs, RunRoot: o.RunRoot}
 	res, err := foreground(b, so, deps)
 	if err != nil {
 		return ProbeResult{}, err
@@ -433,11 +467,45 @@ func probeAttempt(o ProbeOpts, deps Deps, provider, model string, rawEffort any)
 	return out, nil
 }
 
+// probeCodexBuild is buildStep for a Codex probe step (B617): the coder in
+// its tree with a per-session CODEX_HOME, every other role closed-book in
+// <session>/cwd with the strict schema in <session>/schema.json. so gets
+// the step's cwd, schema and validator for foreground.
+func probeCodexBuild(o ProbeOpts, so *Opts, model, effort, sessionDir string) (built, error) {
+	if o.Role == "coder" {
+		cwd := o.Cwd
+		if cwd == "" {
+			cwd = "."
+		}
+		abs, err := filepath.Abs(cwd)
+		if err != nil {
+			return built{}, err
+		}
+		so.Cwd = abs
+	}
+	schema, err := probeCodexSchema(o.Schema)
+	if err != nil {
+		return built{}, err
+	}
+	if schema != nil {
+		name := o.Schema
+		so.Schema = schema
+		so.Validate = func(answer any) bool { return probeMatchesSchema(name, answer) }
+	}
+	s := step{provider: "openai", model: model}
+	if effort != "" {
+		s.effort = effort
+	}
+	return buildStep(*so, s, sessionDir)
+}
+
 // ProbeInProject is probes.mjs reviewerInProject: the closed-book reviewer
 // argv of level L2 run with its cwd set to the project itself (no session
-// dir, the packet on stdin for claude), environ minus CODE_FORGE_/JEV_ and
-// no builder env. promptPath is the written prompt file.
-func ProbeInProject(cfg map[string]any, promptPath, projectDir string, deps Deps) (ProbeResult, error) {
+// dir, the packet on stdin for claude and codex), environ minus
+// CODE_FORGE_/JEV_ and no builder env. promptPath is the written prompt
+// file; outPath is codex's -o answer file (read when it exists; the caller
+// removes it).
+func ProbeInProject(cfg map[string]any, promptPath, outPath, projectDir string, deps Deps) (ProbeResult, error) {
 	provider, model, rawEffort, ok := ProbeLevel(cfg, "L2")
 	if !ok {
 		return probeError("Error"), nil
@@ -446,16 +514,30 @@ func ProbeInProject(cfg map[string]any, promptPath, projectDir string, deps Deps
 	if cli == "" {
 		return probeError("no-cli-mapping"), nil
 	}
-	if cli == "codex" {
-		return ProbeResult{}, unsupported("a Codex isolation probe")
-	}
 	effort, valid := probeEffort(provider, rawEffort)
 	if !valid {
 		return probeError("TypeError"), nil
 	}
 	var argv []string
 	var input []byte
-	if cli == "claude" {
+	switch cli {
+	case "codex":
+		// buildCodexArgv: a no-tools role is built only with the open-book
+		// opt-in (the caller refused it before), never the delegate
+		if !(section(cfg, "review")["allow_open_book_codex"] == true) {
+			return probeError("closed-book"), nil
+		}
+		argv = []string{"codex", "exec", "-m", model}
+		if effort != "" {
+			argv = append(argv, "-c", "model_reasoning_effort="+effort)
+		}
+		argv = append(argv, "-s", "read-only", "--ephemeral", "--ignore-rules", "--ignore-user-config", "-C", projectDir, "--skip-git-repo-check", "-o", outPath, "--json", "-")
+		data, err := os.ReadFile(promptPath)
+		if err != nil {
+			return ProbeResult{}, err
+		}
+		input = data
+	case "claude":
 		argv = []string{"claude", "-p", "--model", model}
 		if effort != "" {
 			argv = append(argv, "--effort", effort)
@@ -466,7 +548,7 @@ func ProbeInProject(cfg map[string]any, promptPath, projectDir string, deps Deps
 			return ProbeResult{}, err
 		}
 		input = data
-	} else {
+	default:
 		argv = []string{"grok", "--prompt-file", promptPath, "-m", model}
 		if effort != "" {
 			argv = append(argv, "--reasoning-effort", effort)
@@ -491,7 +573,19 @@ func ProbeInProject(cfg map[string]any, promptPath, projectDir string, deps Deps
 		runner = run
 	}
 	res := runner(eo)
-	parsed, text, answer, hasAnswer := readAnswer(res.Stdout)
+	var parsed, answer any
+	var text string
+	var hasAnswer bool
+	if cli == "codex" {
+		var outText *string
+		if data, err := os.ReadFile(outPath); err == nil {
+			t := utf8Text(data)
+			outText = &t
+		}
+		parsed, text, answer, hasAnswer, _ = codexReadAnswer(res.Stdout, outText)
+	} else {
+		parsed, text, answer, hasAnswer = readAnswer(res.Stdout)
+	}
 	if reason := classifyUnavailable(res, parsed); reason != "" {
 		return ProbeResult{Status: "unavailable", Reason: reason, Text: text}, nil
 	}

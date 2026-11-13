@@ -29,6 +29,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/contextpack"
+	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/pkgroot"
@@ -524,17 +525,26 @@ func dfNativeRow() (doctorRow, handoverReason) {
 }
 
 // dfDaemonRow is the CLI's `native daemon` row without a loadable config:
-// with no live worker the config in force is {native: {daemon: false}}.
-func dfDaemonRow(cwd string) (doctorRow, handoverReason) {
-	off := doctorRow{"native_daemon", "INFO", "native daemon", "off"}
+// the live worker's run config in force, else {native: {daemon: false}}
+// (B617: the daemon is pinged in Go).
+func dfDaemonRow(cwd, home string) (doctorRow, handoverReason) {
+	row := doctorRow{"native_daemon", "INFO", "native daemon", "off"}
 	w, err := worker.Live(config.ProjectRootFor(cwd), worker.LiveOpts{}, worker.Probes{})
 	if errors.Is(err, worker.ErrUndecided) {
 		return doctorRow{}, hDoctorWorkerRegistry
 	}
 	if err != nil || w == nil || os.Getenv("CODE_FORGE_NATIVE") == "0" {
-		return off, 0 // an unreadable registry leaves native acceleration off
+		return row, 0 // an unreadable registry leaves native acceleration off
 	}
-	return doctorRow{}, hDoctorFullLiveWorker // the run's config may ping the daemon
+	run, snapshot, ok := drunLiveConfig(home, w)
+	if !ok || snapshot == nil || !daemonclient.Enabled(snapshot) {
+		return row, 0
+	}
+	row.detail = "fallback"
+	if drunDaemonPing(run) {
+		row.detail = "live"
+	}
+	return row, 0
 }
 
 // dfNoindex is isNoindexPath.
@@ -683,7 +693,7 @@ func prepareDoctorNoConfig(cwd, home string, rows []doctorRow, jsonOut bool) (fu
 	if reason != 0 {
 		return handover(reason)
 	}
-	daemon, reason := dfDaemonRow(cwd)
+	daemon, reason := dfDaemonRow(cwd, home)
 	if reason != 0 {
 		return handover(reason)
 	}

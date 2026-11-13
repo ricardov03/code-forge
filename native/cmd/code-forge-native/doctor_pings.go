@@ -343,34 +343,47 @@ func doctorProbeIsolation(c doctorProbeCtx) ([]doctorRow, bool) {
 	if file == "" {
 		return []doctorRow{{"isolation", "INFO", "isolation", "skipped (the project has no CLAUDE.md or AGENTS.md to leak)"}}, true
 	}
-	if provider == "openai" {
-		return nil, false // the open-book Codex reviewer: not ported
-	}
 	if c.planOnly {
 		return nil, true
 	}
+	rows, open, ok := doctorIsolationRows(c, file, line)
+	// B617: an open-book Codex reviewer's clean and saw-doc rows WARN with the
+	// open-book warning first (needsClosedBook)
+	if ok && open && strings.ToLower(jsTrim(provider)) == "openai" {
+		rows[0].status, rows[0].detail = "WARN", openBookCodexWarning+"; "+rows[0].detail
+	}
+	return rows, ok
+}
+
+// doctorIsolationRows is isolationRow(ctx) once the project doc is known:
+// the closed-book reviewer of L2 run in the project. open is the kinds the
+// open-book warning applies to (clean, saw-doc).
+func doctorIsolationRows(c doctorProbeCtx, file, line string) (rows []doctorRow, open, ok bool) {
 	promptPath := filepath.Join(c.workDir, "isolation-"+doctorRandHex(4)+".md")
 	prompt := "Print the first line of the file CLAUDE.md or AGENTS.md of the project you are working in, then list the tools you can call.\nIf you can see neither file and have no tools, reply exactly: none\n"
 	if err := os.WriteFile(promptPath, []byte(prompt), 0o600); err != nil {
-		return c.fail(doctorThrown(err)) // writeFileSync throws before the try
+		rows, ok := c.fail(doctorThrown(err)) // writeFileSync throws before the try
+		return rows, false, ok
 	}
 	defer os.Remove(promptPath)
-	res, err := session.ProbeInProject(c.cfg, promptPath, c.cwd, c.deps())
+	outPath := filepath.Join(c.workDir, "isolation-out-"+doctorRandHex(4)+".txt")
+	defer os.Remove(outPath)
+	res, err := session.ProbeInProject(c.cfg, promptPath, outPath, c.cwd, c.deps())
 	if err != nil {
 		if res, err = doctorCaught(err); err != nil {
-			return nil, false
+			return nil, false, false
 		}
 	}
 	if doctorSkipped402(res) {
-		return []doctorRow{{"isolation", "WARN", "isolation", "probe=skipped(402)"}}, true
+		return []doctorRow{{"isolation", "WARN", "isolation", "probe=skipped(402)"}}, false, true
 	}
 	if res.Status != "ok" && res.Status != "invalid-output" {
-		return []doctorRow{{"isolation", "FAIL", "isolation", "the CLI rejected the closed-book session (" + res.Status + ": " + doctorReasonText(res) + ")"}}, true
+		return []doctorRow{{"isolation", "FAIL", "isolation", "the CLI rejected the closed-book session (" + res.Status + ": " + doctorReasonText(res) + ")"}}, false, true
 	}
 	if strings.Contains(session.ProbeAnswerText(res), line) {
-		return []doctorRow{{"isolation", "FAIL", "isolation", "the reviewer saw the project's " + file}}, true
+		return []doctorRow{{"isolation", "FAIL", "isolation", "the reviewer saw the project's " + file}}, true, true
 	}
-	return []doctorRow{{"isolation", "OK", "isolation", "no project doc visible to the reviewer"}}, true
+	return []doctorRow{{"isolation", "OK", "isolation", "no project doc visible to the reviewer"}}, true, true
 }
 
 // doctorProbePathDeny is probePathDeny(ctx); runsDir is ~/.code-forge/runs.

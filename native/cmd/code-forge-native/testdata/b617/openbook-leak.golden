@@ -1,0 +1,374 @@
+exit=0
+--- stdout
+WARN config: valid with 2 warning(s); first: levels.L2.model is not a known "openai" id, not in known_extra, and not seen-in-cache
+WARN links: no harness link recorded (run code-forge init)
+WARN keys: jev key not resolved; System 1 falls back to rules
+WARN code-forge: not on PATH (the skill shim calls it)
+INFO solo: UNVERIFIED (no Solo probe in this version)
+WARN gates: no gate command configured
+WARN jev: live call skipped (no key)
+INFO tools: missing recommended tools: gemini, grok, op, solo — run code-forge tools install
+OK   ledger: writable
+OK   locks: no unreadable or malformed locks
+OK   tmp: 0 stale roots, 0 stale pids
+OK   sweep: 0 stale workers, 0 orphans, 0 zombies
+INFO memory: code-forge N MB, children N MB, orphans N MB
+INFO review concurrency: 6 tickets at once; provider slots anthropic 4 · openai 2 · xai 2
+OK   claude: present, 9.9.9 (fake claude)
+OK   claude flags: every builder flag is in --help
+OK   codex: present, codex-cli 9.9.9 (fake codex)
+OK   codex flags: every builder flag is in --help
+OK   ping facts (anthropic/claude-haiku-4-5-20251001): ping=ok
+OK   ping coder (anthropic/claude-sonnet-5): ping=ok
+OK   ping reviewer (openai/gpt-9-codex): ping=ok
+WARN ping s2 (anthropic/claude-fable-5-1): ping=answered (schema mismatch)
+WARN isolation: codex reviewer is not closed-book: it can read files on this machine (review.allow_open_book_codex); the reviewer saw the project's CLAUDE.md
+WARN path deny: claude: path deny rules not honoured
+OK   codex rules: 83 execpolicy rules via CODEX_HOME=<session>/rules/code-forge.rules
+OK   signer key: generated; a signed row verifies, a changed one is refused
+OK   worker: pid N started, announced itself and stopped on SIGTERM
+INFO signer: same-user boundary only
+INFO native binary: not found, using Node
+INFO native daemon: off
+--- stderr
+doctor: 14 ok, 9 warn, 0 fail
+--- argv
+=== claude
+-p
+--model
+claude-haiku-4-5-20251001
+--safe-mode
+--tools
+Bash
+--strict-mcp-config
+--no-session-persistence
+--output-format
+json
+--max-budget-usd
+0.5
+--permission-mode
+dontAsk
+--disallowedTools
+Bash(gh pr ready:*)
+Bash(gh pr merge:*)
+Bash(gh pr close:*)
+Bash(gh pr edit --base:*)
+Bash(gh pr edit -B:*)
+Bash(git push --force:*)
+Bash(git push -f:*)
+Bash(git push --force-with-lease:*)
+Bash(git push --force-if-includes:*)
+Bash(git push --mirror:*)
+Bash(git reset --hard:*)
+Bash(git checkout --:*)
+Bash(git checkout --force:*)
+Bash(git checkout -f:*)
+Bash(git restore:*)
+Bash(git clean:*)
+Bash(git stash:*)
+Bash(git branch -D:*)
+Bash(git branch --delete --force:*)
+Bash(git branch --delete -f:*)
+Bash(git branch -d --force:*)
+Bash(git branch -d -f:*)
+Bash(git branch --force --delete:*)
+Bash(git branch --force -d:*)
+Bash(git branch -f --delete:*)
+Bash(git branch -f -d:*)
+Bash(git rm:*)
+Bash(rm --recursive:*)
+Bash(rm --force:*)
+Bash(rm -r:*)
+Bash(rm -R:*)
+Bash(rm -f:*)
+Bash(rm -rR:*)
+Bash(rm -rf:*)
+Bash(rm -Rr:*)
+Bash(rm -Rf:*)
+Bash(rm -fr:*)
+Bash(rm -fR:*)
+Read(~/.code-forge/runs/**)
+Edit(~/.code-forge/runs/**)
+Write(~/.code-forge/runs/**)
+Bash(code-forge worker:*)
+Bash(npx code-forge worker:*)
+Bash(npx @codedology/code-forge worker:*)
+Bash(forge worker:*)
+Bash(code-forge run start:*)
+Bash(npx code-forge run start:*)
+Bash(npx @codedology/code-forge run start:*)
+Bash(forge run start:*)
+Bash(code-forge run reload:*)
+Bash(npx code-forge run reload:*)
+Bash(npx @codedology/code-forge run reload:*)
+Bash(forge run reload:*)
+Edit(.code-forge/reviews/**)
+Write(.code-forge/reviews/**)
+Edit(.code-forge/queue/*.done)
+Write(.code-forge/queue/*.done)
+Bash(rm*)
+Bash(git push*)
+Bash(git commit*)
+Bash(git merge*)
+Bash(mv*)
+Bash(cp*)
+--restricted
+=== claude
+-p
+--model
+claude-sonnet-5
+--permission-mode
+bypassPermissions
+--output-format
+json
+--no-session-persistence
+--max-budget-usd
+0.5
+--disallowedTools
+Bash(gh pr ready:*)
+Bash(gh pr merge:*)
+Bash(gh pr close:*)
+Bash(gh pr edit --base:*)
+Bash(gh pr edit -B:*)
+Bash(git push --force:*)
+Bash(git push -f:*)
+Bash(git push --force-with-lease:*)
+Bash(git push --force-if-includes:*)
+Bash(git push --mirror:*)
+Bash(git reset --hard:*)
+Bash(git checkout --:*)
+Bash(git checkout --force:*)
+Bash(git checkout -f:*)
+Bash(git restore:*)
+Bash(git clean:*)
+Bash(git stash:*)
+Bash(git branch -D:*)
+Bash(git branch --delete --force:*)
+Bash(git branch --delete -f:*)
+Bash(git branch -d --force:*)
+Bash(git branch -d -f:*)
+Bash(git branch --force --delete:*)
+Bash(git branch --force -d:*)
+Bash(git branch -f --delete:*)
+Bash(git branch -f -d:*)
+Bash(git rm:*)
+Bash(rm --recursive:*)
+Bash(rm --force:*)
+Bash(rm -r:*)
+Bash(rm -R:*)
+Bash(rm -f:*)
+Bash(rm -rR:*)
+Bash(rm -rf:*)
+Bash(rm -Rr:*)
+Bash(rm -Rf:*)
+Bash(rm -fr:*)
+Bash(rm -fR:*)
+Read(~/.code-forge/runs/**)
+Edit(~/.code-forge/runs/**)
+Write(~/.code-forge/runs/**)
+Bash(code-forge worker:*)
+Bash(npx code-forge worker:*)
+Bash(npx @codedology/code-forge worker:*)
+Bash(forge worker:*)
+Bash(code-forge run start:*)
+Bash(npx code-forge run start:*)
+Bash(npx @codedology/code-forge run start:*)
+Bash(forge run start:*)
+Bash(code-forge run reload:*)
+Bash(npx code-forge run reload:*)
+Bash(npx @codedology/code-forge run reload:*)
+Bash(forge run reload:*)
+Edit(.code-forge/reviews/**)
+Write(.code-forge/reviews/**)
+Edit(.code-forge/queue/*.done)
+Write(.code-forge/queue/*.done)
+Bash(code-forge block waive:*)
+Bash(npx code-forge block waive:*)
+Bash(npx @codedology/code-forge block waive:*)
+Bash(forge block waive:*)
+Bash(code-forge block reopen:*)
+Bash(npx code-forge block reopen:*)
+Bash(npx @codedology/code-forge block reopen:*)
+Bash(forge block reopen:*)
+Bash(code-forge autopilot:*)
+Bash(npx code-forge autopilot:*)
+Bash(npx @codedology/code-forge autopilot:*)
+Bash(forge autopilot:*)
+Bash(code-forge block accept-hit:*)
+Bash(npx code-forge block accept-hit:*)
+Bash(npx @codedology/code-forge block accept-hit:*)
+Bash(forge block accept-hit:*)
+Bash(code-forge block unwaive:*)
+Bash(npx code-forge block unwaive:*)
+Bash(npx @codedology/code-forge block unwaive:*)
+Bash(forge block unwaive:*)
+Bash(code-forge block ack-waivers:*)
+Bash(npx code-forge block ack-waivers:*)
+Bash(npx @codedology/code-forge block ack-waivers:*)
+Bash(forge block ack-waivers:*)
+Bash(code-forge block human-pass:*)
+Bash(npx code-forge block human-pass:*)
+Bash(npx @codedology/code-forge block human-pass:*)
+Bash(forge block human-pass:*)
+Bash(code-forge run start --add-worker:*)
+Bash(code-forge block amend-acceptance:*)
+Bash(npx code-forge block amend-acceptance:*)
+Bash(npx @codedology/code-forge block amend-acceptance:*)
+Bash(forge block amend-acceptance:*)
+--
+<BASE>/tmp/doctor-N-X/doctor/coder-X.md
+=== codex
+exec
+-m
+gpt-9-codex
+-s
+read-only
+--ephemeral
+--ignore-rules
+--ignore-user-config
+-C
+<BASE>/tmp/doctor-N-X/sessions/reviewer-T-X/cwd
+--skip-git-repo-check
+-o
+<BASE>/tmp/doctor-N-X/sessions/reviewer-T-X/out.json
+--json
+-
+=== claude
+-p
+--model
+claude-fable-5-1
+--safe-mode
+--tools
+
+--strict-mcp-config
+--no-session-persistence
+--output-format
+json
+--json-schema
+{"type":"object","properties":{"decision":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1},"reason":{"type":"string"},"overrule":{"type":"boolean"},"ask_human":{"type":"boolean"},"human_question":{"type":["string","null"]}},"required":["decision","confidence","reason","overrule","ask_human","human_question"],"additionalProperties":false}
+--max-budget-usd
+0.5
+--permission-mode
+dontAsk
+=== codex
+exec
+-m
+gpt-9-codex
+-s
+read-only
+--ephemeral
+--ignore-rules
+--ignore-user-config
+-C
+<BASE>/repo
+--skip-git-repo-check
+-o
+<BASE>/tmp/doctor-N-X/doctor/isolation-out-X.txt
+--json
+-
+=== claude
+-p
+--model
+claude-sonnet-5
+--permission-mode
+bypassPermissions
+--output-format
+json
+--no-session-persistence
+--max-budget-usd
+0.5
+--disallowedTools
+Bash(gh pr ready:*)
+Bash(gh pr merge:*)
+Bash(gh pr close:*)
+Bash(gh pr edit --base:*)
+Bash(gh pr edit -B:*)
+Bash(git push --force:*)
+Bash(git push -f:*)
+Bash(git push --force-with-lease:*)
+Bash(git push --force-if-includes:*)
+Bash(git push --mirror:*)
+Bash(git reset --hard:*)
+Bash(git checkout --:*)
+Bash(git checkout --force:*)
+Bash(git checkout -f:*)
+Bash(git restore:*)
+Bash(git clean:*)
+Bash(git stash:*)
+Bash(git branch -D:*)
+Bash(git branch --delete --force:*)
+Bash(git branch --delete -f:*)
+Bash(git branch -d --force:*)
+Bash(git branch -d -f:*)
+Bash(git branch --force --delete:*)
+Bash(git branch --force -d:*)
+Bash(git branch -f --delete:*)
+Bash(git branch -f -d:*)
+Bash(git rm:*)
+Bash(rm --recursive:*)
+Bash(rm --force:*)
+Bash(rm -r:*)
+Bash(rm -R:*)
+Bash(rm -f:*)
+Bash(rm -rR:*)
+Bash(rm -rf:*)
+Bash(rm -Rr:*)
+Bash(rm -Rf:*)
+Bash(rm -fr:*)
+Bash(rm -fR:*)
+Read(~/.code-forge/runs/**)
+Edit(~/.code-forge/runs/**)
+Write(~/.code-forge/runs/**)
+Bash(code-forge worker:*)
+Bash(npx code-forge worker:*)
+Bash(npx @codedology/code-forge worker:*)
+Bash(forge worker:*)
+Bash(code-forge run start:*)
+Bash(npx code-forge run start:*)
+Bash(npx @codedology/code-forge run start:*)
+Bash(forge run start:*)
+Bash(code-forge run reload:*)
+Bash(npx code-forge run reload:*)
+Bash(npx @codedology/code-forge run reload:*)
+Bash(forge run reload:*)
+Edit(.code-forge/reviews/**)
+Write(.code-forge/reviews/**)
+Edit(.code-forge/queue/*.done)
+Write(.code-forge/queue/*.done)
+Bash(code-forge block waive:*)
+Bash(npx code-forge block waive:*)
+Bash(npx @codedology/code-forge block waive:*)
+Bash(forge block waive:*)
+Bash(code-forge block reopen:*)
+Bash(npx code-forge block reopen:*)
+Bash(npx @codedology/code-forge block reopen:*)
+Bash(forge block reopen:*)
+Bash(code-forge autopilot:*)
+Bash(npx code-forge autopilot:*)
+Bash(npx @codedology/code-forge autopilot:*)
+Bash(forge autopilot:*)
+Bash(code-forge block accept-hit:*)
+Bash(npx code-forge block accept-hit:*)
+Bash(npx @codedology/code-forge block accept-hit:*)
+Bash(forge block accept-hit:*)
+Bash(code-forge block unwaive:*)
+Bash(npx code-forge block unwaive:*)
+Bash(npx @codedology/code-forge block unwaive:*)
+Bash(forge block unwaive:*)
+Bash(code-forge block ack-waivers:*)
+Bash(npx code-forge block ack-waivers:*)
+Bash(npx @codedology/code-forge block ack-waivers:*)
+Bash(forge block ack-waivers:*)
+Bash(code-forge block human-pass:*)
+Bash(npx code-forge block human-pass:*)
+Bash(npx @codedology/code-forge block human-pass:*)
+Bash(forge block human-pass:*)
+Bash(code-forge run start --add-worker:*)
+Bash(code-forge block amend-acceptance:*)
+Bash(npx code-forge block amend-acceptance:*)
+Bash(npx @codedology/code-forge block amend-acceptance:*)
+Bash(forge block amend-acceptance:*)
+--
+<BASE>/tmp/doctor-N-X/doctor/coder-X.md
+--- home files
+./.code-forge/logs/breadcrumbs.json

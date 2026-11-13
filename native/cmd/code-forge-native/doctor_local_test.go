@@ -205,7 +205,7 @@ func TestB504NativeAndDaemonRows(t *testing.T) {
 	if got, reason := dfNativeRow(); reason != 0 || got.status != "INFO" || got.detail != "not found, using Node" {
 		t.Errorf("native: %+v %v", got, reason)
 	}
-	if got, reason := dfDaemonRow(repo); reason != 0 || got.detail != "off" || got.label != "native daemon" {
+	if got, reason := dfDaemonRow(repo, os.Getenv("HOME")); reason != 0 || got.detail != "off" || got.label != "native daemon" {
 		t.Errorf("daemon: %+v %v", got, reason)
 	}
 }

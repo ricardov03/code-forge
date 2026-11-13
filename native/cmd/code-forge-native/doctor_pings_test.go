@@ -263,17 +263,17 @@ func TestB523DoctorPingRateLimited(t *testing.T) {
 // B523: the cases Go does not port hand over before any session runs and
 // before any probe file is written.
 func TestB523DoctorProbesHandOver(t *testing.T) {
-	codexCoder := map[string]any{"provider": "anthropic", "levels": map[string]any{"L0": map[string]any{"model": "a"}, "L1": map[string]any{"provider": "openai", "model": "gpt-9"}}}
+	// B617: a Codex coder runs in Go; only coder.sandbox (B93) still hands over
+	codexCoder := map[string]any{"provider": "anthropic", "coder": map[string]any{"sandbox": map[string]any{}},
+		"levels": map[string]any{"L0": map[string]any{"model": "a"}, "L1": map[string]any{"provider": "openai", "model": "gpt-9"}}}
 	openBook := map[string]any{"provider": "anthropic", "review": map[string]any{"allow_open_book_codex": true},
 		"levels": map[string]any{"L2": map[string]any{"provider": "openai", "model": "gpt-9"}}}
 	cases := []struct {
 		name, kind, doc string
 		cfg             map[string]any
 	}{
-		{"codex coder ping", "ping", "", codexCoder},
-		{"codex coder path deny", "deny", "", codexCoder},
-		{"open-book codex reviewer ping", "ping", "", openBook},
-		{"open-book codex isolation", "iso", "doc", openBook},
+		{"sandboxed codex coder ping", "ping", "", codexCoder},
+		{"sandboxed codex coder path deny", "deny", "", codexCoder},
 		{"levels not a map", "ping", "", map[string]any{"provider": "anthropic", "levels": []any{}}},
 		{"level not a map", "deny", "", map[string]any{"provider": "anthropic", "levels": map[string]any{"L1": "x"}}},
 		{"model not a scalar", "ping", "", map[string]any{"provider": "anthropic", "levels": map[string]any{"L0": map[string]any{"model": map[string]any{}}}}},
