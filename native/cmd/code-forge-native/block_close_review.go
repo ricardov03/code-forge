@@ -45,7 +45,9 @@ func closeWaitReviews(run, id, top, qdir string, files []gatecheck.File, changed
 		if inTree {
 			p.Tree = &top
 		}
-		identity, err := queue.Identity(qdir, p)
+		// Node's enqueue identity: the latest reopened attempt is reused, and
+		// Publish retires the attempts that reopen replaced.
+		p, identity, err := queue.Resolve(qdir, p, nil)
 		if err == nil {
 			err = queue.Publish(qdir, p, identity, time.Now())
 		}

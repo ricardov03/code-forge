@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/autopilot"
+	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
@@ -357,11 +358,9 @@ func closeLocalJoin(home, run, id, main, top string, predicted ledger.Object, pr
 		if err != nil {
 			return nil, 1, err
 		}
-		for _, value := range values {
-			row, _ := value.(map[string]any)
-			if row["run"] == run && row["block"] == id && row["event"] == "review.reopened" {
-				return nil, 1, fmt.Errorf("reopened review requires Node")
-			}
+		reopens, err := closeJoinReopens(values, run, id)
+		if err != nil {
+			return nil, 1, err
 		}
 		worker, ok := reviewEnqueueWorker(main)
 		if !ok {
@@ -405,14 +404,31 @@ func closeLocalJoin(home, run, id, main, top string, predicted ledger.Object, pr
 				return nil, 1, err
 			}
 			parts := ticket.Parts{Run: run, Block: id, File: file, ContentHash: hash, Tree: namedTree}
-			identity, err := queue.Identity(idx.Dir, parts)
+			var after *string
+			if at, has := reopens[file]; has {
+				after = &at
+			}
+			parts, identity, err := queue.Resolve(idx.Dir, parts, after)
 			if err != nil {
 				return nil, 1, err
 			}
-			for _, previous := range tickets {
-				if previous["file"] != file {
+			previousTickets, err := closeJoinPrevious(tickets, file, after)
+			if err != nil {
+				return nil, 1, err
+			}
+			// waitBlock restarts a file whose latest attempt stopped (a signed
+			// automatic reopen); that mutation stays with Node.
+			for i := len(tickets) - 1; i >= 0; i-- {
+				if tickets[i]["file"] != file {
 					continue
 				}
+				marker, err := idx.Marker(blockString(tickets[i]["ticket"]))
+				if err != nil || marker["status"] == "stopped" {
+					return nil, 1, fmt.Errorf("stopped or superseded review requires Node")
+				}
+				break
+			}
+			for _, previous := range previousTickets {
 				marker, err := idx.Marker(blockString(previous["ticket"]))
 				if err != nil || marker["status"] == "stopped" || previous["ticket"] != identity && marker["open_findings"] == true {
 					return nil, 1, fmt.Errorf("stopped or superseded review requires Node")
@@ -426,7 +442,7 @@ func closeLocalJoin(home, run, id, main, top string, predicted ledger.Object, pr
 				continue
 			}
 			present := false
-			for _, previous := range tickets {
+			for _, previous := range previousTickets {
 				present = present || previous["ticket"] == identity
 			}
 			if !present && live {
@@ -497,4 +513,73 @@ func closeLocalJoin(home, run, id, main, top string, predicted ledger.Object, pr
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+// closeJoinReopens is waitBlock's reopen map: per file, the lexically latest
+// ts of this block's review.reopened rows by a human, an agreed agent, or the
+// automatic stopped requeue. Like Node, the join does not verify signatures
+// here; the worker verifies the signed row.
+func closeJoinReopens(values []any, run, id string) (map[string]string, error) {
+	reopens := map[string]string{}
+	for _, value := range values {
+		row, _ := value.(map[string]any)
+		if row["event"] != "review.reopened" || row["run"] != run || row["block"] != id {
+			continue
+		}
+		ts, present := row["ts"]
+		_, finite, known := gatecheck.JSDateParse(ts, present)
+		if !known {
+			return nil, fmt.Errorf("unsupported reopen time")
+		}
+		if !finite {
+			continue
+		}
+		verdict, _ := row["verdict"].(map[string]any)
+		from, a := row["from_hash"].(string)
+		to, b := row["to_hash"].(string)
+		automatic := row["by"] == "auto" && row["reason"] == "auto-requeue: content changed after stopped review" && row["from"] == "stopped" && a && b && from != to
+		if row["by"] != "human" && !(row["by"] == "agent" && verdict != nil && verdict["verdict"] == "agree") && !automatic {
+			continue
+		}
+		file, ok := row["file"].(string)
+		at, isText := ts.(string)
+		if !ok || !isText {
+			// A Map key or a ts compared by String() would need Node's coercions.
+			return nil, fmt.Errorf("unsupported reopen row")
+		}
+		if current, has := reopens[file]; !has || at > current {
+			reopens[file] = at
+		}
+	}
+	return reopens, nil
+}
+
+// closeJoinPrevious keeps the file's tickets enqueued after its reopen, as
+// waitBlock does; every ticket counts when the file was not reopened.
+func closeJoinPrevious(tickets []queue.Object, file string, after *string) ([]queue.Object, error) {
+	var afterMs float64
+	if after != nil {
+		ms, ok, known := gatecheck.JSDateParse(*after, true)
+		if !known || !ok {
+			return nil, fmt.Errorf("unsupported reopen time")
+		}
+		afterMs = ms
+	}
+	out := []queue.Object{}
+	for _, t := range tickets {
+		if t["file"] != file {
+			continue
+		}
+		if after != nil {
+			ms, ok, known := gatecheck.JSDateParse(t["enqueued_at"], true)
+			if !known {
+				return nil, fmt.Errorf("unsupported ticket time")
+			}
+			if !ok || ms <= afterMs {
+				continue
+			}
+		}
+		out = append(out, t)
+	}
+	return out, nil
 }

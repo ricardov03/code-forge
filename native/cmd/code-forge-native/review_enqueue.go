@@ -433,7 +433,8 @@ func reviewEnqueueWith(args []string, step *landStep, pre *reviewFileScope) int 
 		p.AcceptanceRevision = &revision
 	}
 	dir := filepath.Join(root, ".code-forge", "queue")
-	id, err := queue.Identity(dir, p)
+	// reviewIdentity: ordinary enqueues reuse the latest reopened attempt.
+	p, id, err := queue.Resolve(dir, p, nil)
 	if err != nil {
 		return reviewWaitHandover(args, hEnqueueIdentity)
 	}
@@ -471,6 +472,9 @@ func reviewEnqueueWith(args []string, step *landStep, pre *reviewFileScope) int 
 	}
 	if p.AcceptanceRevision != nil {
 		out.Set("acceptance_revision", *p.AcceptanceRevision)
+	}
+	if p.ReopenedAt != nil {
+		out.Set("reopened_at", *p.ReopenedAt)
 	}
 	return reviewEnqueueSay(args, out, 0)
 }

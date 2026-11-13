@@ -14,20 +14,84 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/ticket"
 )
 
 var surrogate = regexp.MustCompile(`(?i)\\ud[89a-f][0-9a-f]{2}`)
 
-// Identity scopes before validating stored tickets, like reviewIdentity. Rare
-// reopened attempts stay with Node, which also retires their prior attempts.
-// No files have been changed when this returns an error.
+// Identity is Node's reviewIdentity without a reopen boundary: the ticket of
+// p's current content, reusing the latest reopened attempt. No files have
+// been changed when this returns an error.
 func Identity(dir string, p ticket.Parts) (string, error) {
+	_, id, err := Resolve(dir, p, nil)
+	return id, err
+}
+
+// Resolve is Node's reviewIdentity. It returns p with the attempt's
+// reopened_at (absent for an ordinary review) and that attempt's ticket id.
+// With after (a reopen row's ts), the latest matching ticket enqueued later is
+// reused, else after names a new attempt; without it the latest reopened
+// attempt is reused. It never writes; Publish retires the earlier attempts.
+func Resolve(dir string, p ticket.Parts, after *string) (ticket.Parts, string, error) {
+	p.ReopenedAt = nil
+	matching, err := scan(dir, p)
+	if err != nil {
+		return p, "", err
+	}
+	afterMs, afterOK := 0.0, false
+	if after != nil {
+		ms, ok, known := gatecheck.JSDateParse(*after, true)
+		if !known {
+			return p, "", fmt.Errorf("unsupported reopen time")
+		}
+		afterMs, afterOK = ms, ok
+	}
+	var latest, fresh Object
+	for _, t := range matching {
+		if _, reopened := t["reopened_at"]; reopened {
+			latest = t
+		}
+		if afterOK {
+			ms, ok, known := gatecheck.JSDateParse(t["enqueued_at"], true)
+			if !known {
+				return p, "", fmt.Errorf("unsupported ticket time")
+			}
+			if ok && ms > afterMs {
+				fresh = t
+			}
+		}
+	}
+	switch {
+	case fresh != nil:
+		if at, ok := fresh["reopened_at"].(string); ok {
+			p.ReopenedAt = &at
+		}
+	case afterOK:
+		at := *after
+		p.ReopenedAt = &at
+	case latest != nil:
+		at := latest["reopened_at"].(string)
+		p.ReopenedAt = &at
+	}
+	return p, ticket.ReviewID(p), nil
+}
+
+// canonicalStamp is the toISOString form whose byte order equals Node's
+// localeCompare order, which reviewIdentity sorts attempts by.
+var canonicalStamp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$`)
+
+// scan returns the valid tickets of p's scope (reopen attempts included) in
+// Node's order: enqueued_at, then ticket id. Scope is checked before
+// validation, like reviewIdentity.
+func scan(dir string, p ticket.Parts) ([]Object, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil && !os.IsNotExist(err) {
-		return "", err
+		return nil, err
 	}
+	matching := []Object{}
+	ordered := false
 	for _, entry := range entries {
 		if !ticketName.MatchString(entry.Name()) {
 			continue
@@ -37,7 +101,7 @@ func Identity(dir string, p ticket.Parts) (string, error) {
 			continue
 		}
 		if !utf8.Valid(data) || surrogate.Match(data) {
-			return "", fmt.Errorf("unsupported ticket encoding")
+			return nil, fmt.Errorf("unsupported ticket encoding")
 		}
 		var t Object
 		if json.Unmarshal(data, &t) != nil || t == nil {
@@ -51,35 +115,78 @@ func Identity(dir string, p ticket.Parts) (string, error) {
 			if kind == "answers" {
 				continue
 			}
-			return "", fmt.Errorf("unsupported ticket kind")
+			return nil, fmt.Errorf("unsupported ticket kind")
 		}
 		if err := validate(entry.Name()[:24], t); err != nil {
-			return "", err
+			return nil, err
 		}
 		if _, ok := t["enqueued_at"].(string); !ok {
-			return "", fmt.Errorf("unsupported ticket time")
+			return nil, fmt.Errorf("unsupported ticket time")
 		}
 		if _, reopened := t["reopened_at"]; reopened {
-			return "", fmt.Errorf("reopened ticket requires Node")
+			ordered = true
+		}
+		matching = append(matching, t)
+	}
+	// The order decides only between reopen attempts; Go's byte order equals
+	// localeCompare for toISOString stamps and hand over anything else.
+	if ordered && len(matching) > 1 {
+		for _, t := range matching {
+			if !canonicalStamp.MatchString(text(t, "enqueued_at")) {
+				return nil, fmt.Errorf("unsupported ticket time")
+			}
 		}
 	}
-	return ticket.ReviewID(p), nil
+	sort.SliceStable(matching, func(i, j int) bool {
+		a, b := text(matching[i], "enqueued_at"), text(matching[j], "enqueued_at")
+		if a != b {
+			return a < b
+		}
+		return text(matching[i], "ticket") < text(matching[j], "ticket")
+	})
+	return matching, nil
 }
 
-// Publish uses Node's no-overwrite hard-link publication and 0644 temp mode.
-// There is deliberately no queue lock. Concurrent writers leave the first
-// complete ticket's original bytes in place.
+// Publish is enqueueHash's write. A reopened attempt first retires every
+// other matching attempt enqueued at or before its reopen (supersedeTicket),
+// then publishes with Node's no-overwrite hard link and 0644 temp mode. There
+// is deliberately no queue lock. Concurrent writers leave the first complete
+// ticket's original bytes in place.
 func Publish(dir string, p ticket.Parts, id string, now time.Time) error {
+	stampMs := now.UnixMilli()
+	if p.ReopenedAt != nil {
+		at, ok, known := gatecheck.JSDateParse(*p.ReopenedAt, true)
+		if !known {
+			return fmt.Errorf("unsupported reopen time")
+		}
+		if ok {
+			matching, err := scan(dir, p)
+			if err != nil {
+				return err
+			}
+			retire := []string{}
+			for _, previous := range matching {
+				ms, parsed, known := gatecheck.JSDateParse(previous["enqueued_at"], true)
+				if !known {
+					return fmt.Errorf("unsupported ticket time")
+				}
+				if text(previous, "ticket") != id && parsed && ms <= at {
+					retire = append(retire, text(previous, "ticket"))
+				}
+			}
+			for _, previous := range retire {
+				if err := publishObject(dir, filepath.Join(dir, previous+".done"), ledger.Object{{Key: "ticket", Value: previous}, {Key: "status", Value: "refused"}, {Key: "reason", Value: "superseded"}}); err != nil {
+					return err
+				}
+			}
+			stampMs = max(stampMs, int64(at)+1)
+		}
+	}
 	target := filepath.Join(dir, id+".json")
 	if _, err := os.Stat(target); err == nil {
 		return nil
 	}
-	stamp := now.UTC().Format("2006-01-02T15:04:05.000Z")
-	if p.ReopenedAt != nil {
-		if after, err := time.Parse(time.RFC3339Nano, *p.ReopenedAt); err == nil && !now.Truncate(time.Millisecond).After(after) {
-			stamp = after.Add(time.Millisecond).UTC().Format("2006-01-02T15:04:05.000Z")
-		}
-	}
+	stamp := time.UnixMilli(stampMs).UTC().Format("2006-01-02T15:04:05.000Z")
 	body := ledger.Object{
 		{Key: "ticket", Value: id}, {Key: "run", Value: p.Run}, {Key: "block", Value: p.Block}, {Key: "file", Value: p.File}, {Key: "content_hash", Value: p.ContentHash},
 		{Key: "enqueued_at", Value: stamp}, {Key: "queued_at", Value: stamp}, {Key: "started_at", Value: nil}, {Key: "finished_at", Value: nil}, {Key: "duration_ms", Value: nil},

@@ -292,6 +292,9 @@ func reviewEnqueueFresh(root string, p ticket.Parts, id string, retry bool) (led
 		if p.AcceptanceRevision != nil {
 			out.Set("acceptance_revision", *p.AcceptanceRevision)
 		}
+		if p.ReopenedAt != nil {
+			out.Set("reopened_at", *p.ReopenedAt)
+		}
 		if outcome == "dropped" {
 			key := "fresh"
 			if retry {

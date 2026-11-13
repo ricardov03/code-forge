@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/ticket"
 )
@@ -453,7 +454,12 @@ func validate(id string, t Object) error {
 		return bad
 	}
 	if p.ReopenedAt != nil {
-		if _, err := time.Parse(time.RFC3339Nano, *p.ReopenedAt); err != nil {
+		// readTicket's Number.isFinite(Date.parse(reopened_at)).
+		_, finite, known := gatecheck.JSDateParse(*p.ReopenedAt, true)
+		if !known {
+			return fmt.Errorf("unsupported reopen time")
+		}
+		if !finite {
 			return bad
 		}
 	}
