@@ -203,7 +203,7 @@ func TestB500LedgerHelp(t *testing.T) {
 		{[]string{"ledger", "add", "-h"}, "usage: code-forge ledger add coder --run <r> --block <b> --usd <n> [--note \"...\"]\n"},
 		{[]string{"ledger", "outside-review", "--help"}, "usage: code-forge ledger outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...\n"},
 	} {
-		if code, out, errText := b500Run(t, tc.args...); code != 0 || out != tc.want || errText != "" {
+		if code, out, errText := b500Run(t, tc.args...); code != 0 || out != helpExpect(t, tc.args, 0, tc.want) || errText != "" {
 			t.Errorf("%q: got (%d, %q, %q)", tc.args, code, out, errText)
 		}
 	}

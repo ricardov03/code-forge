@@ -104,8 +104,9 @@ func b458Node(t *testing.T, args []string) b458Side {
 
 // Every form below handed over to Node before B458; Go must now answer it
 // with Node's stdout, stderr, exit code, breadcrumb and error-log entry.
+// Since B613 the command list ({}, --help, -h, help) is Go's own page
+// (TestB613ListPage), and a `<verb> --help` page wraps Node's usage text.
 var b458GoForms = [][]string{
-	{}, {"--help"}, {"-h"}, {"-h", "extra"}, {"help"}, {"help", "--help"}, {"help", "-h"}, {"help", "x", "--help"},
 	{"--version"}, {"-v"}, {"version"}, {"version", "--help"}, {"--version", "-h"},
 	{"init", "--help"}, {"init", "-h"}, {"native-status", "--help"},
 	{"facts"}, {"facts", "--help"}, {"facts", "--brief"}, {"facts", "--bogus", "x"}, {"facts", "pos", "--brief", "b"},
@@ -136,6 +137,13 @@ func TestB458FormsMatchNode(t *testing.T) {
 	for _, args := range b458GoForms {
 		goSide := b458Go(t, args)
 		nodeSide := b458Node(t, args)
+		routed := append([]string{}, args...)
+		if len(routed) > 0 && (routed[0] == "--version" || routed[0] == "-v") {
+			routed[0] = "version" // the router's alias
+		}
+		if name, ok := helpTarget(routed); ok && nodeSide.code == 0 && helpIsUsage(nodeSide.stdout) {
+			nodeSide.stdout = helpWrapped(t, name, nodeSide.stdout)
+		}
 		if goSide.code != nodeSide.code || goSide.stdout != nodeSide.stdout || goSide.stderr != nodeSide.stderr {
 			t.Errorf("%q:\n go   code=%d stdout=%q stderr=%q\n node code=%d stdout=%q stderr=%q", args, goSide.code, goSide.stdout, goSide.stderr, nodeSide.code, nodeSide.stdout, nodeSide.stderr)
 			continue
@@ -151,10 +159,6 @@ func TestB458FormsMatchNode(t *testing.T) {
 
 // Golden checks that hold without Node on PATH.
 func TestB458GoAnswers(t *testing.T) {
-	help := b458Go(t, []string{"help"})
-	if help.code != 0 || !strings.HasPrefix(help.stdout, "Usage: code-forge <verb> [args]\n\nVerbs:\n") || !strings.Contains(help.stdout, "\n  proof\n") || !strings.Contains(help.stdout, "\n  version\n") || help.crumbs != "[\"help\"]\n" {
-		t.Fatalf("help: %+v", help)
-	}
 	data, err := os.ReadFile(filepath.Join(b458Repo(t), "package.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -162,6 +166,10 @@ func TestB458GoAnswers(t *testing.T) {
 	var pkg struct{ Name, Version string }
 	if err := json.Unmarshal(data, &pkg); err != nil {
 		t.Fatal(err)
+	}
+	help := b458Go(t, []string{"help"})
+	if help.code != 0 || !strings.HasPrefix(help.stdout, pkg.Name+" "+pkg.Version+"\n\nUsage:\n") || !strings.Contains(help.stdout, "\n  proof tier ") || !strings.Contains(help.stdout, "\n  version ") || help.crumbs != "[\"help\"]\n" {
+		t.Fatalf("help: %+v", help)
 	}
 	if got := b458Go(t, []string{"-v"}); got.code != 0 || got.stdout != pkg.Name+" "+pkg.Version+"\n" || got.stderr != "" || got.crumbs != "[\"version\"]\n" {
 		t.Fatalf("-v: %+v", got)
@@ -215,11 +223,11 @@ func TestB458HandOvers(t *testing.T) {
 	defer func() { metaPackageRoot = saved }()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if code, _ := run([]string{"help"}); code != 127 {
+	// Since B613 the list is Go's own table: no install needed, no hand-over.
+	if code, _ := run([]string{"help"}); code != 0 {
 		t.Fatalf("help without an install: code=%d", code)
 	}
-	data, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
-	if !bytes.Contains(data, []byte(`"reason":"help-verbs"`)) {
-		t.Fatalf("help hand-over row %q", data)
+	if data, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl")); len(bytes.TrimSpace(data)) != 0 {
+		t.Fatalf("help without an install handed over: %q", data)
 	}
 }

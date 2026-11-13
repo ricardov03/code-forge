@@ -165,6 +165,7 @@ func TestRunVerbHelpAndUsage(t *testing.T) {
 				args = strings.Split(tc.args, "|")
 			}
 			code, out, errs := runVerbCall(t, args...)
+			tc.stdout = helpExpect(t, append([]string{"run"}, args...), tc.code, tc.stdout) // B613 help page
 			if code != tc.code || out != tc.stdout || errs != tc.errs {
 				t.Fatalf("run %v = %d stdout %q stderr %q, want %d %q %q", args, code, out, errs, tc.code, tc.stdout, tc.errs)
 			}
