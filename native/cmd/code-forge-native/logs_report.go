@@ -26,6 +26,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/pkgroot"
 	"github.com/ricardov03/code-forge/native/session"
 )
 
@@ -52,7 +53,7 @@ var (
 		if exe, err = filepath.EvalSymlinks(exe); err != nil {
 			return ""
 		}
-		return filepath.Join(filepath.Dir(exe), "..", "..", "..", "package.json")
+		return filepath.Join(pkgroot.FromExecutable(exe), "package.json")
 	}
 	lrNow = time.Now
 	lrRun = func(argv []string, timeout time.Duration) childResult {

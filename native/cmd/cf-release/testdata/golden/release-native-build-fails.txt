@@ -9,11 +9,11 @@ ok    on branch main
 ok    up to date with origin/main
 ok    0.22.0 > 0.21.0 (package.json) and > 0.21.0 (npm)
 ok    tag v0.22.0 is free (local and origin)
-ok    docs block covers 12f42bc2a84c1098217018bd7eb4a0a9d4df1700 since v0.21.0
+ok    docs block covers 013def573776c5126a81066b4d99c29d3c6996b9 since v0.21.0
 
 == 2. bump + 3. CHANGELOG and README ==
-package.json: version  0.21.0 → 0.22.0
-npm-shrinkwrap.json: version, packages[""].version  0.21.0 → 0.22.0
+package.json: version, platform package pins  0.21.0 → 0.22.0
+npm-shrinkwrap.json: version, packages[""].version, platform package pins  0.21.0 → 0.22.0
 .claude-plugin/plugin.json: version  0.21.0 → 0.22.0
 skill/scripts/forge: PINNED_VERSION  0.21.0 → 0.22.0
 CHANGELOG.md: [Unreleased] → [0.22.0] — 2026-11-12
@@ -68,18 +68,18 @@ docs/step-by-step.md: version pins: 0.21.0 → 0.22.0
     + @codedology/code-forge 0.22.0
 
 == 4. checks ==
-ok    CI for HEAD 55ae49b370863bb9670a985aaecdd6a4dfebde08: completed, success (npm test, npm run typecheck, gen-config-doc and gen-commands-doc --check)
+ok    CI for HEAD 915bef24e353ffbb667a9c5e9565df3911b452bb: completed, success (npm test, npm run typecheck, gen-config-doc and gen-commands-doc --check)
 --- stderr
 
 FAILED: build-native failed (exit 1): build-native: linux-x64 build failed: go: linux/amd64 build broke
 rolled back 7 files; nothing was committed or tagged
 --- repo refs
-refs/heads/main 55ae49b370863bb9670a985aaecdd6a4dfebde08 docs: stamp
-refs/remotes/origin/main 55ae49b370863bb9670a985aaecdd6a4dfebde08 docs: stamp
-refs/tags/v0.21.0 9ba933710fc6c42cfd5030502bb61f86d8fab67b Release v0.21.0
+refs/heads/main 915bef24e353ffbb667a9c5e9565df3911b452bb docs: stamp
+refs/remotes/origin/main 915bef24e353ffbb667a9c5e9565df3911b452bb docs: stamp
+refs/tags/v0.21.0 b9c5d385efa93371559af7835644c99d47d9c391 Release v0.21.0
 --- repo status
 --- tag v0.21.0
-object 12f42bc2a84c1098217018bd7eb4a0a9d4df1700
+object 013def573776c5126a81066b4d99c29d3c6996b9
 type commit
 tag v0.21.0
 tagger Test <test@example.invalid> 1794477600 +0000
@@ -93,6 +93,12 @@ Release v0.21.0
   "repository": {
     "type": "git",
     "url": "git+https://github.com/example/pkg.git"
+  },
+  "optionalDependencies": {
+    "@example/pkg-darwin-arm64": "0.21.0",
+    "@example/pkg-darwin-x64": "0.21.0",
+    "@example/pkg-linux-arm64": "0.21.0",
+    "@example/pkg-linux-x64": "0.21.0"
   }
 }
 --- file npm-shrinkwrap.json
@@ -104,7 +110,53 @@ Release v0.21.0
   "packages": {
     "": {
       "name": "@example/pkg",
-      "version": "0.21.0"
+      "version": "0.21.0",
+      "optionalDependencies": {
+        "@example/pkg-darwin-arm64": "0.21.0",
+        "@example/pkg-darwin-x64": "0.21.0",
+        "@example/pkg-linux-arm64": "0.21.0",
+        "@example/pkg-linux-x64": "0.21.0"
+      }
+    },
+    "node_modules/@example/pkg-darwin-arm64": {
+      "version": "0.21.0",
+      "cpu": [
+        "arm64"
+      ],
+      "optional": true,
+      "os": [
+        "darwin"
+      ]
+    },
+    "node_modules/@example/pkg-darwin-x64": {
+      "version": "0.21.0",
+      "cpu": [
+        "x64"
+      ],
+      "optional": true,
+      "os": [
+        "darwin"
+      ]
+    },
+    "node_modules/@example/pkg-linux-arm64": {
+      "version": "0.21.0",
+      "cpu": [
+        "arm64"
+      ],
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@example/pkg-linux-x64": {
+      "version": "0.21.0",
+      "cpu": [
+        "x64"
+      ],
+      "optional": true,
+      "os": [
+        "linux"
+      ]
     }
   }
 }
@@ -157,16 +209,16 @@ Install:
 Not a pin: @codedology/code-forge@0.21.0x stays.
 --- file docs/release-docs.json
 {
-  "through": "12f42bc2a84c1098217018bd7eb4a0a9d4df1700",
+  "through": "013def573776c5126a81066b4d99c29d3c6996b9",
   "tag": "v0.21.0"
 }
 --- origin refs
-refs/heads/main 55ae49b370863bb9670a985aaecdd6a4dfebde08
-refs/tags/v0.21.0 9ba933710fc6c42cfd5030502bb61f86d8fab67b
+refs/heads/main 915bef24e353ffbb667a9c5e9565df3911b452bb
+refs/tags/v0.21.0 b9c5d385efa93371559af7835644c99d47d9c391
 --- release temp files
 --- fake log
 <CASE>/repo npm view @example/pkg version
-<CASE>/repo gh run list --commit 55ae49b370863bb9670a985aaecdd6a4dfebde08 --workflow CI --limit 1 --json headSha,status,conclusion
+<CASE>/repo gh run list --commit 915bef24e353ffbb667a9c5e9565df3911b452bb --workflow CI --limit 1 --json headSha,status,conclusion
 <CASE>/repo go version
 <CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/darwin-arm64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 GOTOOLCHAIN=local GOPROXY=off
 <CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/darwin-x64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 GOTOOLCHAIN=local GOPROXY=off

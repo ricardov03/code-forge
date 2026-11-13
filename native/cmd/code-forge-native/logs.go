@@ -16,6 +16,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/pkgroot"
 )
 
 func init() { routes["logs"] = runLogs }
@@ -434,7 +435,7 @@ func logsEmptyFixes() bool {
 	if err != nil {
 		return false
 	}
-	file := filepath.Join(filepath.Dir(exe), "..", "..", "..", "src", "util", "known-fixes.json")
+	file := filepath.Join(pkgroot.FromExecutable(exe), "src", "util", "known-fixes.json")
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return errors.Is(err, fs.ErrNotExist) // Node treats a missing table as empty.

@@ -74,7 +74,11 @@ that run's job summary; it never changes an issue.
 npm run known-fix -- check              # if this release fixes reported errors: table is valid
 npm run release -- minor --dry-run      # see the plan and the diffs; writes nothing
 npm run release -- minor                # bump, CHANGELOG, README, checks, commit, tag
-npm publish                             # publish to npm from your machine
+npm publish dist/npm/darwin-arm64       # the four platform packages first (B606)
+npm publish dist/npm/darwin-x64
+npm publish dist/npm/linux-x64
+npm publish dist/npm/linux-arm64
+npm publish                             # then the main package, from your machine
 npm run release:site                    # wait for npm, check and deploy the site
 git push origin main --follow-tags      # then push; CI only creates the GitHub release
 ```
@@ -161,7 +165,8 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
 3. Complete [the docs block](#the-docs-block), commit its stamp last, and land it on `main`.
 4. `npm run release -- <bump> --dry-run`, and read the README and CHANGELOG diffs.
 5. `npm run release -- <bump>`.
-6. `npm publish`, then `npm run release:site` to update the website.
+6. `npm publish dist/npm/<target>` for each of the four targets, then `npm publish`, then
+   `npm run release:site` to update the website.
 7. `git push origin main --follow-tags`; merge and push the site's release branch using the printed commands.
 8. Comment the fixed version on each issue, and close it when all its items are done.
 
@@ -184,6 +189,8 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
    - `npm-shrinkwrap.json` `version` and `packages[""].version` (and `package-lock.json` if present)
    - `.claude-plugin/plugin.json` `version`
    - `skill/scripts/forge` `PINNED_VERSION="x.y.z"`
+   - with a native build, the four `@codedology/code-forge-<target>` pins in `package.json`
+     `optionalDependencies` and in `npm-shrinkwrap.json` (B606); a missing pin refuses the release
 
    JSON files are parsed and written back with their own indentation and trailing newline; only
    the version fields change.
@@ -204,8 +211,12 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
    Nothing is written or tagged. After the version edits it builds the four native targets with
    `go build` (the same targets, flags and output lines as `scripts/build-native.mjs`, run from Go;
    the Node version stamp is `node --version` of `CODE_FORGE_NODE` or node on PATH, and stays
-   `unknown` with no usable node), then runs `npm pack --dry-run` (the name and version must match; the file count is
-   printed), `npm ls --json` (0 invalid, 0 missing), and `claude plugin validate .` when the
+   `unknown` with no usable node), then writes one platform package per target to
+   `dist/npm/<target>/` (`package.json` with `os`, `cpu`, `files: ["bin"]` and the same version,
+   README, LICENSE, `bin/code-forge-native`; `dist/npm/` is git-ignored) (B606), then runs
+   `npm pack --dry-run` on each platform package (must be under 35 MB and hold the binary) and on
+   the main package (the name and version must match, the file count is printed, it must be under
+   5 MB and ship nothing from `native/bin`), `npm ls --json` (0 invalid, 0 missing), and `claude plugin validate .` when the
    `claude` CLI is installed (otherwise a warning). A failure here rolls back the version edits.
    CI covers HEAD before the release commit; the release commit only changes version fields,
    CHANGELOG and README.
@@ -217,7 +228,8 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
 5. **Commit and tag.** One commit `Release vX.Y.Z` with only the changed version files,
    `CHANGELOG.md`, and `README.md` when its Latest line changed, then the annotated tag `vX.Y.Z`,
    whose message is that version's CHANGELOG section.
-6. **Next steps.** It prints `npm publish`, `npm run release:site`, then the push command (publish first; the tag push
+6. **Next steps.** It prints the four platform publishes (`npm publish dist/npm/<target>`) first, then
+   `npm publish`, `npm run release:site`, then the push command (publish first; the tag push
    only creates the GitHub release), and the exact `gh release create … --verify-tag` command, with
    the release notes already written to a temp file.
 
@@ -298,7 +310,8 @@ command to finish by hand.
 ## What stays manual
 
 - **Push:** `git push origin main --follow-tags` sends the commit and the tag together.
-- **Publish:** `npm publish` from the tagged commit, before you push. Only you publish; CI never
+- **Publish:** `npm publish dist/npm/<target>` for the four targets, then `npm publish`, from the
+  tagged commit, before you push. Only you publish; CI never
   does, so no npm token is stored in GitHub.
 - **GitHub release:** automatic when the tag is pushed. See below.
 - **Your own install:** after `npm publish`, run `npm install -g @codedology/code-forge@latest` and

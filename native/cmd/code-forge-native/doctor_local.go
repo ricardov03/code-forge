@@ -31,6 +31,7 @@ import (
 	"github.com/ricardov03/code-forge/native/contextpack"
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/pkgroot"
 	"github.com/ricardov03/code-forge/native/session"
 	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/worker"
@@ -511,8 +512,7 @@ func dfNativeRow() (doctorRow, handoverReason) {
 	if err != nil {
 		return doctorRow{}, hDoctorNativeBinary
 	}
-	pkg := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(exe))))
-	binary := filepath.Join(pkg, "native", "bin", runtime.GOOS+"-"+dfNativeArch(), "code-forge-native")
+	binary, _ := pkgroot.Find(pkgroot.FromExecutable(exe), runtime.GOOS+"-"+dfNativeArch()) // B606
 	st, err := os.Stat(binary)
 	if err != nil || !st.Mode().IsRegular() || dfAccessX(binary) != nil {
 		return missing, 0

@@ -80,7 +80,11 @@ test('package.json declares exactly the specified runtime/optional/dev dependenc
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
 
   assert.deepEqual(Object.keys(pkg.dependencies).sort(), ['@clack/prompts', 'ajv', 'yaml']);
-  assert.deepEqual(Object.keys(pkg.optionalDependencies).sort(), ['@napi-rs/keyring']);
+  // B606: the four platform packages carry the Go binary, pinned to the package's own version.
+  assert.deepEqual(Object.keys(pkg.optionalDependencies).sort(), ['@codedology/code-forge-darwin-arm64', '@codedology/code-forge-darwin-x64', '@codedology/code-forge-linux-arm64', '@codedology/code-forge-linux-x64', '@napi-rs/keyring']);
+  for (const [name, version] of Object.entries(pkg.optionalDependencies)) {
+    if (name.startsWith('@codedology/')) assert.equal(version, pkg.version, `${name} pinned at ${version}, package is ${pkg.version}`);
+  }
   // R14 (B0.1): no mutation tooling — dev deps are exactly typescript + @types/node.
   assert.deepEqual(Object.keys(pkg.devDependencies).sort(), ['@types/node', 'typescript']);
 });
@@ -258,7 +262,7 @@ test('every dependency version is an exact semver — no ^, ~, *, "latest", or p
     ...Object.values(pkg.devDependencies ?? {}),
   ];
 
-  assert.equal(allVersions.length, 6);
+  assert.equal(allVersions.length, 10);
   for (const version of allVersions) {
     assert.match(version, EXACT_SEMVER, `"${version}" is not an exact semver`);
   }

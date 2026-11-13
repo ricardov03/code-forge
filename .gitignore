@@ -16,6 +16,7 @@ reports/
 package-lock.json
 *.tsbuildinfo
 native/bin/
+/dist/npm/
 
 # macOS
 .DS_Store

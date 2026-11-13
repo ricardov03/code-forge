@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+
+	"github.com/ricardov03/code-forge/native/pkgroot"
 )
 
 func init() { routes["setup"] = runSetupCommand }
@@ -35,7 +37,7 @@ func runSetupCommand(args []string) int {
 		fmt.Fprintf(os.Stderr, "code-forge setup: cannot locate the Go binary: %v\nfix: npm install -g @codedology/code-forge\n", err)
 		return 1
 	}
-	pkg := filepath.Clean(filepath.Join(filepath.Dir(exe), "..", "..", ".."))
+	pkg := pkgroot.FromExecutable(exe)
 	return setupCheck(args, pkg, setupHost(runtime.GOOS, runtime.GOARCH), version, os.Stdout, os.Stderr)
 }
 
@@ -67,7 +69,7 @@ func setupCheck(args []string, pkg, target, binaryVersion string, stdout, stderr
 	if err != nil {
 		return fail(fmt.Sprintf("cannot read %s: %v", filepath.Join(pkg, "package.json"), err), "npm install -g @codedology/code-forge")
 	}
-	binary := filepath.Join(pkg, "native", "bin", target, "code-forge-native")
+	binary, _ := pkgroot.Find(pkg, target) // B606: platform package, then the dev build
 	reinstall := fmt.Sprintf("npm install -g %s@%s", info.Name, info.Version)
 	if _, err := os.Stat(filepath.Join(pkg, "native", "go.mod")); err == nil {
 		reinstall = "node scripts/build-native.mjs --host"

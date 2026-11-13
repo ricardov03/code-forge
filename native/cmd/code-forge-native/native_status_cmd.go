@@ -16,6 +16,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/pkgroot"
 	"github.com/ricardov03/code-forge/native/runstatus"
 )
 
@@ -243,7 +244,7 @@ func nativeStatusNode(stdin io.Reader, stdout io.Writer) (int, error) {
 	if err != nil {
 		return 1, fmt.Errorf("resolve package executable: %w", err)
 	}
-	script := filepath.Join(filepath.Dir(executable), "..", "..", "..", "src", "cli", "native-status.mjs")
+	script := filepath.Join(pkgroot.FromExecutable(executable), "src", "cli", "native-status.mjs")
 	cmd := exec.Command(nodePath, script)
 	cmd.Stdout = stdout
 	cmd.Stderr = os.Stderr

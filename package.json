@@ -23,7 +23,6 @@
   },
   "files": [
     "bin",
-    "native/bin",
     "src",
     "schema",
     "skill",
@@ -62,6 +61,10 @@
     "yaml": "2.9.1"
   },
   "optionalDependencies": {
+    "@codedology/code-forge-darwin-arm64": "0.23.0",
+    "@codedology/code-forge-darwin-x64": "0.23.0",
+    "@codedology/code-forge-linux-arm64": "0.23.0",
+    "@codedology/code-forge-linux-x64": "0.23.0",
     "@napi-rs/keyring": "2.1.0"
   },
   "devDependencies": {

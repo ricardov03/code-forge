@@ -125,6 +125,11 @@ func (p b569Pkg) install(args ...string) b569Result {
 	return p.run("sh", nil, append([]string{filepath.Join(p.pkg, "scripts", "install.sh")}, args...)...)
 }
 
+// nested is the B606 path a missing-binary message names: the platform package under this one.
+func (p b569Pkg) nested(target string) string {
+	return filepath.Join(p.pkg, "node_modules", "@codedology", "code-forge-"+target, "bin", "code-forge-native")
+}
+
 func (p b569Pkg) noEngine(problem string) string {
 	return "code-forge: " + problem + "\n  expected: " + p.binary + "\n  fix: sh '" + p.pkg + "/scripts/install.sh'\n  if that fails, reinstall: npm i -g @codedology/code-forge\n"
 }
@@ -150,6 +155,7 @@ func TestB569LauncherMissingBinaryStops(t *testing.T) {
 	if err := os.Remove(p.binary); err != nil {
 		t.Fatal(err)
 	}
+	p.binary = p.nested(p.target) // B606: no binary anywhere names the platform package path
 	want := p.noEngine("the Go engine for " + p.target + " is missing")
 	b569Expect(t, "missing", p.launch(nil, "status"), 69, "", want)
 	b569Expect(t, "missing, no verb", p.launch(nil), 69, "", want)
@@ -173,7 +179,7 @@ func TestB569LauncherUnsupportedHostStops(t *testing.T) {
 	} {
 		p := newB569Pkg(t)
 		p.fakeUname(host.sys, host.mach)
-		p.binary = filepath.Join(p.pkg, "native", "bin", host.target, "code-forge-native")
+		p.binary = p.nested(host.target)
 		want := p.noEngine("no Go engine is built for " + host.target + " (built: darwin-arm64, darwin-x64, linux-arm64, linux-x64)")
 		b569Expect(t, host.target, p.launch(nil, "status"), 69, "", want)
 		b569Expect(t, host.target+" setup", p.launch(nil, "setup"), 69, "", want)
@@ -245,9 +251,9 @@ func TestB569InstallMissingUnsupportedAndBroken(t *testing.T) {
 	if err := os.Remove(p.binary); err != nil {
 		t.Fatal(err)
 	}
-	b569Expect(t, "missing", p.install(), 1, "", "code-forge install: Go binary is missing: "+p.binary+"\nfix: npm i -g @codedology/code-forge@"+b569Version+"\n")
+	b569Expect(t, "missing", p.install(), 1, "", "code-forge install: Go binary is missing: "+p.nested(p.target)+"\nfix: npm i -g @codedology/code-forge@"+b569Version+"\n")
 	p.fakeUname("Linux", "riscv64")
-	b569Expect(t, "unsupported", p.install(), 1, "", "code-forge install: no Go binary is built for linux-riscv64 (built: darwin-arm64, darwin-x64, linux-arm64, linux-x64): "+filepath.Join(p.pkg, "native", "bin", "linux-riscv64", "code-forge-native")+"\nfix: use macOS or Linux on x64 or arm64\n")
+	b569Expect(t, "unsupported", p.install(), 1, "", "code-forge install: no Go binary is built for linux-riscv64 (built: darwin-arm64, darwin-x64, linux-arm64, linux-x64): "+p.nested("linux-riscv64")+"\nfix: use macOS or Linux on x64 or arm64\n")
 }
 
 func TestB569InstallUsage(t *testing.T) {

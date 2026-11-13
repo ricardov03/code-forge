@@ -12,8 +12,8 @@ ok    tag v0.22.0 is free (local and origin)
 WARN  !!! --no-checks: docs block preflight check was NOT run !!!
 
 == 2. bump + 3. CHANGELOG and README ==
-package.json: version  0.21.0 → 0.22.0
-npm-shrinkwrap.json: version, packages[""].version  0.21.0 → 0.22.0
+package.json: version, platform package pins  0.21.0 → 0.22.0
+npm-shrinkwrap.json: version, packages[""].version, platform package pins  0.21.0 → 0.22.0
 .claude-plugin/plugin.json: version  0.21.0 → 0.22.0
 skill/scripts/forge: PINNED_VERSION  0.21.0 → 0.22.0
 CHANGELOG.md: [Unreleased] → [0.22.0] — 2026-11-12
@@ -73,7 +73,19 @@ native darwin-x64: 20 bytes (v0.22.0)
 native linux-x64: 19 bytes (v0.22.0)
 native linux-arm64: 19 bytes (v0.22.0)
 ok    build-native: all four release targets
-ok    package size: 1234567 bytes (1.23 MB; limit <35 MB)
+ok    platform package @example/pkg-darwin-arm64@0.22.0: dist/npm/darwin-arm64
+ok    platform package @example/pkg-darwin-x64@0.22.0: dist/npm/darwin-x64
+ok    platform package @example/pkg-linux-x64@0.22.0: dist/npm/linux-x64
+ok    platform package @example/pkg-linux-arm64@0.22.0: dist/npm/linux-arm64
+ok    package size: @example/pkg-darwin-arm64 7654321 bytes (7.65 MB; limit <35 MB)
+ok    npm pack --dry-run: @example/pkg-darwin-arm64@0.22.0, 7 files
+ok    package size: @example/pkg-darwin-x64 7654321 bytes (7.65 MB; limit <35 MB)
+ok    npm pack --dry-run: @example/pkg-darwin-x64@0.22.0, 7 files
+ok    package size: @example/pkg-linux-x64 7654321 bytes (7.65 MB; limit <35 MB)
+ok    npm pack --dry-run: @example/pkg-linux-x64@0.22.0, 7 files
+ok    package size: @example/pkg-linux-arm64 7654321 bytes (7.65 MB; limit <35 MB)
+ok    npm pack --dry-run: @example/pkg-linux-arm64@0.22.0, 7 files
+ok    package size: @example/pkg 1234567 bytes (1.23 MB; limit <5 MB)
 ok    npm pack --dry-run: @example/pkg@0.22.0, 7 files
 WARN  !!! --no-checks: the CI run for HEAD (npm test, typecheck, gen-config-doc and gen-commands-doc --check), npm ls and plugin validate were NOT checked; native build and package size checked !!!
 
@@ -82,7 +94,11 @@ ok    committed "Release v0.22.0" (7 files)
 ok    annotated tag v0.22.0
 
 == 6. next steps (nothing was pushed or published) ==
-  publish to npm first, then push (the tag push only creates the GitHub release; CI never publishes):
+  publish the four platform packages first, then the main package, then push (the tag push only creates the GitHub release; CI never publishes):
+      npm publish dist/npm/darwin-arm64
+      npm publish dist/npm/darwin-x64
+      npm publish dist/npm/linux-x64
+      npm publish dist/npm/linux-arm64
       npm publish
       npm run release:site
       git push origin main --follow-tags
@@ -90,20 +106,20 @@ ok    annotated tag v0.22.0
       gh release create v0.22.0 --title v0.22.0 --notes-file <CASE>/tmp/code-forge-release-<RAND>/release-notes-v0.22.0.md --verify-tag
 --- stderr
 --- repo refs
-refs/heads/main 87434ed980c3d8dfdfe4c42c8877530e2a85f320 Release v0.22.0
-refs/remotes/origin/main 55ae49b370863bb9670a985aaecdd6a4dfebde08 docs: stamp
-refs/tags/v0.21.0 9ba933710fc6c42cfd5030502bb61f86d8fab67b Release v0.21.0
-refs/tags/v0.22.0 8d8de85e885185c7b2c742597541fe440bb52ca8 Release v0.22.0
+refs/heads/main a1f904f6a1b7faabdf0e3c820bcfc429de95267f Release v0.22.0
+refs/remotes/origin/main 915bef24e353ffbb667a9c5e9565df3911b452bb docs: stamp
+refs/tags/v0.21.0 b9c5d385efa93371559af7835644c99d47d9c391 Release v0.21.0
+refs/tags/v0.22.0 832f2abceb2313f7d918891c13d0f2bce3b45bb2 Release v0.22.0
 --- repo status
 --- tag v0.21.0
-object 12f42bc2a84c1098217018bd7eb4a0a9d4df1700
+object 013def573776c5126a81066b4d99c29d3c6996b9
 type commit
 tag v0.21.0
 tagger Test <test@example.invalid> 1794477600 +0000
 
 Release v0.21.0
 --- tag v0.22.0
-object 87434ed980c3d8dfdfe4c42c8877530e2a85f320
+object a1f904f6a1b7faabdf0e3c820bcfc429de95267f
 type commit
 tag v0.22.0
 tagger Test <test@example.invalid> 1794477600 +0000
@@ -125,6 +141,12 @@ Release v0.22.0
   "repository": {
     "type": "git",
     "url": "git+https://github.com/example/pkg.git"
+  },
+  "optionalDependencies": {
+    "@example/pkg-darwin-arm64": "0.22.0",
+    "@example/pkg-darwin-x64": "0.22.0",
+    "@example/pkg-linux-arm64": "0.22.0",
+    "@example/pkg-linux-x64": "0.22.0"
   }
 }
 --- file npm-shrinkwrap.json
@@ -136,7 +158,53 @@ Release v0.22.0
   "packages": {
     "": {
       "name": "@example/pkg",
-      "version": "0.22.0"
+      "version": "0.22.0",
+      "optionalDependencies": {
+        "@example/pkg-darwin-arm64": "0.22.0",
+        "@example/pkg-darwin-x64": "0.22.0",
+        "@example/pkg-linux-arm64": "0.22.0",
+        "@example/pkg-linux-x64": "0.22.0"
+      }
+    },
+    "node_modules/@example/pkg-darwin-arm64": {
+      "version": "0.22.0",
+      "cpu": [
+        "arm64"
+      ],
+      "optional": true,
+      "os": [
+        "darwin"
+      ]
+    },
+    "node_modules/@example/pkg-darwin-x64": {
+      "version": "0.22.0",
+      "cpu": [
+        "x64"
+      ],
+      "optional": true,
+      "os": [
+        "darwin"
+      ]
+    },
+    "node_modules/@example/pkg-linux-arm64": {
+      "version": "0.22.0",
+      "cpu": [
+        "arm64"
+      ],
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@example/pkg-linux-x64": {
+      "version": "0.22.0",
+      "cpu": [
+        "x64"
+      ],
+      "optional": true,
+      "os": [
+        "linux"
+      ]
     }
   }
 }
@@ -192,12 +260,12 @@ Install:
 Not a pin: @codedology/code-forge@0.21.0x stays.
 --- file docs/release-docs.json
 {
-  "through": "12f42bc2a84c1098217018bd7eb4a0a9d4df1700",
+  "through": "013def573776c5126a81066b4d99c29d3c6996b9",
   "tag": "v0.21.0"
 }
 --- origin refs
-refs/heads/main 55ae49b370863bb9670a985aaecdd6a4dfebde08
-refs/tags/v0.21.0 9ba933710fc6c42cfd5030502bb61f86d8fab67b
+refs/heads/main 915bef24e353ffbb667a9c5e9565df3911b452bb
+refs/tags/v0.21.0 b9c5d385efa93371559af7835644c99d47d9c391
 --- release temp files
 # <CASE>/tmp/code-forge-release-<RAND>/release-notes-v0.22.0.md
 ### Added
@@ -227,4 +295,8 @@ Release v0.22.0
 <CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/darwin-x64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 GOTOOLCHAIN=local GOPROXY=off
 <CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/linux-x64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOTOOLCHAIN=local GOPROXY=off
 <CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/linux-arm64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=linux GOARCH=arm64 GOTOOLCHAIN=local GOPROXY=off
+<CASE>/repo/dist/npm/darwin-arm64 npm pack --dry-run --json
+<CASE>/repo/dist/npm/darwin-x64 npm pack --dry-run --json
+<CASE>/repo/dist/npm/linux-x64 npm pack --dry-run --json
+<CASE>/repo/dist/npm/linux-arm64 npm pack --dry-run --json
 <CASE>/repo npm pack --dry-run --json

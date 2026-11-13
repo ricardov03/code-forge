@@ -24,6 +24,10 @@
         "node": ">=22"
       },
       "optionalDependencies": {
+        "@codedology/code-forge-darwin-arm64": "0.23.0",
+        "@codedology/code-forge-darwin-x64": "0.23.0",
+        "@codedology/code-forge-linux-arm64": "0.23.0",
+        "@codedology/code-forge-linux-x64": "0.23.0",
         "@napi-rs/keyring": "2.1.0"
       }
     },
@@ -54,6 +58,50 @@
       "engines": {
         "node": ">= 20.12.0"
       }
+    },
+    "node_modules/@codedology/code-forge-darwin-arm64": {
+      "version": "0.23.0",
+      "cpu": [
+        "arm64"
+      ],
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "darwin"
+      ]
+    },
+    "node_modules/@codedology/code-forge-darwin-x64": {
+      "version": "0.23.0",
+      "cpu": [
+        "x64"
+      ],
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "darwin"
+      ]
+    },
+    "node_modules/@codedology/code-forge-linux-arm64": {
+      "version": "0.23.0",
+      "cpu": [
+        "arm64"
+      ],
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@codedology/code-forge-linux-x64": {
+      "version": "0.23.0",
+      "cpu": [
+        "x64"
+      ],
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
     },
     "node_modules/@napi-rs/keyring": {
       "version": "2.1.0",

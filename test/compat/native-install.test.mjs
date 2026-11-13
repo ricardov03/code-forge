@@ -123,8 +123,9 @@ test('npm installation ships a working host binary, reports its version, and ver
     } finally { await rm(snapshot, { recursive: true, force: true }); }
     assert.equal(packed.status, 0, packed.stderr);
     const [pack] = JSON.parse(packed.stdout);
-    assert.equal(pack.files.filter((f) => f.path === path.relative(root, binary)).length, 1, 'npm must ship exactly one host executable');
-    assert.ok(pack.size < 35_000_000, `package must stay under 35 MB, got ${pack.size} bytes`);
+    // B606: the Go binaries ship as the @codedology/code-forge-<target> platform packages.
+    assert.deepEqual(pack.files.filter((f) => f.path.startsWith('native/bin/')).map((f) => f.path), [], 'the main package must ship no native/bin file');
+    assert.ok(pack.size < 5_000_000, `the main package must stay under 5 MB, got ${pack.size} bytes`);
   } finally {
     if (disabled === undefined) delete process.env.CODE_FORGE_NATIVE;
     else process.env.CODE_FORGE_NATIVE = disabled;

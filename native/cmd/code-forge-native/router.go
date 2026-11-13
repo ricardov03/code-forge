@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"syscall"
+
+	"github.com/ricardov03/code-forge/native/pkgroot"
 )
 
 // Only verbs explicitly registered here run in Go. Internal accelerators are
@@ -57,7 +59,7 @@ func handover(args []string, reasons ...handoverReason) (int, error) {
 	if err != nil {
 		return 1, fmt.Errorf("resolve package executable: %w", err)
 	}
-	script := filepath.Join(filepath.Dir(executable), "..", "..", "..", "bin", "code-forge.mjs")
+	script := filepath.Join(pkgroot.FromExecutable(executable), "bin", "code-forge.mjs")
 	argv := append([]string{node, script}, args...)
 	childregRelease() // Node makes its own root
 	if err := syscall.Exec(nodePath, argv, os.Environ()); err != nil {
