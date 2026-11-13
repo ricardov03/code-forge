@@ -51,8 +51,11 @@ func TestRequest(t *testing.T) {
 		{name: "bad wait-block", method: "wait-block", response: `{"block":"B2","done":false,"files":[]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			// B599: a call that must fail may have a short budget (a busy
+			// machine only makes it fail the same way); a call that must
+			// answer gets a long one so load cannot turn it into a timeout.
 			timeout := 50 * time.Millisecond
-			if tc.name == "oversized" {
+			if tc.ok || tc.name == "oversized" {
 				timeout = 2 * time.Second
 			}
 			method := tc.method

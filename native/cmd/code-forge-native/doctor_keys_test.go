@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,19 +182,34 @@ func TestB483DoctorOpFailures(t *testing.T) {
 }
 
 // A first call that times out is retried once and logged as an op_retry
-// warning; two timeouts are op_timeout. The timeout is shortened, the fake op
-// sleeps far past it, so the outcome does not depend on machine load.
+// warning; two timeouts are op_timeout. B599: the outcome must not depend on
+// machine load. The fake op hangs unless an answer file exists; the test's
+// attempt hook writes that file only when attempt 2 starts and gives attempt 2
+// a long budget, so a slow process start can neither turn call 1 into the
+// answering call nor make call 2 time out. A hanging call always times out,
+// however busy the machine is.
 func TestB483DoctorOpTimeoutRetriesOnce(t *testing.T) {
-	saved := opTimeout
-	opTimeout = 2 * time.Second
-	t.Cleanup(func() { opTimeout = saved })
+	saved := opAttemptTimeout
+	t.Cleanup(func() { opAttemptTimeout = saved })
 	t.Setenv("CODE_FORGE_NO_ERROR_LOG", "")
+	const hangUnlessAnswered = `if [ -e "${0%/op}/answer" ]; then printf 'second\n'; else exec /bin/sleep 60; fi`
 
 	home, _ := b474Project(t, b483OpCfg, b483Now)
-	fake := b483FakeOp(t, `if [ $n = 1 ]; then exec /bin/sleep 60; fi; printf 'second\n'`)
+	fake := b483FakeOp(t, hangUnlessAnswered)
+	var attempts []int
+	opAttemptTimeout = func(attempt int) time.Duration {
+		attempts = append(attempts, attempt)
+		if attempt == 2 {
+			if err := os.WriteFile(filepath.Join(fake, "answer"), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return time.Minute
+		}
+		return time.Second
+	}
 	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0, b483Rows("OK   keys: jev key from op, expires " + b483Expires), b474Summary(2, 1, 0)}})
-	if count, _ := os.ReadFile(filepath.Join(fake, "count")); string(count) != "2\n" {
-		t.Fatalf("op calls = %q", count)
+	if fmt.Sprint(attempts) != "[1 2]" {
+		t.Fatalf("op attempts = %v", attempts)
 	}
 	log := b483File(t, home, "logs/errors.jsonl")
 	if !strings.Contains(log, `"verb":"doctor","sub":null,"flags":[],"exit":0,"kind":"warning","warning":"op_retry","message":"1Password did not answer in time; the call was retried once","stack":null,"cleaned":[],"fp":"3d3635502fa2"`) || strings.Count(log, "\n") != 1 {
@@ -201,11 +217,16 @@ func TestB483DoctorOpTimeoutRetriesOnce(t *testing.T) {
 	}
 
 	b474Project(t, b483OpCfg, b483Now)
-	fake = b483FakeOp(t, `exec /bin/sleep 60`)
+	b483FakeOp(t, hangUnlessAnswered)
+	attempts = nil
+	opAttemptTimeout = func(attempt int) time.Duration {
+		attempts = append(attempts, attempt)
+		return time.Second
+	}
 	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0,
 		b483Rows("WARN keys: jev key not resolved (1Password did not answer in time; unlock the app and try again); System 1 falls back to rules"), b474Summary(1, 2, 0)}})
-	if count, _ := os.ReadFile(filepath.Join(fake, "count")); string(count) != "2\n" {
-		t.Fatalf("op calls = %q", count)
+	if fmt.Sprint(attempts) != "[1 2]" {
+		t.Fatalf("op attempts = %v", attempts)
 	}
 }
 

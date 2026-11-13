@@ -134,15 +134,28 @@ func TestB585NodeVersionBadAnswerFallsBack(t *testing.T) {
 			log := filepath.Join(dir, "calls.log")
 			node := nodeRunFake(t, dir, log, body)
 			t.Setenv("CODE_FORGE_NODE", node)
-			nodeRunVersionUse(t, nodeRunVersionAskNode)
+			asks := 0
+			nodeRunVersionUse(t, func() string { asks++; return nodeRunVersionAskNode() })
 			if name == "times out" {
 				nodeRunVersionTimeout = 500 * time.Millisecond
 			}
 			reviewWaitNodeVersion = "unknown"
+			started := time.Now()
 			if got := nodeRunVersion(); got != "unknown" {
 				t.Errorf("got %q, want unknown", got)
 			}
-			if calls := nodeRunCalls(t, log); len(calls) != 1 {
+			if got := nodeRunVersion(); got != "unknown" || asks != 1 {
+				t.Errorf("second read: got %q after %d asks, want unknown after 1", got, asks)
+			}
+			calls := nodeRunCalls(t, log)
+			if name == "times out" {
+				// B599: the hanging fake may be killed before it logs its
+				// call on a busy machine; the ask must still have waited
+				// out the timeout and run node at most once.
+				if elapsed := time.Since(started); elapsed < nodeRunVersionTimeout || len(calls) > 1 {
+					t.Errorf("timed out after %v with node asked %d times, want >= %v and at most 1", elapsed, len(calls), nodeRunVersionTimeout)
+				}
+			} else if len(calls) != 1 {
 				t.Errorf("node asked %d times, want 1", len(calls))
 			}
 		})

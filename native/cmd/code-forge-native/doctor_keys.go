@@ -30,6 +30,11 @@ import (
 // opTimeout is OP_TIMEOUT_MS; tests shorten it.
 var opTimeout = 60 * time.Second
 
+// opAttemptTimeout is the time budget of op read attempt 1 or 2 (the retry);
+// both are opTimeout. Tests give each attempt its own budget so a busy
+// machine cannot make the answering call time out (B599).
+var opAttemptTimeout = func(attempt int) time.Duration { return opTimeout }
+
 // opMessages are OP_MESSAGES, the fixed texts a doctor reason may show.
 var opMessages = map[string]string{
 	"op_missing":    "1Password CLI not found; install it with: brew install 1password-cli",
@@ -166,9 +171,9 @@ func opRead(ref string) (string, string) {
 	}
 	// exec: each op child is recorded in the pid registry of this
 	// process's run root while it runs (B567).
-	res := toolsExec([]string{"op", "read", ref}, opTimeout)
+	res := toolsExec([]string{"op", "read", ref}, opAttemptTimeout(1))
 	if !res.ok && res.timedOut {
-		res = toolsExec([]string{"op", "read", ref}, opTimeout)
+		res = toolsExec([]string{"op", "read", ref}, opAttemptTimeout(2))
 		logNativeWarning("doctor", "op_retry", "1Password did not answer in time; the call was retried once")
 	}
 	if !res.ok {
