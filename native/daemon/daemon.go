@@ -72,6 +72,16 @@ type request struct {
 // requests. An OS lock serializes startup, including simultaneous stale recovery.
 // Active long-polls keep the daemon alive; idle connected clients do not.
 func Serve(home, run, version string, idle time.Duration) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+	return ServeContext(ctx, home, run, version, idle)
+}
+
+// ServeContext is Serve stopped by ctx instead of its own signal handling, so
+// a process that must clean up after the daemon (internal serve releases its
+// lazy run root, B602) keeps SIGTERM handled until it exits. A ctx already
+// done before the socket is up ends the daemon without listening.
+func ServeContext(ctx context.Context, home, run, version string, idle time.Duration) error {
 	if idle <= 0 {
 		return fmt.Errorf("idle duration must be positive")
 	}
@@ -110,6 +120,9 @@ func Serve(home, run, version string, idle time.Duration) error {
 	if err := s.refresh(); err != nil {
 		return err
 	}
+	if ctx.Err() != nil {
+		return nil
+	}
 	s.sweep(time.Now())
 	socket := filepath.Join(dir, "native.sock")
 	if info, err := os.Lstat(socket); err == nil {
@@ -138,7 +151,7 @@ func Serve(home, run, version string, idle time.Duration) error {
 	if err := os.Chmod(socket, 0600); err != nil {
 		return err
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var activity sync.Mutex
 	last := time.Now()

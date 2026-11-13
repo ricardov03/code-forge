@@ -2,14 +2,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/ricardov03/code-forge/native/daemon"
@@ -102,7 +105,18 @@ func runInternal(args []string) (int, error) {
 		if *idle <= 0 {
 			return 2, fmt.Errorf("idle duration must be positive")
 		}
-		if err := daemon.Serve(*home, *runID, version, *idle); err != nil {
+		// B602: SIGTERM and SIGINT stay handled until the process exits, so a
+		// second signal (the worker's daemon stop after a stop of its process
+		// group) cannot kill the daemon before main releases its lazy run root.
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go func() {
+			<-signals
+			cancel()
+		}()
+		if err := daemon.ServeContext(ctx, *home, *runID, version, *idle); err != nil {
 			return 1, err
 		}
 		return 0, nil
