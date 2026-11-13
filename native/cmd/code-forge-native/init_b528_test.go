@@ -236,6 +236,7 @@ func TestB528InitWizardMatchesNode(t *testing.T) {
 				t.Errorf("init log differs from Node:\n%s", b528Diff(want.Log, got.Log))
 			}
 			want.Files = b552SkillRows(t, want.Files, "")
+			want.Files = b607LinkVersion(t, want.Files)
 			if got.Files != want.Files {
 				t.Errorf("files differ from Node:\n%s", b528Diff(want.Files, got.Files))
 			}
@@ -340,4 +341,20 @@ func TestB528WriteNodeGoldens(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// b607LinkRow is a skill link row's version field, as Node's golden recorded it.
+var b607LinkRow = regexp.MustCompile(`("linked_at": "<ISO>",\n\s*"version": ")[^"]*(")`)
+
+// b607LinkVersion sets each recorded skill link row to the repo's current
+// package.json version. Node wrote the version of that day's package; Go
+// writes today's. A release bump (0.22.1 -> 0.23.0) must not turn the init
+// golden red, while a wrong or missing version field in Go still does.
+func b607LinkVersion(t *testing.T, tree string) string {
+	t.Helper()
+	version, err := nbPackageVersion(b458Repo(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b607LinkRow.ReplaceAllString(tree, "${1}"+version+"${2}")
 }
