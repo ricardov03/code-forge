@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-11-13
+
 ### Changed
 
 - `npm run release` now accepts a package up to 35 MB (was 20 MB): the Go port made the four native binaries about 15 MB each, so the 0.23.0 package is 28.3 MB; the refusal reads `published package must be under 35 MB` (B605)

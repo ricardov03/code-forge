@@ -41,7 +41,7 @@ system and prints `OK`, or the problem and the one command that fixes it.
 Or pin one version in a project that has a `package.json`:
 
 ```sh
-npm install --save-dev --save-exact @codedology/code-forge@0.22.1
+npm install --save-dev --save-exact @codedology/code-forge@0.23.0
 npx code-forge version
 ```
 
@@ -51,7 +51,7 @@ when you install. The unscoped npm package is a different tool.
 **You see** — Output shortened (local CLI check):
 
 ```text
-@codedology/code-forge 0.22.1
+@codedology/code-forge 0.23.0
 ```
 
 **What changed**
