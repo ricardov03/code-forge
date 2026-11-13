@@ -372,7 +372,10 @@ func TestB554LogsReportHandsOverWhatStaysInNode(t *testing.T) {
 		args         []string
 		setup        func(t *testing.T, c lrTestCase)
 	}{
-		{"ai cleaning", "logs-report", []string{"--dry-run"}, nil},
+		{"ai cleaning in a terminal send", "logs-report", []string{"--yes", "--allow-old"}, func(t *testing.T, c lrTestCase) {
+			asked := ""
+			b500Terminal(t, true, true, humanask.Cancelled, &asked)
+		}},
 		{"doctor", "logs-report-doctor", []string{"--no-ai", "--with-doctor", "--dry-run"}, nil},
 		{"known fixes", "logs-report-known-fixes", []string{"--no-ai", "--dry-run"}, func(t *testing.T, c lrTestCase) { lrFixesEmpty = func() bool { return false } }},
 		{"os release unknown", "logs-report-system", []string{"--no-ai", "--dry-run"}, func(t *testing.T, c lrTestCase) {

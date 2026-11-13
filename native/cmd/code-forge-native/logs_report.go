@@ -3,9 +3,10 @@ package main
 // `logs report` (B554), the report function in src/cli/logs.mjs: the picked
 // errors, the npm version check, the built-in cleaning, the 16 KB cap, the
 // secret checks, the preview, then gh (after a search for the same
-// fingerprint) or a prefilled issue link. Go runs the --no-ai path with no
-// prompt; the AI cleaning session, --with-doctor, a known-fix table, a
-// terminal prompt and entry shapes Go cannot print like Node stay in Node.
+// fingerprint) or a prefilled issue link. Go runs the path with no prompt,
+// the AI cleaning session included (B615, logs_report_ai.go); --with-doctor,
+// a known-fix table, a terminal prompt (or a terminal send with the AI pass)
+// and entry shapes Go cannot print like Node stay in Node.
 
 import (
 	"crypto/rand"
@@ -1005,10 +1006,7 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 	_, dryRun := flags["dry-run"]
 	_, yes := flags["yes"]
 	_, allowOld := flags["allow-old"]
-	switch {
-	case !noAI:
-		return logsHandover(args, hLogsReport) // the AI cleaning session stays in Node
-	case withDoctor:
+	if withDoctor {
 		return logsHandover(args, hLogsReportDoctor)
 	}
 	all := make([]lrEntry, len(newest))
@@ -1032,6 +1030,12 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 		return logsHandover(args, hLogsReportSystem)
 	case tty && !dryRun && !(yes && allowOld):
 		return logsHandover(args, hLogsReportPrompt)
+	case !noAI && tty && !dryRun:
+		// an AI pass that does not run asks "Send without the AI check?" in a terminal
+		return logsHandover(args, hLogsReport)
+	case !noAI && !lrAIServed(physicalCwd()):
+		// a session Go's session layer does not serve stays in Node
+		return logsHandover(args, hLogsReport)
 	case !routerHintReadable():
 		return logsHandover(args, hRouterHintState)
 	}
@@ -1097,6 +1101,18 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 	if blocked() {
 		return 1
 	}
+	aiLine := "AI cleaning was skipped (--no-ai); only the built-in cleaning ran."
+	aiRan := false
+	if !noAI {
+		items, why := lrRunAIScrub(title+"\n\n"+body, physicalCwd())
+		if why == "" {
+			texts, counts := lrApplyItems([]string{title, body}, items)
+			title, body = scrubber.scrub(texts[0]), scrubber.scrub(texts[1])
+			aiLine, aiRan = lrDescribeAICounts(counts), true
+		} else {
+			aiLine = "AI cleaning was not available (" + why + "); only the built-in cleaning ran."
+		}
+	}
 	body += lrFooterText(fps)
 	lists := []any{}
 	for _, e := range selected {
@@ -1107,7 +1123,7 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 		return 1
 	}
 	out(shared)
-	out(lrDescribeCounts(cleaned) + "\nAI cleaning was skipped (--no-ai); only the built-in cleaning ran.\n\nTitle: " + title + "\n\n" + body + "\n")
+	out(lrDescribeCounts(cleaned) + "\n" + aiLine + "\n\nTitle: " + title + "\n\n" + body + "\n")
 	if dryRun {
 		out("dry run: not sent\n")
 		return 0
@@ -1115,6 +1131,10 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 	if !yes {
 		// a terminal without --yes was handed over above
 		return failed(2, "logs: no terminal to confirm; not sent — pass --yes to send the report above\n")
+	}
+	if !aiRan && !noAI {
+		// a terminal was handed over above: without one, the AI check that did not run is refused
+		return failed(1, "logs: the AI check did not run and there is no terminal to confirm; not sent — pass --no-ai with --yes to send with only the built-in cleaning\n")
 	}
 
 	fp := fps[0]
