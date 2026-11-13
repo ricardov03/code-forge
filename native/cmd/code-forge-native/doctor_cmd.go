@@ -419,8 +419,15 @@ func jevKeyChain(cfg map[string]any, home string, now float64, opOK bool) (func(
 	if value := os.Getenv(envName); envName != "" && value != "" {
 		return keyed(doctorRow{"keys", "OK", "keys", "jev key from env, no expiry" + suffix}, value)
 	}
+	// B610: the default chain reads the OS keychain through `security`
+	// first (the writer), then the 0600 file store.
+	var kc *kcStore
 	if os.Getenv("CODE_FORGE_KEY_BACKEND") != "file" {
-		return nil, none, hDoctorKeyStore
+		store, ok := kcOpen()
+		if !ok {
+			return nil, none, hDoctorKeyStore
+		}
+		kc = &store
 	}
 	okRow := func(source string, exp *float64) doctorRow {
 		if exp != nil && *exp-now < 3_600_000 {
@@ -437,13 +444,62 @@ func jevKeyChain(cfg map[string]any, home string, now float64, opOK bool) (func(
 	keyFile := filepath.Join(home, ".code-forge", "store", storeName+".key")
 	var reasons, secrets []string
 	var before func()
-	raw, err := os.ReadFile(keyFile)
-	switch {
-	case err == nil:
-		if !utf8.Valid(raw) {
+	if kc != nil {
+		raw, found, ok := kc.get(storeName)
+		if !ok {
 			return nil, none, hDoctorKeyStore
 		}
-		text := strings.TrimSuffix(string(raw), "\n")
+		if found {
+			value, exp, ok := decodeKeyEntry(raw)
+			if !ok {
+				return nil, none, hDoctorKeyStore
+			}
+			secrets = append(secrets, value)
+			switch {
+			case exp != nil && *exp <= now:
+				// dropped as expired: the item goes, then its index row; the
+				// read ends here (the file store is not read)
+				if !keyIndexReadable(home, storeName, false) {
+					return nil, none, hDoctorKeyRefresh
+				}
+				before = func() {
+					if _, ok := kc.delete(storeName); !ok {
+						reasons = append(reasons, "key store error")
+					}
+					if updateKeyIndex(home, func(index *ledger.Object) { index.Delete(storeName) }) != nil {
+						reasons = append(reasons, "key store error")
+					}
+				}
+			case exp != nil && *exp > latest:
+				if !keyIndexReadable(home, storeName, true) {
+					return nil, none, hDoctorKeyRefresh
+				}
+				return func() doctorKeyResult {
+					if kc.set(storeName, encodeKeyEntry(value, latest)) == "" {
+						_ = updateKeyIndex(home, func(index *ledger.Object) {
+							if row, ok := index.Get(storeName).(ledger.Object); ok {
+								row = row.Clone()
+								row.Set("backend", kc.name)
+								row.Set("exp", latest)
+								index.Set(storeName, row)
+							}
+						})
+					}
+					return doctorKeyResult{okRow(kc.name, &latest), secrets, value, true}
+				}, doctorKeyPlan{maybe: true, empty: value == ""}, 0
+			default:
+				return keyed(okRow(kc.name, exp), value)
+			}
+		}
+	}
+	raw, err := []byte(nil), error(os.ErrNotExist)
+	if before == nil {
+		raw, err = os.ReadFile(keyFile)
+	}
+	switch {
+	case err == nil:
+		// readFile(file, 'utf8'): an invalid byte reads as U+FFFD
+		text := strings.TrimSuffix(nodeUTF8(string(raw)), "\n")
 		if text == "" {
 			break
 		}
@@ -517,9 +573,17 @@ func jevKeyChain(cfg map[string]any, home string, now float64, opOK bool) (func(
 		}
 		secrets = append(secrets, value)
 		exp := latest
-		if writePrivateFile(keyFile, encodeKeyEntry(value, exp)) == nil {
+		// store.put: the writer (the keychain on the default chain) first,
+		// then the index row naming it
+		backend, written := "file", false
+		if kc != nil {
+			backend, written = kc.name, kc.set(storeName, encodeKeyEntry(value, exp)) == ""
+		} else {
+			written = writePrivateFile(keyFile, encodeKeyEntry(value, exp)) == nil
+		}
+		if written {
 			_ = updateKeyIndex(home, func(index *ledger.Object) {
-				index.Set(storeName, ledger.Object{{Key: "source", Value: "op"}, {Key: "backend", Value: "file"}, {Key: "exp", Value: exp}, {Key: "ref", Value: opRef}})
+				index.Set(storeName, ledger.Object{{Key: "source", Value: "op"}, {Key: "backend", Value: backend}, {Key: "exp", Value: exp}, {Key: "ref", Value: opRef}})
 			})
 		}
 		return doctorKeyResult{okRow("op", &exp), secrets, value, true}

@@ -124,9 +124,10 @@ func workerServePlan(home string, a workerServeArgs) (*worker.TicketRunner, map[
 }
 
 // workerJevResolver is loop.mjs resolveJevKey decided before any write: the
-// env variable and the file store (CODE_FORGE_KEY_BACKEND=file) run in Go
-// (doctor's jevKeyChain); with the default backends a key Go proves absent
-// is none, any other goes to Node (the keychain is not read here).
+// env variable, the macOS keychain through `security` (B610) and the file
+// store run in Go (doctor's jevKeyChain); where Go cannot open the keychain
+// (not macOS, `security` failing) a key Go proves absent is none, any other
+// goes to Node.
 func workerJevResolver(cfg map[string]any, home string) (func() (string, []string), handoverReason) {
 	chain, plan, reason := jevKeyChain(cfg, home, float64(workerNow().UnixMilli()), false)
 	switch {

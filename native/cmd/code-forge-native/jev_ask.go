@@ -342,7 +342,25 @@ func b550JevKey(call *b550JevCall, cfg map[string]any, values map[string]string)
 		return true
 	}
 	if os.Getenv("CODE_FORGE_KEY_BACKEND") != "file" {
-		return false
+		// B610: the keychain through `security` first; a hit that needs a
+		// store change (expired, too long) stays with Node
+		kc, ok := kcOpen()
+		if !ok {
+			return false
+		}
+		raw, found, ok := kc.get(storeName)
+		if !ok {
+			return false
+		}
+		if found {
+			value, exp, ok := decodeKeyEntry(raw)
+			now := b550JevNow()
+			if !ok || value == "" || (exp != nil && (*exp <= now || *exp > now+hours*3_600_000)) {
+				return false
+			}
+			call.key = value
+			return true
+		}
 	}
 	raw, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".code-forge", "store", storeName+".key"))
 	text := ""

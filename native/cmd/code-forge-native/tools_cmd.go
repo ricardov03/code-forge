@@ -211,8 +211,21 @@ func runChildOwnerEnv(environ []string) []string {
 // (when not nil) runs once the child has settled: leader reaped, remaining
 // group members stopped, output drained (exec.mjs settle).
 func runChildHooked(argv []string, timeout time.Duration, started func(pid int, argv0 string) func()) childResult {
+	return runChildInput(argv, timeout, started, nil, false)
+}
+
+// runChildInput is runChildHooked with exec's `input` (written to stdin,
+// then closed; nil is stdin 'ignore') and, with setsid, Node's detached
+// spawn: the child leads a new session with no controlling terminal (B610).
+func runChildInput(argv []string, timeout time.Duration, started func(pid int, argv0 string) func(), input *string, setsid bool) childResult {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if setsid {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	}
+	if input != nil {
+		cmd.Stdin = strings.NewReader(*input)
+	}
 	// the CLI's owner and run variables when it set them (B573)
 	env := childreg.Env
 	if env == nil {

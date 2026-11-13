@@ -42,7 +42,18 @@ func initJevAutoPlan(home string) (initJevAuto, handoverReason) {
 		return initJevAuto{found: true, ref: "env:CODE_FORGE_KEY_JEV", source: "env", secrets: []string{value}}, 0
 	}
 	if os.Getenv("CODE_FORGE_KEY_BACKEND") != "file" {
-		return initJevAuto{}, hInitJevKeychain
+		// B610: the keychain through `security` first, then the file store
+		kc, ok := kcOpen()
+		if !ok {
+			return initJevAuto{}, hInitJevKeychain
+		}
+		raw, found, ok := kc.get("jev")
+		if !ok {
+			return initJevAuto{}, hInitJevKeychain
+		}
+		if found {
+			return initJevAutoKeychain(home, kc, raw)
+		}
 	}
 	keyFile := filepath.Join(home, ".code-forge", "store", "jev.key")
 	raw, err := os.ReadFile(keyFile)
@@ -83,6 +94,46 @@ func initJevAutoPlan(home string) (initJevAuto, handoverReason) {
 					if row, ok := index.Get("jev").(ledger.Object); ok {
 						row = row.Clone()
 						row.Set("backend", "file")
+						row.Set("exp", latest)
+						index.Set("jev", row)
+					}
+				})
+			}
+		}
+	}
+	return found, 0
+}
+
+// initJevAutoKeychain is initJevAutoPlan's read of a keychain hit: an
+// expired item is deleted with its index row (and the read ends there), an
+// expiry past the 24 h cap is cut (item and existing index row rewritten).
+func initJevAutoKeychain(home string, kc kcStore, raw string) (initJevAuto, handoverReason) {
+	value, exp, ok := decodeKeyEntry(raw)
+	if !ok {
+		return initJevAuto{}, hInitJevKeychain
+	}
+	now := doctorNow()
+	latest := now + 24*3_600_000
+	found := initJevAuto{found: true, ref: "user", source: kc.name, secrets: []string{value}}
+	switch {
+	case exp != nil && *exp <= now:
+		if !keyIndexReadable(home, "jev", false) {
+			return initJevAuto{}, hInitJevKeychain
+		}
+		return initJevAuto{secrets: []string{value}, pre: func() {
+			_, _ = kc.delete("jev")
+			_ = updateKeyIndex(home, func(index *ledger.Object) { index.Delete("jev") })
+		}}, 0
+	case exp != nil && *exp > latest:
+		if !keyIndexReadable(home, "jev", true) {
+			return initJevAuto{}, hInitJevKeychain
+		}
+		found.pre = func() {
+			if kc.set("jev", encodeKeyEntry(value, latest)) == "" {
+				_ = updateKeyIndex(home, func(index *ledger.Object) {
+					if row, ok := index.Get("jev").(ledger.Object); ok {
+						row = row.Clone()
+						row.Set("backend", kc.name)
 						row.Set("exp", latest)
 						index.Set("jev", row)
 					}

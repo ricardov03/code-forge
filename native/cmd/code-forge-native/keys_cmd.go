@@ -612,8 +612,15 @@ func keysDecide(args []string, cwd string) keysRun {
 			return 0
 		}
 	case "remove":
+		// B610: the default chain removes from the keychain through
+		// `security` too (Node's second keychain backend then finds nothing)
+		var kc *kcStore
 		if !fileOnly {
-			return nil
+			store, ok := kcOpen()
+			if !ok {
+				return nil
+			}
+			kc = &store
 		}
 		if _, err := keysIndex(indexFile); err != nil {
 			return nil
@@ -621,8 +628,13 @@ func keysDecide(args []string, cwd string) keysRun {
 		return func(stdout, stderr io.Writer) int {
 			r.write(stderr, storeWarning)
 			removed := 0
+			if kc != nil {
+				if gone, _ := kc.delete(p.name); gone {
+					removed++
+				}
+			}
 			if keysUnlink(filepath.Join(dir, p.name+".key")) == nil {
-				removed = 1
+				removed++
 			}
 			if err := keysUpdateIndex(indexFile, func(o *ledger.Object) { o.Delete(p.name) }); err != nil {
 				r.write(stderr, "code-forge: verb \"keys\" failed: Error: "+keysReason(err)+"\n")
@@ -659,8 +671,13 @@ func keysDecide(args []string, cwd string) keysRun {
 			return 2
 		}
 	case "test":
+		var kc *kcStore
 		if !fileOnly {
-			return nil
+			store, ok := kcOpen()
+			if !ok {
+				return nil
+			}
+			kc = &store
 		}
 		cache := keysCacheHoursFor(p, cwd, false)
 		if cache.handOff {
@@ -709,6 +726,32 @@ func keysDecide(args []string, cwd string) keysRun {
 		if strings.HasPrefix(ref, "op://") {
 			// a store miss would read 1Password: Node only
 			return nil
+		}
+		if kc != nil {
+			// B610: the keychain is read first; a miss goes on to the file
+			raw, found, ok := kc.get(storeName)
+			if !ok {
+				return nil
+			}
+			if found {
+				if _, err := keysIndex(indexFile); err != nil {
+					return nil
+				}
+				return func(stdout, stderr io.Writer) int {
+					r.write(stderr, prefix+storeWarning)
+					errs := []string{}
+					found, exp := keysKeychainRead(*kc, storeName, indexFile, raw, now, cache.hours, r, &errs)
+					for _, e := range errs {
+						r.write(stderr, p.name+": "+e+"\n")
+					}
+					if !found {
+						r.write(stderr, p.name+": not found\n")
+						return 1
+					}
+					r.write(stdout, p.name+": ok source="+kc.name+" expires="+keysFormatExpiry(exp, now)+"\n")
+					return 0
+				}
+			}
 		}
 		keyFile := filepath.Join(dir, storeName+".key")
 		raw, readErr := os.ReadFile(keyFile)
@@ -778,6 +821,45 @@ func keysFileRead(name, keyFile, indexFile string, raw []byte, readErr error, no
 			}
 			row = row.Clone()
 			row.Set("backend", "file")
+			row.Set("exp", latest)
+			o.Set(name, row)
+		})
+		if err != nil {
+			*errs = append(*errs, "index: rewrite of the shortened expiry failed ("+keysReason(err)+")")
+		}
+		return true, latest
+	}
+	return true, exp
+}
+
+// keysKeychainRead is store.read's keychain hit: an expired item is deleted
+// with its index row (not found), an expiry past the cache hours is cut.
+func keysKeychainRead(kc kcStore, name, indexFile, raw string, now float64, hours int, r *keysRedactor, errs *[]string) (bool, any) {
+	value, exp := keysDecodeEntry(raw)
+	r.register(value)
+	latest := now + float64(hours)*keysHourMS
+	if n, ok := exp.(float64); ok && n <= now {
+		if _, ok := kc.delete(name); !ok {
+			*errs = append(*errs, kc.name+": delete of expired entry failed (Error)")
+		}
+		if err := keysUpdateIndex(indexFile, func(o *ledger.Object) { o.Delete(name) }); err != nil {
+			*errs = append(*errs, "index: removal of the expired entry failed ("+keysReason(err)+")")
+		}
+		return false, nil
+	}
+	if n, ok := exp.(float64); ok && n > latest {
+		entry, _ := ledger.Stringify(ledger.Object{{Key: "v", Value: value}, {Key: "exp", Value: latest}}, false)
+		if reason := kc.set(name, string(entry)); reason != "" {
+			*errs = append(*errs, kc.name+": rewrite of the shortened expiry failed ("+reason+")")
+			return true, latest
+		}
+		err := keysUpdateIndex(indexFile, func(o *ledger.Object) {
+			row, ok := o.Get(name).(ledger.Object)
+			if !ok {
+				return
+			}
+			row = row.Clone()
+			row.Set("backend", kc.name)
 			row.Set("exp", latest)
 			o.Set(name, row)
 		})
