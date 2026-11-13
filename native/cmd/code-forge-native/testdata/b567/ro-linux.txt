@@ -1,0 +1,2 @@
+git rev-parse --path-format=absolute <PID> NOENTRY
+git rev-parse --show-toplevel <PID> NOENTRY

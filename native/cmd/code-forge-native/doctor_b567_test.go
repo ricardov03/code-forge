@@ -104,23 +104,48 @@ func b567Want(t *testing.T, name string) string {
 	return string(data)
 }
 
+// b567EachPlatform runs a full-doctor case once as darwin and once as linux
+// (drunPlatform), whatever the host. Only darwin runs the worktree indexing
+// check, whose repoTopOf is one more `git rev-parse --show-toplevel` child
+// (Node: src/cli/doctor.mjs, `(deps.platform ?? process.platform) ===
+// 'darwin'` before repoTopOf; Go: doctor_run.go, drunPlatform == "darwin").
+// The goldens <name>.txt are Node's run on macOS; <name>-linux.txt are the
+// same records without that one child (B597: CI on Ubuntu saw exactly that).
+func b567EachPlatform(t *testing.T, run func(t *testing.T, golden func(string) string)) {
+	for _, platform := range []string{"darwin", "linux"} {
+		t.Run(platform, func(t *testing.T) {
+			saved := drunPlatform
+			drunPlatform = platform
+			defer func() { drunPlatform = saved }()
+			run(t, func(name string) string {
+				if platform == "darwin" {
+					return name + ".txt"
+				}
+				return name + "-" + platform + ".txt"
+			})
+		})
+	}
+}
+
 const b567Plain = "provider: anthropic\n" + b474Levels
 
 // A full run: every probe child sees its own entry in the adopted doctor
 // root, with Node's fields; the root is gone after the run.
 func TestB567DoctorFullRunRegistersEachChild(t *testing.T) {
-	e, log := b567Setup(t, b567Plain, []string{"claude", "grok", "git"})
-	code, stdout, stderr := runCaptured(t, "doctor")
-	if code != 0 || !strings.Contains(stdout, "OK   claude: present, 9.9.9 (fake claude)\n") || !strings.HasSuffix(stderr, "0 fail\n") {
-		t.Fatalf("doctor: exit %d\n%s\nstderr: %s", code, stdout, stderr)
-	}
-	if got, want := b567Records(t, log), b567Want(t, "full.txt"); got != want {
-		t.Errorf("registry seen by the children:\n%s\nwant (Node):\n%s", got, want)
-	}
-	e.assertClean(t)
-	if lrRoot != "" {
-		t.Errorf("the doctor root is still adopted: %s", lrRoot)
-	}
+	b567EachPlatform(t, func(t *testing.T, golden func(string) string) {
+		e, log := b567Setup(t, b567Plain, []string{"claude", "grok", "git"})
+		code, stdout, stderr := runCaptured(t, "doctor")
+		if code != 0 || !strings.Contains(stdout, "OK   claude: present, 9.9.9 (fake claude)\n") || !strings.HasSuffix(stderr, "0 fail\n") {
+			t.Fatalf("doctor: exit %d\n%s\nstderr: %s", code, stdout, stderr)
+		}
+		if got, want := b567Records(t, log), b567Want(t, golden("full")); got != want {
+			t.Errorf("registry seen by the children:\n%s\nwant (Node):\n%s", got, want)
+		}
+		e.assertClean(t)
+		if lrRoot != "" {
+			t.Errorf("the doctor root is still adopted: %s", lrRoot)
+		}
+	})
 }
 
 // A quick run adopts no root: the op child is recorded in the lazy root,
@@ -140,22 +165,24 @@ func TestB567DoctorQuickOpRegistersInTheLazyRoot(t *testing.T) {
 // An unwritable temp root: no doctor root, no probes, and the children that
 // still run (git) find no entry, as in Node; nothing is written there.
 func TestB567DoctorUnwritableRootStillRuns(t *testing.T) {
-	e, log := b567Setup(t, b567Plain, []string{"claude", "grok", "git"})
-	if err := os.Chmod(e.tmp, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(e.tmp, 0o700) })
-	code, stdout, _ := runCaptured(t, "doctor")
-	if code != 1 || !strings.Contains(stdout, "FAIL probes: no temp root (EACCES: permission denied, mkdir ") {
-		t.Fatalf("doctor: exit %d\n%s", code, stdout)
-	}
-	if got, want := b567Records(t, log), b567Want(t, "ro.txt"); got != want {
-		t.Errorf("registry seen by the children:\n%s\nwant (Node):\n%s", got, want)
-	}
-	if err := os.Chmod(e.tmp, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	e.assertClean(t)
+	b567EachPlatform(t, func(t *testing.T, golden func(string) string) {
+		e, log := b567Setup(t, b567Plain, []string{"claude", "grok", "git"})
+		if err := os.Chmod(e.tmp, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(e.tmp, 0o700) })
+		code, stdout, _ := runCaptured(t, "doctor")
+		if code != 1 || !strings.Contains(stdout, "FAIL probes: no temp root (EACCES: permission denied, mkdir ") {
+			t.Fatalf("doctor: exit %d\n%s", code, stdout)
+		}
+		if got, want := b567Records(t, log), b567Want(t, golden("ro")); got != want {
+			t.Errorf("registry seen by the children:\n%s\nwant (Node):\n%s", got, want)
+		}
+		if err := os.Chmod(e.tmp, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		e.assertClean(t)
+	})
 }
 
 // Init's installer is recorded under the tmp.root of the config at the

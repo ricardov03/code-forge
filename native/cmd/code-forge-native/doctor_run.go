@@ -256,7 +256,7 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 		}
 		// the indexing check's git child runs in the body, after the
 		// probes, while the run root is adopted (B567)
-		indexing = runtime.GOOS == "darwin"
+		indexing = drunPlatform == "darwin"
 	}
 
 	// The --version and --help children run last, so a version line Go
@@ -366,6 +366,10 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 		return 0
 	}, 0, true
 }
+
+// drunPlatform is the platform the indexing check is gated on (Node's
+// deps.platform ?? process.platform, src/cli/doctor.mjs); tests set it (B597).
+var drunPlatform = runtime.GOOS
 
 // drunIndexingRows is the CLI's darwin worktree indexing check for a loaded
 // config with no live worker: top is the repo top (realpath), else the config
