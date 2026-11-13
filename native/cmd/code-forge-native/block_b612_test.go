@@ -23,6 +23,7 @@ import (
 
 const b612Claude = `#!/bin/sh
 cat > "$FAKE_DIR/stdin.$$"
+printf '%s\n' "$*" >> "$FAKE_DIR/args"
 echo x >> "$FAKE_DIR/calls"
 case "$FAKE_VERDICT" in
 agree) printf '%s' '{"type":"result","is_error":false,"result":"done","structured_output":{"verdict":"agree","reason":"  fine  "},"usage":{"input_tokens":10,"output_tokens":5}}' ;;

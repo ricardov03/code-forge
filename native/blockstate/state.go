@@ -248,6 +248,11 @@ type Loaded struct {
 	Status string
 	State  map[string]any
 	Seq    float64
+	// Raw is the state file's bytes when the state came from a file; MAC is
+	// the anchor row's mac. Callers that print state values in Node's
+	// JSON.parse key order re-read them from these (B612).
+	Raw []byte
+	MAC string
 }
 
 // Load checks durable and legacy bytes against the highest verified anchor. It never migrates.
@@ -308,5 +313,6 @@ func Load(home, legacy, run, id, file string, rows []gatecheck.Row, key []byte) 
 		return result
 	}
 	result.State, result.Status = Map(body["state"]), "ok"
+	result.Raw, result.MAC = data, Text(anchor["mac"])
 	return result
 }

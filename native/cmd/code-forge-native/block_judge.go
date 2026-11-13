@@ -459,6 +459,46 @@ func bjWindows(windows []blockstate.Window) []any {
 	return out
 }
 
+// bjOpenFindings is reopen.mjs loaded.state?.open ?? [], with the key order
+// JSON.parse gives Node: read again from the state file's bytes, or from the
+// anchor row's state_body in ledger order. ok is false when Go cannot find
+// the same value (the caller hands over).
+func (p *blockPreview) bjOpenFindings(loaded blockstate.Loaded) (any, bool) {
+	var body ledger.Object
+	if loaded.Status == "lost" {
+		return []any{}, true
+	}
+	if loaded.Raw != nil {
+		v, err := ledger.DecodeObject(loaded.Raw)
+		if err != nil {
+			return nil, false
+		}
+		body = v
+	} else {
+		ordered, err := ledger.ReadAllOrdered(filepath.Join(p.home, ".code-forge/ledger"), blockString(p.record.Get("project")))
+		if err != nil || loaded.MAC == "" {
+			return nil, false
+		}
+		for _, v := range ordered {
+			row, isObject := v.(ledger.Object)
+			if isObject && row.Get("event") == "review.state" && row.Get("mac") == loaded.MAC {
+				body, _ = row.Get("state_body").(ledger.Object)
+			}
+		}
+		if body == nil {
+			return nil, false
+		}
+	}
+	state, isObject := body.Get("state").(ledger.Object)
+	if !isObject {
+		return nil, false
+	}
+	if open := state.Get("open"); open != nil {
+		return open, true
+	}
+	return []any{}, true
+}
+
 type bjReopenCase struct {
 	top, root, file, reason string
 	from, stopReason        string
@@ -532,9 +572,9 @@ func (p *blockPreview) bjReopen(c bjReopenCase) int {
 	if c.from == "stopped" {
 		stopReason = c.stopReason
 	}
-	findings := c.loaded.State["open"]
-	if findings == nil {
-		findings = []any{}
+	findings, ok := p.bjOpenFindings(c.loaded)
+	if !ok {
+		return p.fallback()
 	}
 	packet := ledger.Object{{Key: "stop_reason", Value: stopReason}, {Key: "findings", Value: findings}, {Key: "reason", Value: c.reason}, {Key: "file", Value: ledger.Object{{Key: "path", Value: c.file}, {Key: "content", Value: content}}}}
 	if windows := blockstate.CitedWindows(c.reason, c.root); len(windows) > 0 {
