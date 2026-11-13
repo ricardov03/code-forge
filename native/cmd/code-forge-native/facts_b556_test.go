@@ -27,7 +27,7 @@ const fcFakeClaude = `#!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done > "$FAKE_LOG/claude.argv"
 pwd -P > "$FAKE_LOG/claude.cwd"
 cat > "$FAKE_LOG/stdin.txt"
-find . | sort | while read -r f; do printf '%s %s\n' "$(ls -ld "$f" | cut -c1-10)" "$f"; done > "$FAKE_LOG/snapshot.txt"
+find . | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$(ls -ld "$f" | cut -c1-10)" "$f"; done > "$FAKE_LOG/snapshot.txt"
 case "$FAKE_MODE" in
 fail) echo "boom" >&2; exit 5;;
 esac
@@ -37,7 +37,7 @@ printf '{"type":"result","is_error":false,"result":"","structured_output":%s,"us
 const fcFakeGrok = `#!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done > "$FAKE_LOG/grok.argv"
 pwd -P > "$FAKE_LOG/grok.cwd"
-find . | sort | while read -r f; do printf '%s %s\n' "$(ls -ld "$f" | cut -c1-10)" "$f"; done > "$FAKE_LOG/snapshot.txt"
+find . | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$(ls -ld "$f" | cut -c1-10)" "$f"; done > "$FAKE_LOG/snapshot.txt"
 case "$FAKE_MODE" in
 fail) echo "boom" >&2; exit 5;;
 esac

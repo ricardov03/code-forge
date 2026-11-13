@@ -211,6 +211,12 @@ func TestB577FactsGlobServedLikeNode(t *testing.T) {
 	}
 	base := fcWorkspace(t, "anthropic", string(brief))
 	t.Setenv("FAKE_ANSWER", string(answer))
+	// B596: path.matchesGlob is nocase on macOS and Windows only (Node 24's
+	// lib/path.js: nocase: isWindows || isMacOS); glob.txt was recorded on
+	// macOS, so the check runs with macOS's nocase on every OS.
+	savedNocase := fcGlobNocase
+	fcGlobNocase = true
+	t.Cleanup(func() { fcGlobNocase = savedNocase })
 	code, stdout, stderr := runCaptured(t, "facts", "--brief", "brief.md")
 	if data, _ := os.ReadFile(filepath.Join(base, "home", ".code-forge", "native", "handovers.jsonl")); len(data) != 0 {
 		t.Fatalf("handed over: %s", data)

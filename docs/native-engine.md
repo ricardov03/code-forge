@@ -282,8 +282,8 @@ sh "$(npm root -g)/@codedology/code-forge/scripts/install.sh"
 It maps `uname -s` and `uname -m` like the entry, checks that the binary
 exists, restores a lost execute bit (`chmod +x`), runs `<binary> --version` and
 `<binary> internal version`, and compares the binary's version with
-`package.json`. On success it prints
-`code-forge install: OK Go binary <platform>-<arch> v<version> (<path>)` and
+`package.json`. On success it prints this line (shown here in quotes)
+`"code-forge install: OK Go binary <platform>-<arch> v<version> (<path>)"` and
 exits 0. On a problem it prints the problem and one `fix:` line
 (`npm i -g @codedology/code-forge@<version>`, or
 `node scripts/build-native.mjs --host` in a source checkout) and exits 1.

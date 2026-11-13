@@ -87,17 +87,17 @@ Bash(mv*)
 Bash(cp*)
 --restricted
 --- log/claude.cwd
-<WS>/tmp/cf/proc-41776-1794511367449/facts/1794511367454-850add26/snapshot
+<WS>/tmp/cf/proc-61873-1794533934269/facts/1794533934273-0d78fb6a/snapshot
 --- log/snapshot.txt
 dr-xr-xr-x .
+-r--r--r-- ./.code-forge.yml
+-r--r--r-- ./.gitignore
 dr-xr-xr-x ./_sources
 dr-xr-xr-x ./_sources/docsout
 -r--r--r-- ./_sources/docsout/notes.md
 dr-xr-xr-x ./_sources/ext
 dr-xr-xr-x ./_sources/ext/lib
 -r--r--r-- ./_sources/ext/lib/util.mjs
--r--r--r-- ./.code-forge.yml
--r--r--r-- ./.gitignore
 -r--r--r-- ./brief.md
 dr-xr-xr-x ./docs
 -r--r--r-- ./docs/readme.md
@@ -171,17 +171,17 @@ repo/src/new.mjs
 tmp
 tmp/cf
 --- home/.code-forge/ledger/unit.jsonl
-{"event":"session","role":"facts","level":"L0","provider":"anthropic","model":"m-x","effort":null,"fallback_step":0,"run":null,"block":null,"status":"ok","tokens_in":100,"tokens_out":20,"tokens_source":"reported","usd":0.0001,"cost_source":"estimated","duration_ms":317,"ts":"2026-11-12T19:22:48.435Z"}
-{"event":"facts.built","role":"facts","run":null,"claims":7,"verified":1,"tokens_in":100,"tokens_out":20,"ts":"2026-11-12T19:22:48.441Z","tokens_source":"estimated","cost_source":null}
+{"event":"session","role":"facts","level":"L0","provider":"anthropic","model":"m-x","effort":null,"fallback_step":0,"run":null,"block":null,"status":"ok","tokens_in":100,"tokens_out":20,"tokens_source":"reported","usd":0.0001,"cost_source":"estimated","duration_ms":322,"ts":"2026-11-13T01:38:55.200Z"}
+{"event":"facts.built","role":"facts","run":null,"claims":7,"verified":1,"tokens_in":100,"tokens_out":20,"ts":"2026-11-13T01:38:55.209Z","tokens_source":"estimated","cost_source":null}
 --- home/.code-forge/logs/breadcrumbs.json
 ["facts"]
 --- repo/plans/brief.facts.md
 # Facts sheet
 
 - brief: `../brief.md`
-- brief_sha256: `ce7bb1785ef7aa35638dfab06c736e6c8254170ac66d51e524dd7855f3824137`
-- brief_mtime: `2026-11-12T19:22:47.126Z`
-- built_at: `2026-11-12T19:22:48.440Z`
+- brief_sha256: `56eaf2b03a809fbb695cb2a56e037f3edf1d192c5dd76797f85c6f7945757592`
+- brief_mtime: `2026-11-13T01:38:53.509Z`
+- built_at: `2026-11-13T01:38:55.208Z`
 - claims: 7 (VERIFIED 1 · NOT-FOUND 0 · UNVERIFIABLE 6)
 
 | fact_id | tag | kind | source | claim | command | output | why |

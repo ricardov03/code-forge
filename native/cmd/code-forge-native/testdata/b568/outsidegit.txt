@@ -87,16 +87,16 @@ Bash(mv*)
 Bash(cp*)
 --restricted
 --- log/claude.cwd
-<WS>/tmp/cf/proc-25223-1794511277672/facts/1794511277678-6c4d9bba/snapshot
+<WS>/tmp/cf/proc-62438-1794533935714/facts/1794533935719-912ef646/snapshot
 --- log/snapshot.txt
 dr-xr-xr-x .
+-r--r--r-- ./.code-forge.yml
+-r--r--r-- ./.gitignore
 dr-xr-xr-x ./_sources
 dr-xr-xr-x ./_sources/lib
 dr-xr-xr-x ./_sources/lib-2
 -r--r--r-- ./_sources/lib-2/b.mjs
 -r--r--r-- ./_sources/lib/a.mjs
--r--r--r-- ./.code-forge.yml
--r--r--r-- ./.gitignore
 -r--r--r-- ./brief.md
 dr-xr-xr-x ./docs
 -r--r--r-- ./docs/readme.md
@@ -177,8 +177,8 @@ repo/src/new.mjs
 tmp
 tmp/cf
 --- home/.code-forge/ledger/unit.jsonl
-{"event":"session","role":"facts","level":"L0","provider":"anthropic","model":"m-x","effort":null,"fallback_step":0,"run":null,"block":null,"status":"ok","tokens_in":100,"tokens_out":20,"tokens_source":"reported","usd":0.0001,"cost_source":"estimated","duration_ms":288,"ts":"2026-11-12T19:21:18.490Z"}
-{"event":"facts.built","role":"facts","run":null,"claims":14,"verified":1,"tokens_in":100,"tokens_out":20,"ts":"2026-11-12T19:21:18.497Z","tokens_source":"estimated","cost_source":null}
+{"event":"session","role":"facts","level":"L0","provider":"anthropic","model":"m-x","effort":null,"fallback_step":0,"run":null,"block":null,"status":"ok","tokens_in":100,"tokens_out":20,"tokens_source":"reported","usd":0.0001,"cost_source":"estimated","duration_ms":405,"ts":"2026-11-13T01:38:56.688Z"}
+{"event":"facts.built","role":"facts","run":null,"claims":14,"verified":1,"tokens_in":100,"tokens_out":20,"ts":"2026-11-13T01:38:56.695Z","tokens_source":"estimated","cost_source":null}
 --- home/.code-forge/logs/breadcrumbs.json
 ["facts"]
 --- repo/plans/brief.facts.md
@@ -186,8 +186,8 @@ tmp/cf
 
 - brief: `../brief.md`
 - brief_sha256: `1c9a8a33b80ac3a8ecc090e0683653719145e8fe56a0b23e01c4ff41ab964596`
-- brief_mtime: `2026-11-12T19:21:17.171Z`
-- built_at: `2026-11-12T19:21:18.497Z`
+- brief_mtime: `2026-11-13T01:38:55.242Z`
+- built_at: `2026-11-13T01:38:56.694Z`
 - claims: 14 (VERIFIED 1 · NOT-FOUND 0 · UNVERIFIABLE 13)
 
 | fact_id | tag | kind | source | claim | command | output | why |
