@@ -26,7 +26,7 @@ import (
 )
 
 // B556: buildFacts (src/session/facts.mjs) and the rest of runFactsVerb in Go
-// for the anthropic and xai providers: the read-only snapshot (git archive +
+// for the anthropic and xai providers (B582: and openai, the Codex CLI): the read-only snapshot (git archive +
 // seal), git check-ignore marking, packet.md, the L0 facts session, the
 // answer validation, the sheet and the facts.built ledger row. Every case Go
 // does not serve byte-equal is a named hand-over decided before any side
@@ -249,9 +249,9 @@ func fcPlanFacts(flags map[string]any, brief string) (*fcPlan, handoverReason) {
 	// the packet path is set at run time; Check only needs an absolute one
 	probe := p.opts
 	probe.PromptPath = filepath.Join(p.project, "facts.packet.md")
-	if session.HasCodexStep(probe) {
-		return nil, hFactsCodexStep
-	}
+	// B582: an openai (Codex) step runs the closed-book Codex session of B551
+	// (read-only argv in the snapshot, strict schema file, -o answer); facts
+	// is not a no-tools role, so review.allow_open_book_codex changes nothing
 	err = session.Check(probe)
 	if p.levelCrash = session.LevelCrash(err); p.levelCrash != "" {
 		return p, 0

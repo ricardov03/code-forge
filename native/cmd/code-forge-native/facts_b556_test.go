@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -224,52 +222,8 @@ func TestB556FactsSessionMatchesNode(t *testing.T) {
 	}
 }
 
-// The cases Go does not serve byte-equal hand over to Node before any write:
-// no breadcrumb, nothing under the tmp root, no sheet, no ledger row.
-func TestB556FactsNarrowHandovers(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not installed")
-	}
-	cases := []struct {
-		name, provider, brief string
-		args                  []string
-		setup                 func(t *testing.T, base string) []string
-		reason                string
-	}{
-		{"openai L0 runs the Codex CLI", "openai", fcBrief, nil, nil, "facts-codex-step"},
-		// B568: the glob claim, the non-UTF-8 brief, the source outside the
-		// project and the run root in a git work tree run in Go now
-		// (TestB568FactsServedLikeNode)
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			base := fcWorkspace(t, c.provider, c.brief)
-			args := append([]string{"facts", "--brief", "brief.md"}, c.args...)
-			if c.setup != nil {
-				args = append(args, c.setup(t, base)...)
-			}
-			if code, _ := run(args); code != 127 {
-				t.Fatalf("code=%d; want the Node hand-over", code)
-			}
-			home := filepath.Join(base, "home")
-			data, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
-			var row handoverRow
-			if json.Unmarshal(bytes.TrimSpace(data), &row) != nil || row.Verb != "facts" || row.Reason != c.reason {
-				t.Fatalf("handover row %q; want reason %q", data, c.reason)
-			}
-			for _, p := range []string{".code-forge/logs/breadcrumbs.json", ".code-forge/ledger", ".code-forge/logs/errors.jsonl"} {
-				if _, err := os.Stat(filepath.Join(home, p)); err == nil {
-					t.Fatalf("Go wrote %s before the hand-over", p)
-				}
-			}
-			for _, p := range []string{"tmp", "log", "repo/plans", "repo/tmpcf"} {
-				if left := fcTree(t, filepath.Join(base, p)); len(left) != 0 {
-					t.Fatalf("Go wrote under %s before the hand-over: %v", p, left)
-				}
-			}
-		})
-	}
-}
+// B582: the last facts hand-over (facts-codex-step, an openai L0 step) runs
+// in Go now (TestB582FactsCodexStepMatchesNode); B568 served the others.
 
 // spawn --role facts --cwd runs in Go since B556 (it was the spawn-facts-cwd
 // hand-over): a cwd outside a facts snapshot area is refused with Node's

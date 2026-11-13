@@ -1,0 +1,141 @@
+exit=0
+--- stdout
+{"out":"<WS>/repo/plans/brief.facts.md","claims":6,"verified":2}
+--- stderr
+level=L0 provider=openai model=gpt-x effort=medium fallback_step=0
+facts: F3 not counted — check command not allowed: one command per row: no pipe or list (| ; && || & or a newline); not counted
+--- log/codex.argv
+exec
+-m
+gpt-x
+-c
+model_reasoning_effort=medium
+-s
+read-only
+--ephemeral
+--ignore-rules
+--ignore-user-config
+-C
+<WS>/tmp/cf/proc-P-T/facts/T-H/snapshot
+--skip-git-repo-check
+--output-schema
+<WS>/tmp/cf/proc-P-T/sessions/facts-T-H/schema.json
+-o
+<WS>/tmp/cf/proc-P-T/sessions/facts-T-H/out.json
+--json
+-
+--- log/codex.calls
+ok
+--- log/codex.cwd
+<WS>/tmp/cf/proc-P-T/facts/T-H/snapshot
+--- log/codex.schema
+-rw-------
+{"type":"object","properties":{"facts":{"type":"array","items":{"type":"object","properties":{"fact_id":{"type":"string"},"claim":{"type":"string"},"kind":{"type":"string","enum":["flag","command","path","version","endpoint","package","env","symbol"]},"command":{"type":"string"},"output_excerpt":{"type":"string"},"tag":{"type":"string","enum":["VERIFIED","NOT-FOUND","UNVERIFIABLE"]},"why":{"type":["string","null"]}},"required":["fact_id","claim","kind","command","output_excerpt","tag","why"],"additionalProperties":false}}},"required":["facts"],"additionalProperties":false}
+--- log/codex.snapshot
+dr-xr-xr-x .
+-r--r--r-- ./.code-forge.yml
+-r--r--r-- ./.gitignore
+-r--r--r-- ./brief.md
+dr-xr-xr-x ./docs
+-r--r--r-- ./docs/readme.md
+dr-xr-xr-x ./src
+-r--r--r-- ./src/app.mjs
+--- log/codex.stdin
+# Facts delegate
+
+For each claim below, run the cheapest READ-ONLY check (`grep -rn -- <flag> <path>`, `which <cli>`,
+`ls <path>`, `npm view <name> version`). Quote the exact command and the output line it printed (at most 200
+characters). Tag each claim VERIFIED (the output shows it), NOT-FOUND (the check ran and it is absent) or
+UNVERIFIABLE (no read-only check can decide it — say why in `why`). Never infer, never guess: the excerpt is the
+command's literal output, never your reading of it. For a path use `ls <path>` (it prints the path); `test` prints
+nothing, so a `test` check can never be VERIFIED. A flag is checked in the source text of the project, never by
+running a program: `grep -rn -- <flag> <path>` (`<path>` a top-level source folder such as `src`, never `.`,
+the root, docs, plans or tests) — VERIFIED only with a hit line (`file:line:text`) from a source file (not
+Markdown or text, not docs, plans, tests or fixtures) that contains the flag, as the excerpt. Never run a program with `--help`, `-h` or `--version`: a version is checked with `npm view <name>
+version`, `which` or `ls`. Run one command at a time, never a pipe. Only these forms are accepted: which,
+command -v, ls, cat, head, tail, wc, grep (options only -n -c -i -w -F; recursive only as
+`grep -rn -- <flag> <path>`),
+find (only -name -iname -path -ipath -type -maxdepth -mindepth -print -print0 -newer -size -empty -mtime -mmin
+-not ! -a -o -and -or, plus paths), stat, file, uname, sw_vers, jq, git
+log|show|status|rev-parse|ls-files|cat-file, npm view|ls, test -e|-f|-d|-n, `curl -sI <one URL>`.
+A check that breaks these rules is not counted.
+A source root is the project (`.`) or `_sources/<label>`. A top-level source folder is directly
+under that root: `src` or `_sources/<label>/app`. `_sources` itself is never a source folder.
+An identifier symbol needs `grep -rn -- <quoted token or keyword token> <top-level source folder>`.
+Quote the pattern. Keywords: class interface trait enum struct type function func def.
+VERIFIED needs a file:line: hit in a source file holding the whole token; NOT-FOUND needs a whole top-level source folder.
+A file-name symbol needs `find <root> -name <token>`; VERIFIED needs an output path ending in /<token>.
+For a glob path use the per-claim check command. A find directory must be literal and its pattern quoted.
+If a directory segment has glob characters, only `ls -d <exact glob token>` is accepted. For any glob claim,
+`ls -d <exact glob token>` is also accepted, quoted or unquoted. VERIFIED needs a matching output path;
+NOT-FOUND needs No such file output. Use the check path given for a source, never its live absolute path.
+No `$`, no backticks, no redirection, no unquoted glob except the exact ls -d form above, no `~`, no absolute path outside /usr, /opt/homebrew or
+/bin, no secret files.
+An env claim is checked ONLY with `printenv NAME >/dev/null` (quote its exit status; the value is never shown).
+
+Reply with ONE JSON object: {"facts": [{"fact_id", "claim", "kind", "command", "output_excerpt", "tag", "why"}]} —
+one row per claim: `fact_id` (F<n>) and `kind` copied from the list, `claim` = the token alone (the text after
+`<kind>: `), `why` null unless UNVERIFIABLE.
+The claim is the token alone, without source/check annotations or the bracketed glob check hint.
+
+## Claims
+- F1 path: src/app.mjs
+- F2 flag: --alpha
+- F3 path: docs/missing.md
+- F5 env: NODE_ENV
+- F6 path: /usr/bin/env
+--- files
+home
+home/.code-forge
+home/.code-forge/ledger
+home/.code-forge/ledger/unit.jsonl
+home/.code-forge/logs
+home/.code-forge/logs/breadcrumbs.json
+repo
+repo/.code-forge.yml
+repo/.env
+repo/.gitignore
+repo/brief.md
+repo/docs
+repo/docs/readme.md
+repo/ignored.txt
+repo/plans
+repo/plans/brief.facts.md
+repo/src
+repo/src/app.mjs
+repo/src/new.mjs
+tmp
+tmp/cf
+--- home/.code-forge/ledger/unit.jsonl
+{"event":"session","role":"facts","level":"L0","provider":"openai","model":"gpt-x","effort":"medium","fallback_step":0,"run":null,"block":null,"status":"ok","tokens_in":300,"tokens_out":40,"tokens_source":"reported","usd":0.0003,"cost_source":"estimated","duration_ms":D,"ts":"T"}
+{"event":"facts.built","role":"facts","run":null,"claims":6,"verified":2,"tokens_in":300,"tokens_out":40,"ts":"T","tokens_source":"estimated","cost_source":null}
+--- home/.code-forge/logs/breadcrumbs.json
+["facts"]
+--- repo/plans/brief.facts.md
+# Facts sheet
+
+- brief: `../brief.md`
+- brief_sha256: `1c9a8a33b80ac3a8ecc090e0683653719145e8fe56a0b23e01c4ff41ab964596`
+- brief_mtime: `T`
+- built_at: `T`
+- claims: 6 (VERIFIED 2 · NOT-FOUND 0 · UNVERIFIABLE 4)
+
+| fact_id | tag | kind | claim | command | output | why |
+|---|---|---|---|---|---|---|
+| F1 | VERIFIED | path | `src/app.mjs` | `ls src/app.mjs` | src/app.mjs | — |
+| F2 | VERIFIED | flag | `--alpha` | `grep -rn -- --alpha src` | src/app.mjs:1:const a = '--alpha'; | — |
+| F3 | UNVERIFIABLE | path | `docs/missing.md` | `cat docs/missing.md \| head` | No such file | check command not allowed: one command per row: no pipe or list (\| ; && \|\| & or a newline); not counted |
+| F4 | UNVERIFIABLE | path | `src/new.mjs` | — | — | not at HEAD in repo: outside the snapshot |
+| F5 | UNVERIFIABLE | env | `NODE_ENV` | — | — | no answer from the delegate |
+| F6 | UNVERIFIABLE | path | `/usr/bin/env` | — | — | no answer from the delegate |
+
+<!-- facts-json
+[
+{"fact_id":"F1","claim":"src/app.mjs","kind":"path","command":"ls src/app.mjs","output_excerpt":"src/app.mjs","tag":"VERIFIED","why":null},
+{"fact_id":"F2","claim":"--alpha","kind":"flag","command":"grep -rn -- --alpha src","output_excerpt":"src/app.mjs:1:const a = '--alpha';","tag":"VERIFIED","why":null},
+{"fact_id":"F3","claim":"docs/missing.md","kind":"path","command":"cat docs/missing.md | head","output_excerpt":"No such file","tag":"UNVERIFIABLE","why":"check command not allowed: one command per row: no pipe or list (| ; && || & or a newline); not counted"},
+{"fact_id":"F4","claim":"src/new.mjs","kind":"path","command":"","output_excerpt":"","tag":"UNVERIFIABLE","why":"not at HEAD in repo: outside the snapshot"},
+{"fact_id":"F5","claim":"NODE_ENV","kind":"env","command":"","output_excerpt":"","tag":"UNVERIFIABLE","why":"no answer from the delegate"},
+{"fact_id":"F6","claim":"/usr/bin/env","kind":"path","command":"","output_excerpt":"","tag":"UNVERIFIABLE","why":"no answer from the delegate"}
+]
+-->

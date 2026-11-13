@@ -343,21 +343,6 @@ func plan(o Opts) ([]step, int, error) {
 	return steps, skipped, nil
 }
 
-// HasCodexStep tells whether the ladder Spawn would run has an openai (Codex)
-// step; the facts command still hands such a ladder to Node (B556).
-func HasCodexStep(o Opts) bool {
-	steps, _, err := plan(o)
-	if err != nil {
-		return false
-	}
-	for _, s := range steps {
-		if s.provider == "openai" {
-			return true
-		}
-	}
-	return false
-}
-
 // Check tells, before anything runs, whether Spawn serves these options.
 func Check(o Opts) error {
 	_, _, err := plan(o)
