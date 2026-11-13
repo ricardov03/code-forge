@@ -1,0 +1,13 @@
+== code 2
+== out
+== err
+author: provider "OpenAI" has no CLI mapping
+== ledger
+== files
+== repo
+.code-forge.yml
+brief.md
+docs
+docs/b1.md
+facts.md
+packet.json

@@ -1,0 +1,61 @@
+== code 0
+== out
+{"decision":"go","confidence":0.7,"reason":"codex ok","overrule":false,"ask_human":false,"human_question":null}
+== err
+level=L3 provider=openai model=gpt-x effort=high fallback_step=0
+== ledger
+{"event":"session","role":"s2","level":"L3","provider":"openai","model":"gpt-x","effort":"high","fallback_step":0,"run":"r9","block":null,"source":"s2","status":"ok","tokens_in":50,"tokens_out":9,"tokens_source":"reported","usd":0.0015,"cost_source":"estimated","duration_ms":N}
+== files
+home/.code-forge/ledger/repo.jsonl
+tmp/code-forge/r9/owner.json
+== codex.argv
+exec
+-m
+gpt-x
+-c
+model_reasoning_effort=high
+-s
+read-only
+--ephemeral
+--ignore-rules
+--ignore-user-config
+-C
+<ws>/tmp/code-forge/r9/sessions/s2-T-R/cwd
+--skip-git-repo-check
+--output-schema
+<ws>/tmp/code-forge/r9/sessions/s2-T-R/schema.json
+-o
+<ws>/tmp/code-forge/r9/sessions/s2-T-R/out.json
+--json
+-
+== codex.cwd
+<ws>/tmp/code-forge/r9/sessions/s2-T-R/cwd
+== codex.stdin
+# System 2 decision
+
+Decide the question below from the material given. Reply with ONE JSON object:
+{"decision": string, "confidence": number 0..1, "reason": string of at most 280 characters,
+ "overrule": boolean (true when you disagree with System 1), "ask_human": boolean,
+ "human_question": string or null (the one question for the human when ask_human is true)}.
+## Question
+Ship it?
+
+## Options
+- yes
+- no
+
+## System 1 answer
+{"lane":"L1"}
+
+## Context
+some context
+== codex.schema
+{"type":"object","properties":{"decision":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1},"reason":{"type":"string"},"overrule":{"type":"boolean"},"ask_human":{"type":"boolean"},"human_question":{"type":["string","null"]}},"required":["decision","confidence","reason","overrule","ask_human","human_question"],"additionalProperties":false}== codex.home
+CODEX_HOME=<ws>/codexhome
+== repo
+.code-forge.yml
+brief.md
+docs
+docs/b1.md
+facts.md
+packet.json

@@ -1,0 +1,73 @@
+== code 0
+== out
+{"draft":"<ws>/repo/plans/brief.plan.md","questions":[],"cost":{"tokens_in":50,"tokens_out":9,"tokens_source":"reported","usd_estimated":0.0015}}
+== err
+level=L3 provider=openai model=gpt-x effort=high fallback_step=0
+== ledger
+{"event":"session","role":"author","level":"L3","provider":"openai","model":"gpt-x","effort":"high","fallback_step":0,"run":null,"block":null,"status":"ok","tokens_in":50,"tokens_out":9,"tokens_source":"reported","usd":0.0015,"cost_source":"estimated","duration_ms":N}
+== files
+home/.code-forge/ledger/repo.jsonl
+== codex.argv
+exec
+-m
+gpt-x
+-c
+model_reasoning_effort=high
+-s
+read-only
+--ephemeral
+--ignore-rules
+--ignore-user-config
+-C
+<ws>/tmp/code-forge/proc-N/sessions/author-T-R/cwd
+--skip-git-repo-check
+--output-schema
+<ws>/tmp/code-forge/proc-N/sessions/author-T-R/schema.json
+-o
+<ws>/tmp/code-forge/proc-N/sessions/author-T-R/out.json
+--json
+-
+== codex.cwd
+<ws>/tmp/code-forge/proc-N/sessions/author-T-R/cwd
+== codex.stdin
+# Author job: plan
+
+Write the plan draft in markdown. Its §0 is the facts sheet below, VERBATIM (header lines included).
+Use these section headings exactly, word for word, at these positions (plan check finds the sections by them):
+- "§0.x Acceptance clauses the facts sheet cannot back" — every clause that cites a claim the sheet marks NOT-FOUND or UNVERIFIABLE, each with a tolerance naming the block; `none` when there is none.
+- "§3 Caller map" — mechanism → the block that ships it → the block that calls it; every block id appears.
+The level column of the block table is the lane recorded for each block by `forge jev ask lane --block <id> --plan <plan>`
+(or `--rules`, the deterministic fallback, when Jev is unavailable): L0 trivial · L1 a plain feature following a pattern ·
+L2 money, dates, tenancy, migrations, concurrency. It is never a block category. Leave it as `L?` when no lane is given in
+the message; plan check refuses a level that differs from the recorded lane.
+
+Reply with {"draft": markdown, "questions": [{"id", "question", "options", "why", "blocking"}]} — questions empty when none remain.
+
+## Brief
+
+Build the thing.
+
+It has two parts.
+
+## Facts sheet
+
+# Facts
+
+- brief: `brief.md`
+- brief_sha256: `50786bf6056004ff19897ffd4bb480e46144a6779144eae2b6db65e31b3a2d5d`
+
+<!-- facts-json
+[]
+-->
+== codex.schema
+{"type":"object","properties":{"draft":{"type":"string"},"questions":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"question":{"type":"string"},"options":{"type":"array","items":{"type":"string"}},"why":{"type":"string"},"blocking":{"type":"boolean"}},"required":["id","question","options","why","blocking"],"additionalProperties":false}}},"required":["draft","questions"],"additionalProperties":false}== codex.home
+CODEX_HOME=<ws>/codexhome
+== repo
+.code-forge.yml
+brief.md
+docs
+docs/b1.md
+facts.md
+packet.json
+plans
+plans/brief.plan.md

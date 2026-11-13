@@ -227,34 +227,4 @@ func TestB550S2RunsInGo(t *testing.T) {
 	}
 }
 
-// An openai (Codex) L3 stays with Node: the call hands over before Go writes
-// anything (no ledger row, no draft, no run root, no packet).
-func TestB550OpenAILevelHandsOverAndWritesNothing(t *testing.T) {
-	for _, c := range []struct {
-		args   []string
-		reason string
-	}{
-		{[]string{"author", "--job", "plan", "--brief", "brief.md", "--facts", "facts.md", "--run", "r9"}, "author-provider"},
-		{[]string{"s2", "--packet", "packet.json", "--run", "r9"}, "system-two-provider"},
-	} {
-		f, repo := newB550Fixture(t, "openai")
-		t.Setenv("FAKE_MODE", "author")
-		before := b550Tree(t, repo)
-		code, out, _ := b460Call(t, c.args...)
-		if code != 127 || out != "" {
-			t.Fatalf("%v = %d %q; want the Node hand-over", c.args, code, out)
-		}
-		if got := b460Handovers(t, f.home); len(got) != 1 || got[0] != c.args[0]+" "+c.reason {
-			t.Fatalf("%v: handovers %v", c.args, got)
-		}
-		if after := b550Tree(t, repo); strings.Join(after, ",") != strings.Join(before, ",") {
-			t.Fatalf("%v: repo changed %v -> %v", c.args, before, after)
-		}
-		if rows := b477Ledger(t, f.home); len(rows) != 0 {
-			t.Fatalf("%v: ledger rows %v", c.args, rows)
-		}
-		if left := b550Tree(t, filepath.Join(f.workspace, "tmp")); len(left) != 0 {
-			t.Fatalf("%v: tmp written %v", c.args, left)
-		}
-	}
-}
+// B618: an openai (Codex) L3 runs in Go (TestB618AuthorS2CodexMatchesNode).

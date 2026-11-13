@@ -1,0 +1,54 @@
+== code 1
+== out
+{"status":"failed","reason":"exit 5","answer":null,"usage":{"tokens_in":9,"tokens_out":11,"tokens_source":"estimated"},"duration_ms":N,"exit_code":5,"stderr":"boom\n","provider":"openai","model":"gpt-x","effort":"high","fallback_step":0,"row":{"event":"session","role":"coder","level":"L3","provider":"openai","model":"gpt-x","effort":"high","fallback_step":0,"run":null,"block":null,"sandbox":"toolchain","status":"failed","reason":"exit 5","tokens_in":9,"tokens_out":11,"tokens_source":"estimated","usd":0.0005,"cost_source":"estimated","duration_ms":N},"attempts":[{"fallback_step":0,"provider":"openai","model":"gpt-x","status":"failed","reason":"exit 5"}]}
+== err
+level=L3 provider=openai model=gpt-x effort=high fallback_step=0
+== ledger
+{"event":"session","role":"coder","level":"L3","provider":"openai","model":"gpt-x","effort":"high","fallback_step":0,"run":null,"block":null,"sandbox":"toolchain","status":"failed","reason":"exit 5","tokens_in":9,"tokens_out":11,"tokens_source":"estimated","usd":0.0005,"cost_source":"estimated","duration_ms":N}
+== files
+home/.code-forge/ledger/repo.jsonl
+== codex.argv
+exec
+-m
+gpt-x
+-c
+model_reasoning_effort=high
+-s
+workspace-write
+--add-dir
+<ws>/cache
+--add-dir
+<ws>/home/build
+--add-dir
+<ws>/cache2
+-c
+sandbox_workspace_write.exclude_tmpdir_env_var=true
+-c
+sandbox_workspace_write.exclude_slash_tmp=true
+-c
+approval_policy="never"
+-C
+<ws>/repo
+--json
+-o
+<ws>/tmp/code-forge/proc-N/sessions/coder-T-R/out.json
+<ws>/repo/brief.md
+== codex.cwd
+<ws>/repo
+== codex.prompt
+Build block one.
+Keep it small.
+
+== codex.home
+CODEX_HOME=<ws>/tmp/code-forge/proc-N/codex-homes/coder-H
+.
+./auth.json
+./rules
+./rules/code-forge.rules
+rules:1534559860 10949
+auth:{"token":"t"}
+== repo
+.code-forge.yml
+brief.md
+docs
+docs/b1.md

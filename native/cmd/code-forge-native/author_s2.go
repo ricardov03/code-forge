@@ -507,12 +507,15 @@ func b550S2Build(p *b550Plan, flags map[string]any, packet any) (*b550Plan, hand
 	return b550Checked(p)
 }
 
-// b550Checked hands the call over when the session would not run in Go (an
-// openai level, a provider or level shape the Go session does not take).
+// b550Checked hands the call over when the session would not run in Go (a
+// level or effort shape Node throws a TypeError on). A session refusal (B618:
+// an openai level without review.allow_open_book_codex, a provider with no
+// CLI mapping) is Spawn's, printed as "<verb>: <message>" exit 2 after the
+// run root and the packet, like runAuthor and runS2.
 func b550Checked(p *b550Plan) (*b550Plan, handoverReason) {
 	probe := p.opts
 	probe.PromptPath = string(filepath.Separator) + "packet.md"
-	if err := session.Check(probe); err != nil {
+	if err := session.Check(probe); session.IsUnsupported(err) {
 		return nil, p.provider
 	}
 	return p, 0

@@ -283,9 +283,8 @@ func TestB549SpawnNarrowHandovers(t *testing.T) {
 		name, reason, record string
 		args                 []string
 	}{
-		// B551r: a Codex coder step runs in Go unless coder.sandbox is set
-		{"codex coder sandbox --run", "spawn-codex-sandbox", "", []string{"--level", "L3", "--role", "coder", "--brief", "brief.md", "--run", "r1"}},
-		{"codex coder sandbox fallback", "spawn-codex-sandbox", "", []string{"--level", "L0", "--role", "coder", "--brief", "brief.md"}},
+		// B618: a Codex coder under coder.sandbox runs in Go
+		// (TestB618SpawnCodexSandboxMatchesNode)
 		{"unreadable run record", "spawn-coder-run", "{not json", []string{"--level", "L1", "--role", "coder", "--brief", "brief.md", "--run", "r1"}},
 		{"non-object block", "spawn-coder-run", b549RecordHead + `"blocks":{"B1":"x"}}`, []string{"--level", "L1", "--role", "coder", "--brief", "brief.md", "--run", "r1", "--block", "B1"}},
 		{"background cli missing", "spawn-background-start", "", []string{"--level", "L2", "--role", "reviewer", "--brief", "brief.md", "--background"}},
@@ -293,9 +292,6 @@ func TestB549SpawnNarrowHandovers(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			w := b549Fixture(t, "ok", tc.record)
-			if tc.reason == "spawn-codex-sandbox" {
-				b460Write(t, filepath.Join(w, "repo", ".code-forge.yml"), b549Config+"coder:\n  sandbox:\n    profile: workspace\n")
-			}
 			if tc.reason == "spawn-background-start" {
 				if err := os.Remove(filepath.Join(w, "bin", "grok")); err != nil {
 					t.Fatal(err)

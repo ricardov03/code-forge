@@ -82,17 +82,26 @@ func TestCodexCheckServesOpenBookOnly(t *testing.T) {
 	if err := Check(o); !IsUnsupported(err) {
 		t.Fatalf("Check bad effort = %v, want unsupported", err)
 	}
-	// B551r: a Codex coder step runs in Go; with coder.sandbox set it stays
-	// with Node, named as the sandbox case
+	// B551r: a Codex coder step runs in Go; B618: so does one under a
+	// coder.sandbox mapping with a known profile; any other coder.sandbox
+	// (Node's TypeError) stays with Node, named as the sandbox case
 	o.Cfg = open
 	o.Role = "coder"
 	if err := Check(o); err != nil {
 		t.Fatalf("Check coder = %v, want nil", err)
 	}
-	o.Cfg = map[string]any{"coder": map[string]any{"sandbox": map[string]any{"profile": "workspace"}},
-		"levels": map[string]any{"L1": map[string]any{"provider": "openai", "model": "gpt-x", "effort": "high"}}}
-	if err := Check(o); !IsUnsupported(err) || !IsCodexSandbox(err) {
-		t.Fatalf("Check sandboxed coder = %v, want the codex sandbox case", err)
+	levels := map[string]any{"L1": map[string]any{"provider": "openai", "model": "gpt-x", "effort": "high"}}
+	for _, sandbox := range []any{map[string]any{"profile": "workspace"}, map[string]any{"profile": "full"}, map[string]any{"profile": nil, "add_dirs": []any{"/x"}}, map[string]any{}} {
+		o.Cfg = map[string]any{"coder": map[string]any{"sandbox": sandbox}, "levels": levels}
+		if err := Check(o); err != nil {
+			t.Fatalf("Check sandboxed coder %v = %v, want nil", sandbox, err)
+		}
+	}
+	for _, sandbox := range []any{"workspace", []any{}, map[string]any{"profile": "open"}, map[string]any{"profile": 3.0}} {
+		o.Cfg = map[string]any{"coder": map[string]any{"sandbox": sandbox}, "levels": levels}
+		if err := Check(o); !IsUnsupported(err) || !IsCodexSandbox(err) {
+			t.Fatalf("Check sandboxed coder %v = %v, want the codex sandbox case", sandbox, err)
+		}
 	}
 }
 

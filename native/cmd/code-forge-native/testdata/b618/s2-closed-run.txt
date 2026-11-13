@@ -1,0 +1,14 @@
+== code 2
+== out
+== err
+s2: codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author
+== ledger
+== files
+tmp/code-forge/r9/owner.json
+== repo
+.code-forge.yml
+brief.md
+docs
+docs/b1.md
+facts.md
+packet.json

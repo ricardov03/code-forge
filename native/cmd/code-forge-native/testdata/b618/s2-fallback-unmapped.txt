@@ -1,0 +1,16 @@
+== code 2
+== out
+== err
+level=L3 provider=anthropic model=claude-x effort=none fallback_step=0
+s2: provider "Foo" has no CLI mapping
+== ledger
+{"event":"session","role":"s2","level":"L3","provider":"anthropic","model":"claude-x","effort":null,"fallback_step":0,"run":null,"block":null,"source":"s2","status":"unavailable","reason":"cli-missing","tokens_in":118,"tokens_out":0,"tokens_source":"estimated","usd":0.0035,"cost_source":"estimated","duration_ms":N}
+== files
+home/.code-forge/ledger/repo.jsonl
+== repo
+.code-forge.yml
+brief.md
+docs
+docs/b1.md
+facts.md
+packet.json

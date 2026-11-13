@@ -103,11 +103,12 @@ func LevelCrash(err error) string {
 func CheckFactsCwd(cwd, runRootDir string) error { return assertFactsCwd(cwd, runRootDir) }
 
 // codexSandboxWhy is the refusal of a Codex coder step under a coder.sandbox
-// config (B93's checkSandboxDirs, not ported).
+// that is not a mapping with a known profile (coderSandbox's TypeError, which
+// Node prints with its stack; B618 ports every other coder.sandbox).
 const codexSandboxWhy = "a Codex coder with coder.sandbox"
 
 // IsCodexSandbox reports an unsupported ladder because a coder step runs on
-// openai with a coder.sandbox config (left to Node, B551r).
+// openai with a coder.sandbox value Node's builder throws a TypeError on.
 func IsCodexSandbox(err error) bool {
 	var u *unsupportedError
 	return errors.As(err, &u) && u.why == codexSandboxWhy
@@ -205,6 +206,17 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// knownProvider: cliNameForProvider maps the provider to a CLI.
+func knownProvider(provider string) bool {
+	return provider == "anthropic" || provider == "xai" || provider == "openai"
+}
+
+// b618UnmappedProvider is buildStep's SessionError for a provider
+// cliNameForProvider does not map (an unchecked config's "OpenAI").
+func b618UnmappedProvider(provider string) error {
+	return &Error{"usage", "provider \"" + provider + "\" has no CLI mapping"}
 }
 
 func section(cfg map[string]any, key string) map[string]any {
@@ -315,8 +327,15 @@ func plan(o Opts) ([]step, int, error) {
 	}
 	var steps []step
 	for _, s := range kept {
-		if s.provider != "anthropic" && s.provider != "xai" && s.provider != "openai" {
-			return nil, 0, unsupported("provider " + strconv.Quote(s.provider))
+		if !knownProvider(s.provider) {
+			// B618: a foreground step on a provider with no CLI mapping is
+			// buildStep's usage error (b618UnmappedProvider), thrown after
+			// the provider slot and the budget gate like Node
+			if o.Background {
+				return nil, 0, unsupported("provider " + strconv.Quote(s.provider))
+			}
+			steps = append(steps, s)
+			continue
 		}
 		if s.effort != nil {
 			e, ok := s.effort.(string)
@@ -334,7 +353,9 @@ func plan(o Opts) ([]step, int, error) {
 			if _, err := codexSchemaPlan(o); err != nil {
 				return nil, 0, err
 			}
-			if o.Role == "coder" && section(o.Cfg, "coder")["sandbox"] != nil {
+			// B618: a coder.sandbox mapping with a known profile is built in
+			// Go; any other value is a TypeError Node prints with its stack
+			if sandbox := coderSandboxFor(o, s.provider); sandbox != nil && !sandboxPlanOK(sandbox) {
 				return nil, 0, unsupported(codexSandboxWhy)
 			}
 		}
@@ -385,6 +406,9 @@ var factsExtraWriteVerbRules = []string{"Bash(rm*)", "Bash(git push*)", "Bash(gi
 func buildStep(o Opts, s step, sessionDir string) (built, error) {
 	effort, _ := s.effort.(string)
 	if o.Role == "coder" {
+		if !knownProvider(s.provider) {
+			return built{}, b618UnmappedProvider(s.provider)
+		}
 		return buildCoder(o, s, sessionDir, effort)
 	}
 	// B556: the facts delegate may run in the caller's read-only snapshot
@@ -399,6 +423,9 @@ func buildStep(o Opts, s step, sessionDir string) (built, error) {
 		cwd = snapshot
 	} else if err := os.Mkdir(cwd, 0o700); err != nil {
 		return built{}, err
+	}
+	if !knownProvider(s.provider) {
+		return built{}, b618UnmappedProvider(s.provider)
 	}
 	switch s.provider {
 	case "openai":
@@ -788,6 +815,10 @@ func attempt(o Opts, deps Deps, s step, isLast bool, runRoot string, writeRow fu
 			source = "s2-fallback"
 		}
 		base.Set("source", source)
+	}
+	// B618: sandboxRowField, the Codex coder's sandbox profile
+	if sandbox := coderSandboxFor(o, s.provider); sandbox != nil {
+		base.Set("sandbox", sandboxProfile(sandbox))
 	}
 	for _, f := range o.RowExtra {
 		base.Set(f.Key, f.Value)

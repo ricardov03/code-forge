@@ -1,0 +1,11 @@
+== code 1
+== out
+== err
+spawn: sandbox-dir-refused: coder.sandbox.add_dirs[0] is refused — it is, holds or sits inside the run temp root or the session CODEX_HOME
+== ledger
+== files
+== repo
+.code-forge.yml
+brief.md
+docs
+docs/b1.md

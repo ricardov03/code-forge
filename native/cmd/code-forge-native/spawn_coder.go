@@ -19,8 +19,9 @@ import (
 // cannot answer byte-equal hands over before anything is written.
 
 // spawnCodexLadder: the coder session's ladder has a Codex (openai) step
-// under a coder.sandbox config, which stays with Node (hSpawnCodexSandbox,
-// B551r; every other Codex coder or facts step runs in Go).
+// under a coder.sandbox value Node's builder throws a TypeError on (not a
+// mapping, or an unknown profile), which stays with Node (hSpawnCodexSandbox;
+// B618 runs every other coder.sandbox in Go).
 func spawnCodexLadder(cwd string, parsed cliParsed) bool {
 	role := parsed.values["role"]
 	if role != "coder" {

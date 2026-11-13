@@ -419,9 +419,9 @@ func codexClosedBook(o Opts, model, effort, cwd, sessionDir string, schema ledge
 	return built{cli: "codex", argv: argv, cwd: cwd, stdin: true, stdinFile: o.PromptPath, outPath: outPath}, nil
 }
 
-// codexCoder is buildStep + buildCoderArgv for a coder step on openai (no
-// coder.sandbox: plan leaves that to Node): the default sandbox profile plus
-// a linked worktree's git dirs, the -o answer in <session>/out.json, the
+// codexCoder is buildStep + buildCoderArgv for a coder step on openai: the
+// coder.sandbox profile (B618; workspace when unset) with its toolchain dirs
+// plus a linked worktree's git dirs (none under full), the -o answer in <session>/out.json, the
 // brief as the last argv token, and a fresh per-session CODEX_HOME under
 // <runRoot>/codex-homes with the execpolicy rules (and the auth copy) as
 // the child's CODEX_HOME. A foreground session removes the home after the
@@ -442,16 +442,26 @@ func codexCoder(o Opts, model, effort, cwd, promptPath, sessionDir string) (buil
 		return built{}, errors.New("buildCodexArgv: the session CODEX_HOME must not be inside the coder cwd (the sandbox can write there)")
 	}
 	environ := os.Environ() // the builder reads process.env, never the session's env
+	// B618: the sandbox dirs are checked only after the home is known to be
+	// absolute and outside the cwd
+	profile, addDirs, err := coderSandbox(coderSandboxFor(o, "openai"), []string{home, runRoot, TmpBase()})
+	if err != nil {
+		return built{}, err
+	}
 	argv := []string{"codex", "exec", "-m", model}
 	if effort != "" {
 		argv = append(argv, "-c", "model_reasoning_effort="+effort)
 	}
-	argv = append(argv, "-s", "workspace-write")
-	seen := map[string]bool{}
-	for _, d := range codexWorktreeGitDirs(cwd, environ) {
-		if !seen[d] {
-			seen[d] = true
-			argv = append(argv, "--add-dir", d)
+	if profile == "full" {
+		argv = append(argv, "-s", "danger-full-access")
+	} else {
+		argv = append(argv, "-s", "workspace-write")
+		seen := map[string]bool{}
+		for _, d := range append(addDirs, codexWorktreeGitDirs(cwd, environ)...) {
+			if !seen[d] {
+				seen[d] = true
+				argv = append(argv, "--add-dir", d)
+			}
 		}
 	}
 	argv = append(argv, codexSandboxTmpExclusions...)

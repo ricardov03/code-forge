@@ -1,0 +1,11 @@
+== code 1
+== out
+== err
+spawn: sandbox-dir-refused: coder.sandbox.add_dirs[1] is refused — it is, holds or sits inside a protected directory (~/.code-forge, ~/.codex, ~/.ssh, ~/.gnupg, ~/.aws, ~/.config, ~/Library/Keychains)
+== ledger
+== files
+== repo
+.code-forge.yml
+brief.md
+docs
+docs/b1.md
