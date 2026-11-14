@@ -407,6 +407,11 @@
           "default": 10,
           "description": "A block that owns more files than this runs the full suite for a {test_files} gate (reason threshold), not its related tests. Owned files are counted this way. A glob or a directory counts the tracked and new (not ignored) files it covers. A path not created yet counts as 1. Outside git each entry counts 1. A git failure runs the full suite. block open --tests names the test files precisely. With gates run --changed, the threshold counts changed files since the last green gates run --run --block instead."
         },
+        "go_changed_packages": {
+          "type": "boolean",
+          "default": true,
+          "description": "B667: in a Go project (go.mod in the project root and a gates.test of go test with a whole ./... item), gates run --run --block --changed runs go test only on the changed Go packages: the directory of each changed .go file and the package of each changed testdata file. go vet and gofmt still check the whole module. A deleted package is dropped. A change to go.mod, go.sum or go.work runs the full suite (reason go_mod). No changed package skips the test gate (reason no_changes). gate.done carries scope changed, reason go_packages and packages. block land uses this scope for each block, and a batch land runs one full go test ./... at the end before any block lands or main is pushed. false runs the B404 file selection instead."
+        },
         "test_class_map": {
           "type": "array",
           "maxItems": 50,

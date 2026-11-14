@@ -588,6 +588,16 @@ func landMergeGate(home, project, run, id, main, treePath, workspace, branch, ba
 		if landMergeSelectable(cwd) {
 			options.scope = &scope
 			result.selected = len(scope.Files)
+			// B667: a Go project's merge gate tests the merge's changed
+			// packages, like its block gate.
+			if gpkProject(cwd) {
+				options.goChanged = gpkChanged(cwd, "HEAD^1", "HEAD")
+				if s := gpkScope(cwd, options.goChanged, false); gpkScoped(s) {
+					result.selected, result.scopeReason = len(s.Files), s.Reason
+				} else {
+					result.selected, result.scopeReason = -1, s.Reason
+				}
+			}
 		}
 		suite := landCapture(func(s *landStep) int {
 			code, safe := gatesNativeStep(fullArgs, options, s)

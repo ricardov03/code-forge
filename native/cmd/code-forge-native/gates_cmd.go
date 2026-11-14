@@ -64,6 +64,9 @@ type gatesOptions struct {
 	// scope is a test scope planned by a caller (the land merge gates) for a
 	// run without --run/--block.
 	scope *gates.Scope
+	// goChanged is the merge's changed paths for a Go project's package
+	// scope (B667); set with scope by the single-block land merge gate.
+	goChanged []string
 }
 
 func gatesParse(args []string) (gatesOptions, string) {
