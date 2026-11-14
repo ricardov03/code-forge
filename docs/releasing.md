@@ -131,7 +131,7 @@ Run both generated-doc checks:
 
 ```sh
 node scripts/gen-config-doc.mjs --check
-node scripts/gen-commands-doc.mjs --check
+sh scripts/gen-commands-doc.sh --check
 ```
 
 List the site pages from the brief in the final report so a person can check them.

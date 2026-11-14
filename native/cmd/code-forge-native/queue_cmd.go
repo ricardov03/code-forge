@@ -23,7 +23,8 @@ func init() { routes["queue"] = runQueue }
 
 const queueUsage = "usage: code-forge queue [status] [--json]\n" +
 	"       code-forge queue run [--kind full|changed] [--label X] -- <cmd> [args]\n" +
-	"  The machine-wide FIFO test queue ($HOME/.code-forge/queue). CODE_FORGE_TEST_QUEUE=off disables it.\n"
+	"  The machine-wide FIFO test queue ($HOME/.code-forge/queue). Gates take a slot by themselves;\n" +
+	"  wrap any other test command in `queue run`. CODE_FORGE_TEST_QUEUE=off disables it.\n"
 
 func runQueue(args []string) int {
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {

@@ -137,6 +137,7 @@ func TestB500LogsClearUsageAndHelp(t *testing.T) {
 		{[]string{"logs", "clear", "extra", "--bad"}, 2, "", "logs: unknown flag \"--bad\"\n" + b500LogsUsage},
 	} {
 		code, out, errText := b500Run(t, tc.args...)
+		tc.out = helpExpect(t, tc.args, tc.code, tc.out) // B613 help page
 		if code != tc.code || out != tc.out || errText != tc.er {
 			t.Errorf("%q: got (%d, %q, %q), want (%d, %q, %q)", tc.args, code, out, errText, tc.code, tc.out, tc.er)
 		}
