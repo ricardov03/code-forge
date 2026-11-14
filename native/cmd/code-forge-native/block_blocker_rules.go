@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 
+	"github.com/ricardov03/code-forge/native/autopilot"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
@@ -80,6 +81,10 @@ var blockerRules = map[string]blockerRule{
 	}},
 	"no_changes": {clearsByOwner, func(in blockerFixInput) []string {
 		return []string{"code-forge", "block", "close", in.id, "--run", in.run, "--no-require-reviews"}
+	}, nil},
+	// B630: the owner grants the scope; the review stays the substitute's.
+	substCloseCode: {clearsByOwner, func(in blockerFixInput) []string {
+		return []string{"code-forge", "autopilot", "start", "--run", in.run, "--until", "<time>", "--delegate", "L2", "--allow", autopilot.SubstituteScope}
 	}, nil},
 	"not_approved":             {clearsByOwner, blockerWaiveOrReopen, nil},
 	"late_unruled":             {clearsByOwner, blockerWaiveOrReopen, nil},
