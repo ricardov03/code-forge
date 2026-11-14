@@ -200,14 +200,25 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			return err
 		}
 		added = true
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(maxMs)*time.Millisecond)
+		ctx, cancel := landBatchDeadline(maxMs)
 		defer cancel()
+		// B662: a deadline that expires during a block's rebase, gates or
+		// trial merge cuts that step short, so it says nothing about the
+		// block: the whole batch is refused with no culprit, as in the merge
+		// gate.
+		blockTimedOut := func(err error) error {
+			if ctx.Err() == nil {
+				return err
+			}
+			stoppedID = strings.Join(ids, " ")
+			return fmt.Errorf("batch timed out after %dms during the %s step; no block landed", maxMs, step)
+		}
 		prefixes := []string{strings.TrimSpace(mainHead)}
 		for _, block := range batch {
 			stoppedID, step = block.id, "rebase"
 			tip := prefixes[len(prefixes)-1]
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return blockTimedOut(ctx.Err())
 			}
 			if _, err := gitx.Run(block.tree.Path, "merge-base", "--is-ancestor", block.base, "HEAD"); err != nil {
 				return fmt.Errorf("block %s recorded base is not an ancestor", block.id)
@@ -247,11 +258,11 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			err = landBatchChanged(ctx, home, workspace, run, block)
 			block.gatesMs = time.Since(started).Milliseconds()
 			if err != nil {
-				return err
+				return blockTimedOut(err)
 			}
 			step = "merge"
 			if _, err := gitx.Run(temporary, "merge", "--no-ff", "--no-edit", "--", strings.TrimSpace(block.head)); err != nil {
-				return fmt.Errorf("block %s trial merge failed: %s", block.id, landGitError(err, err.Error()))
+				return blockTimedOut(fmt.Errorf("block %s trial merge failed: %s", block.id, landGitError(err, err.Error())))
 			}
 			head, err := gitx.Run(temporary, "rev-parse", "HEAD")
 			if err != nil {
@@ -446,6 +457,12 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		return stop(err.Error())
 	}
 	return code
+}
+
+// landBatchDeadline makes the batch's --max context. B662: tests replace it
+// to end the batch at a chosen step instead of racing a wall clock.
+var landBatchDeadline = func(maxMs int64) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), time.Duration(maxMs)*time.Millisecond)
 }
 
 // landBatchCommit publishes the entries of these batch blocks, and the signed

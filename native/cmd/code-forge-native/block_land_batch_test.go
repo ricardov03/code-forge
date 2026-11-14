@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -49,6 +50,7 @@ func newLandBatchFixture(t *testing.T, bad int) *landBatchFixture {
 	// integration contract, and it records main's tree so a failed trial cannot
 	// briefly reach main.
 	command := `case "$PWD" in *.merge-gate-*) log=merge ;; *) log=changed ;; esac
+if [ -f "$HOME/hold-$log" ]; then printf '%s\n' "$PWD" >> "$HOME/held-$log"; i=0; while [ ! -f "$HOME/release" ] && [ $i -lt 3000 ]; do sleep 0.05; i=$((i+1)); done; fi
 if [ "$#" -eq 0 ]; then printf '%s\n' "$PWD" >> "$HOME/full-calls"; fi
 printf '%s\n' "$PWD" >> "$HOME/$log-calls"
 printf '%s\n' "$*" >> "$HOME/$log-args"
@@ -591,16 +593,82 @@ func TestBlockLandBatchMarksLandedAndRefusesRelanding(t *testing.T) {
 	}
 }
 
+// landBatchExpireAt makes the batch's --max deadline expire as soon as the
+// fake gate of kind log ("changed" or "merge") is holding (B662): the test
+// chooses the step the deadline hits instead of racing 10 s of wall clock.
+// The held gate is killed by the expired context.
+func landBatchExpireAt(t *testing.T, f *landBatchFixture, log string) {
+	t.Helper()
+	f.write(f.home, "hold-"+log, "")
+	old := landBatchDeadline
+	stop := make(chan struct{})
+	watched := make(chan struct{})
+	landBatchDeadline = func(maxMs int64) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			defer close(watched)
+			for {
+				if _, err := os.Stat(filepath.Join(f.home, "held-"+log)); err == nil {
+					cancel()
+					return
+				}
+				select {
+				case <-stop:
+					return
+				case <-ctx.Done():
+					return
+				case <-time.After(20 * time.Millisecond):
+				}
+			}
+		}()
+		return ctx, cancel
+	}
+	t.Cleanup(func() {
+		landBatchDeadline = old
+		_ = os.WriteFile(filepath.Join(f.home, "release"), nil, 0o644)
+		close(stop)
+		select {
+		case <-watched:
+		case <-time.After(5 * time.Minute):
+		}
+	})
+}
+
 func TestBlockLandBatchTimeoutRefusesWholeBatch(t *testing.T) {
 	f := newLandBatchFixture(t, 0)
 	before := f.heads()
-	f.write(f.home, "slow-full", "1\n")
+	landBatchExpireAt(t, f, "merge")
 	code, output := f.landWith([]string{"--max", "10s"}, "B1", "B2", "B3")
 	if code != 1 || !strings.Contains(output, "block B1 B2 B3 land stopped at merge-gate: batch timed out after 10000ms") {
 		t.Errorf("timeout exit=%d, want 1 refusing the whole batch: %s", code, output)
 	}
 	if strings.Contains(output, "not landed") || strings.Contains(output, "block B1 landed") || strings.Contains(output, "deadline exceeded") {
 		t.Errorf("a timeout must name no culprit and land nothing: %s", output)
+	}
+	if f.git(f.repo, "rev-parse", "main") != f.base {
+		t.Errorf("main moved after a timeout: %s", output)
+	}
+	if got := f.heads(); !reflect.DeepEqual(got, before) {
+		t.Errorf("block heads=%v, want original %v after a refused batch", got, before)
+	}
+}
+
+// B662: a deadline that expires while a block's changed gates run cuts them
+// short; that says nothing about the block, so the whole batch is refused
+// with no culprit and no "tests failed" reason, like a merge-gate timeout.
+func TestBlockLandBatchTimeoutDuringBlockGatesNamesNoCulprit(t *testing.T) {
+	f := newLandBatchFixture(t, 0)
+	before := f.heads()
+	landBatchExpireAt(t, f, "changed")
+	code, output := f.landWith([]string{"--max", "10s"}, "B1", "B2", "B3")
+	if code != 1 || !strings.Contains(output, "block B1 B2 B3 land stopped at gates: batch timed out after 10000ms during the gates step; no block landed") {
+		t.Errorf("timeout exit=%d, want 1 refusing the whole batch at its gates: %s", code, output)
+	}
+	if strings.Contains(output, "tests failed") || strings.Contains(output, "not landed") || strings.Contains(output, "block B1 landed") || strings.Contains(output, "deadline exceeded") || strings.Contains(output, "context canceled") {
+		t.Errorf("a timeout must name no culprit and land nothing: %s", output)
+	}
+	if len(f.lines("merge-calls")) != 0 {
+		t.Errorf("a batch that timed out in block gates must not run its merge gate: %s", output)
 	}
 	if f.git(f.repo, "rev-parse", "main") != f.base {
 		t.Errorf("main moved after a timeout: %s", output)
@@ -649,12 +717,23 @@ func TestBlockLandBatchMergeGateLeavesRunUnlocked(t *testing.T) {
 		output string
 	}
 	done := make(chan landed, 1)
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		code, output := f.land("B1", "B2")
 		done <- landed{code, output}
 	}()
-	// The merge gate logs its call before it sleeps.
-	for deadline := time.Now().Add(60 * time.Second); len(f.lines("merge-calls")) == 0; {
+	// B662: a failed check must not end the test while the land still runs;
+	// its goroutine would then call t.Fatal after the test completed (panic).
+	t.Cleanup(func() {
+		_ = os.WriteFile(filepath.Join(f.home, "release"), nil, 0o644)
+		select {
+		case <-finished:
+		case <-time.After(5 * time.Minute):
+		}
+	})
+	// The merge gate logs its call before it sleeps. B662: 5 min is a cap.
+	for deadline := time.Now().Add(5 * time.Minute); len(f.lines("merge-calls")) == 0; {
 		if time.Now().After(deadline) {
 			t.Fatal("the merge gate never started")
 		}
