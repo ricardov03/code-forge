@@ -138,14 +138,22 @@ func rhcList(home string, args []string, stdout io.Writer) *rhcFail {
 	if run == "" {
 		return rhcUsage("--run is required")
 	}
-	_, open, fail := rhcOpen(home, run)
+	record, open, fail := rhcOpen(home, run)
 	if fail != nil {
 		return fail
+	}
+	// B632: a check of a closed_deferred_human block is marked deferred.
+	deferred := func(e humancheck.Entry) bool {
+		return blockObject(blockObject(record.Get("blocks")).Get(e.Block)).Get("status") == humancheck.DeferredStatus
 	}
 	if asJSON {
 		list := make([]any, len(open))
 		for i, e := range open {
-			list[i] = e.Object()
+			o := e.Object()
+			if deferred(e) {
+				o.Set("deferred", true)
+			}
+			list[i] = o
 		}
 		data, _ := ledger.Stringify(ledger.Object{{Key: "run", Value: run}, {Key: "open", Value: list}}, false)
 		fmt.Fprintln(stdout, string(data))
@@ -165,7 +173,11 @@ func rhcList(home string, args []string, stdout io.Writer) *rhcFail {
 		if s, ok := e.OpenedAt.(string); ok && s != "" {
 			opened = "; opened " + s
 		}
-		fmt.Fprintf(stdout, "%s %s %s%s%s\n", e.Block, e.Clause, statusQuote(e.Check), waits, opened)
+		mark := ""
+		if deferred(e) {
+			mark = "; deferred (block " + humancheck.DeferredStatus + ")"
+		}
+		fmt.Fprintf(stdout, "%s %s %s%s%s%s\n", e.Block, e.Clause, statusQuote(e.Check), waits, opened, mark)
 	}
 	return nil
 }
@@ -223,7 +235,7 @@ func rhcClear(home string, args []string, stdout, stderr io.Writer) *rhcFail {
 		fmt.Fprintf(stderr, "run human-checks clear %s %s: cancelled — nothing was recorded\n", block, clause)
 		return &rhcFail{1, ""}
 	}
-	var row ledger.Object
+	var row, closedRow ledger.Object
 	err = state.UpdateBlock(home, run, "", func(current, _ *ledger.Object) ([]ledger.Object, error) {
 		if g := blockObject(current.Get("autopilot")); g != nil {
 			s, err := autopilot.GrantState(g, rhcNow())
@@ -240,6 +252,10 @@ func rhcClear(home string, args []string, stdout, stderr io.Writer) *rhcFail {
 			return nil, &state.Error{Code: "human-check-not-open", Message: fmt.Sprintf("human-check-not-open: block %s has no open human check %s in run %s; nothing was recorded", block, clause, run)}
 		}
 		row = ledger.Object{{Key: "event", Value: humancheck.ClearedEvent}, {Key: "block", Value: block}, {Key: "clause", Value: clause}, {Key: "check", Value: now.Check}, {Key: "waits_for", Value: now.WaitsFor}, {Key: "note", Value: note}, {Key: "by", Value: "human"}}
+		if closed := rhcCloseDeferred(current, again, block, clause); closed != nil {
+			closedRow = closed
+			return []ledger.Object{row, closed}, nil
+		}
 		return []ledger.Object{row}, nil
 	})
 	if err != nil {
@@ -250,12 +266,38 @@ func rhcClear(home string, args []string, stdout, stderr io.Writer) *rhcFail {
 		return &rhcFail{1, blockIOMessage(err)}
 	}
 	if asJSON {
+		if closedRow != nil {
+			row.Set("block_status", "closed") // B632
+		}
 		data, _ := ledger.Stringify(row, false)
 		fmt.Fprintln(stdout, string(data))
 	} else {
 		fmt.Fprintf(stdout, "run %s: human check %s %s cleared (by: human)\n", run, block, clause)
+		if closedRow != nil {
+			fmt.Fprintf(stdout, "run %s: block %s closed (its last deferred human check is cleared)\n", run, block)
+		}
 	}
 	return nil
+}
+
+// rhcCloseDeferred (B632): clearing the last open clause of a
+// closed_deferred_human block makes it closed, with one signed row. open is
+// the run's open checks before this clear.
+func rhcCloseDeferred(current *ledger.Object, open []humancheck.Entry, block, clause string) ledger.Object {
+	blocks := blockObject(current.Get("blocks"))
+	entry := blockObject(blocks.Get(block))
+	if entry.Get("status") != humancheck.DeferredStatus {
+		return nil
+	}
+	for _, e := range open {
+		if e.Block == block && e.Clause != clause {
+			return nil
+		}
+	}
+	entry.Set("status", "closed")
+	blocks.Set(block, entry)
+	current.Set("blocks", blocks)
+	return ledger.Object{{Key: "event", Value: humancheck.DeferredEvent}, {Key: "block", Value: block}, {Key: "status", Value: "closed"}, {Key: "by", Value: "human"}}
 }
 
 // runOutWriter sends a writer's text through runOut (stdout or stderr), so
