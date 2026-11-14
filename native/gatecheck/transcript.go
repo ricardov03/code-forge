@@ -73,6 +73,10 @@ func transcriptLines(text string, fn func(lineNo int, scans []transcriptScan)) b
 		return false
 	}
 	lines := strings.Split(text, "\n")
+	if claudeResultLog(lines) {
+		// B628: a Claude result object carries no tool calls, so nothing in it ran.
+		return true
+	}
 	events, claude := claudeEvents(lines)
 	var codex []*codexLine
 	if !claude {
@@ -806,6 +810,35 @@ func claudeEvents(lines []string) ([]*claudeEvent, bool) {
 		return nil, false
 	}
 	return events, true
+}
+
+// claudeResultLog is Node's B628 Claude result-object detection: every non-empty line an object
+// with type "result" and a string result (the final object of `claude -p --output-format json`),
+// at least one of them and no stdin banner. Such a log has no tool calls, so nothing is scanned;
+// a file that mixes one with any other line stays a plain-text log.
+func claudeResultLog(lines []string) bool {
+	seen := false
+	for _, line := range lines {
+		if jsTrim(line) == "" {
+			continue
+		}
+		if !jsonIsObject(json.RawMessage(line)) || !json.Valid([]byte(line)) {
+			return false
+		}
+		var obj map[string]json.RawMessage
+		if json.Unmarshal([]byte(line), &obj) != nil || obj == nil {
+			return false
+		}
+		kind, isStr := jsonString(obj["type"])
+		if !isStr || kind != "result" {
+			return false
+		}
+		if _, isStr := jsonString(obj["result"]); !isStr {
+			return false
+		}
+		seen = true
+	}
+	return seen
 }
 
 // jsonString is a JSON string value (not null, a number or a missing key).
