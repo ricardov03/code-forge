@@ -268,13 +268,7 @@ func runBlockReady(args []string) int {
 			fmt.Fprint(os.Stderr, w)
 		}
 	}
-	formatted := closeBlockersJSON(blockers, p.id, p.run, p.flags, entry)
-	for _, value := range formatted {
-		o := value.(ledger.Object)
-		if o.Get("code") == "light_limits" {
-			o.Set("fix", "no automatic fix: light_limits; stop this attempt, then reopen with --kind code --attempt <n+1> and the original base, ownership and acceptance, or split the block within light limits")
-		}
-	}
+	formatted := closeBlockersRows(blockers, p.id, p.run, p.flags, entry, true)
 	ready := len(blockers) == 0
 	// B625: only reviewer-down files block: COMPLETE_PENDING_REVIEW.
 	down := readyPendingReview(blockers, files, rows, p.run, p.id, key)

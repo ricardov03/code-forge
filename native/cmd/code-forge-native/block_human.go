@@ -146,6 +146,13 @@ func humanDecisions(run, id, reason string, gate gatecheck.Result, rows []gatech
 }
 
 func runBlockHumanPass(args []string) int {
+	// B622: --dry-run previews the human-pass checks; nothing is asked or written.
+	if rest, dry, message := dryRunArgs(args); message != "" {
+		fmt.Fprintln(os.Stderr, "block human-pass:", message)
+		return 2
+	} else if dry {
+		return humanPassDryRun(rest)
+	}
 	var stdout bytes.Buffer
 	stderr := &closeErrorBuffer{}
 	delegated := false
@@ -187,7 +194,7 @@ func blockHumanPass(args []string, stdout, stderr io.Writer, delegated *bool, en
 	usage := func(s string) int { return fail(&state.Error{Code: "usage", Message: s}) }
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
-			fmt.Fprint(stdout, blockVerbUsage("human-pass", "<id> --run <r> --note <text> [--proof <dir-or-file>]"))
+			fmt.Fprint(stdout, blockVerbUsage("human-pass", "<id> --run <r> --note <text> [--proof <dir-or-file>] [--dry-run]"))
 			return 0
 		}
 	}
