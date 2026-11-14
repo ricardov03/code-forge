@@ -30,6 +30,8 @@ type landStep struct {
 	// pastClaim: a close preflight got past the point where Node's
 	// --auto-claim signs its claims (B498).
 	pastClaim bool
+	// dry (B622): a block close --dry-run preview collects its blockers here.
+	dry *closeDry
 }
 
 func (s *landStep) writers() (io.Writer, io.Writer) {

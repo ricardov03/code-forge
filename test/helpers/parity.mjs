@@ -350,3 +350,25 @@ export async function runParity(verbArgs, { fixture, goCommand, nodeCommand = [p
     return { equal: diffs.length === 0, diffs };
   } finally { await rm(root, { recursive: true, force: true }); }
 }
+
+/**
+ * B622: Go's block ready --json and --preflight --json add clears_by (owner|orchestrator) to
+ * every blocker; Node does not. Drop the process:stdout diff only when Go's stdout is one JSON
+ * document whose blockers each carry a valid clears_by and which, with exactly that field
+ * removed, re-serialises byte for byte to Node's stdout. Every other diff is kept.
+ * @param {Diff[]} diffs
+ * @returns {Diff[]}
+ */
+export function allowClearsBy(diffs) {
+  return diffs.filter((d) => {
+    if (d.where !== 'process' || d.field !== 'stdout' || typeof d.go !== 'string' || typeof d.node !== 'string') return true;
+    let doc;
+    try { doc = JSON.parse(d.go); } catch { return true; }
+    if (doc === null || typeof doc !== 'object' || !Array.isArray(doc.blockers) || doc.blockers.length === 0) return true;
+    for (const b of doc.blockers) {
+      if (b === null || typeof b !== 'object' || !['owner', 'orchestrator'].includes(b.clears_by)) return true;
+      delete b.clears_by;
+    }
+    return JSON.stringify(doc) + '\n' !== d.node;
+  });
+}

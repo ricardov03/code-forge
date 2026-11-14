@@ -355,13 +355,13 @@ export const USAGE =
   'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]\n' +
   '       code-forge block ready <id> --run <r> [--transcript <file>] [--report <file>]\n' +
   '       code-forge block rebase <id> --run <r> --accept-landed\n' +
-  '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
+  '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--dry-run] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n' +
   '       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n' +
   '       code-forge block accept-hit <id> --run <r> [--rule <rule-id>] --line <n> --transcript <path> --reason <text>\n' +
   '       code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>\n' +
   '       code-forge block ack-waivers <id> --run <r>\n' +
-  '       code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>]\n' +
+  '       code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>] [--dry-run]\n' +
   '       code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>\n' +
   '       code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links]\n' +
 '       code-forge block land <id> <id>... --run <r> [--max <dur>] [--push] [--watch-ci] [--copy-links]\n' +
@@ -374,7 +374,7 @@ const VERB_USAGE = {
   rebase: '<id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>] [--accept-landed]',
   claim: '<id> <path> --run <r>',
   ready: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>]',
-  close: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide]',
+  close: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide] [--dry-run]',
   land: '<id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links]',
   stop: '<id> --run <r> --reason <text>',
   waive: '<id> <finding-id> --run <r> --file <path> --reason <text> [--yes]',
@@ -382,7 +382,7 @@ const VERB_USAGE = {
   'accept-hit': '<id> --run <r> [--rule <rule-id>] --line <n> --transcript <path> --reason <text>',
   unwaive: '<id> <finding-id> --run <r> --file <path> --reason <text>',
   'ack-waivers': '<id> --run <r>',
-  'human-pass': '<id> --run <r> --note <text> [--proof <dir-or-file>]',
+  'human-pass': '<id> --run <r> --note <text> [--proof <dir-or-file>] [--dry-run]',
   'amend-acceptance': '<id> --run <r> --acceptance <file> --reason <text>',
 };
 const SUBCOMMANDS = Object.keys(VERB_USAGE);
