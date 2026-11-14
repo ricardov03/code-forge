@@ -160,6 +160,16 @@ starts. The result and `gate.done` carry `scope: related`, `test_count` and, on 
 `test_files`, with `reason: go_only` for a block with no Node product file and
 `reason: import_graph` otherwise. A text-only skip still wins.
 
+A Go project tests only its changed packages (B667). This applies when the test command is
+`go test` with the item `./...`, `go.mod` is in the workspace root and
+`gates.go_changed_packages` is not `false` (the default is `true`). Then `--changed` replaces
+`./...` with the changed packages. A changed package is the directory of a changed `.go` file,
+or the package that holds a changed `testdata/` file. A deleted directory is dropped.
+`go vet ./...` and `gofmt` keep their whole-module argv. With no changed package, the test gate
+is skipped with `reason: no_changes`. A change to `go.mod`, `go.sum` or `go.work` runs the full
+suite with `reason: go_mod`. `gate.done` carries `scope: changed`, `reason: go_packages` and
+`packages` (the list). The block land and close gates use this scope.
+
 A block is Go-only when every owned path is under `native/`, `docs/`, `plans/` or
 `.github/`, is a runnable test file under `test/` (`*.test.*` or `*.spec.*`), is
 `CHANGELOG.md` or another `*.md` file, or is `scripts/build-native.mjs`. A Node product
@@ -646,6 +656,12 @@ no block owns or changes a Node product file (`src/**`, `bin/**`, `scripts/**/*.
 batch whose selection holds `test/compat/go.test.mjs` runs it (B407). The signed `land.batch` row
 records `merge_gate_reason`. A test command without `{test_files}` gets the selection appended
 here too; it never runs unscoped.
+In a Go project with package scope (B667), each block tests only its changed packages. The merge
+gate then runs ONE full `go test ./...` on the merged trial tree, before any push. It prints
+`merge gate: full go test suite once for the batch (B667)`; `--json` emits a `merge_gate` event
+with `reason: full_suite`. A red full suite lands nothing and pushes nothing from the failing
+part of the batch: land tests trial prefixes as above, and a prefix lands only after its own green
+full suite.
 A merge refusal leaves the block closed; correct the checkout
 and use the displayed next command. `--json` emits one JSON line: `event: landed` or `closed`
 and the merge command, or `event: refused` with `step`, `reason` and `next`.

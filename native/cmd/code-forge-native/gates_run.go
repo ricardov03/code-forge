@@ -551,6 +551,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	// (gates_select.go). An explicit --full runs the full suite.
 	goOnly := o.changed && o.run != "" && gatesGoOnly(block, p)
 	selected := o.changed && !o.full && o.run != "" && listErr == nil && gatesSelectable(p)
+	// B667: a whole-module `go test ./...` gate narrows to the changed Go
+	// packages (gates.go_changed_packages, default true).
+	goPackages := gpkMode(cwd, p, configured)
 	if step != nil && step.preflight {
 		return 0, true
 	}
@@ -724,13 +727,22 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 			if base == "" {
 				changed = gatesOwnedListed(b, listed)
 			}
-			scope = gatesChangedSelect(cwd, b, listed, changed, goOnly)
-			scope.Files = gatesRunnerFiles(p.Commands["test"].Argv, scope.Files)
+			if goPackages {
+				// B667: a Go project tests only its changed packages.
+				scope = gpkScope(cwd, changed, base != "")
+			} else {
+				scope = gatesChangedSelect(cwd, b, listed, changed, goOnly)
+				scope.Files = gatesRunnerFiles(p.Commands["test"].Argv, scope.Files)
+			}
 			changedScope = &scope
 		}
 		if o.run == "" && o.scope != nil && gatesSelectable(p) {
-			scope = *o.scope
-			scope.Files = gatesRunnerFiles(p.Commands["test"].Argv, scope.Files)
+			if goPackages && o.goChanged != nil {
+				scope = gpkScope(cwd, o.goChanged, false)
+			} else {
+				scope = *o.scope
+				scope.Files = gatesRunnerFiles(p.Commands["test"].Argv, scope.Files)
+			}
 		}
 		if o.full {
 			scope = gates.Scope{Kind: "full", Report: "full", Reason: "explicit", Files: []string{}, Changed: []string{}, Dependents: []string{}}
@@ -745,6 +757,10 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		// skips the test gate; it never runs the unscoped (full) command.
 		if gatesSelectedReason(scope.Reason) {
 			runPlan = gatesWithTestFiles(p)
+		}
+		goScoped := goPackages && gpkScoped(scope)
+		if goScoped {
+			runPlan = gpkPlan(p, scope)
 		}
 		emptySelection := gatesSelectedReason(scope.Reason) && len(scope.Files) == 0
 		if scope.Reason == "text_only" || emptySelection {
@@ -783,11 +799,14 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		if ranTree != "" && gatesCleanTree(cwd) != ranTree {
 			ranTree = ""
 		}
-		if scope.Reason == "text_only" || emptySelection {
+		if scope.Reason == "text_only" || emptySelection || goScoped {
 			for i, result := range results {
 				r := result.(ledger.Object)
 				if r.Get("gate") == "test" {
 					gatesAdd(&r, scope.Fields(true))
+					if goScoped {
+						r.Set("packages", scope.Files)
+					}
 					results[i] = r
 				}
 			}
@@ -948,7 +967,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 			gatesAdd(&row, scoped)
 		} else if changedScope != nil {
 			gatesAdd(&row, changedScope.Fields(true))
-			if gatesSelectedReason(changedScope.Reason) {
+			if goPackages && gpkScoped(*changedScope) {
+				row.Set("packages", changedScope.Files)
+			} else if gatesSelectedReason(changedScope.Reason) {
 				row.Set("test_files", changedScope.Files)
 			}
 		} else {

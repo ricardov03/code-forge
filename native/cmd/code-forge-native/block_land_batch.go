@@ -325,9 +325,20 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 				args := []string{"run", "--cwd", cwd}
 				options, _ := gatesParse(args)
 				selected := -1
-				if landMergeSelectable(cwd) {
+				// B667: a Go project's batch runs ONE full go test ./... here,
+				// after each block ran only its changed packages; no block
+				// lands or pushes before it is green.
+				goFull := gpkProject(cwd)
+				if landMergeSelectable(cwd) && !goFull {
 					options.scope = &scope
 					selected = len(scope.Files)
+				}
+				if n == len(batch) && goFull {
+					if json {
+						emit(ledger.Object{{Key: "event", Value: "merge_gate"}, {Key: "reason", Value: "full_suite"}, {Key: "batch", Value: mergeReason}, {Key: "full", Value: true}})
+					} else {
+						fmt.Fprintf(os.Stdout, "merge gate: full go test suite once for the batch (B667)\n")
+					}
 				}
 				if n == len(batch) && selected >= 0 {
 					if json {
@@ -709,7 +720,15 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 		return err
 	}
 	var scope gates.Scope
-	if gatesSelectable(p) {
+	goPackages := gatesSelectable(p) && gpkMode(block.tree.Workspace, p, configured)
+	if goPackages {
+		// B667: a Go project tests only the block's changed packages; the
+		// batch runs one full go test ./... at the end (merge gate).
+		scope = gpkScope(block.tree.Workspace, delta, base != "")
+		if gpkScoped(scope) {
+			p = gpkPlan(p, scope)
+		}
+	} else if gatesSelectable(p) {
 		// B404: the same selection as gates run --changed; an empty one skips
 		// the test gate instead of running the full suite.
 		scope = gatesChangedSelect(block.tree.Workspace, block.entry, listed, delta, gatesGoOnly(block.entry, p))
@@ -761,7 +780,9 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 	}
 	row := ledger.Object{{Key: "event", Value: "gate.done"}, {Key: "block", Value: block.id}, {Key: "worktree", Value: block.tree.Path}, {Key: "all_ok", Value: all && ctx.Err() == nil}, {Key: "results", Value: summaries}, {Key: "test_base", Value: base}}
 	gatesAdd(&row, scope.Fields(true))
-	if gatesSelectedReason(scope.Reason) {
+	if goPackages && gpkScoped(scope) {
+		row.Set("packages", scope.Files)
+	} else if gatesSelectedReason(scope.Reason) {
 		row.Set("test_files", scope.Files)
 	}
 	if _, err := state.WriteSigned(home, run, row); err != nil {
