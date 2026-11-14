@@ -108,15 +108,15 @@ func writeLedger(t *testing.T, f runFixture, rows ...string) {
 func TestAutopilotVerbHelpAndUsage(t *testing.T) {
 	newAutopilotFixture(t)
 	code, out, errText := autopilotCall(t, "--help")
-	if code != 0 || out != autopilotUsage || errText != "" {
+	if code != 0 || out != helpWrapped(t, "autopilot", autopilotUsage) || errText != "" {
 		t.Fatalf("--help = %d %q %q", code, out, errText)
 	}
 	code, out, _ = autopilotCall(t, "status", "-h")
-	if code != 0 || out != "usage: code-forge autopilot status --run <id> [--json]\n" {
+	if code != 0 || out != helpWrapped(t, "autopilot status", "usage: code-forge autopilot status --run <id> [--json]\n") {
 		t.Fatalf("status -h = %d %q", code, out)
 	}
 	code, out, _ = autopilotCall(t, "ask", "--help")
-	if code != 0 || !strings.HasPrefix(out, "usage: code-forge autopilot ask --run <id>") || !strings.HasSuffix(out, "(options for an action: waive,fix · allow,deny · L1,L2)\n") {
+	if code != 0 || !strings.HasPrefix(out, "Description:\n  Ask the delegate one question inside the grant\n\nUsage:\n  usage: code-forge autopilot ask --run <id>") || !strings.Contains(out, "(options for an action: waive,fix · allow,deny · L1,L2)\n\nOptions:\n") {
 		t.Fatalf("ask --help = %d %q", code, out)
 	}
 	cases := []struct {
@@ -265,11 +265,11 @@ func TestAutopilotVerbStart(t *testing.T) {
 		{[]string{"start", "--run", "r-a", "--until", "2026-11-11T09:00:00Z"}, "--until is in the past; give a time after now, at most 24 h ahead"},
 		{[]string{"start", "--run", "r-a", "--until", "2026-11-12T10:00:01Z"}, "--until is more than 24 h ahead; a grant lasts at most 24 h"},
 		{[]string{"start", "--run", "r-a", "--until", until, "--delegate", "L4"}, "--delegate must be L2 or L3"},
-		{[]string{"start", "--run", "r-a", "--until", until, "--delegate", "L2"}, "--allow is required: one or more of waive:warning, waive:nit, round:extra, model:choose, close:routine"},
+		{[]string{"start", "--run", "r-a", "--until", until, "--delegate", "L2"}, "--allow is required: one or more of waive:warning, waive:nit, round:extra, model:choose, close:routine, review:substitute, human-pass:deferred"},
 		{[]string{"start", "--run", "r-a", "--until", until, "--delegate", "L2", "--allow", "waive:critical"}, "scope waive:critical is on the fixed deny list and can never be allowed (waive a critical finding)"},
-		{[]string{"start", "--run", "r-a", "--until", until, "--delegate", "L2", "--allow", "foo"}, "unknown scope \"foo\" in --allow; allowable scopes: waive:warning, waive:nit, round:extra, model:choose, close:routine"},
+		{[]string{"start", "--run", "r-a", "--until", until, "--delegate", "L2", "--allow", "foo"}, "unknown scope \"foo\" in --allow; allowable scopes: waive:warning, waive:nit, round:extra, model:choose, close:routine, review:substitute, human-pass:deferred"},
 		{append(base, "--deny", " , "), "--deny needs one or more scopes"},
-		{append(base, "--deny", "zzz"), "unknown scope \"zzz\" in --deny; allowable scopes: waive:warning, waive:nit, round:extra, model:choose, close:routine"},
+		{append(base, "--deny", "zzz"), "unknown scope \"zzz\" in --deny; allowable scopes: waive:warning, waive:nit, round:extra, model:choose, close:routine, review:substitute, human-pass:deferred"},
 		{append(base, "--deny", "round:extra"), "scope round:extra is in both --allow and --deny; name it in one of them"},
 		{append(base, "--budget", ","), "--budget needs <category>=<usd>, e.g. review=5,coding=20"},
 		{append(base, "--budget", "x=1"), "unknown budget category \"x\"; categories: coding, review"},

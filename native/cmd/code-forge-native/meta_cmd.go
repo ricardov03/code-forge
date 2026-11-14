@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/ricardov03/code-forge/native/docsync"
@@ -28,7 +27,7 @@ func init() {
 }
 
 const (
-	helpUsage    = "usage: code-forge help\n"
+	helpUsage    = "usage: code-forge help [<command> [<sub-command>]] [--json]\n"
 	versionUsage = "usage: code-forge version\n"
 	initUsage    = "usage: code-forge init [--no-interaction] [--tools recommended|current] [--yes-tool <tool>]…\n" +
 		"  [--harness a,b] [-g|-p] [--copy] [--provider P] [--level Ln=model[:effort][@provider]]…\n" +
@@ -44,9 +43,6 @@ const (
 
 // metaPackageRoot is the install root (<root>/native/bin/<platform>/); a test seam.
 var metaPackageRoot = docsync.PackageRoot
-
-// metaVerbFile is VERB_FILE_PATTERN in bin/code-forge.mjs and src/cli/help.mjs.
-var metaVerbFile = regexp.MustCompile(`^[a-z][a-z0-9-]*\.mjs$`)
 
 func metaIsHelp(s string) bool { return s == "--help" || s == "-h" }
 
@@ -112,49 +108,53 @@ func metaHandover(verb string, args []string, reason handoverReason) int {
 	return code
 }
 
-// helpVerbs is listVerbs in bin/code-forge.mjs: the regular src/cli/*.mjs
-// files of this install, sorted.
-func helpVerbs() ([]string, error) {
-	root, err := metaPackageRoot()
-	if err != nil {
-		return nil, err
-	}
-	entries, err := os.ReadDir(filepath.Join(root, "src", "cli"))
-	if err != nil {
-		return nil, err
-	}
-	verbs := []string{}
-	for _, entry := range entries {
-		if entry.Type().IsRegular() && metaVerbFile.MatchString(entry.Name()) {
-			verbs = append(verbs, strings.TrimSuffix(entry.Name(), ".mjs"))
-		}
-	}
-	sort.Strings(verbs)
-	return verbs, nil
-}
-
+// runHelpVerb is `code-forge help` (B613, Artisan's list and help <command>):
+// no argument prints the grouped command list, --json the machine list, and
+// one command (`help block`, `help block open`) that command's help page.
 func runHelpVerb(args []string) int {
-	if metaHelp(args, helpUsage, nil) {
-		return 0
+	// B648: the maintainer's command reference generator (hidden).
+	if len(args) > 0 && args[0] == "--commands-doc" {
+		return runHelpDoc(args[1:], os.Stdout, os.Stderr)
 	}
-	verbs, err := helpVerbs()
-	if err != nil {
-		return metaHandover("help", args, hHelpVerbs)
-	}
-	return metaServe("help", "", args, func(stdout, _ io.Writer) int {
-		var b strings.Builder
-		b.WriteString("Usage: code-forge <verb> [args]\n\nVerbs:\n")
-		for _, verb := range verbs {
-			b.WriteString("  " + verb + "\n")
+	for _, arg := range args {
+		if metaIsHelp(arg) {
+			fmt.Fprint(os.Stdout, helpUsage)
+			return 0
 		}
-		b.WriteString("\nBlock usage: code-forge block <verb> --help (or -h).\n")
-		b.WriteString("  block open --acceptance <file>: JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n")
-		b.WriteString("  block open --brief <file>: a file inside the repository, not inline text.\n")
-		b.WriteString("  block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links] [--json]: join reviews, run changed gates, close, then with --merge run the merge gate and merge with --no-ff.\n")
-		b.WriteString("  block land <id> <id>... --run <r> [--max <dur>] [--push] [--watch-ci] [--copy-links] [--json]: land closed blocks in order with one merge gate.\n")
-		b.WriteString("  Configuration fallback entries must be {provider, model} objects, not model-name strings (optional effort).\n")
-		b.WriteString("\nTest queue: gates wait in one machine-wide FIFO queue (code-forge queue shows it); wrap other test commands in `code-forge queue run -- <cmd>`.\n")
-		fmt.Fprint(stdout, b.String())
+	}
+	return metaServe("help", "", args, func(stdout, stderr io.Writer) int {
+		words, asJSON := []string{}, false
+		for _, arg := range args {
+			switch {
+			case arg == "--json":
+				asJSON = true
+			case strings.HasPrefix(arg, "-"):
+				fmt.Fprintf(stderr, "help: unknown flag %s\n%s", statusQuote(arg), helpUsage)
+				return 2
+			default:
+				words = append(words, arg)
+			}
+		}
+		if asJSON && len(words) > 0 {
+			fmt.Fprint(stderr, "help: --json lists every command; it takes no command name\n"+helpUsage)
+			return 2
+		}
+		if asJSON {
+			data, _ := json.Marshal(helpJSONRows())
+			fmt.Fprintln(stdout, string(data))
+			return 0
+		}
+		if len(words) == 0 {
+			fmt.Fprint(stdout, helpListText(helpPainter(helpColor())))
+			return 0
+		}
+		name := strings.Join(words, " ")
+		entry, ok := helpLookup(name)
+		if !ok || len(words) > 2 {
+			fmt.Fprintf(stderr, "help: unknown command %s; run code-forge help for the list\n", statusQuote(name))
+			return 2
+		}
+		fmt.Fprint(stdout, helpPage(helpPainter(helpColor()), entry, helpCommandUsage(name)))
 		return 0
 	})
 }

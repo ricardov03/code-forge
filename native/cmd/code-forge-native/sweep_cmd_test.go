@@ -82,7 +82,7 @@ func TestB486SweepHelpAndUsage(t *testing.T) {
 	for _, args := range [][]string{{"--help"}, {"-h"}, {"-h", "--bogus"}, {"--apply", "--help"}, {"--json", "--help", "--apply"}} {
 		home, _ := b486Env(t, nil, nil)
 		code, out, errText, handed := b486Call(t, args...)
-		if handed != nil || code != 0 || out != b486Usage || errText != "" {
+		if handed != nil || code != 0 || out != helpExpect(t, append([]string{"sweep"}, args...), 0, b486Usage) || errText != "" {
 			t.Fatalf("%v: code=%d out=%q err=%q handed=%v", args, code, out, errText, handed)
 		}
 		if got := b486Handovers(t, home); got != nil {

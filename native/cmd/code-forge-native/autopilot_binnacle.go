@@ -18,8 +18,10 @@ import (
 	"unicode/utf16"
 
 	"github.com/ricardov03/code-forge/native/autopilot"
+	"github.com/ricardov03/code-forge/native/blockclose"
 	"github.com/ricardov03/code-forge/native/canon"
 	"github.com/ricardov03/code-forge/native/childreg"
+	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/runstatus"
 	"github.com/ricardov03/code-forge/native/state"
@@ -131,6 +133,18 @@ func bnU(v any, fallback string) string {
 		return fallback
 	}
 	return bnJSString(v)
+}
+
+// bnEndText (B634) is a grant's end in the binnacle: "until <time>", or for
+// an until-done grant "until done" with " or <deadline>" when it has one.
+func bnEndText(grant any) string {
+	if bnGet(grant, "until_done") != true {
+		return "until " + bnU(bnGet(grant, "until"), "unknown")
+	}
+	if bnNullish(bnGet(grant, "until")) {
+		return "until done"
+	}
+	return "until done or " + bnU(bnGet(grant, "until"), "unknown")
 }
 
 func bnList(v any) string {
@@ -526,11 +540,20 @@ func bnDescribe(row any) (string, string, any) {
 	}
 	switch bnEvent(row) {
 	case "autopilot.grant":
-		return "Grant started", "grant " + bnU(g("grant_id"), "unknown") + " · delegate " + bnU(g("delegate"), "unknown") + " · allow " + bnList(g("scopes")) + " · until " + bnU(g("until"), "unknown"), nil
+		return "Grant started", "grant " + bnU(g("grant_id"), "unknown") + " · delegate " + bnU(g("delegate"), "unknown") + " · allow " + bnList(g("scopes")) + " · " + bnEndText(row), nil
 	case "autopilot.stop":
 		return "Grant stopped", "grant " + bnU(g("grant_id"), "unknown"), nil
 	case "autopilot.expire":
+		if g("reason") == "done" { // B634: an until-done grant whose planned blocks all closed
+			return "Grant ended", "grant " + bnU(g("grant_id"), "unknown") + " · " + autopilotDoneText + " (" + bnList(g("blocks")) + ")", nil
+		}
 		return "Grant expired", "grant " + bnU(g("grant_id"), "unknown") + " · window ended " + bnU(g("until"), "unknown"), nil
+	case "autopilot.extend":
+		was := "no deadline"
+		if !bnNullish(g("from")) {
+			was = "was " + bnU(g("from"), "unknown")
+		}
+		return "Grant extended", "grant " + bnU(g("grant_id"), "unknown") + " · until " + bnU(g("until"), "unknown") + " (" + was + ")", nil
 	case "autopilot.link":
 		return "Log link stored", "grant " + bnU(g("grant_id"), "unknown"), bnStrOr(g("link"))
 	case "autopilot.decision":
@@ -764,6 +787,8 @@ func (b *bnBuild) blockLine(blockRows []any, entry any, id string) ledger.Object
 		stateText = "Open"
 	case bnEq(status, "stopped"):
 		stateText = "Stopped"
+	case bnEq(status, humancheck.DeferredStatus):
+		stateText = "Closed with human checks deferred to you (B632); it may land"
 	}
 	parts := []string{}
 	if branch != nil {
@@ -854,6 +879,13 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 	})
 	blocks := []any{}
 	closedIDs := []string{}
+	deferredIDs := []string{} // B632
+	// B633: the open human checks of blocks past open hold the run's end.
+	held := []humancheck.Entry{}
+	if rehHeld(record) {
+		key, _ := blockclose.ReadKey(b.home, runID)
+		held = rehHolding(record, humancheck.Open(runID, record, all, key))
+	}
 	for _, id := range ids {
 		blockRows := []any{}
 		for _, r := range all {
@@ -861,7 +893,11 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 				blockRows = append(blockRows, r)
 			}
 		}
-		blocks = append(blocks, b.blockLine(blockRows, entry(id), id))
+		line := b.blockLine(blockRows, entry(id), id)
+		if own := bnHeldFor(held, id); len(own) > 0 && bnEq(bnGet(entry(id), "status"), "closed") {
+			line.Set("state", bnHeldState(len(own)))
+		}
+		blocks = append(blocks, line)
 		status := bnGet(entry(id), "status")
 		if bnNullish(status) {
 			status = ""
@@ -871,6 +907,9 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 		}
 		if bnEq(status, "closed") {
 			closedIDs = append(closedIDs, id)
+		}
+		if bnEq(status, humancheck.DeferredStatus) {
+			deferredIDs = append(deferredIDs, id)
 		}
 	}
 
@@ -1004,6 +1043,10 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 		}
 	}
 	for _, id := range closedIDs {
+		if own := bnHeldFor(held, id); len(own) > 0 { // B633: not ready
+			action(bnHeldAction(runID, id, own))
+			continue
+		}
 		var pr any
 		for i := len(all) - 1; i >= 0 && pr == nil; i-- {
 			if bnEq(bnGet(all[i], "block"), id) {
@@ -1015,6 +1058,19 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 			text += " (" + pr.(string) + ")"
 		}
 		action(text)
+	}
+	// B626: a block whose blockers are all owner-only gets one owner line.
+	for _, line := range settleOwnerLines(all, runID, settleOpenBlock(record)) {
+		action(line)
+	}
+
+	// B632: one line per deferred block with the owner's clear command.
+	if len(deferredIDs) > 0 {
+		key, _ := blockclose.ReadKey(b.home, runID)
+		open := humancheck.Open(runID, record, all, key)
+		for _, id := range deferredIDs {
+			action(bnDeferredAction(runID, id, open))
+		}
 	}
 
 	// ---- incidents
@@ -1076,6 +1132,9 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 				b.unsupported = true
 			}
 			stateText = name
+			if g.Get("done_at") != nil {
+				stateText = "done" // B634: ended when every planned block closed
+			}
 		} else {
 			b.unsupported = true
 		}
@@ -1185,9 +1244,9 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 	switch {
 	case grant != nil:
 		g := func(k string) any { return bnGet(grant, k) }
-		window = stateText + " · grant " + bnU(g("grant_id"), "unknown") + " · " + bnU(g("started_at"), "unknown") + " to " + bnU(g("until"), "unknown") + " · delegate " + bnU(g("delegate"), "unknown") + " · allow " + bnList(g("scopes"))
+		window = stateText + " · grant " + bnU(g("grant_id"), "unknown") + " · " + bnU(g("started_at"), "unknown") + " to " + strings.TrimPrefix(bnEndText(grant), "until ") + " · delegate " + bnU(g("delegate"), "unknown") + " · allow " + bnList(g("scopes"))
 	case grantRow != nil:
-		window = "grant " + bnU(bnGet(grantRow, "grant_id"), "unknown") + " · until " + bnU(bnGet(grantRow, "until"), "unknown")
+		window = "grant " + bnU(bnGet(grantRow, "grant_id"), "unknown") + " · " + bnEndText(grantRow)
 	}
 	linkText := "none"
 	if link != nil {
@@ -1196,11 +1255,15 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 	item := func(name, value string) any {
 		return ledger.Object{{Key: "item", Value: name}, {Key: "value", Value: value}}
 	}
-	status := []any{
-		item("Result", resultText), item("Stack/PRs", prText), item("Full suite", fullSuiteText),
+	status := []any{item("Result", resultText)}
+	if len(held) > 0 { // B633
+		status = append(status, item("Human checks", bnHumanChecksItem(runID, held)))
+	}
+	status = append(status,
+		item("Stack/PRs", prText), item("Full suite", fullSuiteText),
 		item("Reviews", bnPlural(results, "result")+" · "+bnPlural(len(approved), "file")+" approved · "+strconv.Itoa(waived)+" waived by autopilot"),
 		item("Files to read", filesText), item("Base", base), item("Spend", spendText), item("Autopilot window", window), item("Log link", linkText),
-	}
+	)
 	if approx == 1 {
 		status = append(status, item("Clock note", "1 row carries no valid timestamp and takes the time of the row before it"))
 	} else if approx > 1 {
@@ -1572,7 +1635,7 @@ func autopilotBinnacle(o *runOut, home, runID, sub string, flags autopilotFlags)
 			return autopilotReport(o, sub, err)
 		}
 		if checked.State == "expired" {
-			return autopilotReport(o, sub, &runFail{autopilot.ExpiredMessage(runID, autopilotText(checked.Grant.Get("until"))), false})
+			return autopilotReport(o, sub, &runFail{autopilotExpiredMsg(runID, checked.Grant), false})
 		}
 		link, usage, _ := bnParseLink(flags.values["link"])
 		if usage != nil {
@@ -1625,4 +1688,29 @@ func autopilotBinnacle(o *runOut, home, runID, sub string, flags autopilotFlags)
 		o.out(bnRenderLog(runID, b.fullLog(rows, scrub), bnNewScrub(home, bnCwd())))
 	}
 	return 0
+}
+
+// bnDeferredAction is the owner action for one closed_deferred_human block:
+// its open human checks and the command that clears one (B632).
+func bnDeferredAction(runID, id string, open []humancheck.Entry) string {
+	checks, clauses := []string{}, []string{}
+	for _, e := range open {
+		if e.Block != id {
+			continue
+		}
+		text := e.Clause + " " + statusQuote(e.Check)
+		if w, ok := e.WaitsFor.(string); ok {
+			text += " (waits for: " + w + ")"
+		}
+		checks = append(checks, text)
+		clauses = append(clauses, e.Clause)
+	}
+	if len(clauses) == 0 {
+		return "Block " + id + " has human checks deferred to you, but none is open now: see code-forge run human-checks list --run " + runID
+	}
+	clause := clauses[0]
+	if len(clauses) > 1 {
+		clause = "<" + strings.Join(clauses, "|") + ">"
+	}
+	return "Check block " + id + " by hand (its human checks were deferred under autopilot): " + strings.Join(checks, "; ") + "; then clear each with code-forge run human-checks clear --run " + runID + " --block " + id + " --clause " + clause + " --note \"<what you checked>\""
 }

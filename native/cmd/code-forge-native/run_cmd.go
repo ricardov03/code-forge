@@ -29,13 +29,14 @@ import (
 // Go too (run_reload.go); odd cases keep named hand-overs.
 func init() { routes["run"] = runRun }
 
-const runUsage = "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>\n"
+const runUsage = "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id> [--json] | human-checks list --run <id> [--json] | human-checks clear --run <id> --block <id> --clause <C<n>> --note <text> [--json]\n"
 
 var runSubUsage = map[string]string{
-	"start":  "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief]\nusage: code-forge run start --add-worker --run <id>\nusage: code-forge run start --reattach --run <id> [--worker-pid <pid>]\n",
-	"status": "usage: code-forge run status --run <id>\n",
-	"reload": "usage: code-forge run reload --run <id>\n",
-	"end":    "usage: code-forge run end --run <id>\n",
+	"start":        "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief]\nusage: code-forge run start --add-worker --run <id>\nusage: code-forge run start --reattach --run <id> [--worker-pid <pid>]\n",
+	"status":       "usage: code-forge run status --run <id>\n",
+	"reload":       "usage: code-forge run reload --run <id>\n",
+	"end":          "usage: code-forge run end --run <id> [--json]\n",
+	"human-checks": rhcListUsage + rhcClearUsage,
 }
 
 // runFail is a refusal printed as `run <sub>: <message>`; usage exits 2.
@@ -64,10 +65,12 @@ type runFlags struct {
 	values   map[string]string
 	reattach bool
 	add      bool
+	json     bool // B633: run end --json
 }
 
 // runParseFlags is parseFlags (src/state/cli-args.mjs) for the run spec.
-func runParseFlags(args []string) (runFlags, error) {
+// allowJSON (B633) adds the boolean --json, which only run end takes.
+func runParseFlags(args []string, allowJSON bool) (runFlags, error) {
 	f := runFlags{values: map[string]string{}}
 	seen := map[string]bool{}
 	valueFlags := map[string]bool{"run": true, "cwd": true, "engine": true, "worker-pid": true, "mode": true}
@@ -77,7 +80,7 @@ func runParseFlags(args []string) (runFlags, error) {
 			continue // positionals are ignored by run
 		}
 		name, inline, hasInline := strings.Cut(arg[2:], "=")
-		boolean := name == "reattach" || name == "add-worker"
+		boolean := name == "reattach" || name == "add-worker" || allowJSON && name == "json"
 		if !boolean && !valueFlags[name] {
 			quoted, _ := ledger.Stringify(arg, false)
 			return f, &runFail{"unknown flag " + string(quoted), true}
@@ -93,6 +96,8 @@ func runParseFlags(args []string) (runFlags, error) {
 			}
 			if name == "reattach" {
 				f.reattach = true
+			} else if name == "json" {
+				f.json = true
 			} else {
 				f.add = true
 			}
@@ -177,13 +182,26 @@ func runRun(args []string) int {
 	if len(args) > 0 {
 		sub = args[0]
 	}
+	if sub == "human-checks" { // B631: the run's human-check ledger
+		before := gatesBreadcrumbName("run human-checks")
+		o := &runOut{}
+		code := runHumanChecks(home, args[1:], runOutWriter{o, false}, runOutWriter{o, true})
+		if code != 0 {
+			var message any
+			if o.last != "" {
+				message = strings.TrimSpace(o.last)
+			}
+			nativeVerbFailure("run", sub, args, code, message, before)
+		}
+		return code
+	}
 	known := sub == "start" || sub == "status" || sub == "reload" || sub == "end"
 	var flags runFlags
 	var parseErr error
 	var workerPid float64
 	var plan func(o *runOut) int
 	if known {
-		flags, parseErr = runParseFlags(args[1:])
+		flags, parseErr = runParseFlags(args[1:], sub == "end")
 		if parseErr == nil {
 			parseErr = runCheckFlags(sub, flags, &workerPid)
 		}
@@ -222,7 +240,7 @@ func runRun(args []string) int {
 				}
 			case sub == "end" && hasRun:
 				var reason handoverReason
-				plan, reason = runEndPlan(home, runID)
+				plan, reason = runEndPlan(home, runID, flags.json)
 				if plan == nil {
 					return runHandover(args, reason)
 				}
@@ -536,7 +554,7 @@ func runStopPinned(pin ledger.Object) (bool, error) {
 	return true, nil
 }
 
-func runEndPlan(home, runID string) (func(o *runOut) int, handoverReason) {
+func runEndPlan(home, runID string, asJSON bool) (func(o *runOut) int, handoverReason) {
 	if _, readErr, ok := runReadRecord(home, runID); !ok {
 		return nil, hRunRecord
 	} else if readErr != nil {
@@ -555,6 +573,14 @@ func runEndPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 			}
 			if current.Get("status") != "active" {
 				return &runFail{fmt.Sprintf("run %s has already ended", runID), false}
+			}
+			// B633: open human checks hold the end; nothing is written.
+			held, err := rehOpenHolding(home, runID, current)
+			if err != nil {
+				return err
+			}
+			if len(held) > 0 {
+				return &rehHeldError{current, held}
 			}
 			blocks, isObject := current.Get("blocks").(ledger.Object)
 			if !isObject {
@@ -636,10 +662,29 @@ func runEndPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 			return nil
 		})
 		if errors.Is(err, errRunHandover) {
-			return runHandover([]string{"end", "--run", runID}, hRunShape)
+			args := []string{"end", "--run", runID}
+			if asJSON {
+				args = append(args, "--json")
+			}
+			return runHandover(args, hRunShape)
+		}
+		var held *rehHeldError
+		if errors.As(err, &held) {
+			if asJSON {
+				o.out(rehRefusalJSON(runID, held.record, held.held))
+				o.err("run end: " + rehHead(runID, len(held.held)) + "\n")
+			} else {
+				o.err("run end: " + rehRefusalText(runID, held.record, held.held))
+			}
+			return 1
 		}
 		if err != nil {
 			return runReport(o, "end", err)
+		}
+		if asJSON {
+			data, _ := ledger.Stringify(ledger.Object{{Key: "run", Value: ended.Get("run_id")}, {Key: "ended", Value: true}, {Key: "ended_at", Value: ended.Get("ended_at")}}, false)
+			o.out(string(data) + "\n")
+			return 0
 		}
 		o.out(fmt.Sprintf("run %s ended\n", runString(ended.Get("run_id"))))
 		return 0

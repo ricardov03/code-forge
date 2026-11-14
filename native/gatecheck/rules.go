@@ -1013,8 +1013,9 @@ func newGate(in Input) *gate {
 		g.human = append(g.human, r)
 	}
 	g.agent = countedAgentWaivers(g.mine, in.Block, g.ok)
-	for _, r := range g.mine {
-		if r["event"] == "review.waived" && r["by"] == "autopilot" {
+	for i, r := range g.mine {
+		// B635: a later human review.unwaived (autopilot revert) ends it.
+		if r["event"] == "review.waived" && r["by"] == "autopilot" && !isUnwaived(g.mine, i, g.ok) {
 			g.autopilot = append(g.autopilot, r)
 		}
 		if r["event"] == "review.answered" && g.ok(r) && r["run"] == in.Run {

@@ -227,10 +227,15 @@ func TestGraphDependentsRepositoryVerbSelectsCLITests(t *testing.T) {
 	g := NewGraph(root, listed)
 	for _, changed := range []string{"src/cli/help.mjs", "src/cli/version.mjs", "src/cli/doctor.mjs"} {
 		got := g.Dependents([]string{changed})
-		for _, want := range []string{"test/cli/verb-help.test.mjs", "test/docs-commands.test.mjs", "test/docs-verbs.test.mjs"} {
+		for _, want := range []string{"test/cli/verb-help.test.mjs", "test/docs-verbs.test.mjs"} {
 			if !Has(got, want) {
 				t.Errorf("Dependents(%s) misses %s (got %d tests)", changed, want, len(got))
 			}
 		}
+	}
+	// B648: the command reference test checks the page against the Go help
+	// table, so a native change (not a src/cli change) selects it.
+	if native := g.NativeTests(); !Has(native, "test/docs-commands.test.mjs") {
+		t.Errorf("NativeTests misses test/docs-commands.test.mjs (got %d tests)", len(native))
 	}
 }

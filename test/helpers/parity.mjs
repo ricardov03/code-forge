@@ -350,3 +350,56 @@ export async function runParity(verbArgs, { fixture, goCommand, nodeCommand = [p
     return { equal: diffs.length === 0, diffs };
   } finally { await rm(root, { recursive: true, force: true }); }
 }
+
+/**
+ * B613: Go prints `<command> --help` as the Artisan help page (Description, Node's usage text
+ * two spaces in, the sub-commands, Options) where Node prints the bare usage. Build that page
+ * from Node's usage, so a help case still pins every byte of Node's usage inside Go's page.
+ * @param {string} usage Node's usage text
+ * @param {{summary: string, commands?: [string, string][], options?: [string, string][]}} page
+ */
+export function goHelpPage(usage, { summary, commands = [], options = [] }) {
+  const rows = (list) => {
+    const width = Math.max(...list.map(([name]) => name.length));
+    return list.map(([name, text]) => `  ${name.padEnd(width)}  ${text}\n`).join('');
+  };
+  let text = `Description:\n  ${summary}\n\nUsage:\n`;
+  text += usage.replace(/\n$/, '').split('\n').map((line) => (line === '' ? '\n' : `  ${line}\n`)).join('');
+  if (commands.length) text += '\nAvailable commands:\n' + rows(commands);
+  return text + '\nOptions:\n' + rows([...options, ['-h, --help', 'Show this help']]);
+}
+
+/**
+ * The runParity result a help form must give after B613: exactly one difference, process
+ * stdout, where Node printed its usage (it must start with "usage: code-forge") and Go printed
+ * goHelpPage of that usage. Exit, stderr and every state file stay equal.
+ * @param {{equal: boolean, diffs: Diff[]}} result
+ * @param {Parameters<typeof goHelpPage>[1]} page
+ */
+export function helpPageParity(result, page) {
+  const node = result.diffs.find((diff) => diff.where === 'process' && diff.field === 'stdout')?.node;
+  const usage = typeof node === 'string' && /^usage: code-forge /.test(node) ? node : '<Node printed no usage>';
+  return { equal: false, diffs: [{ where: 'process', field: 'stdout', node: usage, go: goHelpPage(usage, page) }] };
+}
+
+/**
+ * B622: Go's block ready --json and --preflight --json add clears_by (owner|orchestrator) to
+ * every blocker; Node does not. Drop the process:stdout diff only when Go's stdout is one JSON
+ * document whose blockers each carry a valid clears_by and which, with exactly that field
+ * removed, re-serialises byte for byte to Node's stdout. Every other diff is kept.
+ * @param {Diff[]} diffs
+ * @returns {Diff[]}
+ */
+export function allowClearsBy(diffs) {
+  return diffs.filter((d) => {
+    if (d.where !== 'process' || d.field !== 'stdout' || typeof d.go !== 'string' || typeof d.node !== 'string') return true;
+    let doc;
+    try { doc = JSON.parse(d.go); } catch { return true; }
+    if (doc === null || typeof doc !== 'object' || !Array.isArray(doc.blockers) || doc.blockers.length === 0) return true;
+    for (const b of doc.blockers) {
+      if (b === null || typeof b !== 'object' || !['owner', 'orchestrator'].includes(b.clears_by)) return true;
+      delete b.clears_by;
+    }
+    return JSON.stringify(doc) + '\n' !== d.node;
+  });
+}
