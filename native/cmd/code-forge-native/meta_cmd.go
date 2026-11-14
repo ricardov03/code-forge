@@ -112,6 +112,10 @@ func metaHandover(verb string, args []string, reason handoverReason) int {
 // no argument prints the grouped command list, --json the machine list, and
 // one command (`help block`, `help block open`) that command's help page.
 func runHelpVerb(args []string) int {
+	// B648: the maintainer's command reference generator (hidden).
+	if len(args) > 0 && args[0] == "--commands-doc" {
+		return runHelpDoc(args[1:], os.Stdout, os.Stderr)
+	}
 	for _, arg := range args {
 		if metaIsHelp(arg) {
 			fmt.Fprint(os.Stdout, helpUsage)

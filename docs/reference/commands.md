@@ -1,6 +1,6 @@
 # Command reference
 
-This page lists the CLI commands and their usage. It is generated from the CLI. Regenerate it with `node scripts/gen-commands-doc.mjs`.
+This page lists the CLI commands and their usage. It is generated from the Go help table. Regenerate it with `sh scripts/gen-commands-doc.sh`.
 
 - [author](#author)
 - [autopilot](#autopilot)
@@ -353,6 +353,14 @@ Watch the CI runs of one commit
 usage: code-forge ci watch --sha <sha> [--run <r>] [--timeout 30m] [--cwd <dir>] [--json]
 ```
 
+### ci watch
+
+Wait for the CI runs of a commit; name failed tests
+
+```text
+usage: code-forge ci watch --sha <sha> [--run <r>] [--timeout 30m] [--cwd <dir>] [--json]
+```
+
 ## cloud-coder
 
 Send a block to the cloud coder and commit its patch
@@ -380,6 +388,14 @@ usage: code-forge context pack --run <id> --block <id> [--json] [--path-only]
 ## decisions
 
 Show the decisions the autopilot signed
+
+```text
+usage: code-forge decisions list [--run <r>] [--json]
+```
+
+### decisions list
+
+List the close decisions the autopilot signed
 
 ```text
 usage: code-forge decisions list [--run <r>] [--json]
@@ -492,7 +508,7 @@ usage: code-forge heal list [--run R] [--json] | show <id> [--run R] [--json] | 
 Show the commands, or the help of one command
 
 ```text
-usage: code-forge help
+usage: code-forge help [<command> [<sub-command>]] [--json]
 ```
 
 ## init
@@ -566,7 +582,7 @@ usage: code-forge keys remove <name>
 
 ## land
 
-Provide the block landing implementation used by block land.
+Landing code that block land uses
 
 ```text
 usage: code-forge land
@@ -681,7 +697,7 @@ usage: code-forge models [--refresh --from-cli-caches]
 
 ## native-status
 
-Convert cached daemon records and rows from standard input into run status JSON.
+Daemon companion for run status
 
 ```text
 usage: code-forge native-status

@@ -30,6 +30,9 @@ type helpEntry struct {
 	// the group heading in the list and is not a row of its own.
 	namespace bool
 	options   []helpOption
+	// usage is the usage text of a command Go does not route (B648: land);
+	// a routed command's usage comes from its own help form.
+	usage string
 }
 
 var helpJSONOption = helpOption{"--json", "Print one JSON line instead of text"}
@@ -52,14 +55,16 @@ var helpCommands = []helpEntry{
 		options: []helpOption{helpJSONOption}},
 	{name: "block open", summary: "Start a block: owned files, acceptance tests, brief",
 		options: []helpOption{helpRunOption, {"--owned <paths…>", "The files the block may change"}, {"--acceptance <file>", "The clauses and their tests"}, {"--brief <file>", "The brief file in the repository"}, helpJSONOption}},
-	{name: "block ready", summary: "List what still blocks the close of a block"},
+	{name: "block attempt", summary: "Start the next attempt of an open block"},
 	{name: "block rebase", summary: "Move a block onto the new base of its branch",
 		options: []helpOption{helpRunOption, {"--accept-landed", "Rebase onto what landed on the base branch"}, {"--accept-changed <file>…", "Keep a changed file (owner)"}, helpJSONOption}},
-	{name: "block attempt", summary: "Start the next attempt of an open block"},
+	{name: "block claim", summary: "Add one more owned path to an open block"},
+	{name: "block ready", summary: "List what still blocks the close of a block"},
 	{name: "block settle", summary: "Run the orchestrator fixes that clear a block, then report"},
 	{name: "block close", summary: "Run the final checks and close the block",
 		options: []helpOption{helpRunOption, {"--transcript <file>", "The coder transcript to check"}, {"--report <file>", "The coder report"}, {"--decide", "Clear a transcript hit by a decision (owner)"}, helpJSONOption}},
-	{name: "block claim", summary: "Add one more owned path to an open block"},
+	{name: "block land", summary: "Join reviews, run gates, close, then merge",
+		options: []helpOption{helpRunOption, {"--merge", "Run the merge gate and merge with --no-ff"}, {"--push", "Push main after the merge"}, {"--watch-ci", "Wait for CI on the pushed commit"}, helpJSONOption}},
 	{name: "block stop", summary: "Stop a block and record why"},
 	{name: "block waive", summary: "Accept one review finding without a fix", owner: true},
 	{name: "block reopen", summary: "Reopen a stopped file review for a new round", owner: true},
@@ -68,8 +73,6 @@ var helpCommands = []helpEntry{
 	{name: "block ack-waivers", summary: "Acknowledge the agent waivers of a block", owner: true},
 	{name: "block human-pass", summary: "Record the owner's device check and close", owner: true},
 	{name: "block amend-acceptance", summary: "Change the acceptance clauses of a block", owner: true},
-	{name: "block land", summary: "Join reviews, run gates, close, then merge",
-		options: []helpOption{helpRunOption, {"--merge", "Run the merge gate and merge with --no-ff"}, {"--push", "Push main after the merge"}, {"--watch-ci", "Wait for CI on the pushed commit"}, helpJSONOption}},
 	{name: "ci", summary: "Watch the CI runs of one commit", namespace: true},
 	{name: "ci watch", summary: "Wait for the CI runs of a commit; name failed tests"},
 	{name: "cloud-coder", summary: "Send a block to the cloud coder and commit its patch"},
@@ -106,7 +109,8 @@ var helpCommands = []helpEntry{
 	{name: "keys set", summary: "Store a credential reference"},
 	{name: "keys test", summary: "Check a credential reference works"},
 	{name: "keys remove", summary: "Remove a stored credential reference"},
-	{name: "land", summary: "Landing code that block land uses", hidden: true},
+	{name: "land", summary: "Landing code that block land uses", hidden: true,
+		usage: "usage: code-forge land\n  Used internally by code-forge block land; this module has no standalone handler.\n"},
 	{name: "ledger", summary: "Read the ledger or record outcomes and spend", namespace: true},
 	{name: "ledger calibration", summary: "Show how reliable the recorded answers were"},
 	{name: "ledger outcome", summary: "Record the CI result of a pull request"},
@@ -440,7 +444,8 @@ func helpCommandUsage(name string) string {
 	words := strings.Fields(name)
 	route, ok := routes[words[0]]
 	if !ok {
-		return ""
+		entry, _ := helpLookup(name)
+		return entry.usage
 	}
 	// Logging off, and a hand-over (block --help) fails here instead of
 	// running Node: the page then shows the sub-commands without usage text.
