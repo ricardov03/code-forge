@@ -135,6 +135,18 @@ func bnU(v any, fallback string) string {
 	return bnJSString(v)
 }
 
+// bnEndText (B634) is a grant's end in the binnacle: "until <time>", or for
+// an until-done grant "until done" with " or <deadline>" when it has one.
+func bnEndText(grant any) string {
+	if bnGet(grant, "until_done") != true {
+		return "until " + bnU(bnGet(grant, "until"), "unknown")
+	}
+	if bnNullish(bnGet(grant, "until")) {
+		return "until done"
+	}
+	return "until done or " + bnU(bnGet(grant, "until"), "unknown")
+}
+
 func bnList(v any) string {
 	list, ok := v.([]any)
 	if !ok {
@@ -528,11 +540,20 @@ func bnDescribe(row any) (string, string, any) {
 	}
 	switch bnEvent(row) {
 	case "autopilot.grant":
-		return "Grant started", "grant " + bnU(g("grant_id"), "unknown") + " · delegate " + bnU(g("delegate"), "unknown") + " · allow " + bnList(g("scopes")) + " · until " + bnU(g("until"), "unknown"), nil
+		return "Grant started", "grant " + bnU(g("grant_id"), "unknown") + " · delegate " + bnU(g("delegate"), "unknown") + " · allow " + bnList(g("scopes")) + " · " + bnEndText(row), nil
 	case "autopilot.stop":
 		return "Grant stopped", "grant " + bnU(g("grant_id"), "unknown"), nil
 	case "autopilot.expire":
+		if g("reason") == "done" { // B634: an until-done grant whose planned blocks all closed
+			return "Grant ended", "grant " + bnU(g("grant_id"), "unknown") + " · " + autopilotDoneText + " (" + bnList(g("blocks")) + ")", nil
+		}
 		return "Grant expired", "grant " + bnU(g("grant_id"), "unknown") + " · window ended " + bnU(g("until"), "unknown"), nil
+	case "autopilot.extend":
+		was := "no deadline"
+		if !bnNullish(g("from")) {
+			was = "was " + bnU(g("from"), "unknown")
+		}
+		return "Grant extended", "grant " + bnU(g("grant_id"), "unknown") + " · until " + bnU(g("until"), "unknown") + " (" + was + ")", nil
 	case "autopilot.link":
 		return "Log link stored", "grant " + bnU(g("grant_id"), "unknown"), bnStrOr(g("link"))
 	case "autopilot.decision":
@@ -1093,6 +1114,9 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 				b.unsupported = true
 			}
 			stateText = name
+			if g.Get("done_at") != nil {
+				stateText = "done" // B634: ended when every planned block closed
+			}
 		} else {
 			b.unsupported = true
 		}
@@ -1202,9 +1226,9 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 	switch {
 	case grant != nil:
 		g := func(k string) any { return bnGet(grant, k) }
-		window = stateText + " · grant " + bnU(g("grant_id"), "unknown") + " · " + bnU(g("started_at"), "unknown") + " to " + bnU(g("until"), "unknown") + " · delegate " + bnU(g("delegate"), "unknown") + " · allow " + bnList(g("scopes"))
+		window = stateText + " · grant " + bnU(g("grant_id"), "unknown") + " · " + bnU(g("started_at"), "unknown") + " to " + strings.TrimPrefix(bnEndText(grant), "until ") + " · delegate " + bnU(g("delegate"), "unknown") + " · allow " + bnList(g("scopes"))
 	case grantRow != nil:
-		window = "grant " + bnU(bnGet(grantRow, "grant_id"), "unknown") + " · until " + bnU(bnGet(grantRow, "until"), "unknown")
+		window = "grant " + bnU(bnGet(grantRow, "grant_id"), "unknown") + " · " + bnEndText(grantRow)
 	}
 	linkText := "none"
 	if link != nil {
@@ -1589,7 +1613,7 @@ func autopilotBinnacle(o *runOut, home, runID, sub string, flags autopilotFlags)
 			return autopilotReport(o, sub, err)
 		}
 		if checked.State == "expired" {
-			return autopilotReport(o, sub, &runFail{autopilot.ExpiredMessage(runID, autopilotText(checked.Grant.Get("until"))), false})
+			return autopilotReport(o, sub, &runFail{autopilotExpiredMsg(runID, checked.Grant), false})
 		}
 		link, usage, _ := bnParseLink(flags.values["link"])
 		if usage != nil {

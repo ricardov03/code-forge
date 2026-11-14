@@ -31,7 +31,7 @@ import (
 // reasons, and so does a binnacle whose data Go cannot read the way Node does.
 func init() { routes["autopilot"] = runAutopilot }
 
-const autopilotUsage = "usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]\n"
+const autopilotUsage = "usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes]\n"
 
 const autopilotApproveNoYes = "autopilot approve: --yes is not accepted — only the owner approves a limit change, at a terminal; a flag could be passed by the orchestrator or a script, so approve always asks"
 
@@ -46,10 +46,10 @@ var autopilotSubUsage = func() map[string]string {
 	return out
 }()
 
-var autopilotSubs = []string{"start", "status", "stop", "ask", "waive", "round", "level", "approve", "binnacle", "log"}
+var autopilotSubs = []string{"start", "status", "stop", "ask", "waive", "round", "level", "approve", "binnacle", "log", "extend"}
 
 var autopilotSpecs = map[string][2][]string{
-	"start":    {{"run", "until", "delegate", "allow", "deny", "budget", "stop-at"}, {"yes"}},
+	"start":    {{"run", "until", "deadline", "blocks", "delegate", "allow", "deny", "budget", "stop-at"}, {"yes", "until-done"}},
 	"status":   {{"run"}, {"json"}},
 	"stop":     {{"run"}, nil},
 	"ask":      {{"run", "scope", "question", "options", "context-file", "block", "file", "finding"}, {"json"}},
@@ -59,6 +59,7 @@ var autopilotSpecs = map[string][2][]string{
 	"approve":  {{"run", "key", "value", "until"}, nil},
 	"binnacle": {{"run", "link"}, {"json", "markdown"}},
 	"log":      {{"run"}, {"json", "markdown"}},
+	"extend":   {{"run", "until", "deadline"}, {"yes"}},
 }
 
 // Seams for tests: the clock, the terminal probe and the grant id.
@@ -182,7 +183,7 @@ func runAutopilot(args []string) int {
 		}
 	}
 	crumb, logSub := "autopilot", ""
-	if sub == "start" || sub == "status" || sub == "stop" {
+	if sub == "start" || sub == "status" || sub == "stop" || sub == "extend" {
 		crumb, logSub = "autopilot "+sub, sub
 	}
 	before := gatesBreadcrumbName(crumb)
@@ -275,6 +276,11 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 			}
 			if sub == "start" {
 				if _, invalid := autopilotValidate(flags, now); invalid != nil {
+					return autopilotReport(o, sub, invalid)
+				}
+			}
+			if sub == "extend" {
+				if _, _, invalid := autopilotExtendInput(flags, now); invalid != nil {
 					return autopilotReport(o, sub, invalid)
 				}
 			}
@@ -377,6 +383,8 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 		return func(o *runOut) int { return autopilotStop(o, home, runID, now) }, 0
 	case "binnacle", "log":
 		return func(o *runOut) int { return autopilotBinnacle(o, home, runID, sub, flags) }, 0
+	case "extend":
+		return func(o *runOut) int { return autopilotExtend(o, home, runID, flags, now) }, 0
 	}
 	return func(o *runOut) int { return autopilotStart(o, home, runID, flags, now) }, 0
 }
@@ -592,11 +600,7 @@ func autopilotStatus(o *runOut, home, runID string, flags autopilotFlags, now ti
 	if stateName != "run-ended" {
 		stateName, _ = autopilot.GrantState(grant, now)
 	}
-	until, _ := time.Parse("2006-01-02T15:04:05.000Z", autopilotText(grant.Get("until")))
-	left := 0.0
-	if stateName == "active" {
-		left = math.Floor(float64(until.UnixMilli()-now.UnixMilli()) / 1000)
-	}
+	left := autopilotTimeLeft(grant, stateName, now)
 	paused := []string{}
 	if p, ok := grant.Get("paused").(ledger.Object); ok {
 		for _, f := range p {
@@ -621,22 +625,45 @@ func autopilotStatus(o *runOut, home, runID string, flags autopilotFlags, now ti
 			data = append(data, ledger.Field{Key: key, Value: grant.Get(key)})
 		}
 	}
+	untilDone := autopilot.UntilDone(grant)
+	var plannedText string
+	if untilDone {
+		// B634: the end condition; a clock grant's JSON stays as it was
+		var ids []any
+		var done int
+		plannedText, ids, done = autopilotPlannedText(record, grant)
+		data = append(data, ledger.Object{
+			{Key: "until_done", Value: true}, {Key: "planned_blocks", Value: ids},
+			{Key: "planned_done", Value: float64(done)}, {Key: "done_at", Value: grant.Get("done_at")},
+		}...)
+	}
 	if flags.bools["json"] {
 		out, _ := ledger.Stringify(data, true)
 		o.out(string(out) + "\n")
 		return 0
 	}
-	untilText := autopilotText(grant.Get("until"))
+	untilText := autopilotGrantEnd(grant)
 	var head string
-	switch stateName {
-	case "active":
-		head = "active · " + autopilotLeft(int64(left)*1000) + " left (until " + untilText + ")"
-	case "stopped":
+	switch {
+	case stateName == "active" && untilDone && left == nil:
+		head = "active · until done (" + autopilotDoneText + "), no deadline"
+	case stateName == "active" && untilDone:
+		head = "active · until done (" + autopilotDoneText + ") or " + autopilotLeft(int64(left.(float64))*1000) + " left (deadline " + autopilotText(grant.Get("until")) + ")"
+	case stateName == "active":
+		head = "active · " + autopilotLeft(int64(left.(float64))*1000) + " left (until " + untilText + ")"
+	case stateName == "stopped":
 		head = "stopped at " + autopilotField(grant, "stopped_at") + " (was until " + untilText + ")"
-	case "run-ended":
+	case stateName == "run-ended":
 		head = "the run has ended; the grant no longer acts (was until " + untilText + ")"
+	case grant.Get("done_at") != nil:
+		head = "done at " + autopilotText(grant.Get("done_at")) + " · " + autopilotDoneText
+	case untilDone:
+		head = "expired at " + autopilotText(grant.Get("until")) + " (the deadline, before every planned block closed)"
 	default:
 		head = "expired at " + untilText
+	}
+	if untilDone {
+		head += "\n  planned   " + plannedText
 	}
 	caps, _ := grant.Get("caps").(ledger.Object)
 	spendParts := []string{}
@@ -671,7 +698,7 @@ func autopilotStop(o *runOut, home, runID string, now time.Time) int {
 		return autopilotReport(o, "stop", err)
 	}
 	if checked.State == "expired" {
-		return autopilotReport(o, "stop", &runFail{autopilot.ExpiredMessage(runID, autopilotText(checked.Grant.Get("until"))), false})
+		return autopilotReport(o, "stop", &runFail{autopilotExpiredMsg(runID, checked.Grant), false})
 	}
 	var stopped ledger.Object
 	err = state.UpdateRun(home, runID, func(record *ledger.Object) error {
@@ -690,7 +717,7 @@ func autopilotStop(o *runOut, home, runID string, now time.Time) int {
 			return &runFail{"run " + runID + "'s autopilot grant was already stopped at " + autopilotField(grant, "stopped_at"), false}
 		}
 		if stateName == "expired" {
-			return &runFail{autopilot.ExpiredMessage(runID, autopilotText(grant.Get("until"))), false}
+			return &runFail{autopilotExpiredMsg(runID, grant), false}
 		}
 		if _, err := autopilotWriteSigned(home, runID, ledger.Object{{Key: "event", Value: "autopilot.stop"}, {Key: "grant_id", Value: grant.Get("grant_id")}, {Key: "ts", Value: autopilotStamp(now)}}); err != nil {
 			return err
@@ -713,6 +740,32 @@ type autopilotGrantInput struct {
 	scopes, deny    []any
 	caps            ledger.Object
 	stopAt          float64
+	// B634: untilDone grants end when every planned block is closed; until
+	// is then the --deadline ("" for none) and planned the --blocks ids.
+	untilDone bool
+	planned   []any
+}
+
+// untilValue is the grant's until: the time, or null for an until-done grant
+// with no deadline.
+func (in autopilotGrantInput) untilValue() any {
+	if in.until == "" {
+		return nil
+	}
+	return in.until
+}
+
+// endFields are the until-done keys of the grant and its row (none for a
+// grant with --until, which keeps Node's shape).
+func (in autopilotGrantInput) endFields() ledger.Object {
+	if !in.untilDone {
+		return nil
+	}
+	out := ledger.Object{{Key: "until_done", Value: true}}
+	if in.planned != nil {
+		out = append(out, ledger.Field{Key: "planned_blocks", Value: in.planned})
+	}
+	return out
 }
 
 var (
@@ -780,20 +833,44 @@ func autopilotUsageFail(msg string) error { return &runFail{msg, true} }
 func autopilotValidate(flags autopilotFlags, now time.Time) (autopilotGrantInput, error) {
 	var in autopilotGrantInput
 	untilText, ok := flags.values["until"]
-	if !ok {
+	in.untilDone = flags.bools["until-done"]
+	_, deadline := flags.values["deadline"]
+	_, blocks := flags.values["blocks"]
+	switch {
+	case ok && in.untilDone:
+		return in, autopilotUsageFail("give --until or --until-done, not both")
+	case !in.untilDone && deadline:
+		return in, autopilotUsageFail("--deadline goes with --until-done; a grant with --until already ends at that time")
+	case !in.untilDone && blocks:
+		return in, autopilotUsageFail("--blocks goes with --until-done")
+	case in.untilDone:
+		if deadline {
+			until, err := autopilotEndTime("--deadline", flags.values["deadline"], now)
+			if err != nil {
+				return in, err
+			}
+			in.until = until
+		}
+		if blocks {
+			in.planned = []any{}
+			for _, id := range autopilotItems(flags.values["blocks"]) {
+				if !slices.Contains(in.planned, any(id)) {
+					in.planned = append(in.planned, id)
+				}
+			}
+			if len(in.planned) == 0 {
+				return in, autopilotUsageFail("--blocks needs one or more block ids, e.g. B1,B2")
+			}
+		}
+	case !ok:
 		return in, autopilotUsageFail("--until is required: an ISO-8601 time with an offset, e.g. " + autopilotUntilExample)
+	default:
+		until, err := autopilotEndTime("--until", untilText, now)
+		if err != nil {
+			return in, err
+		}
+		in.until = until
 	}
-	ms, ok := autopilotUntilMs(untilText)
-	if !ok {
-		return in, autopilotUsageFail("--until must be an ISO-8601 time with an offset (Z or ±hh:mm), e.g. " + autopilotUntilExample)
-	}
-	if ms <= now.UnixMilli() {
-		return in, autopilotUsageFail("--until is in the past; give a time after now, at most 24 h ahead")
-	}
-	if ms-now.UnixMilli() > 24*60*60*1000 {
-		return in, autopilotUsageFail("--until is more than 24 h ahead; a grant lasts at most 24 h")
-	}
-	in.until = autopilotStamp(time.UnixMilli(ms))
 	delegate := flags.values["delegate"]
 	if delegate != "L2" && delegate != "L3" {
 		return in, autopilotUsageFail("--delegate must be L2 or L3")
@@ -878,6 +955,22 @@ func autopilotValidate(flags autopilotFlags, now time.Time) (autopilotGrantInput
 	return in, nil
 }
 
+// autopilotEndTime is parseUntil for a grant end flag (--until, --deadline):
+// an ISO-8601 time with an offset, after now, at most 24 h ahead.
+func autopilotEndTime(flag, text string, now time.Time) (string, error) {
+	ms, ok := autopilotUntilMs(text)
+	if !ok {
+		return "", autopilotUsageFail(flag + " must be an ISO-8601 time with an offset (Z or ±hh:mm), e.g. " + autopilotUntilExample)
+	}
+	if ms <= now.UnixMilli() {
+		return "", autopilotUsageFail(flag + " is in the past; give a time after now, at most 24 h ahead")
+	}
+	if ms-now.UnixMilli() > 24*60*60*1000 {
+		return "", autopilotUsageFail(flag + " is more than 24 h ahead; a grant lasts at most 24 h")
+	}
+	return autopilotStamp(time.UnixMilli(ms)), nil
+}
+
 // autopilotAmount is MONEY_PATTERN then a finite Number(raw).
 func autopilotAmount(raw string) (float64, bool) {
 	if !autopilotMoney.MatchString(raw) {
@@ -907,7 +1000,7 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 		return autopilotReport(o, "start", err)
 	}
 	if before.State == "active" {
-		return autopilotReport(o, "start", &runFail{autopilot.ActiveGrantMessage(runID, autopilotText(before.Grant.Get("until"))), false})
+		return autopilotReport(o, "start", &runFail{autopilot.ActiveGrantMessage(runID, autopilotGrantEnd(before.Grant)), false})
 	}
 	startedAt := now
 	if !flags.bools["yes"] {
@@ -915,7 +1008,7 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 			o.err("autopilot start: no terminal to confirm; the owner starts autopilot — pass --yes to start it without a prompt\n")
 			return 2
 		}
-		answer, err := autopilotConfirm("Start autopilot for run " + runID + " until " + in.until + "?")
+		answer, err := autopilotConfirm("Start autopilot for run " + runID + " " + autopilotEndText(in.untilValue(), in.untilDone) + "?")
 		if err != nil {
 			o.err("autopilot start: " + err.Error() + "\n") // Node's catch: a failed prompt is exit 1
 			return 1
@@ -940,25 +1033,30 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 		return autopilotReport(o, "start", err)
 	}
 	ts := autopilotStamp(now)
-	grant := ledger.Object{
-		{Key: "grant_id", Value: id}, {Key: "status", Value: "active"}, {Key: "until", Value: in.until}, {Key: "delegate", Value: in.delegate},
+	grant := ledger.Object{{Key: "grant_id", Value: id}, {Key: "status", Value: "active"}, {Key: "until", Value: in.untilValue()}}
+	grant = append(grant, in.endFields()...)
+	grant = append(grant, ledger.Object{
+		{Key: "delegate", Value: in.delegate},
 		{Key: "scopes", Value: in.scopes}, {Key: "deny", Value: in.deny}, {Key: "caps", Value: in.caps}, {Key: "stop_at", Value: in.stopAt},
 		{Key: "started_at", Value: ts}, {Key: "stopped_at", Value: nil}, {Key: "expired_at", Value: nil}, {Key: "link", Value: nil},
-	}
+	}...)
 	err = state.UpdateRun(home, runID, func(record *ledger.Object) error {
 		if record.Get("status") != "active" {
 			return &runFail{"run " + runID + " has ended", false}
 		}
 		if previous, ok := record.Get("autopilot").(ledger.Object); ok {
 			if s, err := autopilot.GrantState(previous, now); err == nil && s == "active" {
-				return &runFail{autopilot.ActiveGrantMessage(runID, autopilotText(previous.Get("until"))), false}
+				return &runFail{autopilot.ActiveGrantMessage(runID, autopilotGrantEnd(previous)), false}
 			}
 		}
 		// the row first: a grant stored without its signed row would act unrecorded
-		if _, err := autopilotWriteSigned(home, runID, ledger.Object{
+		row := ledger.Object{
 			{Key: "event", Value: "autopilot.grant"}, {Key: "grant_id", Value: id}, {Key: "scopes", Value: in.scopes}, {Key: "deny", Value: in.deny},
-			{Key: "delegate", Value: in.delegate}, {Key: "until", Value: in.until}, {Key: "caps", Value: in.caps}, {Key: "stop_at", Value: in.stopAt}, {Key: "ts", Value: ts},
-		}); err != nil {
+			{Key: "delegate", Value: in.delegate}, {Key: "until", Value: in.untilValue()},
+		}
+		row = append(row, in.endFields()...)
+		row = append(row, ledger.Object{{Key: "caps", Value: in.caps}, {Key: "stop_at", Value: in.stopAt}, {Key: "ts", Value: ts}}...)
+		if _, err := autopilotWriteSigned(home, runID, row); err != nil {
 			return err
 		}
 		record.Set("autopilot", grant)
@@ -967,9 +1065,13 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 	if err != nil {
 		return autopilotReport(o, "start", err)
 	}
-	until, _ := time.Parse("2006-01-02T15:04:05.000Z", in.until)
 	scopes := autopilotStrings(in.scopes)
-	o.out("autopilot run " + runID + ": grant " + id + " active until " + in.until + " (" + autopilotLeft(until.UnixMilli()-now.UnixMilli()) + ")\n" +
+	window := "no deadline"
+	if in.until != "" {
+		until, _ := time.Parse("2006-01-02T15:04:05.000Z", in.until)
+		window = autopilotLeft(until.UnixMilli() - now.UnixMilli())
+	}
+	o.out("autopilot run " + runID + ": grant " + id + " active " + autopilotEndText(in.untilValue(), in.untilDone) + " (" + window + ")\n" +
 		"  delegate " + in.delegate + " · allow " + strings.Join(scopes, ", ") + " · budget " + autopilotCaps(in.caps) + " · stop at " + autopilotPercent(in.stopAt) + "%\n")
 	return 0
 }

@@ -21,11 +21,46 @@ code-forge autopilot start --run <run> \
 ```
 
 - `--until` is a time with an offset, at most 24 hours ahead. The grant ends by itself then.
+- Or `--until-done` instead of `--until`: the grant ends when every planned block of the run is
+  closed (below). Give one of the two, never both.
 - `--delegate` is `L2` or `L3`. The delegate is a closed-book session and never Codex.
 - `--allow` lists the scopes it may decide (below). `--deny` takes some away again.
 - `--budget` sets a cap in USD per category (`coding`, `review`). `--stop-at` is the share of the
   cap at which that category pauses (default `0.9`).
 - Without a terminal the start is refused, unless you pass `--yes` yourself.
+
+### Until the work is done
+
+```bash
+code-forge autopilot start --run <run> --until-done \
+  --deadline 2026-10-07T07:00:00+02:00 --blocks B1,B2,B3 \
+  --delegate L2 --allow waive:nit,close:routine
+```
+
+- The grant ends when every planned block is closed. A block closed with its human checks
+  deferred (`awaiting_human_check`) counts as closed; a stopped block does not.
+- The planned blocks are the ids you give with `--blocks`. Without `--blocks` they are all the
+  blocks opened in the run so far. Give `--blocks` when you plan more waves: between waves every
+  opened block may be closed, and the grant would end early.
+- A run with no blocks yet keeps the grant active until a block opens and closes.
+- `--deadline` (optional, at most 24 hours ahead) ends it at that time if the blocks are not all
+  closed by then. Without it the grant has no clock end; stop it with `autopilot stop`.
+- When it ends because the work is done, the next autopilot or block command, or the worker,
+  writes one signed `autopilot.expire` row with `"reason": "done"` and the planned blocks.
+  `autopilot status` then says `done at <time> · every planned block closed`, and shows each
+  planned block's state while it runs.
+
+### Push the end out
+
+```bash
+code-forge autopilot extend --run <run> --until 2026-10-07T09:00:00+02:00
+```
+
+It moves a live grant's end later without stopping it: one signed `autopilot.extend` row (the old
+end in `from`, the new one in `until`), and you confirm at the prompt as for `start` (`--yes`
+without a terminal). For an until-done grant use `--deadline <time>` to set or move its deadline.
+It refuses an earlier or equal time, a time more than 24 hours ahead, a grant that is stopped,
+expired, done or absent, an ended run, and `--until` on an until-done grant with no deadline.
 
 Only one grant is active per run. `code-forge autopilot status --run <run>` shows it: time left,
 scopes, the deny list, the spend per category, and where the log is.
@@ -172,8 +207,8 @@ It ends the grant now, with one signed `autopilot.stop` row, and prints the link
 paths. The orchestrator adds the stop as the newest Timeline and Full log row, writes a final
 Status at a glance, and leaves the doc as the record. Then it tells you in chat: the link, and
 "review Open questions and Actions only you can take before work resumes". At `--until`
-the grant expires by itself; the next autopilot or block command writes one `autopilot.expire`
-row.
+(or, for `--until-done`, when every planned block is closed or at the deadline) the grant expires
+by itself; the next autopilot or block command writes one `autopilot.expire` row.
 
 ## Privacy
 

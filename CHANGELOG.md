@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `autopilot start --until-done [--deadline <time>] [--blocks <id,…>]` starts a grant that ends when every planned block of the run is closed (the `--blocks` ids, else the blocks opened in the run), or at the deadline if that comes first; the worker's grant expiry honours it, and `autopilot status` and the log show the end condition. `autopilot extend --run <id> --until <time>` (or `--deadline <time>` for an until-done grant) moves a live grant's end later with one signed `autopilot.extend` row; owner-only, with the same prompt as `start` (B634).
+
 ### Changed
 
 - Go tests no longer fail on a loaded machine because of a wall-clock upper bound: the close test that queues ten reviews counts one shared 1s wait on a fake clock instead of timing it (a small unexported clock hook in the close review wait; default behaviour unchanged), and the run-lock, docs sync, test-slot and land-join tests prove their behaviour by a held fake build, a stop reason or a wait count. B654
