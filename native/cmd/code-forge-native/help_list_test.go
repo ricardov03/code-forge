@@ -79,8 +79,8 @@ func TestB613EveryCommandHasASummary(t *testing.T) {
 	// a listed sub-verb that the dispatcher does not know fails here.
 	b613Env(t)
 	for _, entry := range helpCommands {
-		if _, routed := routes[strings.Fields(entry.name)[0]]; !routed || entry.name == "block" {
-			continue // block --help still hands over to Node; land is not routed
+		if _, routed := routes[strings.Fields(entry.name)[0]]; !routed {
+			continue // land is not routed (B648: its usage is in the help table)
 		}
 		if usage := helpCommandUsage(entry.name); !helpIsUsage(usage) || !strings.Contains(usage, "code-forge "+strings.Fields(entry.name)[0]) {
 			t.Errorf("%q: help form printed no usage: %q", entry.name, usage)
@@ -206,7 +206,7 @@ func TestB613CommandPage(t *testing.T) {
 		t.Fatalf("help gates:\n%s", gates)
 	}
 	_, block, _ := b613Call(t, "help", "block")
-	if !strings.Contains(block, "Usage:\n  code-forge block <command> [options] [arguments]\n") || !strings.Contains(block, "  block waive             Accept one review finding without a fix (owner)\n") {
+	if !strings.Contains(block, "Usage:\n  usage: code-forge block open <id> --run <r> ") || !strings.Contains(block, "  block waive             Accept one review finding without a fix (owner)\n") {
 		t.Fatalf("help block:\n%s", block)
 	}
 	// A verb that refuses --help keeps its refusal; help <verb> still shows its usage.
