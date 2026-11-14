@@ -74,6 +74,9 @@ func substCloseCheck(record ledger.Object, run, id string, rows []gatecheck.Row,
 		if !decided {
 			problems = append(problems, "no signed autopilot.decision row for the substitute")
 		}
+		if apdgSubstReverted(rows, run, id, f.File, f.Hash, key) { // B635
+			problems = append(problems, "the owner reverted the substitute (autopilot revert); a normal review: code-forge review-file "+f.File+" --block "+id+" --run "+run+" --fresh")
+		}
 		if len(problems) == 0 {
 			continue
 		}

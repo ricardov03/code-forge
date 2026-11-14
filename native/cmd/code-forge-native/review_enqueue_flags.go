@@ -16,6 +16,7 @@ import (
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/queue"
+	"github.com/ricardov03/code-forge/native/review"
 	"github.com/ricardov03/code-forge/native/reviewq"
 	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/ticket"
@@ -229,6 +230,10 @@ func reviewEnqueueResult(root string, marker map[string]any) ledger.Object {
 	return result
 }
 
+// reviewFreshSubst (B635) is set by a --fresh review-file whose substitute
+// approval the owner reverted (autopilot revert).
+var reviewFreshSubst bool
+
 func reviewEnqueueFresh(root string, p ticket.Parts, id string, retry bool) (ledger.Object, int) {
 	dir := filepath.Join(root, ".code-forge", "queue")
 	if retry {
@@ -254,6 +259,12 @@ func reviewEnqueueFresh(root string, p ticket.Parts, id string, retry bool) (led
 			switch resultStatus {
 			case "stale", "unavailable", "split_required":
 				verdict = "rerun"
+			case "approved":
+				// B635: the owner reverted this substitute review (autopilot
+				// revert): --fresh runs the normal review it stands in for.
+				if reviewFreshSubst && result.Get("source") == review.SubstituteSource {
+					verdict = "rerun"
+				}
 			case "refused":
 				reason, _ := result.Get("reason").(string)
 				if reason == "review-state-tampered" {

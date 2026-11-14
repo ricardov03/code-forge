@@ -1094,6 +1094,25 @@ route bench are out of the ladder and the chain; the substitute's own session go
 same route watch. A reopened file (`block reopen --file`) gets the normal recheck round, never a
 substitute.
 
+**The owner's digest of autopilot acts** (B635, Go only, no Node parity). `code-forge autopilot
+digest --run <r> [--json]` lists every signed autopilot act of the run that the owner has not
+ratified or reverted: deferred human checks (`human-pass:deferred`, while the block is still
+`closed_deferred_human`), substitute reviews (`review:substitute` decisions that acted), waivers
+by autopilot and counted agent waivers (until a human `review.unwaived` row), temporary config
+changes (approvals still active) and grant extends and until-done ends. Each row has a stable id
+(`dg-` and the first 12 hex digits of its source row's MAC), the kind, block, time, why, and the
+exact `ratify` and `revert` commands. `autopilot ratify <id> --run <r>` and `autopilot revert
+<id> --run <r>` are the owner's: a yes at a terminal (no `--yes`), refused while an autopilot
+grant is active. Each writes one signed `autopilot.ratify` or `autopilot.revert` row (`digest_id`,
+`kind`, `source_event`, the block, file, finding, decision or approval it names, `by: human`),
+and the row leaves the digest. Revert also undoes the act: a deferred block goes back to
+`awaiting_human_check` (a signed `block.awaiting_human_check` row); a waiver gets a signed
+`review.unwaived` row, so neither the gate nor the agent-waiver count uses it any more; a
+substitute approval no longer counts at close and `review-file <file> --fresh` re-runs its review
+instead of keeping it; an approval's window ends now and its old value is restored as at its own
+end. An extend or until-done end has nothing to undo once its grant ended: ratify only. Ratify
+also works on an ended run; revert needs an active run, except a temporary config change.
+
 ### How code-forge picks the reviewer
 
 By default, code-forge scores the L2 model and its fallbacks using this project's ledger across

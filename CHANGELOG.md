@@ -8,6 +8,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Added
 
+- `autopilot digest --run <id> [--json]` lists every autopilot act the owner has not looked at yet (deferred human checks, substitute reviews, autopilot and agent waivers, temporary config changes, grant extends and until-done ends), each with its id and exact ratify and revert commands; `autopilot ratify <row-id> --run <id>` and `autopilot revert <row-id> --run <id>` are owner-only (a terminal yes, no `--yes`, refused under an active grant) and write one signed `autopilot.ratify` or `autopilot.revert` row; revert puts a deferred block back to awaiting_human_check, reopens a waived finding, stops a substitute approval from counting (`review-file --fresh` re-runs it) and restores an approval's old value (B635)
 - `autopilot start --until-done [--deadline <time>] [--blocks <id,…>]` starts a grant that ends when every planned block of the run is closed (the `--blocks` ids, else the blocks opened in the run), or at the deadline if that comes first; the worker's grant expiry honours it, and `autopilot status` and the log show the end condition. `autopilot extend --run <id> --until <time>` (or `--deadline <time>` for an until-done grant) moves a live grant's end later with one signed `autopilot.extend` row; owner-only, with the same prompt as `start` (B634).
 
 ### Changed
