@@ -131,11 +131,14 @@ test('B247 boundary: empty/missing logs match; unsupported arguments and legacy 
     ['summary', '--days'], ['summary', '--unknown'], ['path', '--json'], ['--json', 'extra']]) {
     await parity(['logs', ...args], true); // includes usage-error log and breadcrumb state.
   }
+  /** @type {[string, string][]} */
   const logsCommands = [['logs clear', 'Delete the local CLI error log'], ['logs path', 'Print the path of the CLI error log'],
     ['logs report', 'Report CLI errors as a GitHub issue'], ['logs summary', 'Count the CLI errors of the last days']];
-  for (const [args, page] of [[['--help'], { summary: 'Show the last local CLI errors', commands: logsCommands }],
+  /** @type {[string[], Parameters<typeof helpPageParity>[1]][]} */
+  const helpCases = [[['--help'], { summary: 'Show the last local CLI errors', commands: logsCommands }],
     [['path', '-h'], { summary: 'Print the path of the CLI error log' }], [['summary', '--help'], { summary: 'Count the CLI errors of the last days' }],
-    [['clear', '--help'], { summary: 'Delete the local CLI error log' }], [['report', '--help'], { summary: 'Report CLI errors as a GitHub issue' }]]) {
+    [['clear', '--help'], { summary: 'Delete the local CLI error log' }], [['report', '--help'], { summary: 'Report CLI errors as a GitHub issue' }]];
+  for (const [args, page] of helpCases) {
     await parity(['logs', ...args], true, binary, page); // B613: help page; usage, log and breadcrumb state stay equal.
   }
   await seed(JSON.stringify({ ...entries[1], fp: undefined }) + '\n');
