@@ -166,7 +166,30 @@ func Acceptance(value any) ([]any, error) {
 	if !valid {
 		return nil, refusal("bad-acceptance", "acceptance: a non-empty list of {clause, tests: [test ids…]} or {clause, kind: human_check} without tests is required")
 	}
+	// B631: a human_check clause may say what the human waits for.
+	for _, c := range clauses {
+		o := object(c)
+		waits, present := clauseValue(o, "waits_for")
+		if !present {
+			continue
+		}
+		if o.Get("kind") != "human_check" {
+			return nil, refusal("bad-acceptance", "acceptance: waits_for is allowed only on a human_check clause")
+		}
+		if s, ok := waits.(string); !ok || strings.TrimSpace(s) == "" {
+			return nil, refusal("bad-acceptance", "acceptance: waits_for must be a non-empty string on a human_check clause (what the human must check)")
+		}
+	}
 	return clauses, nil
+}
+
+func clauseValue(o ledger.Object, key string) (any, bool) {
+	for _, f := range o {
+		if f.Key == key {
+			return f.Value, true
+		}
+	}
+	return nil, false
 }
 func BriefPointer(path string, data []byte) (string, error) {
 	if path == "" || strings.ContainsFunc(path, Space) {
