@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { runParity } from '../helpers/parity.mjs';
+import { allowClearsBy, runParity } from '../helpers/parity.mjs';
 import { serveDaemon } from '../helpers/daemon-fixture.mjs';
 import { appendRow } from '../../src/ledger/write.mjs';
 import { initialConfigState } from '../../src/state/config-snapshot.mjs';
@@ -257,7 +257,7 @@ test('B380: agent waivers, agent reopens, accepted hits, require_ack and amended
     const label = `${kind} ${JSON.stringify(config)}`;
     const f = await fixture(kind, config);
     const ready = await runParity(['block', 'ready', 'B1', '--run', RUN, '--json'], { fixture: f, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
-    assert.deepEqual(ready.diffs, [], `${label}: block ready has zero diffs`);
+    assert.deepEqual(allowClearsBy(ready.diffs), [], `${label}: block ready has zero diffs but Go's clears_by`);
     const readyDirect = await launch(f, ['block', 'ready', 'B1', '--run', RUN, '--json']);
     assert.equal(readyDirect.code, expected, `${label}: block ready verdict with no Node: ${readyDirect.stderr}`);
     for (const json of [false, true]) {

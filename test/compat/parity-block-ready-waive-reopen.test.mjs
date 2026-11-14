@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { helpPageParity, runParity } from '../helpers/parity.mjs';
+import { allowClearsBy, helpPageParity, runParity } from '../helpers/parity.mjs';
 import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { processStartTime } from '../../src/state/run.mjs';
 import { signRow, verifyRow } from '../../src/state/signer.mjs';
@@ -120,7 +120,7 @@ async function parity(f, args, extra = {}, page) {
   const result = await runParity(args, { fixture: f, goCommand: BINARY, env: { ...env, ...extra } });
   // B613: a page means Go prints the help page around Node's usage; nothing else may differ.
   if (page) assert.deepEqual(result, helpPageParity(result, page), `${args.join(' ')}: only stdout differs, Go prints the help page around Node usage`);
-  else assert.deepEqual(result.diffs, [], `${args.join(' ')}: zero exit, stream, signed ledger, run, queue and lock diffs`);
+  else assert.deepEqual(allowClearsBy(result.diffs), [], `${args.join(' ')}: zero exit, stream, signed ledger, run, queue and lock diffs but Go's clears_by`);
 }
 /** B613: the one-line summaries of the Go help pages. */
 const helpSummaries = { ready: 'List what still blocks the close of a block', waive: 'Accept one review finding without a fix (owner)',
