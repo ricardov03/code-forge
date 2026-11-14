@@ -202,7 +202,9 @@ func runBlockOpen(args []string) int {
 				human = append(human, statusQuote(blockString(c.Get("clause"))))
 			}
 		}
-		if grant.State == "active" && len(human) > 0 {
+		// B632: a grant with scope human-pass:deferred may open them; the close
+		// defers them to the owner.
+		if grant.State == "active" && len(human) > 0 && autopilot.ScopeRefusal(grant, autopilot.DeferHumanScope) != "" {
 			return failure(&state.Error{Code: "autopilot-human-check", Message: "autopilot-human-check: an active autopilot grant cannot wait on human_check clauses: " + strings.Join(human, ", ") + "; turn each into a clause with tests or ask the owner"})
 		}
 	}

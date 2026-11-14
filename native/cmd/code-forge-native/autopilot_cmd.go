@@ -456,7 +456,7 @@ var autopilotFixedDeny = ledger.Object{
 	{Key: "budget:raise", Value: "raise a budget"},
 }
 
-var autopilotAllowable = []string{"waive:warning", "waive:nit", "round:extra", "model:choose", "close:routine"}
+var autopilotAllowable = []string{"waive:warning", "waive:nit", "round:extra", "model:choose", "close:routine", "human-pass:deferred"}
 
 func autopilotFixedDenyScopes() []any {
 	out := []any{}

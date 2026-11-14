@@ -12,6 +12,7 @@ import (
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/proof"
 	"github.com/ricardov03/code-forge/native/rebase"
@@ -102,7 +103,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			}
 			seen[id] = true
 			entry := blockObject(blocks.Get(id))
-			if entry.Get("status") != "closed" {
+			if entry.Get("status") != "closed" && entry.Get("status") != humancheck.DeferredStatus {
 				return fmt.Errorf("block %s must be closed before batch landing", id)
 			}
 			if entry.Get("landed") != nil {

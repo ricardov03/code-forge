@@ -58,6 +58,8 @@ var apdAllowableWhat = map[string]string{
 	"round:extra":   "one fix round past the cap for a file",
 	"model:choose":  "choose the coder level for a block",
 	"close:routine": "close a routine block",
+	// B632: Go only; Node's ALLOWABLE_WHAT has no entry.
+	"human-pass:deferred": "close a block whose only open items are human checks, leaving them for the owner",
 }
 
 // apdTimeoutMs is the ask's session timeout (0 = spawn.mjs's default, as the

@@ -129,6 +129,18 @@ func Stop(home, run, id, event, reason string) (Result, error) {
 }
 
 func Close(home, run, id string, closeRows []ledger.Object) (Result, error) {
+	return CloseDeferring(home, run, id, closeRows, nil)
+}
+
+// Deferral (B632) runs under the run lock for a block with human checks. A
+// non-nil row closes the block as deferredStatus with that row in place of
+// block.awaiting_human_check; nil keeps today's awaiting_human_check.
+type Deferral func(record, block ledger.Object) ledger.Object
+
+const deferredStatus = "closed_deferred_human" // humancheck.DeferredStatus
+
+// CloseDeferring is Close with a deferral decision for human checks.
+func CloseDeferring(home, run, id string, closeRows []ledger.Object, deferral Deferral) (Result, error) {
 	result := Result{OK: true, Status: "closed"}
 	err := state.UpdateBlock(home, run, id, func(record, block *ledger.Object) ([]ledger.Object, error) {
 		orphans, _ := record.Get("orphans").([]any)
@@ -144,12 +156,21 @@ func Close(home, run, id string, closeRows []ledger.Object) (Result, error) {
 			return []ledger.Object{}, nil
 		}
 		checks, _ := block.Get("human_checks").([]any)
+		var deferred ledger.Object
+		if len(checks) > 0 && deferral != nil {
+			deferred = deferral(*record, *block)
+		}
 		if len(checks) > 0 {
 			result.Status = "awaiting_human_check"
+			if deferred != nil {
+				result.Status = deferredStatus
+			}
 		}
 		block.Set("status", result.Status)
 		rows := append(slices.Clone(closeRows), ledger.Object{{Key: "event", Value: "block.close"}, {Key: "block", Value: id}, {Key: "status", Value: "complete"}})
-		if len(checks) > 0 {
+		if deferred != nil {
+			rows = append(rows, deferred)
+		} else if len(checks) > 0 {
 			rows = append(rows, ledger.Object{{Key: "event", Value: "block.awaiting_human_check"}, {Key: "block", Value: id}, {Key: "checks", Value: checks}})
 		}
 		return rows, nil

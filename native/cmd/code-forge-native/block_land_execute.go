@@ -15,6 +15,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/gosafe"
+	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/proof"
@@ -105,7 +106,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	if _, ok := entry.Get("status").(string); !ok {
 		return fallback(hLandStatusShape)
 	}
-	retry := entry.Get("status") == "closed"
+	retry := entry.Get("status") == "closed" || entry.Get("status") == humancheck.DeferredStatus // B632
 	if entry.Get("status") != "open" && !retry {
 		begin()
 		defer finish()
@@ -347,7 +348,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		step = "close"
 		next = closeCommand(append([]string{"code-forge", "block", "close"}, closeArgs[:len(closeArgs)-1]...))
 		closed := landCapture(func(s *landStep) int { return blockCloseStepWithReason(closeArgs, s, &closeReason) }, nil)
-		if closed.code != 0 || closed.data.Get("status") != "closed" {
+		if closed.code != 0 || closed.data.Get("status") != "closed" && closed.data.Get("status") != humancheck.DeferredStatus {
 			if n, ok := closed.data.Get("next_command").(string); ok {
 				next = n
 			}
@@ -459,7 +460,7 @@ func landClosedHeadMoved(home, run, id, main, branch string) string {
 	recorded := ""
 	if id != "." && id != ".." && !strings.ContainsAny(id, "/\\\x00") {
 		if data, err := os.ReadFile(filepath.Join(home, ".code-forge", "runs", run, "blocks", id+".done.json")); err == nil {
-			if done, err := ledger.DecodeObject(data); err == nil && done.Get("status") == "closed" {
+			if done, err := ledger.DecodeObject(data); err == nil && (done.Get("status") == "closed" || done.Get("status") == humancheck.DeferredStatus) {
 				recorded, _ = done.Get("commit").(string)
 			}
 		}
