@@ -269,6 +269,10 @@ func RoutineRefusal(result Result) string {
 // review (B630).
 const SubstituteScope = "review:substitute"
 
+// DeferHumanScope (B632) lets an active grant close a block whose only open
+// items are human_check clauses as closed_deferred_human.
+const DeferHumanScope = "human-pass:deferred"
+
 // ScopeRefusal is RoutineRefusal for any scope: "" when result's grant is
 // active and allows scope; else no-grant, the grant's state, denied or
 // not-allowed.

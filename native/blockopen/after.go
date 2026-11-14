@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
@@ -34,7 +35,7 @@ func CheckAfter(record ledger.Object, id string, ids []string) error {
 	blocking := []string{}
 	for _, dependency := range unique(ids) {
 		status := object(object(record.Get("blocks")).Get(dependency)).Get("status")
-		if status == "closed" {
+		if status == "closed" || status == humancheck.DeferredStatus { // B632: a deferred block is done for dependents
 			continue
 		}
 		label := "not in run"

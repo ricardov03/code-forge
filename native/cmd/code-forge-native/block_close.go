@@ -21,6 +21,7 @@ import (
 	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/queue"
 	"github.com/ricardov03/code-forge/native/runstatus"
@@ -743,6 +744,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 		closeRows = append(audit, excludedRows...)
 	}
+	var deferredRow ledger.Object // B632: the deferral's decision row
 	if event != "" {
 		result, err = blockclose.Stop(home, run, id, event, reason)
 		if err != nil {
@@ -789,7 +791,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			result.Reason = "orphans: " + strings.Join(names, ", ")
 		}
 		if result.Reason == "" {
-			result, err = blockclose.Close(home, run, id, closeRows)
+			result, err = blockclose.CloseDeferring(home, run, id, closeRows, closeDeferral(home, run, id, &deferredRow))
 			if err != nil {
 				return publishError(err)
 			}
@@ -807,7 +809,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 	}
 	doneFile := ""
-	ended := result.Status == "closed" || result.Status == "stopped"
+	ended := result.Status == "closed" || result.Status == "stopped" || result.Status == humancheck.DeferredStatus
 	if ended {
 		doneFile = closeWriteDone(home, run, id, record, result, lines, rows, key, stderr)
 		if len(endHook) > 0 {
@@ -851,6 +853,10 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 				fmt.Fprintf(stdout, "block %s awaiting human check: %s\n", id, v)
 			}
 			fmt.Fprintf(stdout, "next: code-forge block human-pass %s --run %s --note \"<device check note>\" [--proof <dir-or-file>]\n", id, run)
+		}
+	} else if result.Status == humancheck.DeferredStatus {
+		if !jsonFlag {
+			closeDeferredText(stdout, run, id, deferredRow)
 		}
 	} else {
 		text := fmt.Sprintf("block %s %s", id, result.Status)
@@ -914,6 +920,10 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			if result.Status == "awaiting_human_check" {
 				out.Set("human_checks", entry.Get("human_checks"))
 				out.Set("next_command", fmt.Sprintf("code-forge block human-pass %s --run %s --note \"<device check note>\"", id, run))
+			}
+			if result.Status == humancheck.DeferredStatus {
+				out.Set("decision_id", deferredRow.Get("decision_id"))
+				out.Set("deferred_human_checks", closeDeferredChecks(run, id, deferredRow))
 			}
 			if ended {
 				blockDoneJSON(&out, record, doneFile)

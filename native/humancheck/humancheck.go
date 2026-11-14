@@ -21,6 +21,14 @@ import (
 // ClearedEvent is the signed row `run human-checks clear` writes.
 const ClearedEvent = "human_check.cleared"
 
+// DeferredStatus (B632) is the block status of a block closed under an
+// autopilot grant with scope human-pass:deferred while its human_check
+// clauses stay open. Clearing its last open clause makes it closed.
+const DeferredStatus = "closed_deferred_human"
+
+// DeferredEvent is the signed row that turns a deferred block closed.
+const DeferredEvent = "block.human_checks_cleared"
+
 // Entry is one open human_check clause.
 type Entry struct {
 	Block    string

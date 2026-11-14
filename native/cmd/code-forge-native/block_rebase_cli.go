@@ -16,6 +16,7 @@ import (
 	"github.com/ricardov03/code-forge/native/autopilot"
 	"github.com/ricardov03/code-forge/native/blockstate"
 	"github.com/ricardov03/code-forge/native/humanask"
+	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/rebase"
 	"github.com/ricardov03/code-forge/native/state"
@@ -344,7 +345,7 @@ func rebaseStepBody(args []string, stdout io.Writer, stderr *rebaseHeldStderr, h
 			fmt.Fprintf(stdout, "upstream_owned: %s (main changed these owned files; queued for re-review)\n", rebase.FileList(result.Upstream))
 		}
 		return 0
-	case block.Get("worktree") != nil || status == "closed" || status == "awaiting_human_check":
+	case block.Get("worktree") != nil || status == "closed" || status == "awaiting_human_check" || status == humancheck.DeferredStatus:
 		oldBase, newBase, err = rebaseWorktreeBlock(home, run, id, accept, reason)
 	case len(accept) > 0:
 		return usage("rebase clearance requires a worktree block")

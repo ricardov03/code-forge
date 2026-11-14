@@ -40,6 +40,7 @@ scopes, the deny list, the spend per category, and where the log is.
 | `model:choose` | choose the coder level for a block |
 | `close:routine` | close a routine block when `close.require_human` is on: every changed file approved, a green gate row, no waivers, no transcript hits. Never `block close --decide` |
 | `review:substitute` | run one substitute review of a file whose review stays unavailable after the built-in recovery and `review.on_unavailable`: a closed-book reviewer on a provider none of the failed sessions used. Each substitute gets a signed `autopilot.decision` row first, and `block close` counts its approval only under this scope with every gate green |
+| `human-pass:deferred` | close a block whose only open items are `human_check` clauses as `closed_deferred_human` (Go engine, B632): every other close gate must pass as for a normal close. The checks stay open in `run human-checks list` (marked deferred) for you; the block may land. One signed `autopilot.decision` row (scope, block, clauses, `waits_for`) and one binnacle line per block with your `run human-checks clear` command. Clearing its last check makes the block `closed`. Never a human pass |
 
 An extra round is a normal fix round. Fix rounds are one per block: wait for every `review-file` ticket of the block and its tests, then send ONE fix message with every failing test and every open finding; a finding that arrives later waits for the next round (`skill/references/code.md` §4).
 The per-file cap still counts per file: one block round is one round for each file it touched.
