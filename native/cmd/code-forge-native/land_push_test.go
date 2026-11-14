@@ -146,14 +146,15 @@ func TestLandWatchCIStartsDetachedWatch(t *testing.T) {
 	old := landSelf
 	landSelf = func() (string, error) { return script, nil }
 	t.Cleanup(func() { landSelf = old })
-	started := time.Now()
 	code, output := f.landWith([]string{"--push", "--watch-ci"}, "B1", "B2")
+	// B646: the wait starts after the land returns; under load the land alone took 23s and used up the old window
+	started := time.Now()
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0: %s", code, output)
 	}
 	head := f.git(f.repo, "rev-parse", "main")
 	var args []byte
-	for time.Since(started) < 10*time.Second {
+	for time.Since(started) < 60*time.Second {
 		if data, err := os.ReadFile(marker); err == nil {
 			args = data
 			break
