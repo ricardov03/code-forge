@@ -271,9 +271,12 @@ func runBlockReady(args []string) int {
 		}
 	}
 	ready := len(blockers) == 0
+	// B625: only reviewer-down files block: COMPLETE_PENDING_REVIEW.
+	down := readyPendingReview(blockers, files, rows, p.run, p.id, key)
+	pending := pendingReviewFix(formatted, p.id, p.run, func(_, file string) bool { return down[file] }, true)
 	if p.flags["json"] == true {
 		out := ledger.Object{{Key: "block", Value: p.id}, {Key: "ready", Value: ready}, {Key: "blockers", Value: formatted}}
-		data, _ := ledger.Stringify(out, false)
+		data, _ := ledger.Stringify(pendingReviewJSON(out, pending), false)
 		fmt.Println(string(data))
 	} else {
 		for _, b := range formatted {
@@ -285,6 +288,7 @@ func runBlockReady(args []string) int {
 		} else {
 			fmt.Printf("block %s not ready: %d blockers\n", p.id, len(formatted))
 		}
+		pendingReviewLine(p.id, pending)
 	}
 	if ready {
 		return 0

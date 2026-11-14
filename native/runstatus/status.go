@@ -213,6 +213,9 @@ func compute(record Object, rows []ledger.Row, home string, gateDetails bool) (l
 			}
 		}
 		count := openFindings(bid, id, mine, all, key)
+		if status == "open" && gateResult == "pass" && count == 0 && reviewerDownOnly(mine, id, bid, key) {
+			state = gatecheck.PendingReviewState
+		}
 		blocks = append(blocks, ledger.Object{{Key: "id", Value: bid}, {Key: "state", Value: state}, {Key: "level", Value: nullable(entry["level"])}, {Key: "model", Value: model}, {Key: "gate", Value: ledger.Object{{Key: "result", Value: gateResult}, {Key: "name", Value: gateName}}}, {Key: "findings", Value: count}})
 	}
 	var spent, unknownValue any
@@ -443,4 +446,26 @@ func openFindings(block, run string, mine []Object, all []gatecheck.Row, key []b
 		}
 	}
 	return len(pairs)
+}
+
+// reviewerDownOnly (B625) says whether a file of the block has, as its latest
+// signed review outcome, a review the reviewer infrastructure could not run.
+// The caller has checked that the gates passed and no finding is open.
+func reviewerDownOnly(mine []Object, run, block string, key []byte) bool {
+	rows := make([]gatecheck.Row, len(mine))
+	for i, r := range mine {
+		rows[i] = r
+	}
+	seen := map[string]bool{}
+	for _, r := range rows {
+		file, ok := r["file"].(string)
+		if !ok || r["event"] != "review.result" || seen[file] {
+			continue
+		}
+		seen[file] = true
+		if _, down := gatecheck.ReviewerDown(rows, run, block, file, "", key); down {
+			return true
+		}
+	}
+	return false
 }

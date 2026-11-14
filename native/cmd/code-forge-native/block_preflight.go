@@ -39,6 +39,9 @@ type preflightResult struct {
 	blockers      []gatecheck.Blocker
 	// skipped names each check the preflight could not decide, and why.
 	skipped []string
+	// pendingReview (B625) lists the unreviewed files whose review failed only
+	// on reviewer infrastructure; block ready --preflight lists them.
+	pendingReview []gatecheck.Blocker
 }
 
 // blockPreflight reads only: it never writes a row, a ticket or a file. The
@@ -138,6 +141,7 @@ func blockPreflight(in preflightInput) (preflightResult, error) {
 			kept = append(kept, b)
 		}
 	}
+	out.pendingReview = pendingReviewBlockers(files, unreviewed, rows, in.run, in.id, key)
 	out.blockers = append(out.blockers, kept...)
 	if in.report == nil || externalReview {
 		return out, nil
@@ -238,14 +242,16 @@ func runBlockPreflight(args []string) int {
 	if err != nil {
 		return p.fail(err)
 	}
-	formatted := preflightFormatted(result.blockers, p.id, p.run, p.flags, result.entry)
+	formatted := preflightFormatted(append(result.blockers, result.pendingReview...), p.id, p.run, p.flags, result.entry)
+	pending := pendingReviewFix(formatted, p.id, p.run, func(code, _ string) bool { return code == "review_unavailable" }, len(result.blockers) == 0)
 	ready := len(formatted) == 0
 	if p.flags["json"] == true {
 		skipped := make([]any, len(result.skipped))
 		for i, s := range result.skipped {
 			skipped[i] = s
 		}
-		data, _ := ledger.Stringify(ledger.Object{{Key: "block", Value: p.id}, {Key: "preflight", Value: true}, {Key: "ready", Value: ready}, {Key: "blockers", Value: formatted}, {Key: "skipped", Value: skipped}}, false)
+		out := ledger.Object{{Key: "block", Value: p.id}, {Key: "preflight", Value: true}, {Key: "ready", Value: ready}, {Key: "blockers", Value: formatted}, {Key: "skipped", Value: skipped}}
+		data, _ := ledger.Stringify(pendingReviewJSON(out, pending), false)
 		fmt.Println(string(data))
 	} else {
 		for _, b := range formatted {
@@ -260,6 +266,7 @@ func runBlockPreflight(args []string) int {
 		} else {
 			fmt.Printf("block %s preflight: %d blockers\n", p.id, len(formatted))
 		}
+		pendingReviewLine(p.id, pending)
 	}
 	if ready {
 		return 0
