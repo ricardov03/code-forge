@@ -1249,7 +1249,7 @@ func initSetupFinish(st initSetupState, parsed initParsed, jsonMode bool, wiz *i
 			return initSetupResult{}, hInitConfigCheck
 		}
 	}
-	errs, warns := configValidator{cfg: cfg, order: order, hasCli: func(string) bool { return true }}.run()
+	errs, warns := configValidator{cfg: cfg, order: order, hasCli: func(string) bool { return true }, chainSeen: config.LoadSeenInCache(home)}.run()
 	if len(errs) > 0 {
 		parts := []string{}
 		for _, e := range errs {

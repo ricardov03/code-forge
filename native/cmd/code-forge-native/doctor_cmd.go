@@ -265,15 +265,17 @@ func redactSecret(text string, secrets ...string) string {
 
 // doctorConfigRow is checkConfig in src/doctor/local.mjs. validateConfig runs
 // without seenInCache or hasCliOnPath, so the CLI rules see no seen ids and
-// never report a missing CLI.
+// never report a missing CLI. B655: the review.on_unavailable rule (Go only)
+// reads the seen-in-cache list under $HOME as validate does.
 func doctorConfigRow(cwd string) ([]doctorRow, map[string]any, handoverReason) {
 	cfg, order, err := config.LoadOrdered(cwd)
-	return doctorConfigJudge(cfg, order, err)
+	return doctorConfigJudge(cfg, order, err, os.Getenv("HOME"))
 }
 
 // doctorConfigJudge is checkConfig on a config already loaded (B548: init
-// judges the text it is about to write).
-func doctorConfigJudge(cfg map[string]any, order config.Ordered, err error) ([]doctorRow, map[string]any, handoverReason) {
+// judges the text it is about to write); home is where the seen-in-cache
+// list for the review.on_unavailable rule is read (B655).
+func doctorConfigJudge(cfg map[string]any, order config.Ordered, err error, home string) ([]doctorRow, map[string]any, handoverReason) {
 	if err != nil {
 		if yamlSyntaxError(err) {
 			return nil, nil, hConfigParseError
@@ -295,7 +297,7 @@ func doctorConfigJudge(cfg map[string]any, order config.Ordered, err error) ([]d
 			return nil, nil, hDoctorSandboxDirs
 		}
 	}
-	v := configValidator{cfg: cfg, order: order, hasCli: func(string) bool { return true }}
+	v := configValidator{cfg: cfg, order: order, hasCli: func(string) bool { return true }, chainSeen: config.LoadSeenInCache(home)}
 	errs, warns := v.run()
 	if len(errs) > 0 {
 		return []doctorRow{{"config", "FAIL", "config", fmt.Sprintf("%d error(s); first: %s", len(errs), maskTokens(errs[0].message))}}, nil, 0

@@ -283,6 +283,11 @@ type configValidator struct {
 	order  config.Ordered
 	seen   map[string][]string
 	hasCli func(provider string) bool
+	// chainSeen is B655: the seen-in-cache ids the review.on_unavailable
+	// rule alone reads when seen is not given (doctor and init judge levels
+	// without the cache, as Node's checkConfig does, but a chain validate
+	// passes must not fail there).
+	chainSeen map[string][]string
 }
 
 type effLevel struct {
@@ -810,6 +815,15 @@ func (v configValidator) onUnavailableProvider(route map[string]any) (string, bo
 	return p, ok && p != ""
 }
 
+// chainModelKnown is knownModel for a review.on_unavailable route; without
+// seen it reads chainSeen (B655), so doctor and init agree with validate.
+func (v configValidator) chainModelKnown(provider, model string) bool {
+	if v.knownModel(provider, model) {
+		return true
+	}
+	return v.seen == nil && inList(model, configValidator{seen: v.chainSeen}.seenList(provider))
+}
+
 // onUnavailableMessages is B651: a review.on_unavailable route whose
 // provider cannot be resolved, or whose model is not a known id of that
 // provider (known ids, known_extra, seen-in-cache). Never the value itself.
@@ -829,7 +843,7 @@ func (v configValidator) onUnavailableMessages() []string {
 			messages = append(messages, at+" has no provider (neither its own provider, its level's provider nor the top-level provider is set)")
 			continue
 		}
-		if !v.knownModel(provider, model) {
+		if !v.chainModelKnown(provider, model) {
 			messages = append(messages, at+".model is not a known "+safeProvider(provider)+" id, not in known_extra, and not seen-in-cache")
 		}
 	}

@@ -215,7 +215,7 @@ func initDoctorPlan(cwd, home string, written bool, cfg map[string]any, order co
 	var loaded map[string]any
 	var reason handoverReason
 	if written {
-		rows, loaded, reason = doctorConfigJudge(cfg, order, nil)
+		rows, loaded, reason = doctorConfigJudge(cfg, order, nil, home)
 	} else {
 		rows, loaded, reason = doctorConfigRow(cwd)
 	}
