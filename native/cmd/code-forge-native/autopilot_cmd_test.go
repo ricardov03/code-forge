@@ -108,15 +108,15 @@ func writeLedger(t *testing.T, f runFixture, rows ...string) {
 func TestAutopilotVerbHelpAndUsage(t *testing.T) {
 	newAutopilotFixture(t)
 	code, out, errText := autopilotCall(t, "--help")
-	if code != 0 || out != autopilotUsage || errText != "" {
+	if code != 0 || out != helpWrapped(t, "autopilot", autopilotUsage) || errText != "" {
 		t.Fatalf("--help = %d %q %q", code, out, errText)
 	}
 	code, out, _ = autopilotCall(t, "status", "-h")
-	if code != 0 || out != "usage: code-forge autopilot status --run <id> [--json]\n" {
+	if code != 0 || out != helpWrapped(t, "autopilot status", "usage: code-forge autopilot status --run <id> [--json]\n") {
 		t.Fatalf("status -h = %d %q", code, out)
 	}
 	code, out, _ = autopilotCall(t, "ask", "--help")
-	if code != 0 || !strings.HasPrefix(out, "usage: code-forge autopilot ask --run <id>") || !strings.HasSuffix(out, "(options for an action: waive,fix · allow,deny · L1,L2)\n") {
+	if code != 0 || !strings.HasPrefix(out, "Description:\n  Ask the delegate one question inside the grant\n\nUsage:\n  usage: code-forge autopilot ask --run <id>") || !strings.Contains(out, "(options for an action: waive,fix · allow,deny · L1,L2)\n\nOptions:\n") {
 		t.Fatalf("ask --help = %d %q", code, out)
 	}
 	cases := []struct {

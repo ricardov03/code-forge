@@ -84,6 +84,7 @@ func ledgerCheck(t *testing.T, cases []ledgerCase) {
 	t.Helper()
 	for _, tc := range cases {
 		code, out, errText := ledgerCall(t, tc.args...)
+		tc.out = helpExpect(t, append([]string{"ledger"}, tc.args...), tc.code, tc.out) // B613 help page
 		if code != tc.code || out != tc.out || errText != tc.err {
 			t.Errorf("ledger %q:\n got (%d, %q, %q)\nwant (%d, %q, %q)", tc.args, code, out, errText, tc.code, tc.out, tc.err)
 		}

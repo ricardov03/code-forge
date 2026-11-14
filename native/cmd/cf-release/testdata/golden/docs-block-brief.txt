@@ -24,7 +24,7 @@ Docs:
 
 Generated-doc checks:
 - node scripts/gen-config-doc.mjs --check
-- node scripts/gen-commands-doc.mjs --check
+- sh scripts/gen-commands-doc.sh --check
 
 Site pages a person must check:
 - src/pages/docs/start.astro

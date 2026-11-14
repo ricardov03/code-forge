@@ -37,6 +37,7 @@
     "!scripts/build-native.mjs",
     "!scripts/compat-golden.mjs",
     "!scripts/gen-commands-doc.mjs",
+    "!scripts/gen-commands-doc.sh",
     "!scripts/gen-site-data.mjs",
     "README.md",
     "CHANGELOG.md",

@@ -119,7 +119,7 @@ func TestSetupRouteSourceCheckoutFix(t *testing.T) {
 func TestSetupRouteUsageAndHelp(t *testing.T) {
 	f := newSetupFixture(t, "9.8.7")
 	for _, args := range [][]string{{"--help"}, {"-h"}, {"x", "--help"}} {
-		if code, out, errOut := f.call("9.8.7", args...); code != 0 || out != "usage: code-forge setup\n" || errOut != "" {
+		if code, out, errOut := f.call("9.8.7", args...); code != 0 || out != helpExpect(t, append([]string{"setup"}, args...), 0, "usage: code-forge setup\n") || errOut != "" {
 			t.Fatalf("setup %v = %d %q %q; want usage on stdout, exit 0", args, code, out, errOut)
 		}
 	}

@@ -222,6 +222,7 @@ func TestB500PipelineHelpUsageAndMissingFile(t *testing.T) {
 		{[]string{"pipeline", "status", "--root", "sub"}, 0, "no code-forge.pipeline.yml in " + filepath.Join(work, "sub") + "\n", ""},
 	} {
 		code, out, errText := b500Run(t, tc.args...)
+		tc.out = helpExpect(t, tc.args, tc.code, tc.out) // B613 help page
 		if code != tc.code || out != tc.out || errText != tc.errText {
 			t.Errorf("%q: got (%d, %q, %q), want (%d, %q, %q)", tc.args, code, out, errText, tc.code, tc.out, tc.errText)
 		}

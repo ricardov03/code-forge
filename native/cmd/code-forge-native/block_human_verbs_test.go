@@ -236,7 +236,7 @@ func TestBlockAmendAcceptanceGo(t *testing.T) {
 	}
 	t.Run("help", func(t *testing.T) {
 		f := newHVFixture(t, nil, nil)
-		f.run("TestBlockAmendAcceptanceGo", "notty", "block|amend-acceptance|--help").want(t, 0, "usage: code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text> [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n  --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n                       Human checks use {clause, kind: human_check} without tests.\n", "")
+		f.run("TestBlockAmendAcceptanceGo", "notty", "block|amend-acceptance|--help").want(t, 0, helpWrapped(t, "block amend-acceptance", "usage: code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text> [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n  --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n                       Human checks use {clause, kind: human_check} without tests.\n"), "")
 	})
 	t.Run("usage, no terminal, unchanged", func(t *testing.T) {
 		f := newHVFixture(t, nil, nil)

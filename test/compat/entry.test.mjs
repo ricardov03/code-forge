@@ -95,7 +95,16 @@ test('empty public route table hands unknown verbs and aliases to Node through l
   const binaryLink = path.join(f.dir, 'temp bin/native-link');
   symlinkSync(path.relative(path.dirname(binaryLink), f.binary), binaryLink);
   for (const args of [['unknown-entry-verb', 'with spaces', 'a"b'], ['--help'], ['--version'], []]) {
-    const expected = output(run(process.execPath, [path.join(root, 'bin/code-forge.mjs'), ...args]));
+    // B613: Go serves the command list itself (--help and no verb); every other form still
+    // matches Node's stdout, stderr and exit.
+    const goList = args.length === 0 || args[0] === '--help';
+    const expected = output(goList ? run(f.binary, args) : run(process.execPath, [path.join(root, 'bin/code-forge.mjs'), ...args]));
+    if (goList) {
+      assert.equal(expected.code, 0, JSON.stringify(args) + ': the Go command list exits 0');
+      assert.equal(expected.stderr, '', JSON.stringify(args) + ': the Go command list writes no stderr');
+      assert.ok(expected.stdout.startsWith(`${pkg.name} ${pkg.version}\n\nUsage:\n  code-forge <command> [options] [arguments]\n\nOptions:\n`), JSON.stringify(args) + ': the Go command list starts with the title, Usage and Options');
+      assert.match(expected.stdout, /\nAvailable commands:\n {2}author +Write or harden a plan draft from a brief\n/, JSON.stringify(args) + ': the Go command list has one summary line per command');
+    }
     assert.deepEqual(output(run(f.launcher, args)), expected, JSON.stringify(args) + ': npm symlink matches Node stdout, stderr and exit');
     assert.deepEqual(output(run(binaryLink, args)), expected, JSON.stringify(args) + ': executable symlink matches Node stdout, stderr and exit');
   }
