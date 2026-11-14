@@ -122,6 +122,29 @@ func valid(g ledger.Object) bool {
 // closed; its until is the deadline, or null for none.
 func UntilDone(g ledger.Object) bool { return g.Get("until_done") == true }
 
+// LiveUntilDone (B649) is the run's until-done grant while the record still
+// marks it active, else nil. Node's grantState does Date.parse(until): a null
+// until is NaN, so Node reads such a grant as active forever and never sees
+// its done end. A grant with until present and null but no until_done (which
+// Go never writes) counts too; a grant with no until key at all is a shape
+// the existing hand-over reasons already cover. Go must not hand a command
+// over to Node while this is non-nil.
+func LiveUntilDone(record ledger.Object) ledger.Object {
+	g, ok := record.Get("autopilot").(ledger.Object)
+	if !ok || g.Get("status") != "active" {
+		return nil
+	}
+	if UntilDone(g) {
+		return g
+	}
+	for _, field := range g {
+		if field.Key == "until" && field.Value == nil {
+			return g
+		}
+	}
+	return nil
+}
+
 // validUntilDone: until_done is true when present; planned_blocks (the planned block
 // ids) and done_at belong to an until-done grant only.
 func validUntilDone(g ledger.Object) bool {

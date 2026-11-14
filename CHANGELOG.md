@@ -42,6 +42,10 @@ waits on a second real consumer (plan §10.4, Q17).
 - A reviewer that is still unavailable after the built-in recovery (a timeout, a provider down, a failed spawn) can now fall back to the routes listed in the new `review.on_unavailable` setting (`level`, `model`, optional `provider` and `effort`), walked in order with the waits in `review.on_unavailable_backoff_s` (default 0, 30, 120 seconds); each step writes a signed `review.unavailable_fallback` ledger row and the first route with a valid review ends the walk. A reviewer route that timed out on 2 tickets in a row in a run is benched for the rest of the run (signed `review.route_timeout`, `review.route_benched` and `review.route_reset` rows) until it answers again or the worker is reattached; this folds B321 (B629)
 - Under autopilot, a file whose review stays unavailable after the `review.on_unavailable` chain can get one substitute review when the grant allows the new scope `review:substitute`: a signed `autopilot.decision` row records it, then a closed-book reviewer on a provider none of the failed sessions used reviews the file and its rows carry `source: substitute`; `block close` counts that approval only under the scope with the decision row and green gates, else refuses with `substitute_review` and names `code-forge autopilot start ... --allow review:substitute`. Without the scope one signed row asks the owner and names that command; with no active grant nothing changes (B630)
 
+### Fixed
+
+- The Go engine no longer hands a command to Node while the run it names holds a live until-done autopilot grant (`until: null`), which Node cannot read: it refuses with one line naming the run and the grant (handover reason `until-done-grant`), runs nothing and exits 1; `block waive --yes` on a critical finding and the gate check's grant window now read an until-done grant in Go (an `autopilot.extend` row moves the window's end); timed grants work as before (B649).
+
 ## [0.23.0] — 2026-11-13
 
 ### Changed

@@ -763,7 +763,7 @@ func (g *gate) grantProblem(grantID jv, scope string, at float64, what string) s
 		return "no signed autopilot.grant row for grant " + jsString(grantID) + " in this run"
 	}
 	from, a := g.date(prop(grant, "ts"))
-	until, b := g.date(prop(grant, "until"))
+	until, b := g.grantEnd(grant, id, at)
 	if !(a && b && at >= from && at < until) {
 		return what + " is outside grant " + id + "'s window"
 	}
@@ -790,6 +790,26 @@ func (g *gate) grantProblem(grantID jv, scope string, at float64, what string) s
 		}
 	}
 	return ""
+}
+
+// grantEnd (B649) is the grant's clock end at time at: the until of the
+// latest signed autopilot.extend row of the grant at or before at (B634),
+// else the grant row's until. An until-done grant with a null until has no
+// clock end; its autopilot.expire row (reason done) ends it, as for any grant.
+func (g *gate) grantEnd(grant Row, id string, at float64) (float64, bool) {
+	end, latest := prop(grant, "until"), math.Inf(-1)
+	for _, r := range g.runRows {
+		if r["event"] != "autopilot.extend" || r["grant_id"] != id || !g.ok(r) {
+			continue
+		}
+		if ts, ok := g.date(prop(r, "ts")); ok && ts <= at && ts >= latest {
+			end, latest = prop(r, "until"), ts
+		}
+	}
+	if grant["until_done"] == true && end.ok && end.v == nil {
+		return math.Inf(1), true
+	}
+	return g.date(end)
 }
 
 func (g *gate) decisionProblem(w Row, scope string, at float64) string {

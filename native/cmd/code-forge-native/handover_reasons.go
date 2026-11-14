@@ -318,6 +318,8 @@ const (
 	hOpenOutcomeForm
 	// B587
 	hCloseLockfileFormat
+	// B649
+	hUntilDoneGrant
 )
 
 var handoverReasons = [...]string{
@@ -639,4 +641,6 @@ var handoverReasons = [...]string{
 	hOpenOutcomeForm:    "open-outcome-form",
 	// B587
 	hCloseLockfileFormat: "close-lockfile-format",
+	// B649
+	hUntilDoneGrant: "until-done-grant",
 }

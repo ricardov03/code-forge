@@ -46,6 +46,12 @@ func handover(args []string, reasons ...handoverReason) (int, error) {
 	if len(reasons) > 0 {
 		reason = reasons[0]
 	}
+	if refusal := untilDoneHandoverRefusal(args); refusal != "" {
+		// B649: never let Node read an until-done grant
+		recordHandover(args, handoverReasons[hUntilDoneGrant])
+		fmt.Fprint(hudStderr, refusal)
+		return 1, nil
+	}
 	recordHandover(args, handoverReasons[reason])
 	node := os.Getenv("CODE_FORGE_NODE")
 	if node == "" {

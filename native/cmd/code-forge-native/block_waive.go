@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/autopilot"
 	"github.com/ricardov03/code-forge/native/blockclose"
 	"github.com/ricardov03/code-forge/native/blockstate"
 	"github.com/ricardov03/code-forge/native/gatecheck"
@@ -213,11 +214,22 @@ func runBlockWaive(args []string) int {
 	}
 	severity := blockstate.Severity(rows, p.id, file, finding, key)
 	grant := blockObject(p.record.Get("autopilot"))
-	until, e := time.Parse(time.RFC3339Nano, blockString(grant.Get("until")))
-	if severity == "critical" && p.record.Get("status") == "active" && grant.Get("status") == "active" && e != nil {
-		return p.fallback()
+	var active bool
+	if grant != nil && autopilot.LiveUntilDone(p.record) != nil {
+		// B649: an until-done grant is active until its planned blocks are
+		// all closed (or its deadline); Node cannot read it, so Go decides.
+		read, err := autopilot.ReadGrant(p.record, time.Now())
+		if err != nil {
+			return p.fallback()
+		}
+		active = read.State == "active"
+	} else {
+		until, e := time.Parse(time.RFC3339Nano, blockString(grant.Get("until")))
+		if severity == "critical" && p.record.Get("status") == "active" && grant.Get("status") == "active" && e != nil {
+			return p.fallback()
+		}
+		active = p.record.Get("status") == "active" && grant.Get("status") == "active" && e == nil && time.Now().Before(until)
 	}
-	active := p.record.Get("status") == "active" && grant.Get("status") == "active" && e == nil && time.Now().Before(until)
 	if severity != "warning" && severity != "nit" && !(severity == "critical" && active) {
 		return p.refusal("waive-yes-critical", fmt.Sprintf("waive-yes-critical: finding %s is %s; a critical finding needs an active autopilot grant; otherwise only warning or nit findings may use --yes; nothing was recorded", finding, severity))
 	}
