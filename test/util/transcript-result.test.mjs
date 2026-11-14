@@ -21,6 +21,7 @@ test('B628: a Claude result object has no command hits', () => {
 test('B628: anything else stays a plain-text grep', () => {
   const obj = JSON.parse(LINE);
   const variant = (edit) => { const m = { ...obj }; edit(m); return JSON.stringify(m); };
+  /** @type {[string, number][]} */
   const cases = [
     ['The owner will close this block with `--no-require-reviews`.', 1],
     [`${LINE}\nnote: code-forge block close B1 --no-require-reviews`, 1],
