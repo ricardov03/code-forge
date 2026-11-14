@@ -215,8 +215,9 @@ func (*b630Err) Error() string { return "refused" }
 // TestB630ReopenAfterSubstitute: block reopen --file on a file whose
 // substitute review found a critical still asks a normal review: the
 // signed review.reopened row sends the file's next ticket down the reopen
-// path (Node's review, as before B630) with no substitute and no decision
-// row, even with the provider still down and the scope granted.
+// path (since B623 a recheck round served in Go, as for any reopened file)
+// with no substitute and no new decision row, even with the provider still
+// down and the scope granted.
 func TestB630ReopenAfterSubstitute(t *testing.T) {
 	e := b629Setup(t, b630Chain)
 	b630Grant(t, e, "review:substitute")
@@ -235,12 +236,19 @@ func TestB630ReopenAfterSubstitute(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := e.fx.ticket(t, "r1", "B1", "a.txt", sha(content))
-	_, _, err := e.w.RunTicket(id)
-	if !IsUnsupported(err) || !strings.Contains(err.Error(), "review.reopened") {
-		t.Fatalf("RunTicket err %v, want the reopen path", err)
+	n, poison, err := e.w.RunTicket(id)
+	if err != nil || n != 1 || poison {
+		t.Fatalf("RunTicket = %d, %v, %v; want the reopened ticket served in Go (B623)", n, poison, err)
 	}
-	if len(e.calls) != before {
-		t.Fatalf("calls %v after the reopen", e.calls[before:])
+	res := readFile(t, filepath.Join(e.fx.root, ".code-forge", "reviews", "r1", id+".json"))
+	if !strings.Contains(res, `"kind":"recheck"`) || strings.Contains(res, `"source":"substitute"`) {
+		t.Fatalf("result %s, want the normal recheck round of the reopened file, not a substitute", res)
+	}
+	e.mu.Lock()
+	after := append([]string{}, e.calls[before:]...)
+	e.mu.Unlock()
+	if len(after) != 1 || after[0] == "m-x" {
+		t.Fatalf("calls %v after the reopen, want one recheck session and no substitute", after)
 	}
 	if got := b630Decisions(t, e); len(got) != 1 {
 		t.Fatalf("decision rows %v, want only the first substitute's", got)

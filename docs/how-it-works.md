@@ -1084,6 +1084,16 @@ substitute`. `block close` counts that approval only under the active scope, wit
 row and green gates; otherwise it refuses with `substitute_review`. With no active grant nothing
 changes.
 
+The order in one ticket is fixed: (1) the built-in recovery (the `levels.L2` ladder, the
+same-model timeout retry, `review.routes`, `review.second_levels`), then (2) the
+`review.on_unavailable` chain with its backoff and `review.unavailable_fallback` rows, then (3)
+the substitute review. A chain route that answers ends the walk and no substitute runs. The
+substitute runs only when the chain is used up, so its `autopilot.decision` row comes after the
+chain's rows, and its `failed_providers` include the chain's providers. Routes benched by the
+route bench are out of the ladder and the chain; the substitute's own session goes through the
+same route watch. A reopened file (`block reopen --file`) gets the normal recheck round, never a
+substitute.
+
 ### How code-forge picks the reviewer
 
 By default, code-forge scores the L2 model and its fallbacks using this project's ledger across
