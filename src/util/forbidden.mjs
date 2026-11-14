@@ -1301,7 +1301,10 @@ function transcriptPathText(command) {
  * Write/Edit/MultiEdit/NotebookEdit as `Write(<file_path>)`, any other tool's whole `input`
  * (fail closed); user text, tool_result content, assistant text/thinking and system, attachment
  * and api-request lines are not scanned. An assistant `message.content` that is neither a string
- * nor an array scans the whole message. Any other log uses the plain-text grep above, also treating
+ * nor an array scans the whole message. A Claude result-object log (B628: every non-empty line
+ * an object with type `result` and a string `result`, the final object of
+ * `claude -p --output-format json`, no stdin banner) has no tool calls and scans nothing; its
+ * `result` text is the coder's answer, not a command. Any other log uses the plain-text grep above, also treating
  * backslash-escaped quotes as quote delimiters and escaped n/r/t as whitespace without losing any original-text hits.
  *
  * Linear in the line length: `contains` and `path` entries are evaluated once per text variant over its
@@ -1332,6 +1335,10 @@ export function scanTranscript(text, list = FORBIDDEN) {
     const nonEmpty = parsed.filter((event) => event !== undefined);
     const objects = nonEmpty.every((event) =>
       event !== null && typeof event === 'object' && !Array.isArray(event) && typeof event.type === 'string');
+    // B628: the final result object of `claude -p --output-format json` (every non-empty line an
+    // object with type "result" and a string `result`, no stdin banner) has no tool calls
+    if (objects && !banner && nonEmpty.length > 0
+      && nonEmpty.every((event) => event.type === 'result' && typeof event.result === 'string')) return [];
     if (nonEmpty[0]?.type === 'thread.started' && objects) events = parsed;
     else if (objects && !banner && nonEmpty.some((event) => event.type === 'user' || event.type === 'assistant')
       && nonEmpty.every((event) => CLAUDE_LINE_TYPES.has(event.type) && typeof event.sessionId === 'string'
