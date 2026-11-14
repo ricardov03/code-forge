@@ -392,7 +392,7 @@ func TestB626SettleUsage(t *testing.T) {
 		}
 	}
 	code, stdout, _ := f.call("block", "settle", "--help")
-	if code != 0 || !strings.HasPrefix(stdout, "usage: code-forge block settle <id> --run <r>") {
+	if code != 0 || !strings.HasPrefix(stdout, "Description:\n  Run the orchestrator fixes that clear a block, then report\n\nUsage:\n  usage: code-forge block settle <id> --run <r>") { // B613 help page
 		t.Fatalf("help: exit %d stdout=%q", code, stdout)
 	}
 	if rows := f.b626SettleRows(); len(rows) != 0 {

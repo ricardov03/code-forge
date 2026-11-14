@@ -56,6 +56,7 @@ var helpCommands = []helpEntry{
 	{name: "block rebase", summary: "Move a block onto the new base of its branch",
 		options: []helpOption{helpRunOption, {"--accept-landed", "Rebase onto what landed on the base branch"}, {"--accept-changed <file>…", "Keep a changed file (owner)"}, helpJSONOption}},
 	{name: "block attempt", summary: "Start the next attempt of an open block"},
+	{name: "block settle", summary: "Run the orchestrator fixes that clear a block, then report"},
 	{name: "block close", summary: "Run the final checks and close the block",
 		options: []helpOption{helpRunOption, {"--transcript <file>", "The coder transcript to check"}, {"--report <file>", "The coder report"}, {"--decide", "Clear a transcript hit by a decision (owner)"}, helpJSONOption}},
 	{name: "block claim", summary: "Add one more owned path to an open block"},

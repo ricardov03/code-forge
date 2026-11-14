@@ -337,6 +337,8 @@ usage: code-forge block amend-acceptance <id> --run <r> --acceptance <file> --re
 
 ### block settle
 
+Run the orchestrator fixes that clear a block, then report
+
 ```text
 usage: code-forge block settle <id> --run <r> [--report <file>] [--transcript <file>] [--json] [--help|-h]
   --help, -h  Print this usage and exit without changing state.

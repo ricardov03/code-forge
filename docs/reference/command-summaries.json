@@ -24,6 +24,7 @@
   {"name":"block ready","summary":"List what still blocks the close of a block","owner":false,"group":"block"},
   {"name":"block rebase","summary":"Move a block onto the new base of its branch","owner":false,"group":"block"},
   {"name":"block reopen","summary":"Reopen a stopped file review for a new round","owner":true,"group":"block"},
+  {"name":"block settle","summary":"Run the orchestrator fixes that clear a block, then report","owner":false,"group":"block"},
   {"name":"block stop","summary":"Stop a block and record why","owner":false,"group":"block"},
   {"name":"block unwaive","summary":"Undo an agent waiver of a finding","owner":true,"group":"block"},
   {"name":"block waive","summary":"Accept one review finding without a fix","owner":true,"group":"block"},
