@@ -250,7 +250,7 @@ func TestB634ExtendRefusals(t *testing.T) {
 		"extend": "usage: code-forge autopilot extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes]\n",
 		"start":  "usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes]\n",
 	} {
-		if code, out, errText := autopilotCall(t, sub, "--help"); code != 0 || out != want || errText != "" {
+		if code, out, errText := autopilotCall(t, sub, "--help"); code != 0 || out != helpWrapped(t, "autopilot "+sub, want) || errText != "" {
 			t.Fatalf("%s --help = %d %q %q", sub, code, out, errText)
 		}
 	}

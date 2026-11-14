@@ -4,6 +4,7 @@
   {"name":"autopilot approve","summary":"Change one setting until a set time","owner":true,"group":"autopilot"},
   {"name":"autopilot ask","summary":"Ask the delegate one question inside the grant","owner":false,"group":"autopilot"},
   {"name":"autopilot binnacle","summary":"Print or write the autopilot run summary","owner":false,"group":"autopilot"},
+  {"name":"autopilot extend","summary":"Move the grant end time or deadline later","owner":true,"group":"autopilot"},
   {"name":"autopilot level","summary":"Record the lane (level) the delegate chose","owner":false,"group":"autopilot"},
   {"name":"autopilot log","summary":"Print every autopilot event of a run","owner":false,"group":"autopilot"},
   {"name":"autopilot round","summary":"Record one extra review round for a file","owner":false,"group":"autopilot"},

@@ -44,6 +44,7 @@ var helpCommands = []helpEntry{
 	{name: "autopilot start", summary: "Grant the autopilot a time window, scopes and budget"},
 	{name: "autopilot status", summary: "Show the grant, spend per category and pauses"},
 	{name: "autopilot stop", summary: "End the autopilot grant now"},
+	{name: "autopilot extend", summary: "Move the grant end time or deadline later", owner: true},
 	{name: "autopilot ask", summary: "Ask the delegate one question inside the grant"},
 	{name: "autopilot waive", summary: "Waive a warning or nit finding by a decision", owner: true},
 	{name: "autopilot round", summary: "Record one extra review round for a file"},
