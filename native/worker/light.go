@@ -303,7 +303,7 @@ func (w *TicketRunner) lightLocked(p *lightPlan) (ledger.Object, bool, error) {
 	if err := write(ledger.Object{{Key: "event", Value: "review.light_batch"}, {Key: "round", Value: float64(st.round)}, {Key: "signature", Value: st.signature}}); err != nil {
 		return nil, false, err
 	}
-	deps := review.Deps{Spawn: w.pooled(p.id, p.cfg, session.ReviewSpawn(p.sopts, p.sdeps)), WriteRow: write, Warn: w.Warn, ReadRows: w.readRows}
+	deps := review.Deps{Spawn: w.pooled(p.id, p.cfg, w.reviewSpawn(p.sopts, p.sdeps)), WriteRow: write, Warn: w.Warn, ReadRows: w.readRows}
 	res, err := batch.Run(deps)
 	if err != nil {
 		return nil, false, err

@@ -1033,6 +1033,31 @@ level's own notes are never counted. While a long session runs, the worker keeps
 heartbeat, so `review-file --wait` never reports a live worker as `worker_down`.
 At each poll tick the worker checks that its authoritative run record still exists; removing the record or its HOME stops it cleanly without taking another ticket.
 
+**When the reviewer is still unavailable** (B629). `review.on_unavailable` is a list of other
+routes (`model`, optional `provider`, `effort` and `level`, as in a `review.routes` rule; the
+provider defaults to the level's, then the top-level one). When a reviewer session is still
+unavailable after all of the recovery above (a timeout, a provider down, a failed spawn), the Go
+worker tries these routes in order for that session. Before each step it waits
+`review.on_unavailable_backoff_s` (default `[0, 30, 120]` seconds: the first step at once, the
+last value repeats, at most 3600 each; `[]` never waits) and writes one signed
+`review.unavailable_fallback` row: `ticket`, `file`, `from_provider`/`from_model`,
+`to_provider`/`to_model`, `reason` (`timeout` or `exit`), `attempt` (the step) and `waited_ms`.
+A route with a closed-book provider for the role, or one the session layer cannot run, is
+skipped with `skipped: closed-book` or `not-runnable` and no wait. The first route that gives a
+valid review ends the walk (the session's `schema_fallback` names `review.on_unavailable` and
+the route). A broken answer (a schema miss) also ends it. When every route fails, the session is
+`unavailable` as before. Consensus slots and fix-loop rechecks do not walk the chain.
+
+A route that timed out on two tickets in a row in a run is **benched** for the rest of that run
+(B321). Each ticket that a route only timed out on writes a signed `review.route_timeout` row
+(`level`, `provider`, `model`, `streak`); the second in a row also writes `review.route_benched`.
+Later tickets leave a benched model out of the level's ladder (its first fallback that is not
+benched becomes the primary, else the first `review.on_unavailable` route that is not) and out of
+`review.on_unavailable`. A level with nothing else keeps the benched model as the last resort. A
+success of the route on another ticket writes `review.route_reset` (`was_benched`) and ends the
+streak; `run start --reattach` (its signed `worker.reattach` row) clears every bench. The state
+lives only in the run's signed ledger rows, so a worker restart keeps it.
+
 ### How code-forge picks the reviewer
 
 By default, code-forge scores the L2 model and its fallbacks using this project's ledger across

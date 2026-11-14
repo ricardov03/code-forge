@@ -916,6 +916,15 @@ func runOneWith(spec sessionSpec, text string, packet *Packet, in Input, deps De
 			}
 		}
 	}
+	if walk := r.walkUnavailable(res, verdict); walk != nil {
+		// B629: the review.on_unavailable chain, after every built-in recovery
+		res, verdict = walk.res, walk.verdict
+		tokensIn = addTokens(tokensIn, walk.tokensIn)
+		tokensOut = addTokens(tokensOut, walk.tokensOut)
+		if walk.to != nil {
+			fellBackTo = walk.to
+		}
+	}
 	meta := ledger.Object{{Key: "lens", Value: spec.lens}, {Key: "role", Value: spec.role}, {Key: "level", Value: spec.level}, {Key: "slot", Value: spec.slotValue()},
 		{Key: "context_mode", Value: packet.contextValue()}, {Key: "ctx_tokens_in", Value: float64(packet.TokensIn)},
 		{Key: "provider", Value: orDefault(get(res, "provider"), nil)}, {Key: "model", Value: orDefault(get(res, "model"), nil)},

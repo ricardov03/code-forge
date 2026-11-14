@@ -342,9 +342,20 @@ func (w *TicketRunner) planOrdinary(t ledger.Object, cfg map[string]any, content
 	req := FixLoopRequest{Home: w.Home, RunID: w.RunID, RunRootDir: w.RunRootDir, ContentRoot: contentRoot, Level: e.level, Cfg: cfg, Key: w.Key,
 		Base: e.base, Owned: e.owned, OwnedKinds: e.ownedKinds, Secrets: w.secrets(), ReadRows: w.readObjects, WriteRow: stamp, Now: w.now,
 		Review: func(write func(ledger.Object) error) (ledger.Object, error) {
-			return review.File(in, review.Deps{Spawn: w.pooled(id, cfg, session.ReviewSpawn(sopts, sdeps)), WriteRow: write, Warn: w.Warn,
+			// B321: each route's timeouts and answers on this ticket
+			watch := newRouteWatch()
+			defer w.writeRouteOutcomes(id, watch, write)
+			return review.File(in, review.Deps{Spawn: watch.spawn(cfg, w.pooled(id, cfg, w.reviewSpawn(sopts, sdeps))), WriteRow: write, Warn: w.Warn,
 				ReadRows: w.readRows, SchemaHistory: schemaHistory(w.readRows, w.Key, w.RunID, file, hash),
 				NeedsFileCarry: needsFileCarry(w.readRows, w.Key, w.RunID, block, file),
+				// B629: the review.on_unavailable walk's wait, and its check
+				// that the session layer can run a route
+				Sleep: w.Sleep,
+				CheckSpawn: func(c map[string]any, level, role string) error {
+					o := sopts
+					o.Cfg = c
+					return session.CheckReview(o, level, role)
+				},
 				TimeoutFallback: func(ti review.TimeoutFallbackInput) (*review.Fallback, error) {
 					fb, err := timeoutFallbackFor(ti.Cfg, ti, w.now())
 					if err != nil || fb == nil {
@@ -362,7 +373,7 @@ func (w *TicketRunner) planOrdinary(t ledger.Object, cfg map[string]any, content
 	// B517: a recheck or patch_check round spawns one L2 reviewer session
 	// through the same pool, with no timeout fallback (fixloop.mjs recheckSession)
 	req.Input = in
-	req.Session = review.Deps{Spawn: w.pooled(id, cfg, session.ReviewSpawn(sopts, sdeps)), Warn: w.Warn,
+	req.Session = review.Deps{Spawn: w.pooled(id, cfg, w.reviewSpawn(sopts, sdeps)), Warn: w.Warn,
 		SchemaHistory: schemaHistory(w.readRows, w.Key, w.RunID, file, hash)}
 	req.Jev = w.jevAsk()
 	spawns, kind, err := FixLoopCheck(tk, req)

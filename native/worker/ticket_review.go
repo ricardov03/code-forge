@@ -273,6 +273,8 @@ func (w *TicketRunner) reviewWith(id string, t ledger.Object, cfg map[string]any
 	if err != nil {
 		return nil, unsupported("routing: " + err.Error())
 	}
+	// B321: this run's benched routes sit out (nothing benched: r.cfg as is)
+	r.cfg = w.routeBenched(r.cfg)
 	outcome, plan, err := w.engineRefusal(t, r.cfg, contentRoot, r.timeoutS)
 	if err != nil {
 		return nil, err

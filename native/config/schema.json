@@ -225,6 +225,22 @@
             }
           }
         },
+        "on_unavailable": {
+          "type": "array",
+          "description": "B629: routes a review session tries, in order, when it is still unavailable (a timeout, a provider down, a failed or refused spawn) after the built-in recovery (the timeout retry, the levels.<L>.fallback ladder, review.routes, review.second_levels and the second-timeout fallback model). A route is the provider, model and effort of a review.routes entry (provider left out: the level's provider, else the top-level provider); level picks the sessions it serves (L2 the reviewers, L3 the judge). Before each step the worker waits review.on_unavailable_backoff_s and writes one signed review.unavailable_fallback row (ticket, file, from route, to route, reason, attempt, waited_ms). The first route that gives a valid review stops the walk; when every route fails, the session is unavailable as before. A route with a closed-book provider for the role, or one the session layer cannot run, is skipped (its row has skipped, and there is no wait). B321: a route (a level's model or an on_unavailable route) that timed out on 2 tickets in a row in a run is benched for the rest of that run (signed review.route_benched row) until it succeeds on another ticket or the worker restarts with run start --reattach.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["model"],
+            "properties": {
+              "level": { "type": "string", "enum": ["L2", "L3"], "default": "L2", "description": "B629: the sessions this route serves, L2 (the reviewers) or L3 (the judge)." },
+              "model": { "type": "string", "minLength": 1 },
+              "effort": { "type": "string" },
+              "provider": { "$ref": "#/$defs/provider" }
+            }
+          }
+        },
+        "on_unavailable_backoff_s": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 3600 }, "default": [0, 30, 120], "description": "B629: seconds to wait before each review.on_unavailable step that runs: the nth run waits entry n and the last entry repeats; an empty list never waits." },
         "workers": { "type": "integer", "minimum": 1, "maximum": 4, "default": 1, "description": "B107: Maximum live workers serving the queue. The orchestrator adds one with run start --add-worker --run <id>." },
         "max_rounds_per_file": { "type": "integer", "minimum": 2, "maximum": 6, "default": 4 },
         "recheck_scope": { "type": "string", "enum": ["fix_hunks", "file"], "default": "fix_hunks" },

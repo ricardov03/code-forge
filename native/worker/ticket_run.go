@@ -30,6 +30,7 @@ import (
 	"github.com/ricardov03/code-forge/native/jev"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/proof"
+	"github.com/ricardov03/code-forge/native/review"
 	"github.com/ricardov03/code-forge/native/session"
 	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/ticket"
@@ -84,6 +85,9 @@ type TicketRunner struct {
 	// Sleep is configFor's wait before its one retry (nil: time.Sleep).
 	ReadRecordFile func(string) ([]byte, error)
 	Sleep          func(time.Duration)
+	// ReviewSession (B629 test seam) runs one review session in place of
+	// session.ReviewSpawn (nil: the session layer).
+	ReviewSession func(review.SpawnOpts) (ledger.Object, error)
 }
 
 type attempt struct {

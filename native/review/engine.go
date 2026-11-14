@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/ricardov03/code-forge/native/blockopen"
 	"github.com/ricardov03/code-forge/native/filelock"
@@ -67,6 +68,13 @@ type Deps struct {
 	// review.needs_file_timeout row that still allows a retry (B627); nil
 	// or a nil answer = none.
 	NeedsFileCarry func() (*NeedsFileCarry, error)
+	// Sleep is the wait before a review.on_unavailable step (B629); nil =
+	// time.Sleep.
+	Sleep func(time.Duration)
+	// CheckSpawn says whether the session layer can run cfg's level for role
+	// (B629: an on_unavailable route it cannot run is skipped); nil = every
+	// route runs.
+	CheckSpawn func(cfg map[string]any, level, role string) error
 }
 
 // NeedsFileCarry (B627) is a needs_file round that timed out on an earlier

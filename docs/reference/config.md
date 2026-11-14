@@ -146,6 +146,12 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `review.routes[].second.fallback[].provider` | enum: `anthropic`, `openai`, `xai` | yes | — |  |
 | `review.routes[].second.fallback[].model` | string | yes | — | minLength 1 |
 | `review.routes[].second.fallback[].effort` | string |  | — |  |
+| `review.on_unavailable` | array<object> |  | — | B629: routes a review session tries, in order, when it is still unavailable (a timeout, a provider down, a failed or refused spawn) after the built-in recovery (the timeout retry, the levels.<L>.fallback ladder, review.routes, review.second_levels and the second-timeout fallback model). A route is the provider, model and effort of a review.routes entry (provider left out: the level's provider, else the top-level provider); level picks the sessions it serves (L2 the reviewers, L3 the judge). Before each step the worker waits review.on_unavailable_backoff_s and writes one signed review.unavailable_fallback row (ticket, file, from route, to route, reason, attempt, waited_ms). The first route that gives a valid review stops the walk; when every route fails, the session is unavailable as before. A route with a closed-book provider for the role, or one the session layer cannot run, is skipped (its row has skipped, and there is no wait). B321: a route (a level's model or an on_unavailable route) that timed out on 2 tickets in a row in a run is benched for the rest of that run (signed review.route_benched row) until it succeeds on another ticket or the worker restarts with run start --reattach. |
+| `review.on_unavailable[].level` | enum: `L2`, `L3` |  | `"L2"` | B629: the sessions this route serves, L2 (the reviewers) or L3 (the judge). |
+| `review.on_unavailable[].model` | string | yes | — | minLength 1 |
+| `review.on_unavailable[].effort` | string |  | — |  |
+| `review.on_unavailable[].provider` | enum: `anthropic`, `openai`, `xai` |  | — |  |
+| `review.on_unavailable_backoff_s` | array<integer> |  | `[0,30,120]` | B629: seconds to wait before each review.on_unavailable step that runs: the nth run waits entry n and the last entry repeats; an empty list never waits. |
 | `review.workers` | integer |  | `1` | min 1; max 4; B107: Maximum live workers serving the queue. The orchestrator adds one with run start --add-worker --run <id>. |
 | `review.max_rounds_per_file` | integer |  | `4` | min 2; max 6 |
 | `review.recheck_scope` | enum: `fix_hunks`, `file` |  | `"fix_hunks"` |  |
