@@ -21,6 +21,7 @@ import (
 	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/queue"
 	"github.com/ricardov03/code-forge/native/runstatus"
@@ -507,6 +508,12 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	gateReason := closeLockReason(lockBlockers, gatecheck.Reason(gate.Blockers))
 	gateIndex := len(checks)
 	checks = append(checks, closeCheck{gateReason, append(append([]gatecheck.Blocker{}, lockBlockers...), gate.Blockers...)})
+	if external == "" {
+		// B630: a file approved only by a substitute review
+		if check := substCloseCheck(record, run, id, rows, key, kept, gate, time.Now()); check.Reason != "" {
+			checks = append(checks, check)
+		}
+	}
 	lines, lineWarnings := closeReviewedLines(run, id, top, qdir, entry, kept, gate.Waived, inTree, external == "" && len(gate.Blockers) == 0 && len(lockBlockers) == 0)
 	if _, has := flags["report"].(string); has && external == "" {
 		if reportErr != nil {
@@ -737,6 +744,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 		closeRows = append(audit, excludedRows...)
 	}
+	var deferredRow ledger.Object // B632: the deferral's decision row
 	if event != "" {
 		result, err = blockclose.Stop(home, run, id, event, reason)
 		if err != nil {
@@ -783,7 +791,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			result.Reason = "orphans: " + strings.Join(names, ", ")
 		}
 		if result.Reason == "" {
-			result, err = blockclose.Close(home, run, id, closeRows)
+			result, err = blockclose.CloseDeferring(home, run, id, closeRows, closeDeferral(home, run, id, &deferredRow))
 			if err != nil {
 				return publishError(err)
 			}
@@ -801,7 +809,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 	}
 	doneFile := ""
-	ended := result.Status == "closed" || result.Status == "stopped"
+	ended := result.Status == "closed" || result.Status == "stopped" || result.Status == humancheck.DeferredStatus
 	if ended {
 		doneFile = closeWriteDone(home, run, id, record, result, lines, rows, key, stderr)
 		if len(endHook) > 0 {
@@ -845,6 +853,10 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 				fmt.Fprintf(stdout, "block %s awaiting human check: %s\n", id, v)
 			}
 			fmt.Fprintf(stdout, "next: code-forge block human-pass %s --run %s --note \"<device check note>\" [--proof <dir-or-file>]\n", id, run)
+		}
+	} else if result.Status == humancheck.DeferredStatus {
+		if !jsonFlag {
+			closeDeferredText(stdout, run, id, deferredRow)
 		}
 	} else {
 		text := fmt.Sprintf("block %s %s", id, result.Status)
@@ -908,6 +920,10 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			if result.Status == "awaiting_human_check" {
 				out.Set("human_checks", entry.Get("human_checks"))
 				out.Set("next_command", fmt.Sprintf("code-forge block human-pass %s --run %s --note \"<device check note>\"", id, run))
+			}
+			if result.Status == humancheck.DeferredStatus {
+				out.Set("decision_id", deferredRow.Get("decision_id"))
+				out.Set("deferred_human_checks", closeDeferredChecks(run, id, deferredRow))
 			}
 			if ended {
 				blockDoneJSON(&out, record, doneFile)
@@ -1551,6 +1567,9 @@ func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[s
 			fix += "; stop this attempt, then reopen with --kind code --attempt <n+1> and the original base, ownership and acceptance, or split the block within light limits"
 		case "no_changes":
 			argv = []string{"code-forge", "block", "close", id, "--run", run, "--no-require-reviews"}
+		case substCloseCode:
+			// B630: the owner grants the scope; the review stays the substitute's
+			argv = []string{"code-forge", "autopilot", "start", "--run", run, "--until", "<time>", "--delegate", "L2", "--allow", autopilot.SubstituteScope}
 		case "not_approved", "late_unruled", "review_cap", "autopilot_waiver_invalid":
 			if p.File != "" {
 				if p.Finding != "" {

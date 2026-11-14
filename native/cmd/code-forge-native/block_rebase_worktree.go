@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/queue"
@@ -136,7 +137,7 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 		b := blockObject(blocks.Get(id))
 		status := blockString(b.Get("status"))
 		wt := blockObject(b.Get("worktree"))
-		if (status != "open" && status != "closed" && status != "awaiting_human_check") || b.Get("worktree") == nil {
+		if (status != "open" && status != "closed" && status != "awaiting_human_check" && status != humancheck.DeferredStatus) || b.Get("worktree") == nil {
 			return &state.Error{Code: "no-block", Message: fmt.Sprintf("block %s is not open in run %s", id, run)}
 		}
 		if wt == nil {

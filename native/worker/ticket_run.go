@@ -626,6 +626,10 @@ func (w *TicketRunner) complete(id string, outcome ledger.Object, a *attempt) er
 		}
 	}
 	row = append(row, packetSizeOf(result)...)
+	if result.Get("source") == review.SubstituteSource {
+		// B630: the signed review.result row of a substitute review says so
+		row = append(row, ledger.Field{Key: "source", Value: review.SubstituteSource}, ledger.Field{Key: "substitute", Value: result.Get("substitute")})
+	}
 	if signedRow, err := w.signObject(row); err == nil {
 		_ = w.writeRow(signedRow)
 	}

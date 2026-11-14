@@ -21,11 +21,46 @@ code-forge autopilot start --run <run> \
 ```
 
 - `--until` is a time with an offset, at most 24 hours ahead. The grant ends by itself then.
+- Or `--until-done` instead of `--until`: the grant ends when every planned block of the run is
+  closed (below). Give one of the two, never both.
 - `--delegate` is `L2` or `L3`. The delegate is a closed-book session and never Codex.
 - `--allow` lists the scopes it may decide (below). `--deny` takes some away again.
 - `--budget` sets a cap in USD per category (`coding`, `review`). `--stop-at` is the share of the
   cap at which that category pauses (default `0.9`).
 - Without a terminal the start is refused, unless you pass `--yes` yourself.
+
+### Until the work is done
+
+```bash
+code-forge autopilot start --run <run> --until-done \
+  --deadline 2026-10-07T07:00:00+02:00 --blocks B1,B2,B3 \
+  --delegate L2 --allow waive:nit,close:routine
+```
+
+- The grant ends when every planned block is closed. A block closed with its human checks
+  deferred (`awaiting_human_check`) counts as closed; a stopped block does not.
+- The planned blocks are the ids you give with `--blocks`. Without `--blocks` they are all the
+  blocks opened in the run so far. Give `--blocks` when you plan more waves: between waves every
+  opened block may be closed, and the grant would end early.
+- A run with no blocks yet keeps the grant active until a block opens and closes.
+- `--deadline` (optional, at most 24 hours ahead) ends it at that time if the blocks are not all
+  closed by then. Without it the grant has no clock end; stop it with `autopilot stop`.
+- When it ends because the work is done, the next autopilot or block command, or the worker,
+  writes one signed `autopilot.expire` row with `"reason": "done"` and the planned blocks.
+  `autopilot status` then says `done at <time> · every planned block closed`, and shows each
+  planned block's state while it runs.
+
+### Push the end out
+
+```bash
+code-forge autopilot extend --run <run> --until 2026-10-07T09:00:00+02:00
+```
+
+It moves a live grant's end later without stopping it: one signed `autopilot.extend` row (the old
+end in `from`, the new one in `until`), and you confirm at the prompt as for `start` (`--yes`
+without a terminal). For an until-done grant use `--deadline <time>` to set or move its deadline.
+It refuses an earlier or equal time, a time more than 24 hours ahead, a grant that is stopped,
+expired, done or absent, an ended run, and `--until` on an until-done grant with no deadline.
 
 Only one grant is active per run. `code-forge autopilot status --run <run>` shows it: time left,
 scopes, the deny list, the spend per category, and where the log is.
@@ -39,9 +74,30 @@ scopes, the deny list, the spend per category, and where the log is.
 | `round:extra` | one fix round past the review cap for a file |
 | `model:choose` | choose the coder level for a block |
 | `close:routine` | close a routine block when `close.require_human` is on: every changed file approved, a green gate row, no waivers, no transcript hits. Never `block close --decide` |
+| `review:substitute` | run one substitute review of a file whose review stays unavailable after the built-in recovery and `review.on_unavailable`: a closed-book reviewer on a provider none of the failed sessions used. Each substitute gets a signed `autopilot.decision` row first, and `block close` counts its approval only under this scope with every gate green |
+| `human-pass:deferred` | close a block whose only open items are `human_check` clauses as `closed_deferred_human` (Go engine, B632): every other close gate must pass as for a normal close. The checks stay open in `run human-checks list` (marked deferred) for you; the block may land. One signed `autopilot.decision` row (scope, block, clauses, `waits_for`) and one binnacle line per block with your `run human-checks clear` command. Clearing its last check makes the block `closed`. Never a human pass |
 
 An extra round is a normal fix round. Fix rounds are one per block: wait for every `review-file` ticket of the block and its tests, then send ONE fix message with every failing test and every open finding; a finding that arrives later waits for the next round (`skill/references/code.md` §4).
 The per-file cap still counts per file: one block round is one round for each file it touched.
+
+**Substitute reviews** (`review:substitute`, B630). When a file's review is still unavailable
+after the built-in recovery and the `review.on_unavailable` chain, the Go worker looks at the
+grant. No active grant: nothing changes, the review stays unavailable. An active grant without
+the scope: one signed `autopilot.decision` row to you (`acted: false`) per file and content, whose
+`owner_reason` and `owner_command` name the fix: `code-forge autopilot start --run <run> --until
+<time> --delegate L2 --allow review:substitute`; else the review retries when its provider
+answers again. With the scope: the worker picks the first configured route (the L2 ladder, then
+L3, L1, the other levels and the `review.on_unavailable` routes) on a provider none of the failed
+sessions used that a closed-book reviewer may use and the session layer can run, writes a signed
+`autopilot.decision` row (`decision: substitute`, `failed_providers`, `unavailable_reason`,
+`provider`, `model`) and runs one review there. Its `review.result`, `review.round` and
+`review.approved` rows carry `source: substitute` and `substitute: {provider, model}`. A critical
+finding still blocks: the substitute writes no approval while findings are open. `block close`
+counts a substitute approval only with an active grant holding the scope, the signed decision
+row for that file and content, no gate blocker and a signed green `gate.done` row; otherwise it
+refuses with a `substitute_review` blocker whose fix line is the `autopilot start` command above.
+A normal review of the changed file replaces the substitute. When none is runnable, the
+decision row says so (`owner_command: null`) and the review retries later.
 
 The **deny list** is fixed in the code. You cannot allow these, whatever you pass:
 
@@ -141,6 +197,32 @@ code-forge autopilot binnacle --run <run> --markdown   # write both files, print
 4. Use the **Full log** when you want to check one event in detail.
 5. Comment on any row of the doc. The orchestrator answers in that thread.
 
+### Ratify or revert what autopilot did
+
+```bash
+code-forge autopilot digest --run <run>            # every act that waits for your look
+code-forge autopilot digest --run <run> --json     # the same rows, as data
+code-forge autopilot ratify <row-id> --run <run>   # keep it
+code-forge autopilot revert <row-id> --run <run>   # undo it
+```
+
+The digest (Go engine, B635) lists one row per autopilot act you have not ratified or reverted:
+
+| Kind | What autopilot did | What revert does |
+|---|---|---|
+| `deferred-human` | closed a block as `closed_deferred_human` with its human checks open | the block goes back to `awaiting_human_check` |
+| `substitute` | approved a file with a substitute review | the approval no longer counts at close; `review-file <file> --block <id> --run <run> --fresh` runs the normal review |
+| `waiver` | waived a finding (by autopilot, or a counted agent waiver) | a signed `review.unwaived` row: the finding is open again |
+| `temp-config` | a `.code-forge.yml` value approved for a while that is still active | the window ends now and the old value comes back |
+| `extend` | moved a grant's end later | nothing: ratify only |
+| `until-done-end` | ended an until-done grant when every planned block closed | nothing: ratify only |
+
+Each row shows its id, kind, block, time, why, and the exact `ratify` and `revert` commands.
+Ratify and revert are yours only: they ask at a terminal (there is no `--yes`), and they are
+refused while a grant is active (stop it first). Each writes one signed `autopilot.ratify` or
+`autopilot.revert` row, and the row leaves the digest. Ratify works on an ended run too; revert
+needs an active run, except for a temporary config change.
+
 ## Stop it
 
 ```bash
@@ -151,8 +233,8 @@ It ends the grant now, with one signed `autopilot.stop` row, and prints the link
 paths. The orchestrator adds the stop as the newest Timeline and Full log row, writes a final
 Status at a glance, and leaves the doc as the record. Then it tells you in chat: the link, and
 "review Open questions and Actions only you can take before work resumes". At `--until`
-the grant expires by itself; the next autopilot or block command writes one `autopilot.expire`
-row.
+(or, for `--until-done`, when every planned block is closed or at the deadline) the grant expires
+by itself; the next autopilot or block command writes one `autopilot.expire` row.
 
 ## Privacy
 

@@ -17,6 +17,7 @@ import (
 	"github.com/ricardov03/code-forge/native/blockstate"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -38,6 +39,10 @@ func runBlockReady(args []string) int {
 	entry := blockObject(blockObject(p.record.Get("blocks")).Get(p.id))
 	if entry == nil {
 		return p.refusal("unknown_block", fmt.Sprintf("block %s is not in run %s", p.id, p.run))
+	}
+	if entry.Get("status") == humancheck.DeferredStatus {
+		// B632: say what the block is and what waits on the owner.
+		return p.refusal("no-block", fmt.Sprintf("block %s is %s in run %s: it closed under autopilot with its human checks deferred to the owner (code-forge run human-checks list --run %s)", p.id, humancheck.DeferredStatus, p.run, p.run))
 	}
 	if entry.Get("status") != "open" {
 		return p.refusal("no-block", fmt.Sprintf("block %s is not open in run %s", p.id, p.run))

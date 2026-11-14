@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/queue"
 	"github.com/ricardov03/code-forge/native/sign"
@@ -77,7 +78,7 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 	originCommits := map[string]map[string]bool{}
 	for _, field := range blocks {
 		b, _ := field.Value.(ledger.Object)
-		if text(b, "status") != "closed" {
+		if text(b, "status") != "closed" && text(b, "status") != humancheck.DeferredStatus {
 			continue
 		}
 		base, err := resolve(tree, text(b, "base_sha"))
@@ -427,7 +428,7 @@ func run(home, runID, blockID string, plain bool) (result Result, err error) {
 		replayFrom := oldBase
 		for _, field := range blocks {
 			b, _ := field.Value.(ledger.Object)
-			if text(b, "status") != "closed" {
+			if text(b, "status") != "closed" && text(b, "status") != humancheck.DeferredStatus {
 				continue
 			}
 			base, err := resolve(tree, text(b, "base_sha"))

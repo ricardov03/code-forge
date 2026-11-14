@@ -59,7 +59,7 @@ usage: code-forge author --job plan|harden --brief <file> [--facts <file>] [--dr
 Manage delegated run approvals, decisions, budgets, and activity records.
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]
+usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | digest --run <id> [--json] | ratify <row-id> --run <id> [--json] | revert <row-id> --run <id> [--json]
 ```
 
 ### autopilot start
@@ -120,6 +120,24 @@ usage: code-forge autopilot binnacle --run <id> [--json|--markdown] [--link <htt
 
 ```text
 usage: code-forge autopilot log --run <id> [--json|--markdown]
+```
+
+### autopilot digest
+
+```text
+usage: code-forge autopilot digest --run <id> [--json]
+```
+
+### autopilot ratify
+
+```text
+usage: code-forge autopilot ratify <row-id> --run <id> [--json]
+```
+
+### autopilot revert
+
+```text
+usage: code-forge autopilot revert <row-id> --run <id> [--json]
 ```
 
 ## block
@@ -747,10 +765,10 @@ usage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--
 
 ## run
 
-Start, inspect, reload, or end a run and manage its workers.
+Start, inspect, reload, or end a run, manage its workers, and list or clear its open human checks.
 
 ```text
-usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>
+usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id> | human-checks list --run <id> [--json] | human-checks clear --run <id> --block <id> --clause <C<n>> --note <text> [--json]
 ```
 
 ### run start
@@ -777,6 +795,13 @@ usage: code-forge run reload --run <id>
 
 ```text
 usage: code-forge run end --run <id>
+```
+
+### run human-checks
+
+```text
+usage: code-forge run human-checks list --run <id> [--json]
+usage: code-forge run human-checks clear --run <id> --block <id> --clause <C<n>> --note <text> [--json]
 ```
 
 ## s2

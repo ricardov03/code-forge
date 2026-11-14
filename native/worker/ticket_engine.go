@@ -345,7 +345,9 @@ func (w *TicketRunner) planOrdinary(t ledger.Object, cfg map[string]any, content
 			// B321: each route's timeouts and answers on this ticket
 			watch := newRouteWatch()
 			defer w.writeRouteOutcomes(id, watch, write)
-			return review.File(in, review.Deps{Spawn: watch.spawn(cfg, w.pooled(id, cfg, w.reviewSpawn(sopts, sdeps))), WriteRow: write, Warn: w.Warn,
+			// B630: the providers this review spawned on, for a substitute
+			track := &substTracker{}
+			deps := review.Deps{Spawn: track.spawn(cfg, watch.spawn(cfg, w.pooled(id, cfg, w.reviewSpawn(sopts, sdeps)))), WriteRow: write, Warn: w.Warn,
 				ReadRows: w.readRows, SchemaHistory: schemaHistory(w.readRows, w.Key, w.RunID, file, hash),
 				NeedsFileCarry: needsFileCarry(w.readRows, w.Key, w.RunID, block, file),
 				// B629: the review.on_unavailable walk's wait, and its check
@@ -368,7 +370,12 @@ func (w *TicketRunner) planOrdinary(t ledger.Object, cfg map[string]any, content
 						return nil, err
 					}
 					return fb, nil
-				}})
+				}}
+			res, err := review.File(in, deps)
+			if err != nil || !review.SubstituteApplies(res) {
+				return res, err
+			}
+			return w.substitute(in, deps, res, track.failed(res), block, file, hash, write)
 		}}
 	// B517: a recheck or patch_check round spawns one L2 reviewer session
 	// through the same pool, with no timeout fallback (fixloop.mjs recheckSession)
@@ -481,6 +488,11 @@ func (w *TicketRunner) engineResult(o ledger.Object, base func(string, string) l
 	}
 	if hasKey(o, "sessions") {
 		out.Set("sessions", o.Get("sessions"))
+	}
+	if o.Get("source") == review.SubstituteSource {
+		// B630: a substitute review's result says so, and on which route
+		out.Set("source", review.SubstituteSource)
+		out.Set("substitute", o.Get("substitute"))
 	}
 	return out
 }

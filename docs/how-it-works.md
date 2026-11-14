@@ -263,13 +263,15 @@ For `block open` and `block amend-acceptance`, `--acceptance <file>` reads a JSO
 ```
 
 The equivalent JSON is `[{"clause":"The command prints its usage and exits successfully","tests":["test/cli/verb-help.test.mjs"]}]`.
-Device checks may instead use `{clause, kind: human_check}` without `tests`.
+Device checks may instead use `{clause, kind: human_check}` without `tests`. A `human_check` clause may also carry `waits_for: "<text>"`, what the human must check (for example `device test on iPhone`); it must be a non-empty string and only `human_check` clauses may have it (`bad-acceptance` otherwise, at `block open` and `block amend-acceptance`). Acceptance files without it behave as before.
 For `block open`, `--brief <file>` must name a file inside the repository; it cannot be inline
 brief text or a file outside the repo.
 
 The human can correct an open block's snapshotted clauses with `code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>`. Both terminals and confirmation are required; there is no `--yes`, and an active autopilot grant refuses it. The file follows the same rules as `block open`; invalid or unchanged lists write nothing. One signed `block.acceptance_amended` row records the old and new hashes and the reason. Earlier reviews no longer count, and the next review request or watch tick reviews the new clauses. Coders never run this verb.
 
 UI acceptance may include `kind: human_check` clauses without tests, recorded as `human_checks`. After all code gates pass, `block close` leaves such a block `awaiting_human_check`, prints every check and the next command, and delays its done signal. Status and report list the waiting ids, and `run end` refuses until the human checks the device and types `code-forge block human-pass <id> --run <r> --note "<device check note>" [--proof <existing-path>]` in a terminal, or stops the block. The note is required; `--proof` is optional, and when it is given the path must exist. When omitted, the row records `proof: null`. Human pass records a signed human row and closes it; there is no `--yes`, and an active autopilot grant refuses the verb.
+
+The run's human-check ledger lists every open `human_check` clause of every block that is not stopped: `code-forge run human-checks list --run <r> [--json]` prints each as block, clause id, check text, `waits_for` and the block's `opened_at` (JSON: `{run, open: [{block, clause, check, waits_for, opened_at}]}`). The clause id is `C<n>`, the clause's 1-based place in the block's acceptance list. The open side comes from the run record, so runs opened before this ledger existed list their checks too; the cleared side is signed rows in the run's ledger, so only rows that verify with the run key count: a `block.human_pass` row clears every check it names, and `code-forge run human-checks clear --run <r> --block <id> --clause <C<n>> --note <text> [--json]` clears one clause with a signed `human_check.cleared` row (`block`, `clause`, `check`, `waits_for`, `note`, `by: human`). Clear is the owner's verb, guarded like `block human-pass`: it asks at a terminal (there is no `--yes`), refuses while an autopilot grant is active, refuses a clause that is not open (`human-check-not-open`) and needs an active run. It does not change the block's status; a block awaiting its human check still closes with `block human-pass`. Under an active autopilot grant that allows `human-pass:deferred` (B632, Go engine), `block open` accepts `human_check` clauses, and a block whose every other close gate passes closes as `closed_deferred_human` instead of `awaiting_human_check`: one signed `autopilot.decision` row (`scope`, `block`, `clauses` with `clause`, `check` and `waits_for`, the distinct `waits_for` list) takes the place of `block.awaiting_human_check`, the close prints each deferred check with the owner's `run human-checks clear` command (JSON: `decision_id` and `deferred_human_checks`), and the done signal is written. The clauses stay open: `run human-checks list` marks each `deferred (block closed_deferred_human)` (JSON `"deferred": true`), the binnacle shows one owner line per deferred block, `block ready` names the status, and the block lands, rebases and satisfies `--after` like a closed block. When `run human-checks clear` clears the last open clause of a deferred block, the block becomes `closed` with one more signed row, `block.human_checks_cleared` (`block`, `status: closed`, `by: human`); the text adds `block <id> closed (its last deferred human check is cleared)` and the JSON `"block_status": "closed"`. Without the scope, or with it denied, the close is `awaiting_human_check` as before, and any other blocker still blocks.
 
 For design first, give the design block an acceptance clause such as `{clause: "Owner approves the design", kind: human_check}`. Open it, finish its work and pass its code gates, then close it. The owner approves in their terminal before code blocks open:
 
@@ -1057,6 +1059,49 @@ benched becomes the primary, else the first `review.on_unavailable` route that i
 success of the route on another ticket writes `review.route_reset` (`was_benched`) and ends the
 streak; `run start --reattach` (its signed `worker.reattach` row) clears every bench. The state
 lives only in the run's signed ledger rows, so a worker restart keeps it.
+
+**A substitute review under autopilot** (B630, Go only, no Node parity). When the review is
+still unavailable after the `review.on_unavailable` chain and the run has an active autopilot
+grant, the worker asks the grant for scope `review:substitute`. Without the scope it writes one
+signed `autopilot.decision` row to the owner (`acted: false`, once per file and content) that
+names the owner's command (`code-forge autopilot start --run <run> --until <time> --delegate L2
+--allow review:substitute`) and leaves the file unavailable, to retry when its provider answers
+again. With the scope it writes a signed `autopilot.decision` row (`decision: substitute`, the
+failed providers, the reason, the substitute's provider and model) and runs one closed-book
+review on the first configured route whose provider none of the failed sessions used. The
+`review.result`, `review.round` and `review.approved` rows it leads to carry `source:
+substitute`. `block close` counts that approval only under the active scope, with the decision
+row and green gates; otherwise it refuses with `substitute_review`. With no active grant nothing
+changes.
+
+The order in one ticket is fixed: (1) the built-in recovery (the `levels.L2` ladder, the
+same-model timeout retry, `review.routes`, `review.second_levels`), then (2) the
+`review.on_unavailable` chain with its backoff and `review.unavailable_fallback` rows, then (3)
+the substitute review. A chain route that answers ends the walk and no substitute runs. The
+substitute runs only when the chain is used up, so its `autopilot.decision` row comes after the
+chain's rows, and its `failed_providers` include the chain's providers. Routes benched by the
+route bench are out of the ladder and the chain; the substitute's own session goes through the
+same route watch. A reopened file (`block reopen --file`) gets the normal recheck round, never a
+substitute.
+
+**The owner's digest of autopilot acts** (B635, Go only, no Node parity). `code-forge autopilot
+digest --run <r> [--json]` lists every signed autopilot act of the run that the owner has not
+ratified or reverted: deferred human checks (`human-pass:deferred`, while the block is still
+`closed_deferred_human`), substitute reviews (`review:substitute` decisions that acted), waivers
+by autopilot and counted agent waivers (until a human `review.unwaived` row), temporary config
+changes (approvals still active) and grant extends and until-done ends. Each row has a stable id
+(`dg-` and the first 12 hex digits of its source row's MAC), the kind, block, time, why, and the
+exact `ratify` and `revert` commands. `autopilot ratify <id> --run <r>` and `autopilot revert
+<id> --run <r>` are the owner's: a yes at a terminal (no `--yes`), refused while an autopilot
+grant is active. Each writes one signed `autopilot.ratify` or `autopilot.revert` row (`digest_id`,
+`kind`, `source_event`, the block, file, finding, decision or approval it names, `by: human`),
+and the row leaves the digest. Revert also undoes the act: a deferred block goes back to
+`awaiting_human_check` (a signed `block.awaiting_human_check` row); a waiver gets a signed
+`review.unwaived` row, so neither the gate nor the agent-waiver count uses it any more; a
+substitute approval no longer counts at close and `review-file <file> --fresh` re-runs its review
+instead of keeping it; an approval's window ends now and its old value is restored as at its own
+end. An extend or until-done end has nothing to undo once its grant ended: ratify only. Ratify
+also works on an ended run; revert needs an active run, except a temporary config change.
 
 ### How code-forge picks the reviewer
 

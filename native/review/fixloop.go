@@ -415,6 +415,11 @@ func RunRound(state ledger.Object, deps LoopDeps, kind string) (ledger.Object, e
 		{Key: "level", Value: draft.Get("level")}, {Key: "kind", Value: kind}, {Key: "open_before", Value: float64(openBefore)},
 		{Key: "closed", Value: 0.0}, {Key: "new_in_hunks", Value: float64(len(fixNow))}, {Key: "late", Value: 0.0},
 		{Key: "open_after", Value: float64(len(fixNow))}, {Key: "tokens_in", Value: nil}, {Key: "tokens_out", Value: nil}}
+	// B630: a substitute review's round and approval say so
+	substitute := result.Get("source") == SubstituteSource
+	if substitute {
+		roundRow.Set("source", SubstituteSource)
+	}
 	if len(fixNow) == 0 {
 		draft.Set("status", "complete")
 		draft.Set("next", nextStep("action", "complete"))
@@ -445,7 +450,11 @@ func RunRound(state ledger.Object, deps LoopDeps, kind string) (ledger.Object, e
 		state.Set(f.Key, f.Value)
 	}
 	if state.Get("status") == "complete" {
-		note(deps.WriteRow, ledger.Object{{Key: "event", Value: "review.approved"}, {Key: "file", Value: file}, {Key: "content_hash", Value: hash}, {Key: "round", Value: state.Get("round")}})
+		approved := ledger.Object{{Key: "event", Value: "review.approved"}, {Key: "file", Value: file}, {Key: "content_hash", Value: hash}, {Key: "round", Value: state.Get("round")}}
+		if substitute {
+			approved.Set("source", SubstituteSource)
+		}
+		note(deps.WriteRow, approved)
 	}
 	return state, nil
 }

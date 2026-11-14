@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/queue"
@@ -95,7 +96,7 @@ func RebaseCheck(home, root, run, id string, exclude func(string) (string, bool)
 		snapshot := state.CloneObject(b)
 		wt := rebaseObject(b, "worktree")
 		status := rebaseText(b, "status")
-		if (status != "open" && status != "closed" && status != "awaiting_human_check") || wt == nil {
+		if (status != "open" && status != "closed" && status != "awaiting_human_check" && status != humancheck.DeferredStatus) || wt == nil {
 			return rebaseError("no-block", fmt.Sprintf("block %s is not open in run %s", id, run))
 		}
 		closed := status != "open"
