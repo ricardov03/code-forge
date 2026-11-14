@@ -153,7 +153,7 @@ func TestB635DigestListsActs(t *testing.T) {
 			t.Fatalf("%v = %d %q", args, code, errText)
 		}
 	}
-	if code, out, _ := apdgSettleCall(t, f, "digest", "--help"); code != 0 || out != "usage: code-forge autopilot digest --run <id> [--json]\n" {
+	if code, out, _ := apdgSettleCall(t, f, "digest", "--help"); code != 0 || out != helpWrapped(t, "autopilot digest", "usage: code-forge autopilot digest --run <id> [--json]\n") {
 		t.Fatalf("help = %d %q", code, out)
 	}
 }
