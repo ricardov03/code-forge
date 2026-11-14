@@ -5,6 +5,8 @@ Autopilot lets the owner leave for a set time. A delegate (a fresh L2 or L3 sess
 ## §1 Start — only after the owner asks
 
 1. The owner asks for autopilot and names the window, the delegate level and the scopes. Run `forge autopilot start --run <r> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>]`. The owner confirms it at the prompt. Never pass `--yes` unless the owner said so in chat.
+   - When the owner says "until it is done": `--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>]` in place of `--until`. The grant ends when every planned block is closed (`--blocks`, else every block opened in the run; give `--blocks` when more waves follow), or at the deadline. `--until` and `--until-done` never go together.
+   - The owner wants more time: `forge autopilot extend --run <r> --until <time>` (`--deadline <time>` for an until-done grant). Owner-only, like start: it prompts; `--yes` only when the owner said so in chat. It writes one signed `autopilot.extend` row and only moves the end later.
 2. **One doc per run.** First run `forge autopilot status --run <r>`: a link there means the doc exists (a lost session left it) — continue in it, never create a second doc for the same run. No link: create ONE Claude Docs doc titled `<project> autopilot run — <date>` with two tabs, born in one call (the exact steps: `adapters/claude-code.md` §4).
    - **Binnacle** (the main tab): its outline is `forge autopilot binnacle --run <r> --json` — the title and byline, then 7 sections: Status at a glance, Decisions, Blocks, Open questions, Actions only you can take, Incidents, Timeline. One pending block per section.
    - **Full log**: one table from `forge autopilot log --run <r> --json` — Time, Event, Block, File, Detail, Link — newest first. One pending block for it.
@@ -34,7 +36,7 @@ The allowable scope `close:routine` means “close a routine block.” It lets p
 
 ## §3 Stop — at the owner's return or `until`
 
-1. `forge autopilot stop --run <r>` when the owner is back (at `until` the grant expires by itself; `forge autopilot status --run <r>` then says so).
+1. `forge autopilot stop --run <r>` when the owner is back (at `until` the grant expires by itself; an until-done grant ends when its planned blocks are all closed or at its deadline; `forge autopilot status --run <r>` then says so).
 2. Add the stop (or expiry) event as the newest Timeline row and the newest Full log row, then write the final Status at a glance (the window's end, the result, the spend). Leave the doc as the record of the run; do not delete or move it.
 3. Tell the owner in chat: the link, and "review Open questions and Actions only you can take before work resumes".
 
