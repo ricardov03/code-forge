@@ -1059,6 +1059,9 @@ skipped with `skipped: closed-book` or `not-runnable` and no wait. The first rou
 valid review ends the walk (the session's `schema_fallback` names `review.on_unavailable` and
 the route). A broken answer (a schema miss) also ends it. When every route fails, the session is
 `unavailable` as before. Consensus slots and fix-loop rechecks do not walk the chain.
+`run reload` takes a change to `review.on_unavailable` or `review.on_unavailable_backoff_s` as a
+review-only change (like `review.routes`), even when a frozen key also changed on disk, and a live
+worker uses the new chain from its next ticket (B650).
 
 A route that timed out on two tickets in a row in a run is **benched** for the rest of that run
 (B321). Each ticket that a route only timed out on writes a signed `review.route_timeout` row

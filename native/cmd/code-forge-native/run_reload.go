@@ -747,6 +747,8 @@ func rrDeepCloneJSON(value any) any {
 
 // reviewOnlyReloadGo is reviewOnlyReload: nil when the reload is more than a
 // review recovery; supported false for a shape Node handles with JS quirks.
+// B650: Go also takes review.on_unavailable and on_unavailable_backoff_s
+// (Node's list stops at session_timeout_s).
 func reviewOnlyReloadGo(before, after ledger.Object, frozen []string) (ledger.Object, bool) {
 	next := rrDeepCloneJSON(before).(ledger.Object)
 	review := ledger.Object{}
@@ -764,7 +766,8 @@ func reviewOnlyReloadGo(before, after ledger.Object, frozen []string) (ledger.Ob
 			return nil, false
 		}
 	}
-	for _, key := range []string{"second_levels", "routes", "session_timeout_s"} {
+	// B650: review.on_unavailable and its backoff are review recovery too (B629)
+	for _, key := range []string{"second_levels", "routes", "session_timeout_s", "on_unavailable", "on_unavailable_backoff_s"} {
 		if value, ok := rrObjGet(afterReview, key); ok {
 			review.Set(key, rrDeepCloneJSON(value))
 		} else {
