@@ -130,8 +130,8 @@ func TestNodeAppendDuringGoTornTailRecovery(t *testing.T) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	// Give the foreign writer time to observe the lock during the recovery read.
 	// Neither runtime rotates this fixture, so every complete row must remain.
+	// The large torn tail keeps Go's recovery read busy while Node waits on the lock.
 	prefix := "{\"event\":\"before\",\"note\":\"información 🚀\"}\n"
 	if err := os.WriteFile(filepath.Join(dir, "fixture.jsonl"), []byte(prefix+strings.Repeat("x", 64*1024*1024)), 0600); err != nil {
 		t.Fatal(err)
@@ -148,6 +148,12 @@ func TestNodeAppendDuringGoTornTailRecovery(t *testing.T) {
 		ctx, cancel = context.WithDeadline(ctx, deadline.Add(-time.Until(deadline)/10))
 	}
 	defer cancel()
+	// Every step waits on a signal, never on a clock (B624): Go holds its first
+	// recovery lock until Node reports it saw that lock with the torn tail, and
+	// after that the writers alternate, each Go append starting only after Node
+	// reports its previous append. Both still race for the shared lock on every
+	// round, but neither waits longer than one append of the other, so neither
+	// runtime's 5 s lock deadline depends on host load.
 	cmd := exec.CommandContext(ctx, node, "--input-type=module", "-e", `
 import fs from 'node:fs';
 import { existsSync, statSync } from 'node:fs';
@@ -163,11 +169,12 @@ const { appendRow } = await import(pathToFileURL(process.argv[1]));
 const lock = process.argv[2] + '/fixture.append.lock';
 console.log('ready');
 while (!existsSync(lock)) await delay(1);
-// The torn tail still exists while Go holds its first recovery lock. Observing
-// a later append lock would not prove contention with recovery.
+// Go holds its first recovery lock until it reads the next line, so the torn
+// tail is still present here. A smaller file means Go recovered without Node.
 console.log(statSync(process.argv[2] + '/fixture.jsonl').size > 64 * 1024 * 1024 ? 'contending' : 'missed recovery');
 for (let i = 0; i < 100; i++) {
   await appendRow({ event: 'node', id: i }, { slug: 'fixture', rotateAtBytes: 128 * 1024 * 1024 });
+  console.log('node ' + i);
 }
 `, module, dir)
 	cmd.Env = append(os.Environ(), "HOME="+home)
@@ -185,13 +192,34 @@ for (let i = 0; i < 100; i++) {
 	if !scanner.Scan() || scanner.Text() != "ready" {
 		t.Fatalf("Node poller did not start: %s (%v)", &stderr, scanner.Err())
 	}
+	contention := "no recovery hook call"
+	held := false
+	defer ledger.SetBeforeTornTailRecovery(func() {
+		if held {
+			return
+		}
+		held = true
+		if !scanner.Scan() {
+			contention = fmt.Sprintf("Node exited before seeing the lock: %v", scanner.Err())
+			return
+		}
+		contention = scanner.Text()
+	})()
 	for i := 0; i < 100; i++ {
+		if i > 0 {
+			if want := fmt.Sprintf("node %d", i-1); !scanner.Scan() || scanner.Text() != want {
+				t.Fatalf("want %q from Node before Go append %d, got %q: %s (%v)", want, i, scanner.Text(), &stderr, scanner.Err())
+			}
+		}
 		if _, err := ledger.AppendRow(dir, "fixture", map[string]any{"event": "go", "id": i}, 128*1024*1024); err != nil {
 			t.Fatal(err)
 		}
+		if i == 0 && contention != "contending" {
+			t.Fatalf("Node must contend with Go recovery, got %q: %s", contention, &stderr)
+		}
 	}
-	if !scanner.Scan() || scanner.Text() != "contending" {
-		t.Fatalf("Node must contend with Go recovery: %s (%v)", &stderr, scanner.Err())
+	if want := "node 99"; !scanner.Scan() || scanner.Text() != want {
+		t.Fatalf("want %q from Node, got %q: %s (%v)", want, scanner.Text(), &stderr, scanner.Err())
 	}
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("Node append failed: %v; %s", err, &stderr)
@@ -287,5 +315,49 @@ func TestAppendLockSurvivesKilledHolder(t *testing.T) {
 	row, ok := rows[0].(map[string]any)
 	if !ok || row["event"] != "after-kill" {
 		t.Fatalf("recovered row must be the parent's after-kill event: %v", rows[0])
+	}
+}
+
+// fakeAppendPS installs a ps script for the lock identity and restores the
+// real one (and drops the cached identity) when the test ends.
+func fakeAppendPS(t *testing.T, script string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ps")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ledger.SetAppendPS(path))
+}
+
+func TestAppendRetriesLockIdentityAfterPSFailure(t *testing.T) {
+	// Node's `selfStart ??= readStartTime(...)` retries after a failed ps read;
+	// one failed read must not fail every later append in the process.
+	marker := filepath.Join(t.TempDir(), "failed-once")
+	fakeAppendPS(t, fmt.Sprintf("if [ ! -e %q ]; then : > %q; exit 1; fi\nexec /bin/ps \"$@\"\n", marker, marker))
+	dir := t.TempDir()
+	_, err := ledger.AppendRow(dir, "fixture", map[string]any{"event": "first"}, ledger.DefaultRotateAtBytes)
+	if err == nil || !strings.Contains(err.Error(), "cannot determine ledger lock owner process start time") {
+		t.Fatalf("first append with failing ps: want identity error, got %v", err)
+	}
+	if _, err := ledger.AppendRow(dir, "fixture", map[string]any{"event": "second"}, ledger.DefaultRotateAtBytes); err != nil {
+		t.Fatalf("second append after ps recovered: %v", err)
+	}
+	rows, err := ledger.ReadRows(dir, "fixture")
+	if err != nil || len(rows) != 1 || rows[0].(map[string]any)["event"] != "second" {
+		t.Fatalf("want only the second row, got %v (%v)", rows, err)
+	}
+}
+
+func TestAppendLockIdentityAllowsSlowPS(t *testing.T) {
+	// Node gives ps 5000 ms (readStartTime); a ps slower than one second on a
+	// loaded host must still produce the lock identity.
+	fakeAppendPS(t, "sleep 1.5\nexec /bin/ps \"$@\"\n")
+	dir := t.TempDir()
+	if _, err := ledger.AppendRow(dir, "fixture", map[string]any{"event": "slow-ps"}, ledger.DefaultRotateAtBytes); err != nil {
+		t.Fatalf("append with slow ps: %v", err)
+	}
+	rows, err := ledger.ReadRows(dir, "fixture")
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("want one row, got %v (%v)", rows, err)
 	}
 }

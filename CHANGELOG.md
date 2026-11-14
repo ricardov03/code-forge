@@ -21,6 +21,10 @@ waits on a second real consumer (plan §10.4, Q17).
 - The Go `worker` serves an answers ticket itself (the refusals, the answers packet, the L2 answers session, the verdicts and the signed `review.answered` row) with the same ledger rows and files as Node, instead of handing it to Node; a case Go cannot print like Node still hands over (B609)
 - Each Go binary now ships in its own npm package, `@codedology/code-forge-<darwin-arm64|darwin-x64|linux-x64|linux-arm64>`, an optional dependency at the same exact version, so npm installs only your platform's binary and the main package drops `native/bin` (under 5 MB). `bin/code-forge`, `scripts/install.sh`, `code-forge setup` and the Go binary look under the main package, then beside it, then in the dev build `native/bin/<target>`; a source checkout uses its own build only. `npm run release` writes the four packages to `dist/npm/<target>/`, checks every pack (main <5 MB with no `native/bin`, platform <35 MB) and prints the four platform publishes before `npm publish` (B606)
 
+### Fixed
+
+- The Go ledger writer now gives `ps` 5 seconds to read its own process start time for the append lock, as Node does (was 1 second), and retries a failed read on the next append as Node does, instead of failing every later ledger append in that process after one slow `ps` on a loaded host. B624
+
 ## [0.23.0] — 2026-11-13
 
 ### Changed

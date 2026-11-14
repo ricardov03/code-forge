@@ -83,6 +83,9 @@ func AppendObject(dir, slug string, row Object, rotateAtBytes int64) (Object, er
 			return nil, err
 		}
 	}
+	if beforeTornTailRecovery != nil {
+		beforeTornTailRecovery()
+	}
 	if err := truncateTornTail(file); err != nil {
 		return nil, err
 	}
@@ -103,6 +106,11 @@ func AppendObject(dir, slug string, row Object, rotateAtBytes int64) (Object, er
 	}
 	return normalized, nil
 }
+
+// beforeTornTailRecovery is nil in production. Tests set it to hold the append
+// lock with the torn tail still present until a foreign writer signals that it
+// has seen the lock, so contention with recovery waits on a signal, not a clock.
+var beforeTornTailRecovery func()
 
 func isNumber(value any) bool {
 	switch value.(type) {

@@ -22,18 +22,26 @@ type appendOwner struct {
 // Shared with Node: older writers may still be publishing their identity.
 const unidentifiedLockGrace = 30 * time.Second
 
+// appendSelf caches this process's lock identity once ps has produced it.
+// A failed read is not cached: Node's `selfStart ??=` retries on the next
+// append, so one slow ps on a loaded host must not fail every later append.
 var appendSelf struct {
-	sync.Once
+	sync.Mutex
 	data []byte
-	err  error
 }
 
+// appendPSPath is the preferred ps binary; tests point it at a fake.
+var appendPSPath = "/bin/ps"
+
+// appendPSTimeout matches Node's readStartTime execFileSync timeout (5000 ms).
+const appendPSTimeout = 5 * time.Second
+
 func appendStartTime(pid int) (string, error) {
-	ps := "/bin/ps"
+	ps := appendPSPath
 	if _, err := os.Stat(ps); err != nil {
 		ps = "ps"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), appendPSTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, ps, "-o", "lstart=", "-p", strconv.Itoa(pid))
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
@@ -70,33 +78,44 @@ func staleAppendLock(file string) (bool, error) {
 	return err == nil && start != "" && start != strings.Join(strings.Fields(owner.StartedAt), " "), nil
 }
 
+func appendIdentity() ([]byte, error) {
+	appendSelf.Lock()
+	defer appendSelf.Unlock()
+	if appendSelf.data != nil {
+		return appendSelf.data, nil
+	}
+	start, err := appendStartTime(os.Getpid())
+	if err != nil || start == "" {
+		return nil, fmt.Errorf("cannot determine ledger lock owner process start time: %v", err)
+	}
+	data, err := json.Marshal(appendOwner{os.Getpid(), start})
+	if err != nil {
+		return nil, err
+	}
+	appendSelf.data = data
+	return data, nil
+}
+
 // Reclamation uses this SAME link-published protocol on file+".reap".
 // Serializing stale checks and rename prevents two reapers from moving a new
 // live owner's lock after one has already replaced the stale inode. A killed
 // reaper is itself recoverable by the same protocol, with the same deadline.
 func lockAppend(file, slug string, deadline time.Time) (func(), error) {
-	appendSelf.Do(func() {
-		start, err := appendStartTime(os.Getpid())
-		if err != nil || start == "" {
-			appendSelf.err = fmt.Errorf("cannot determine ledger lock owner process start time: %v", err)
-			return
-		}
-		appendSelf.data, appendSelf.err = json.Marshal(appendOwner{os.Getpid(), start})
-	})
-	if appendSelf.err != nil {
-		return nil, appendSelf.err
+	identity, err := appendIdentity()
+	if err != nil {
+		return nil, err
 	}
 	f, err := os.CreateTemp(filepath.Dir(file), filepath.Base(file)+".tmp.")
 	if err != nil {
 		return nil, err
 	}
 	defer os.Remove(f.Name())
-	n, writeErr := f.Write(appendSelf.data)
+	n, writeErr := f.Write(identity)
 	closeErr := f.Close()
 	if writeErr != nil {
 		return nil, writeErr
 	}
-	if n != len(appendSelf.data) {
+	if n != len(identity) {
 		return nil, io.ErrShortWrite
 	}
 	if closeErr != nil {
