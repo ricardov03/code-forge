@@ -58,6 +58,8 @@ var apdAllowableWhat = map[string]string{
 	"round:extra":   "one fix round past the cap for a file",
 	"model:choose":  "choose the coder level for a block",
 	"close:routine": "close a routine block",
+	// B630
+	"review:substitute": "run a substitute review on another provider when a file's review stays unavailable",
 }
 
 // apdTimeoutMs is the ask's session timeout (0 = spawn.mjs's default, as the

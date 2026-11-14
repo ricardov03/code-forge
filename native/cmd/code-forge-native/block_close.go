@@ -507,6 +507,12 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	gateReason := closeLockReason(lockBlockers, gatecheck.Reason(gate.Blockers))
 	gateIndex := len(checks)
 	checks = append(checks, closeCheck{gateReason, append(append([]gatecheck.Blocker{}, lockBlockers...), gate.Blockers...)})
+	if external == "" {
+		// B630: a file approved only by a substitute review
+		if check := substCloseCheck(record, run, id, rows, key, kept, gate, time.Now()); check.Reason != "" {
+			checks = append(checks, check)
+		}
+	}
 	lines, lineWarnings := closeReviewedLines(run, id, top, qdir, entry, kept, gate.Waived, inTree, external == "" && len(gate.Blockers) == 0 && len(lockBlockers) == 0)
 	if _, has := flags["report"].(string); has && external == "" {
 		if reportErr != nil {
@@ -1551,6 +1557,9 @@ func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[s
 			fix += "; stop this attempt, then reopen with --kind code --attempt <n+1> and the original base, ownership and acceptance, or split the block within light limits"
 		case "no_changes":
 			argv = []string{"code-forge", "block", "close", id, "--run", run, "--no-require-reviews"}
+		case substCloseCode:
+			// B630: the owner grants the scope; the review stays the substitute's
+			argv = []string{"code-forge", "autopilot", "start", "--run", run, "--until", "<time>", "--delegate", "L2", "--allow", autopilot.SubstituteScope}
 		case "not_approved", "late_unruled", "review_cap", "autopilot_waiver_invalid":
 			if p.File != "" {
 				if p.Finding != "" {

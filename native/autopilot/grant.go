@@ -265,6 +265,31 @@ func RoutineRefusal(result Result) string {
 	return ""
 }
 
+// SubstituteScope is the scope that lets the orchestrator run a substitute
+// review (B630).
+const SubstituteScope = "review:substitute"
+
+// ScopeRefusal is RoutineRefusal for any scope: "" when result's grant is
+// active and allows scope; else no-grant, the grant's state, denied or
+// not-allowed.
+func ScopeRefusal(result Result, scope string) string {
+	if result.State != "active" {
+		if result.State == "none" || result.State == "" {
+			return "no-grant"
+		}
+		return result.State
+	}
+	deny, _ := result.Grant.Get("deny").([]any)
+	allow, _ := result.Grant.Get("scopes").([]any)
+	if slices.Contains(deny, any(scope)) {
+		return "denied"
+	}
+	if !slices.Contains(allow, any(scope)) {
+		return "not-allowed"
+	}
+	return ""
+}
+
 func ActiveGrantMessage(run, until string) string {
 	return "run " + run + " already has an active autopilot grant until " + until + "; stop it first with code-forge autopilot stop --run " + run
 }

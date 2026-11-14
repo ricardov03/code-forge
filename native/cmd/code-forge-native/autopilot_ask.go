@@ -27,7 +27,7 @@ var (
 )
 
 // autopilotScopeCategory is SCOPE_CATEGORY (src/autopilot/scopes.mjs).
-var autopilotScopeCategory = map[string]string{"waive:warning": "review", "waive:nit": "review", "round:extra": "coding", "model:choose": "coding"}
+var autopilotScopeCategory = map[string]string{"waive:warning": "review", "waive:nit": "review", "round:extra": "coding", "model:choose": "coding", "review:substitute": "review"}
 
 func autopilotJSTrim(s string) string { return strings.TrimFunc(s, autopilotJSSpace) }
 

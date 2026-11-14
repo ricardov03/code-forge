@@ -39,9 +39,29 @@ scopes, the deny list, the spend per category, and where the log is.
 | `round:extra` | one fix round past the review cap for a file |
 | `model:choose` | choose the coder level for a block |
 | `close:routine` | close a routine block when `close.require_human` is on: every changed file approved, a green gate row, no waivers, no transcript hits. Never `block close --decide` |
+| `review:substitute` | run one substitute review of a file whose review stays unavailable after the built-in recovery and `review.on_unavailable`: a closed-book reviewer on a provider none of the failed sessions used. Each substitute gets a signed `autopilot.decision` row first, and `block close` counts its approval only under this scope with every gate green |
 
 An extra round is a normal fix round. Fix rounds are one per block: wait for every `review-file` ticket of the block and its tests, then send ONE fix message with every failing test and every open finding; a finding that arrives later waits for the next round (`skill/references/code.md` §4).
 The per-file cap still counts per file: one block round is one round for each file it touched.
+
+**Substitute reviews** (`review:substitute`, B630). When a file's review is still unavailable
+after the built-in recovery and the `review.on_unavailable` chain, the Go worker looks at the
+grant. No active grant: nothing changes, the review stays unavailable. An active grant without
+the scope: one signed `autopilot.decision` row to you (`acted: false`) per file and content, whose
+`owner_reason` and `owner_command` name the fix: `code-forge autopilot start --run <run> --until
+<time> --delegate L2 --allow review:substitute`; else the review retries when its provider
+answers again. With the scope: the worker picks the first configured route (the L2 ladder, then
+L3, L1, the other levels and the `review.on_unavailable` routes) on a provider none of the failed
+sessions used that a closed-book reviewer may use and the session layer can run, writes a signed
+`autopilot.decision` row (`decision: substitute`, `failed_providers`, `unavailable_reason`,
+`provider`, `model`) and runs one review there. Its `review.result`, `review.round` and
+`review.approved` rows carry `source: substitute` and `substitute: {provider, model}`. A critical
+finding still blocks: the substitute writes no approval while findings are open. `block close`
+counts a substitute approval only with an active grant holding the scope, the signed decision
+row for that file and content, no gate blocker and a signed green `gate.done` row; otherwise it
+refuses with a `substitute_review` blocker whose fix line is the `autopilot start` command above.
+A normal review of the changed file replaces the substitute. When none is runnable, the
+decision row says so (`owner_command: null`) and the review retries later.
 
 The **deny list** is fixed in the code. You cannot allow these, whatever you pass:
 
