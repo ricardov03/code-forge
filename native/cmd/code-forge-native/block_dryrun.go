@@ -118,6 +118,18 @@ func dryRunPrint(stdout io.Writer, verb, id string, formatted []any, jsonFlag bo
 // closeDryRun is block close <id> --run <r> --dry-run [--json] (args without
 // --dry-run). It runs the close's read-only boundary and never hands over.
 func closeDryRun(args []string) int {
+	id, rows, flags, code := closeDryRows(args, os.Stderr)
+	if code >= 0 {
+		return code
+	}
+	return dryRunPrint(os.Stdout, "close", id, rows, flags["json"] == true)
+}
+
+// closeDryRows runs the close preview and returns its blocker rows (the
+// dry-run shape with clears_by) and the block id. code is -1 when rows are valid, else the
+// exit code of a usage error (2) or of Node's throw guard (1); its message
+// went to stderr. B626 block settle re-derives its blocker list through it.
+func closeDryRows(args []string, errOut io.Writer) (id string, rows []any, flags map[string]any, code int) {
 	flags, pos, message := closeFlags(args)
 	if message == "" {
 		for _, flag := range []string{"decide", "auto-claim", "no-require-reviews"} {
@@ -127,18 +139,19 @@ func closeDryRun(args []string) int {
 		}
 	}
 	if message != "" {
-		fmt.Fprintln(os.Stderr, "block close:", message)
-		return 2
+		fmt.Fprintln(errOut, "block close:", message)
+		return "", nil, flags, 2
 	}
 	if len(pos) == 0 || pos[0] == "" || blockString(flags["run"]) == "" {
-		fmt.Fprintln(os.Stderr, "block close: a block id and --run are required")
-		return 2
+		fmt.Fprintln(errOut, "block close: a block id and --run are required")
+		return "", nil, flags, 2
 	}
-	id, run := pos[0], blockString(flags["run"])
+	id = pos[0]
+	run := blockString(flags["run"])
 	var stderr strings.Builder
 	dry := &closeDry{}
 	reason := hCloseAutoClaim
-	code := 0
+	code = 0
 	if !closeTextSafe(strings.Join(args, "\n")) {
 		code = landHandover
 		reason = hCloseUnsupportedFlag
@@ -146,8 +159,8 @@ func closeDryRun(args []string) int {
 		code = blockCloseStepWithReason(args, &landStep{preflight: true, stdout: io.Discard, stderr: &stderr, dry: dry}, &reason)
 	}
 	if code == 2 {
-		fmt.Fprint(os.Stderr, stderr.String())
-		return 2
+		fmt.Fprint(errOut, stderr.String())
+		return "", nil, flags, 2
 	}
 	if code == landHandover {
 		// The real close would hand this case to Node; Go cannot preview it.
@@ -162,12 +175,12 @@ func closeDryRun(args []string) int {
 	}
 	for _, b := range dry.blockers {
 		if gatecheck.LandThrows(b) {
-			fmt.Fprintln(os.Stderr, "block close: arg.replaceAll is not a function")
-			return 1
+			fmt.Fprintln(errOut, "block close: arg.replaceAll is not a function")
+			return id, nil, flags, 1
 		}
 	}
 	entry := dryRunEntry(run, id)
-	return dryRunPrint(os.Stdout, "close", id, closeBlockersRows(dry.blockers, id, run, flags, entry, true), flags["json"] == true)
+	return id, closeBlockersRows(dry.blockers, id, run, flags, entry, true), flags, -1
 }
 
 // dryRunEntry is the block's run entry for the fix lines (nil when unread).

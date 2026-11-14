@@ -621,6 +621,15 @@ func autopilotStatus(o *runOut, home, runID string, flags autopilotFlags, now ti
 			data = append(data, ledger.Field{Key: key, Value: grant.Get(key)})
 		}
 	}
+	// B626: the owner line of a block whose blockers are all owner-only.
+	owner := settleOwnerLines(rows, runID, settleOpenBlock(record))
+	if len(owner) > 0 {
+		actions := []any{}
+		for _, line := range owner {
+			actions = append(actions, line)
+		}
+		data = append(data, ledger.Field{Key: "owner_actions", Value: actions})
+	}
 	if flags.bools["json"] {
 		out, _ := ledger.Stringify(data, true)
 		o.out(string(out) + "\n")
@@ -661,6 +670,9 @@ func autopilotStatus(o *runOut, home, runID string, flags autopilotFlags, now ti
 		"  budget    " + autopilotCaps(caps) + " · stop at " + autopilotPercent(grant.Get("stop_at")) + "%\n" +
 		"  spend     " + strings.Join(spendParts, ", ") + " · paused " + pausedText + "\n" +
 		autopilotRecordText(grant.Get("link"), files))
+	for _, line := range owner {
+		o.out("  " + line + "\n")
+	}
 	return 0
 }
 

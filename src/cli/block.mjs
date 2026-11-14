@@ -362,6 +362,7 @@ export const USAGE =
   '       code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>\n' +
   '       code-forge block ack-waivers <id> --run <r>\n' +
   '       code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>] [--dry-run]\n' +
+  '       code-forge block settle <id> --run <r> [--report <file>] [--transcript <file>]\n' +
   '       code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>\n' +
   '       code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links]\n' +
 '       code-forge block land <id> <id>... --run <r> [--max <dur>] [--push] [--watch-ci] [--copy-links]\n' +

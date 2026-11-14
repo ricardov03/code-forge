@@ -137,6 +137,7 @@ usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --
        code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>
        code-forge block ack-waivers <id> --run <r>
        code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>] [--dry-run]
+       code-forge block settle <id> --run <r> [--report <file>] [--transcript <file>]
        code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>
        code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links]
        code-forge block land <id> <id>... --run <r> [--max <dur>] [--push] [--watch-ci] [--copy-links]
