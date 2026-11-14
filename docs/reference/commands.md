@@ -285,6 +285,14 @@ usage: code-forge block amend-acceptance <id> --run <r> --acceptance <file> --re
                        Human checks use {clause, kind: human_check} without tests.
 ```
 
+### block settle
+
+```text
+usage: code-forge block settle <id> --run <r> [--report <file>] [--transcript <file>] [--json] [--help|-h]
+  --help, -h  Print this usage and exit without changing state.
+  --json      Print one JSON line on success instead of text.
+```
+
 ## ci
 
 Watch the GitHub Actions runs of one commit; a red run names the failing jobs and tests and queues a heal item (served by the Go binary).

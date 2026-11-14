@@ -203,6 +203,7 @@
  * through `closeBlock`'s `extraChecks`.
  */
 
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
@@ -235,7 +236,7 @@ import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
 import { reviewExcludeRule, validateConfig } from '../config/validate.mjs';
 import { migrateConfig } from '../config/migrate.mjs';
 import { exec } from '../util/exec.mjs';
-import { runNative } from '../util/native.mjs';
+import { nativePath, runNative } from '../util/native.mjs';
 import { contentHash, gitChildEnv, readRegularFileNoFollow } from '../worker/ticket.mjs';
 import { clearDone, enqueue, resetAcceptanceWatch, resolveTicket } from '../worker/queue.mjs';
 import { loadState } from '../worker/review-state.mjs';
@@ -385,6 +386,7 @@ const VERB_USAGE = {
   'ack-waivers': '<id> --run <r>',
   'human-pass': '<id> --run <r> --note <text> [--proof <dir-or-file>] [--dry-run]',
   'amend-acceptance': '<id> --run <r> --acceptance <file> --reason <text>',
+  settle: '<id> --run <r> [--report <file>] [--transcript <file>]',
 };
 const SUBCOMMANDS = Object.keys(VERB_USAGE);
 
@@ -498,6 +500,17 @@ export async function runBlock(args, deps = {}) {
   if (rest.includes('--help') || rest.includes('-h')) {
     out(verbUsage(sub));
     return 0;
+  }
+  if (sub === 'settle') {
+    // B626: block settle is served by the Go binary only; this shim hands the call over (same pattern as ci.mjs).
+    const binary = nativePath();
+    if (binary === null) {
+      err('code-forge block settle: needs the Go binary native/bin/<platform>-<arch>/code-forge-native (missing for this host, or CODE_FORGE_NATIVE=0)\n');
+      return 1;
+    }
+    const env = { ...process.env, CODE_FORGE_NODE: process.env.CODE_FORGE_NODE || process.execPath };
+    const result = spawnSync(binary, ['block', 'settle', ...rest], { stdio: 'inherit', env });
+    return result.error || result.status === null ? 1 : result.status;
   }
   let jsonOpenId;
   try {
