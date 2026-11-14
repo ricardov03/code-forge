@@ -443,6 +443,7 @@ func reviewEnqueueWith(args []string, step *landStep, pre *reviewFileScope) int 
 	if !reviewEnqueueCacheSupported(root, id, identityRecord) {
 		return reviewWaitHandover(args, hEnqueueCached)
 	}
+	reviewFreshSubst = flags["fresh"] == "true" && step == nil && apdgSubstRevertedRun(home, run, block, file, hash) // B635
 	if flags["fresh"] == "true" || !reviewEnqueueCached(root, id) {
 		if step != nil {
 			return reviewWaitHandover(args, hEnqueueFresh)
