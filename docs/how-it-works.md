@@ -1062,6 +1062,10 @@ the route). A broken answer (a schema miss) also ends it. When every route fails
 `run reload` takes a change to `review.on_unavailable` or `review.on_unavailable_backoff_s` as a
 review-only change (like `review.routes`), even when a frozen key also changed on disk, and a live
 worker uses the new chain from its next ticket (B650).
+`validate` checks each route: a model that is not a known id of the route's provider (its own,
+else its level's, else the top-level one; `known_extra` and seen-in-cache count) is a
+`review-on-unavailable-invalid` error (exit 1), and an `openai` route gets the
+`closed-book-on-openai` warning a `review.routes` rule gets (B651).
 
 A route that timed out on two tickets in a row in a run is **benched** for the rest of that run
 (B321). Each ticket that a route only timed out on writes a signed `review.route_timeout` row

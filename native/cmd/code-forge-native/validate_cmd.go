@@ -544,6 +544,8 @@ func (v configValidator) run() (errs, warns []validateIssue) {
 	}
 	// 18 review-routes-invalid
 	add("error", "review-routes-invalid", v.routeMessages()...)
+	// B651: each review.on_unavailable route's provider and model, like a level's
+	add("error", "review-on-unavailable-invalid", v.onUnavailableMessages()...)
 	// 19 and 20: an empty coder.sandbox.add_dirs yields nothing; a non-empty one went to Node.
 	return errs, warns
 }
@@ -699,6 +701,12 @@ func (v configValidator) closedBookMessages() []string {
 			}
 		}
 	}
+	// B651: a review.on_unavailable route runs as a reviewer or the judge too
+	for i, route := range v.onUnavailableRoutes() {
+		if p, ok := v.onUnavailableProvider(route); ok && isNoClosedBookProvider(p) {
+			where = append(where, fmt.Sprintf("review.on_unavailable[%d]", i))
+		}
+	}
 	text := codexClosedBookRefusal
 	if isTrue(valueAt(v.cfg, "review", "allow_open_book_codex")) {
 		text = openBookCodexWarning
@@ -759,6 +767,70 @@ func (v configValidator) routeMessages() []string {
 			} else if hasSecond && jsEqual(first, second) {
 				messages = append(messages, at+".provider (else provider) equals the second reviewer's effective L2 provider (review.second_levels.L2.provider, else review.second_provider) — multimodel needs two different providers")
 			}
+		}
+	}
+	return messages
+}
+
+// onUnavailableRoutes is review.on_unavailable as a list; an entry that is
+// not an object is nil (the schema refuses it first).
+func (v configValidator) onUnavailableRoutes() []map[string]any {
+	raw, _ := valueAt(v.cfg, "review", "on_unavailable")
+	list, _ := raw.([]any)
+	out := make([]map[string]any, len(list))
+	for i, item := range list {
+		out[i], _ = item.(map[string]any)
+	}
+	return out
+}
+
+// onUnavailableProvider is the provider the worker runs a route with
+// (review.OnUnavailableProvider): its own, else its level's, else the
+// top-level provider; false when none of them is a string.
+func (v configValidator) onUnavailableProvider(route map[string]any) (string, bool) {
+	if route == nil {
+		return "", false
+	}
+	level, _ := route["level"].(string)
+	if level == "" {
+		level = "L2"
+	}
+	raw := route["provider"]
+	if raw == nil {
+		if l, ok := valueAt(v.cfg, "levels", level); ok {
+			if m, _ := l.(map[string]any); m != nil {
+				raw = m["provider"]
+			}
+		}
+	}
+	if raw == nil {
+		raw = v.cfg["provider"]
+	}
+	p, ok := raw.(string)
+	return p, ok && p != ""
+}
+
+// onUnavailableMessages is B651: a review.on_unavailable route whose
+// provider cannot be resolved, or whose model is not a known id of that
+// provider (known ids, known_extra, seen-in-cache). Never the value itself.
+func (v configValidator) onUnavailableMessages() []string {
+	var messages []string
+	for i, route := range v.onUnavailableRoutes() {
+		if route == nil {
+			continue
+		}
+		model, ok := route["model"].(string)
+		if !ok || model == "" {
+			continue
+		}
+		at := fmt.Sprintf("review.on_unavailable[%d]", i)
+		provider, ok := v.onUnavailableProvider(route)
+		if !ok {
+			messages = append(messages, at+" has no provider (neither its own provider, its level's provider nor the top-level provider is set)")
+			continue
+		}
+		if !v.knownModel(provider, model) {
+			messages = append(messages, at+".model is not a known "+safeProvider(provider)+" id, not in known_extra, and not seen-in-cache")
 		}
 	}
 	return messages
