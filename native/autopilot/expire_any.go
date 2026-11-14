@@ -20,21 +20,25 @@ import (
 // expireDue is checkExpiry's decision on one record: whether the expire row
 // is due. ErrUnsupported: an until whose Date.parse Go cannot prove equal
 // to V8's (a number, an array, a legacy text form Go does not read).
-func expireDue(record ledger.Object, now time.Time) (ledger.Object, bool, error) {
-	var grant ledger.Object
+// done (B634): an active until-done grant whose planned blocks are all
+// closed ends now, before its deadline (Go-only grants; Node never wrote one).
+func expireDue(record ledger.Object, now time.Time) (grant ledger.Object, due, done bool, err error) {
 	switch g := record.Get("autopilot").(type) {
 	case ledger.Object:
 		grant = g
 	case []any:
-		return nil, false, nil // an array grant has no status: never active
+		return nil, false, false, nil // an array grant has no status: never active
 	default:
-		return nil, false, nil // null, text, number, bool: no grant
+		return nil, false, false, nil // null, text, number, bool: no grant
 	}
 	if record.Get("status") != "active" {
-		return nil, false, nil // run-ended
+		return nil, false, false, nil // run-ended
 	}
 	if s := grant.Get("status"); s == "stopped" || s == "expired" {
-		return nil, false, nil
+		return nil, false, false, nil
+	}
+	if grant.Get("status") == "active" && RunDone(record, grant) {
+		return grant, true, true, nil
 	}
 	var until any
 	present := false
@@ -50,7 +54,7 @@ func expireDue(record ledger.Object, now time.Time) (ledger.Object, bool, error)
 	default:
 		parsed, ok, known := gatecheck.JSDateParse(until, present)
 		if !known {
-			return nil, false, ErrUnsupported
+			return nil, false, false, ErrUnsupported
 		}
 		if !ok {
 			ms = math.NaN()
@@ -60,15 +64,15 @@ func expireDue(record ledger.Object, now time.Time) (ledger.Object, bool, error)
 	}
 	// now.getTime() >= NaN is false: a grant without a readable until stays active
 	if !(float64(now.UnixMilli()) >= ms) || grant.Get("status") != "active" {
-		return nil, false, nil
+		return nil, false, false, nil
 	}
-	return grant, true, nil
+	return grant, true, false, nil
 }
 
 // ExpireSupported reports whether Go decides checkExpiry on this record the
 // way Node does (no write happens here).
 func ExpireSupported(record ledger.Object, now time.Time) bool {
-	_, _, err := expireDue(record, now)
+	_, _, _, err := expireDue(record, now)
 	return err == nil
 }
 
@@ -81,11 +85,11 @@ func ExpireAny(home, run string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if _, due, err := expireDue(record, now); err != nil || !due {
+	if _, due, _, err := expireDue(record, now); err != nil || !due {
 		return err
 	}
 	return state.UpdateRun(home, run, func(record *ledger.Object) error {
-		grant, due, err := expireDue(*record, now)
+		grant, due, done, err := expireDue(*record, now)
 		if err != nil {
 			return err
 		}
@@ -101,6 +105,15 @@ func ExpireAny(home, run string, now time.Time) error {
 				}
 			}
 		}
+		if done {
+			// B634: the until-done end, with the planned blocks it judged
+			// (the row CheckExpiry writes)
+			planned := []any{}
+			for _, id := range Planned(*record, grant) {
+				planned = append(planned, id)
+			}
+			row = append(row, ledger.Field{Key: "reason", Value: "done"}, ledger.Field{Key: "blocks", Value: planned})
+		}
 		row = append(row, ledger.Field{Key: "ts", Value: at})
 		if _, err := state.WriteSigned(home, run, row); err != nil {
 			return err
@@ -108,6 +121,9 @@ func ExpireAny(home, run string, now time.Time) error {
 		grant = grant.Clone()
 		grant.Set("status", "expired")
 		grant.Set("expired_at", at)
+		if done {
+			grant.Set("done_at", at)
+		}
 		record.Set("autopilot", grant)
 		return nil
 	})
