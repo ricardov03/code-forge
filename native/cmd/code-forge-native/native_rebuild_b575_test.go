@@ -40,7 +40,7 @@ for a in "$@"; do
 done
 echo "$line | CGO_ENABLED=$CGO_ENABLED GOOS=$GOOS GOARCH=$GOARCH GOTOOLCHAIN=$GOTOOLCHAIN GOPROXY=$GOPROXY" >> "$CF_B408_LOG"
 if [ -n "$CF_B408_BUILD_FAIL" ]; then echo 'go: build broke' >&2; exit 1; fi
-if [ -n "$CF_B408_BUILD_SLEEP" ]; then /bin/sleep "$CF_B408_BUILD_SLEEP"; fi
+if [ -n "$CF_B408_BUILD_HOLD" ]; then i=0; while [ ! -f "$CF_B408_BUILD_HOLD" ] && [ $i -lt 1200 ]; do /bin/sleep 0.05; i=$((i+1)); done; fi
 printf '%s\n' "$out" > "$out"
 exit 0
 `
@@ -95,7 +95,7 @@ func newB575Root(t *testing.T) b575Root {
 	r.binary = filepath.Join(r.root, "native", "bin", r.target, "code-forge-native")
 	t.Setenv("CF_B408_LOG", r.log)
 	t.Setenv("CF_B408_BUILD_FAIL", "")
-	t.Setenv("CF_B408_BUILD_SLEEP", "")
+	t.Setenv("CF_B408_BUILD_HOLD", "")
 	t.Setenv("CF_B575_VERSION_FAIL", "")
 	t.Setenv("HOME", filepath.Join(base, "home"))
 	t.Setenv("CODE_FORGE_TMP_ROOT", filepath.Join(base, "tmp"))

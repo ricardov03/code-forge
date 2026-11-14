@@ -210,7 +210,7 @@ func TestSlotHelperHold(t *testing.T) {
 	os.Exit(0)
 }
 
-func TestSlotKilledHolderFreesWithinTwoSeconds(t *testing.T) {
+func TestSlotKilledHolderFrees(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(EnvSwitch, "")
 	t.Setenv(EnvHeld, "")
@@ -232,7 +232,8 @@ func TestSlotKilledHolderFreesWithinTwoSeconds(t *testing.T) {
 	if err != nil || line != "held\n" {
 		t.Fatalf("helper did not take the slot: %q %v", line, err)
 	}
-	// Default 200 ms -> 1 s backoff: the 2 s bound is the real wait loop's.
+	// Default 200 ms -> 1 s backoff: the real wait loop notices the death.
+	// B654: admission is checked with the load-safe admitWait, not a 2 s bound.
 	q := Open(home)
 	q.Probe = func() Resources { return idle }
 	rec := &recorder{holding: map[string]string{}}
@@ -246,8 +247,8 @@ func TestSlotKilledHolderFreesWithinTwoSeconds(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = cmd.Wait()
-	if !admittedWithin(w, 2*time.Second) {
-		t.Fatalf("W not admitted within 2 s of kill -9 (%v)", time.Since(killed))
+	if !admittedWithin(w, admitWait) {
+		t.Fatalf("W not admitted after kill -9 (%v)", time.Since(killed))
 	}
 	t.Logf("admitted %v after kill -9", time.Since(killed).Round(time.Millisecond))
 	finish(t, w)
@@ -378,9 +379,10 @@ func TestSlotIdleAcquireIsFastAndLeavesNothingBehind(t *testing.T) {
 	goroutines := runtime.NumGoroutine()
 	const rounds = 50
 	var total, worst time.Duration
+	waits := 0
 	for i := 0; i < rounds; i++ {
 		began := time.Now()
-		release, err := q.Acquire(context.Background(), Request{Kind: Full, Label: "perf"})
+		release, err := q.Acquire(context.Background(), Request{Kind: Full, Label: "perf", OnWait: func(int, []Ticket) { waits++ }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -393,13 +395,10 @@ func TestSlotIdleAcquireIsFastAndLeavesNothingBehind(t *testing.T) {
 	}
 	mean := total / rounds
 	t.Logf("idle acquire+release: mean %v, worst %v over %d rounds", mean, worst, rounds)
-	if mean >= 20*time.Millisecond {
-		t.Fatalf("idle acquire+release mean = %v, want < 20ms", mean)
-	}
-	// One acquire may meet a scheduler stall on a loaded machine; a loose
-	// bound still catches an acquire that waits out a backoff (200 ms+).
-	if worst >= 150*time.Millisecond {
-		t.Fatalf("slowest idle acquire+release = %v, want < 150ms", worst)
+	// B654: count instead of timing. An idle acquire is admitted on its first
+	// check: it never enters the backoff wait (200 ms+), whatever the load.
+	if waits != 0 {
+		t.Fatalf("idle acquire entered the backoff wait %d times in %d rounds, want 0", waits, rounds)
 	}
 	if left := filesLeft(t, q); len(left) != 0 {
 		t.Fatalf("files left under the queue after release = %v, want none", left)

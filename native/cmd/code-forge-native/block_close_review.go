@@ -15,6 +15,13 @@ import (
 // and runs the ordinary review gate after these queue markers finish.
 type closeReviewWait map[string]string
 
+// closeReviewNow and closeReviewSleep are the shared deadline's clock. Tests
+// swap them to count the wait without a wall-clock bound (B654).
+var (
+	closeReviewNow   = time.Now
+	closeReviewSleep = time.Sleep
+)
+
 func closeWaitReviews(run, id, top, qdir string, files []gatecheck.File, changed []string, blockers []gatecheck.Blocker, cfg map[string]any, inTree bool, print io.Writer) closeReviewWait {
 	waited := closeReviewWait{}
 	pending := map[string]string{}
@@ -23,7 +30,7 @@ func closeWaitReviews(run, id, top, qdir string, files []gatecheck.File, changed
 	if n, ok := blockMap(cfg["review"])["close_wait_s"].(float64); ok && n >= 1 && n <= 86400 {
 		seconds = n
 	}
-	deadline := time.Now().Add(time.Duration(seconds * float64(time.Second)))
+	deadline := closeReviewNow().Add(time.Duration(seconds * float64(time.Second)))
 	// Publish the whole batch before polling any result. The worker pool reviews
 	// files concurrently; close has one deadline, independent of the file count.
 	for _, file := range files {
@@ -69,7 +76,7 @@ func closeWaitReviews(run, id, top, qdir string, files []gatecheck.File, changed
 				delete(pending, file)
 			}
 		}
-		remaining := time.Until(deadline)
+		remaining := deadline.Sub(closeReviewNow())
 		if remaining <= 0 {
 			for file, identity := range pending {
 				waited[file] = fmt.Sprintf("review wait timed out after %gs; reviewer may be unavailable (ticket %s)", seconds, identity)
@@ -77,7 +84,7 @@ func closeWaitReviews(run, id, top, qdir string, files []gatecheck.File, changed
 			break
 		}
 		if len(pending) > 0 {
-			time.Sleep(min(50*time.Millisecond, remaining))
+			closeReviewSleep(min(50*time.Millisecond, remaining))
 		}
 	}
 	return waited

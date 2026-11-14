@@ -292,7 +292,9 @@ func TestBlockRebaseRebuildsNative(t *testing.T) {
 }
 
 // B426: block rebase holds no run lock while its slow native build runs. A
-// block write on another block of the same run succeeds within 1 s meanwhile.
+// block write on another block of the same run succeeds meanwhile: the build
+// holds until the test releases it, so a held run lock would refuse the write
+// at its 5 s lock deadline (B654: no wall-clock bound).
 func TestBlockRebaseSlowBuildLeavesRunUnlocked(t *testing.T) {
 	f := newB408Fixture(t)
 	record, err := state.ReadRun(f.home, "fixture")
@@ -311,9 +313,11 @@ func TestBlockRebaseSlowBuildLeavesRunUnlocked(t *testing.T) {
 		code   int
 		stderr string
 	}
+	release := filepath.Join(f.home, "build-release")
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o644) })
 	done := make(chan outcome, 1)
 	go func() {
-		code, _, stderr := f.call([]string{"CF_B408_BUILD_SLEEP=3"}, "block", "rebase", "B1", "--run", "fixture")
+		code, _, stderr := f.call([]string{"CF_B408_BUILD_HOLD=" + release}, "block", "rebase", "B1", "--run", "fixture")
 		done <- outcome{code, stderr}
 	}()
 	for deadline := time.Now().Add(60 * time.Second); !strings.Contains(f.calls(), "build "); {
@@ -326,19 +330,20 @@ func TestBlockRebaseSlowBuildLeavesRunUnlocked(t *testing.T) {
 		case <-time.After(20 * time.Millisecond):
 		}
 	}
-	begin := time.Now()
 	err = state.UpdateBlock(f.home, "fixture", "B2", func(_, block *ledger.Object) ([]ledger.Object, error) {
 		block.Set("note", "written during the build")
 		return nil, nil
 	})
-	elapsed := time.Since(begin)
-	if err != nil || elapsed > time.Second {
-		t.Fatalf("write on block B2 during the build: err=%v after %v, want success within 1s", err, elapsed)
+	if err != nil {
+		t.Fatalf("write on block B2 during the build: err=%v, want success while the build holds", err)
 	}
 	select {
 	case o := <-done:
 		t.Fatalf("block rebase ended before the other write finished (exit %d), the test proves nothing: %s", o.code, o.stderr)
 	default:
+	}
+	if err := os.WriteFile(release, nil, 0o644); err != nil {
+		t.Fatal(err)
 	}
 	if o := <-done; o.code != 0 || f.calls() != f.buildCall() {
 		t.Fatalf("want exit 0 and one rebase then one build, got exit %d calls %q stderr %s", o.code, f.calls(), o.stderr)

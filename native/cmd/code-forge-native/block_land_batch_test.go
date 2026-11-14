@@ -54,7 +54,7 @@ printf '%s\n' "$PWD" >> "$HOME/$log-calls"
 printf '%s\n' "$*" >> "$HOME/$log-args"
 if [ "$log" = changed ]; then exit 0; fi
 if [ -f "$HOME/slow-full" ]; then sleep 30; fi
-if [ -f "$HOME/slow-3" ]; then sleep 3; fi
+if [ -f "$HOME/hold" ]; then i=0; while [ ! -f "$HOME/release" ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i+1)); done; fi
 git -C "$HOME/main-path" rev-parse HEAD >> "$HOME/observed-main"
 for id in B1 B2 B3; do
   for file in "src/$id.mjs" "native/$id.mjs"; do
@@ -626,8 +626,10 @@ func TestBlockLandBatchRefusesZeroMaxAtPreflight(t *testing.T) {
 }
 
 // B426: a batch land holds no run lock through its merge gate. While its test
-// command sleeps 3 s, a block write on another block of the same run succeeds
-// within 1 s, and the land's final commit keeps that write.
+// command holds until the test releases it, a block write on another block of
+// the same run succeeds (a held run lock would refuse it at its 5 s lock
+// deadline), and the land's final commit keeps that write. B654: no
+// wall-clock bound.
 func TestBlockLandBatchMergeGateLeavesRunUnlocked(t *testing.T) {
 	f := newLandBatchFixture(t, 0)
 	record, err := state.ReadRun(f.home, "r-batch-unit")
@@ -640,7 +642,8 @@ func TestBlockLandBatchMergeGateLeavesRunUnlocked(t *testing.T) {
 	if err := state.SaveRun(f.home, record); err != nil {
 		t.Fatal(err)
 	}
-	f.write(f.home, "slow-3", "")
+	f.write(f.home, "hold", "")
+	t.Cleanup(func() { _ = os.WriteFile(filepath.Join(f.home, "release"), nil, 0o644) })
 	type landed struct {
 		code   int
 		output string
@@ -661,20 +664,19 @@ func TestBlockLandBatchMergeGateLeavesRunUnlocked(t *testing.T) {
 		case <-time.After(20 * time.Millisecond):
 		}
 	}
-	started := time.Now()
 	err = state.UpdateBlock(f.home, "r-batch-unit", "B9", func(_, block *ledger.Object) ([]ledger.Object, error) {
 		block.Set("note", "written during the merge gate")
 		return nil, nil
 	})
-	elapsed := time.Since(started)
-	if err != nil || elapsed > time.Second {
-		t.Fatalf("write on block B9 during the merge gate: err=%v after %v, want success within 1s", err, elapsed)
+	if err != nil {
+		t.Fatalf("write on block B9 during the merge gate: err=%v, want success while the gate holds", err)
 	}
 	select {
 	case r := <-done:
 		t.Fatalf("land ended before the other write finished (exit %d), the test proves nothing: %s", r.code, r.output)
 	default:
 	}
+	f.write(f.home, "release", "")
 	r := <-done
 	if r.code != 0 {
 		t.Fatalf("land exit %d: %s", r.code, r.output)

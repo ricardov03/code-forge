@@ -648,8 +648,10 @@ func landJoinStopped(t *testing.T, home, run, join string, code int, output stri
 		if want := "block B1 land stopped at join: reviews did not finish\n"; !strings.Contains(output, want) {
 			t.Fatalf("output must contain %q: %s", want, output)
 		}
-		if died.IsZero() || ended.Sub(died) >= 2*time.Second {
-			t.Fatalf("land must stop within 2 s of the daemon death; died=%v ended=%v", died, ended)
+		// B654: the stop reason, not a wall-clock bound, proves land stopped
+		// on the death: waiting out its --max 60s reports wait_timeout.
+		if died.IsZero() || strings.Contains(output, "wait_timeout") {
+			t.Fatalf("land must stop on the daemon death, not its --max; died=%v ended=%v: %s", died, ended, output)
 		}
 		if seen["wait-block"] != 1 {
 			t.Fatalf("wait-block requests=%d, want 1: %v", seen["wait-block"], seen)

@@ -13,9 +13,10 @@ import (
 )
 
 // B426: a block rebase holds no run lock while it works in the worktree. A
-// slow fake build (a post-commit hook that sleeps 3 s on every replayed
-// commit) keeps the rebase busy; a block write on another block of the same
-// run succeeds within 1 s meanwhile, and the rebase's commit keeps it.
+// slow fake build (a post-commit hook that holds until the test releases it)
+// keeps the rebase busy; a block write on another block of the same run
+// succeeds meanwhile (a held run lock would refuse it after its 5 s lock
+// deadline), and the rebase's commit keeps it. B654: no wall-clock bound.
 func TestRunLeavesRunUnlockedDuringSlowRebase(t *testing.T) {
 	root := t.TempDir()
 	repo, tree, home := filepath.Join(root, "repo"), filepath.Join(root, "wt"), filepath.Join(root, "home")
@@ -51,10 +52,11 @@ func TestRunLeavesRunUnlockedDuringSlowRebase(t *testing.T) {
 	write(filepath.Join(repo, "m.go"), "main moved\n")
 	g(repo, "add", "m.go")
 	g(repo, "commit", "-qm", "main moved")
-	// The fake build: logs its start, then sleeps 3 s.
-	started := filepath.Join(root, "build-started")
+	// The fake build: logs its start, then holds until released (60 s cap).
+	started, release := filepath.Join(root, "build-started"), filepath.Join(root, "build-release")
 	hook := filepath.Join(root, "hooks", "post-commit")
-	write(hook, "#!/bin/sh\ntouch '"+started+"'\nsleep 3\n")
+	write(hook, "#!/bin/sh\ntouch '"+started+"'\ni=0\nwhile [ ! -f '"+release+"' ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i+1)); done\n")
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0644) })
 	if err := os.Chmod(hook, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -95,20 +97,19 @@ func TestRunLeavesRunUnlockedDuringSlowRebase(t *testing.T) {
 		case <-time.After(20 * time.Millisecond):
 		}
 	}
-	begin := time.Now()
 	err := state.UpdateBlock(home, "unit", "B", func(_, block *ledger.Object) ([]ledger.Object, error) {
 		block.Set("note", "written during the rebase")
 		return nil, nil
 	})
-	elapsed := time.Since(begin)
-	if err != nil || elapsed > time.Second {
-		t.Fatalf("write on block B during the rebase: err=%v after %v, want success within 1s", err, elapsed)
+	if err != nil {
+		t.Fatalf("write on block B during the rebase: err=%v, want success while the build holds", err)
 	}
 	select {
 	case o := <-done:
 		t.Fatalf("rebase ended before the other write finished (%v), the test proves nothing", o.err)
 	default:
 	}
+	write(release, "")
 	o := <-done
 	if o.err != nil {
 		t.Fatalf("rebase: %v", o.err)

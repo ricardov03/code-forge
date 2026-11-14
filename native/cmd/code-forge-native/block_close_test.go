@@ -236,19 +236,25 @@ func TestCloseQueuedReviewRefusals(t *testing.T) {
 	for _, outcome := range []string{"findings", "hung", "unavailable", "unsigned"} {
 		t.Run(outcome, func(t *testing.T) {
 			count := 2
+			var slept time.Duration
+			sleeps := 0
 			if outcome == "hung" {
-				// Leave room for git/process probes under suite load while still
-				// rejecting ten separate one-second waits.
+				// Ten files with no reviewer. A fake clock counts the wait: one
+				// shared 1s deadline sleeps 1s in all, ten per-file waits 10s
+				// (B654: no wall-clock bound, so machine load cannot fail it).
 				count = 10
+				base := time.Now()
+				now, sleep := closeReviewNow, closeReviewSleep
+				t.Cleanup(func() { closeReviewNow, closeReviewSleep = now, sleep })
+				closeReviewNow = func() time.Time { return base.Add(slept) }
+				closeReviewSleep = func(d time.Duration) { slept += d; sleeps++ }
 			}
 			f := newCloseReviewFixture(t, count)
 			var done <-chan error
 			if outcome != "hung" {
 				done = f.reviewer(outcome)
 			}
-			start := time.Now()
 			code, out, errs := f.close()
-			elapsed := time.Since(start)
 			if done != nil {
 				if err := <-done; err != nil {
 					t.Error(err)
@@ -264,8 +270,13 @@ func TestCloseQueuedReviewRefusals(t *testing.T) {
 			if outcome == "findings" && strings.Count(out, "F1 open") != 2 {
 				t.Fatalf("want both F1 findings: %s", out)
 			}
-			if outcome == "hung" && (elapsed < time.Second || elapsed > 8*time.Second) {
-				t.Fatalf("shared 1s wait took %s", elapsed)
+			if outcome == "hung" {
+				if slept != time.Second || sleeps == 0 {
+					t.Fatalf("%d files slept %s in %d sleeps; want one shared 1s wait", count, slept, sleeps)
+				}
+				if n := strings.Count(out, "review wait timed out after 1s"); n != count {
+					t.Fatalf("want %d files timed out on the shared 1s deadline, got %d: %s", count, n, out)
+				}
 			}
 			record, err := state.ReadRun(f.home, "r-close-fixture")
 			if err != nil || blockObject(blockObject(record.Get("blocks")).Get("B1")).Get("status") != "open" {
