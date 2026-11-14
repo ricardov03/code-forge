@@ -14,14 +14,13 @@ import (
 )
 
 // B458: help, version and the metadata, help and usage-error forms of init,
-// native-status, facts, author, s2 and jev run in Go, as bin/code-forge.mjs
-// and src/cli/<verb>.mjs do. Each verb's model session, wizard or companion
-// still hands over to Node with its own reason.
+// facts, author, s2 and jev run in Go, as bin/code-forge.mjs and
+// src/cli/<verb>.mjs do. native-status is routed in native_status_cmd.go
+// (B501, B619).
 func init() {
 	routes["help"] = runHelpVerb
 	routes["version"] = runVersionVerb
 	routes["init"] = runInitVerb
-	routes["native-status"] = runNativeStatusVerb
 	routes["facts"] = runFactsVerb
 	routes["author"] = runAuthorVerb
 	routes["s2"] = runS2Verb
@@ -37,11 +36,10 @@ const (
 		"  [--jev-ref <item-id|link|op://…> | --jev-env NAME | --no-jev] [--engine auto|solo|harness] [--solo-project N]\n" +
 		"  [--coder-may-push yes|no] [--coder-may-open-draft-pr yes|no]\n" +
 		"  [--gate name=cmd]… [--proof isolation=export|lock | high=a,b | link_dirs=a,b | copy_untracked=a,b]… [--skip-doctor]\n"
-	nativeStatusUsage = "usage: code-forge native-status\n  Internal daemon companion: reads JSON records and rows from standard input.\n"
-	factsUsage        = "usage: code-forge facts --brief <file> [--sources <path>...] [--out <file>] [--run <id>] [--timeout <seconds>]\n"
-	authorUsage       = "usage: code-forge author --job plan|harden --brief <file> [--facts <file>] [--draft <file>] [--answers <file>] [--out <file>] [--run <id>] [--timeout <seconds>]\n"
-	s2Usage           = "usage: code-forge s2 --packet <file.json> [--run <id>] [--block <id>] [--timeout <seconds>]\n"
-	jevUsage          = "usage: code-forge jev ask <question-id> --state <file> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]\n"
+	factsUsage  = "usage: code-forge facts --brief <file> [--sources <path>...] [--out <file>] [--run <id>] [--timeout <seconds>]\n"
+	authorUsage = "usage: code-forge author --job plan|harden --brief <file> [--facts <file>] [--draft <file>] [--answers <file>] [--out <file>] [--run <id>] [--timeout <seconds>]\n"
+	s2Usage     = "usage: code-forge s2 --packet <file.json> [--run <id>] [--block <id>] [--timeout <seconds>]\n"
+	jevUsage    = "usage: code-forge jev ask <question-id> --state <file> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]\n"
 )
 
 // metaPackageRoot is the install root (<root>/native/bin/<platform>/); a test seam.
@@ -182,13 +180,6 @@ func runVersionVerb(args []string) int {
 		fmt.Fprintf(stdout, "%s %s\n", *pkg.Name, *pkg.Version)
 		return 0
 	})
-}
-
-func runNativeStatusVerb(args []string) int {
-	if metaHelp(args, nativeStatusUsage, nil) {
-		return 0
-	}
-	return metaHandover("native-status", args, hNativeStatusCompanion)
 }
 
 // metaFlagSpec is the declaration parseFlags (src/state/cli-args.mjs) takes.

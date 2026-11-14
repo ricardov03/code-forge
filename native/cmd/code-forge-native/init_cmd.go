@@ -405,14 +405,25 @@ func initOutputSafe(s string) bool {
 	return utf8.ValidString(s) && !strings.ContainsAny(s, "\u2028\u2029")
 }
 
+// initRoute is where initPlan sends an `init` that Go goes on to serve: an
+// internal routing choice, never a hand-over reason (B619).
+type initRoute int
+
+const (
+	initRouteNone   initRoute = iota
+	initRouteSetup            // the --no-interaction setup (B527)
+	initRouteWizard           // the terminal wizard (B528)
+)
+
 // initRefusal is the wizard's failure before anything is written: the code,
-// the error text, or a hand-over reason.
+// the error text, a hand-over reason, or the route Go serves next.
 type initRefusal struct {
 	code    int
 	message string
 	hand    bool
 	reason  handoverReason
-	// existing: a .code-forge.yml was loaded (hInitSetup only)
+	route   initRoute
+	// existing: a .code-forge.yml was loaded (a route only)
 	existing bool
 }
 
@@ -453,13 +464,13 @@ func initPlan(parsed initParsed, home, cwd string, interactive bool) initRefusal
 	}
 	if interactive {
 		// B528: the wizard asks first; a draft-PR refusal comes after it
-		return initRefusal{hand: true, reason: hInitWizard, existing: existing != nil}
+		return initRefusal{route: initRouteWizard, existing: existing != nil}
 	}
 	draft, _ := parsed.initLast("--coder-may-open-draft-pr")
 	if draft == true && !initCoderMayPush(parsed, existing) {
 		return initRefusal{code: 2, message: initDraftRefusal}
 	}
-	return initRefusal{hand: true, reason: hInitSetup, existing: existing != nil}
+	return initRefusal{route: initRouteSetup, existing: existing != nil}
 }
 
 // initCoderMayPush is the coder_may_push answer of resolveAnswers.
@@ -559,14 +570,14 @@ func runInitVerb(args []string) int {
 	interactive := !parsed.noInteraction && !jsonMode
 	home := os.Getenv("HOME")
 	plan := initPlan(parsed, home, physicalCwd(), interactive)
-	if plan.hand && plan.reason == hInitSetup {
+	if plan.route == initRouteSetup {
 		serve, reason := initSetupPlan(parsed, home, physicalCwd(), jsonMode, plan.existing)
 		if serve == nil {
 			return metaHandover("init", args, reason)
 		}
 		return metaServe("init", "", args, serve)
 	}
-	if plan.hand && plan.reason == hInitWizard {
+	if plan.route == initRouteWizard {
 		serve, reason := initWizardServe(parsed, home, physicalCwd(), plan.existing)
 		if serve != nil && !routerHintReadable() {
 			// Go cannot judge the hint state Node would print after a cancel

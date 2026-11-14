@@ -192,8 +192,6 @@ const (
 	hAutopilotApproveChanged
 	hHelpVerbs
 	hVersionPackage
-	hInitWizard
-	hNativeStatusCompanion
 	hFactsSession
 	hProofConfig
 	hProofRun
@@ -228,7 +226,6 @@ const (
 	hRunReloadAutopilotGrant
 	hRunReloadReviewShape
 	hInitInteractive
-	hInitSetup
 	hInitArgEncoding
 	hInitJevLink
 	hInitConfigSyntax
@@ -507,8 +504,6 @@ var handoverReasons = [...]string{
 	hAutopilotApproveChanged:  "autopilot-approve-changed",
 	hHelpVerbs:                "help-verbs",
 	hVersionPackage:           "version-package",
-	hInitWizard:               "init-wizard",
-	hNativeStatusCompanion:    "native-status-companion",
 	hFactsSession:             "facts-session",
 	hProofConfig:              "proof-config",
 	hProofRun:                 "proof-run",
@@ -543,7 +538,6 @@ var handoverReasons = [...]string{
 	hRunReloadAutopilotGrant:  "run-reload-autopilot-grant",
 	hRunReloadReviewShape:     "run-reload-review-shape",
 	hInitInteractive:          "init-interactive",
-	hInitSetup:                "init-setup",
 	hInitArgEncoding:          "init-arg-encoding",
 	hInitJevLink:              "init-jev-link",
 	hInitConfigSyntax:         "init-config-syntax",
