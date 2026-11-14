@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-11-14
+
 ### Added
 
 - `autopilot digest --run <id> [--json]` lists every autopilot act the owner has not looked at yet (deferred human checks, substitute reviews, autopilot and agent waivers, temporary config changes, grant extends and until-done ends), each with its id and exact ratify and revert commands; `autopilot ratify <row-id> --run <id>` and `autopilot revert <row-id> --run <id>` are owner-only (a terminal yes, no `--yes`, refused under an active grant) and write one signed `autopilot.ratify` or `autopilot.revert` row; revert puts a deferred block back to awaiting_human_check, reopens a waived finding, stops a substitute approval from counting (`review-file --fresh` re-runs it) and restores an approval's old value (B635)
