@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { runParity } from '../helpers/parity.mjs';
+import { helpPageParity, runParity } from '../helpers/parity.mjs';
 import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { processStartTime } from '../../src/state/run.mjs';
 import { signRow, verifyRow } from '../../src/state/signer.mjs';
@@ -116,10 +116,15 @@ function launchAsync(f, args) {
     child.on('error', reject); child.on('close', (code) => resolve({ code, stdout, stderr }));
   });
 }
-async function parity(f, args, extra = {}) {
+async function parity(f, args, extra = {}, page) {
   const result = await runParity(args, { fixture: f, goCommand: BINARY, env: { ...env, ...extra } });
-  assert.deepEqual(result.diffs, [], `${args.join(' ')}: zero exit, stream, signed ledger, run, queue and lock diffs`);
+  // B613: a page means Go prints the help page around Node's usage; nothing else may differ.
+  if (page) assert.deepEqual(result, helpPageParity(result, page), `${args.join(' ')}: only stdout differs, Go prints the help page around Node usage`);
+  else assert.deepEqual(result.diffs, [], `${args.join(' ')}: zero exit, stream, signed ledger, run, queue and lock diffs`);
 }
+/** B613: the one-line summaries of the Go help pages. */
+const helpSummaries = { ready: 'List what still blocks the close of a block', waive: 'Accept one review finding without a fix (owner)',
+  reopen: 'Reopen a stopped file review for a new round (owner)' };
 async function tree(dir) {
   const out = [];
   for (const e of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -173,7 +178,8 @@ test('usage errors are exact and handovers leave every fixture byte unchanged', 
     assert.equal(launch(logged, args, { CODE_FORGE_NO_ERROR_LOG: '0' }).code, verb === 'ready' ? kind === 'clean' ? 0 : 1 : 2, `${verb}/${kind}: default logging stays native with Node unavailable`);
   }
   for (const verb of ['ready', 'waive', 'reopen']) {
-    for (const args of [[], ['B1'], ['--bogus'], ['--weird=<&>café'], ['--run'], ['B1', '--run', ''], ['B1', '--run', RUN, '--run', RUN], ['B1', '--run', RUN, '--json=1'], ['B1', '--run', RUN, '--remove-worktree'], ['--help'], ['-h']]) await parity(f, ['block', verb, ...args]);
+    for (const args of [[], ['B1'], ['--bogus'], ['--weird=<&>café'], ['--run'], ['B1', '--run', ''], ['B1', '--run', RUN, '--run', RUN], ['B1', '--run', RUN, '--json=1'], ['B1', '--run', RUN, '--remove-worktree']]) await parity(f, ['block', verb, ...args]);
+    for (const flag of ['--help', '-h']) await parity(f, ['block', verb, flag], {}, { summary: helpSummaries[verb] });
     for (const tail of [['--worker-pid', '0'], ['--file', 'sample.mjs'], ['--reason', 'why'], ['--file', './sample.mjs', '--reason', 'why', '--yes'], ['--file', 'sample.mjs', '--reason', ' ', '--yes'], ['--file', 'other', '--reason', 'why', '--yes'], ['--file', 'bad\npath', '--reason', 'why', '--yes'], ['--file', '/absolute', '--reason', 'why', '--yes']]) await parity(f, argv(verb, tail));
     if (verb === 'waive') for (const finding of ['bad\nfinding', 'bad/finding']) {
       await parity(f, ['block', verb, 'B1', finding, '--run', RUN, '--file', 'sample.mjs', '--reason', 'why', '--yes']);
