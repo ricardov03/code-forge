@@ -2,11 +2,14 @@
 # B573: a fake git on PATH. A child started with exec.mjs's owner variables
 # waits for its own pid entry in a root under $CODE_FORGE_TMP_ROOT and writes
 # what it sees to $FAKELOG (who spawned it: the worker, the daemon or the CLI
-# verb); then the real git runs.
+# verb); then the real git runs. The parent writes the entry after the
+# child starts (a ps call for the start time comes first), so under machine
+# load that can take seconds: the wait is capped at 30 s and ends as soon as
+# the entry is there (B658).
 if [ -n "$CODE_FORGE_OWNER_PID" ]; then
   i=0
   seen=
-  while [ $i -lt 100 ]; do
+  while [ $i -lt 3000 ]; do
     for f in "$CODE_FORGE_TMP_ROOT"/*/pids/$$.json; do
       [ -f "$f" ] && seen=$f
     done
