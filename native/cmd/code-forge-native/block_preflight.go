@@ -211,16 +211,10 @@ func preflightRows(home, run, project string) ([]gatecheck.Row, []byte, string) 
 	return rows, key, ""
 }
 
-// preflightFormatted is closeBlockersJSON with the stale_base fix line.
+// preflightFormatted is the blocker list with each row's clears_by; the
+// stale_base fix line comes from the blocker table (B622).
 func preflightFormatted(blockers []gatecheck.Blocker, id, run string, flags map[string]any, entry ledger.Object) []any {
-	formatted := closeBlockersJSON(blockers, id, run, flags, entry)
-	for _, value := range formatted {
-		o := value.(ledger.Object)
-		if o.Get("code") == "stale_base" {
-			o.Set("fix", closeCommand([]string{"code-forge", "block", "rebase", id, "--run", run, "--accept-landed"}))
-		}
-	}
-	return formatted
+	return closeBlockersRows(blockers, id, run, flags, entry, true)
 }
 
 // runBlockPreflight is block ready <id> --run <r> --preflight (args without

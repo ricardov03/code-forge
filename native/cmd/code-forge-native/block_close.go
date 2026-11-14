@@ -32,7 +32,16 @@ func init() { blockSubs["close"] = runBlockClose }
 
 // ready stays with Node: a preview collects fatal and nonfatal blockers together,
 // whereas a real close stops immediately on a failed pin or tampered gate row.
-func runBlockClose(args []string) int { return closeWithFlags(args) }
+func runBlockClose(args []string) int {
+	// B622: --dry-run previews the close in Go and never hands over.
+	if rest, dry, message := dryRunArgs(args); message != "" {
+		fmt.Fprintln(os.Stderr, "block close:", message)
+		return 2
+	} else if dry {
+		return closeDryRun(rest)
+	}
+	return closeWithFlags(args)
+}
 
 func blockCloseStep(args []string, step *landStep) int {
 	return blockCloseStepWithReason(args, step, nil)
@@ -67,6 +76,12 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		return blockHandover(original, reason)
 	}
 	fail := func(err error) int {
+		if step != nil && step.dry != nil {
+			// B622: a dry run reports a refusal as a blocker; usage stays exit 2.
+			if code, ok := step.dry.refusal(err, stderr); ok {
+				return code
+			}
+		}
 		// B451: a filesystem error prints in Node's errno form; the caller logs it.
 		// Node runs the expiry check before every close, so any refusal follows it.
 		if expiryOnFailure != nil {
@@ -87,7 +102,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	for _, arg := range args {
 		// Node prints the verb usage for an exact --help or -h anywhere in args.
 		if arg == "--help" || arg == "-h" {
-			fmt.Fprint(stdout, blockVerbUsage("close", "<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide]"))
+			fmt.Fprint(stdout, blockVerbUsage("close", "<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide] [--dry-run]"))
 			return 0
 		}
 	}
@@ -271,6 +286,9 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 				return fail(&state.Error{Code: "close-not-routine", Message: "close-not-routine: " + why})
 			}
 			routineGrant = grant.Grant
+		} else if step != nil && step.dry != nil {
+			// B622: the dry run never asks; the owner's confirmation is a blocker.
+			step.dry.ownerConfirm = true
 		} else {
 			if !humanTTY() {
 				return humanNoTTY(stderr, "close")
@@ -634,6 +652,9 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	// No deferred read may hand over past here. From the first append onward an
 	// error is reported directly, never retried through Node.
 	if step != nil && step.preflight {
+		if step.dry != nil {
+			step.dry.collect(run, id, event, reason, checks, record, rows, key)
+		}
 		return 0
 	}
 	if waited == nil && external == "" && event == "" {
@@ -1519,6 +1540,13 @@ func closeLandThrows(problems []gatecheck.Blocker, stderr io.Writer) bool {
 }
 
 func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[string]any, entry ledger.Object) []any {
+	return closeBlockersRows(problems, id, run, flags, entry, false)
+}
+
+// closeBlockersRows is the blocker list; withClearsBy adds each row's
+// clears_by from the same table row as its fix (B622: ready, preflight and
+// the --dry-run previews).
+func closeBlockersRows(problems []gatecheck.Blocker, id, run string, flags map[string]any, entry ledger.Object, withClearsBy bool) []any {
 	out := []any{}
 	seen := map[string]bool{}
 	for _, p := range problems {
@@ -1536,86 +1564,7 @@ func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[s
 			continue
 		}
 		seen[string(encoded)] = true
-		fix := "no automatic fix: " + p.Code
-		var argv []string
-		switch p.Code {
-		case "unowned_change":
-			if p.File != "" {
-				argv = []string{"code-forge", "block", "claim", id, p.File, "--run", run}
-			}
-		case "unreviewed", "unsigned":
-			argv = []string{"code-forge", "review-file", "--wait-block", id, "--run", run}
-		case "no_green_gates":
-			argv = []string{"code-forge", "gates", "run", "--run", run, "--block", id}
-		case "light_limits":
-			fix += "; stop this attempt, then reopen with --kind code --attempt <n+1> and the original base, ownership and acceptance, or split the block within light limits"
-		case "no_changes":
-			argv = []string{"code-forge", "block", "close", id, "--run", run, "--no-require-reviews"}
-		case "not_approved", "late_unruled", "review_cap", "autopilot_waiver_invalid":
-			if p.File != "" {
-				if p.Finding != "" {
-					argv = []string{"code-forge", "block", "waive", id, p.Finding, "--run", run, "--file", p.File, "--reason", "<reason>"}
-				} else {
-					argv = []string{"code-forge", "block", "reopen", id, "--run", run, "--file", p.File, "--reason", "<reason>"}
-				}
-			}
-		case "unproven":
-			test := "<test-file>"
-			if tests, ok := entry.Get("test_files").([]any); ok && len(tests) > 0 {
-				test = blockString(tests[0])
-			}
-			argv = []string{"code-forge", "proof", "red-green", id, "--run", run, "--test", test}
-		case "rule_break", "close-not-routine":
-			argv = []string{"code-forge", "block", "close", id, "--run", run, "--decide", "--reason", "<reason>"}
-			for _, flag := range []string{"report", "transcript"} {
-				if value, ok := flags[flag].(string); ok {
-					argv = append(argv, "--"+flag, value)
-				}
-			}
-		case "agent-waivers-not-acked":
-			argv = []string{"code-forge", "block", "ack-waivers", id, "--run", run}
-		case "lockfile":
-			lockfile := p.File
-			if lockfile == "" {
-				lockfile = "<lockfile>"
-			}
-			fix += "; repair or regenerate " + closeCommand([]string{lockfile}) + " as valid lock JSON with HTTPS resolved URLs on review.lockfile_registries and nonempty integrity for resolved packages"
-
-		case "git-failed":
-			argv = []string{"code-forge", "block", "rebase", id, "--run", run}
-		case "ledger.tamper":
-			argv = []string{"code-forge", "doctor"}
-		case "coder_report_failed":
-			report := "<coder-report>"
-			if value, ok := flags["report"].(string); ok {
-				report = value
-			}
-			quoted := closeCommand([]string{report})
-			repair := "repair " + quoted + " to address the reported failure"
-			if p.File != "" {
-				repair = "add the review-file ticket id for " + closeCommand([]string{p.File}) + " to " + quoted
-			} else if p.Detail == "coder report FAILED: context.require_coder_tests needs --report" {
-				repair = "create a coder report and pass its path with --report"
-			} else if p.Detail == "coder report FAILED: --report cannot be read" {
-				repair = "restore readable report " + quoted + " or correct --report"
-			} else if p.Detail == "coder report FAILED: no ===BLOCK "+id+" COMPLETE=== sentinel" {
-				repair = "add ===BLOCK " + id + " COMPLETE=== to " + quoted
-			} else if p.Detail == "coder report FAILED: no TESTS line" {
-				repair = "add TESTS <command> exit=<n> with the actual test result before ===BLOCK " + id + " COMPLETE=== in " + quoted
-			} else if strings.HasPrefix(p.Detail, "coder report FAILED: TESTS line malformed:") {
-				repair = "correct the malformed TESTS line to TESTS <command> exit=<n> with the actual test result before ===BLOCK " + id + " COMPLETE=== in " + quoted
-			} else if strings.HasPrefix(p.Detail, "coder report FAILED: TESTS exit=") {
-				repair = "fix the failing tests, rerun them, and update the TESTS line in " + quoted + " with the actual command and exit code"
-			}
-			fix += "; " + repair + "; rerun block ready"
-		default:
-			if strings.HasPrefix(p.Code, "worker.") {
-				argv = []string{"code-forge", "run", "start", "--reattach", "--run", run}
-			}
-		}
-		if argv != nil {
-			fix = closeCommand(argv)
-		}
+		fix, clearsBy := blockerFix(blockerFixInput{p: p, id: id, run: run, flags: flags, entry: entry})
 		detail := p.Detail
 		if detail == "" {
 			detail = p.Finding
@@ -1628,6 +1577,9 @@ func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[s
 			o.Set("finding", p.Finding)
 		}
 		o.Set("fix", fix)
+		if withClearsBy {
+			o.Set("clears_by", clearsBy)
+		}
 		out = append(out, o)
 	}
 	return out

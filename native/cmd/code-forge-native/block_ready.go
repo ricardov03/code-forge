@@ -263,13 +263,7 @@ func runBlockReady(args []string) int {
 			fmt.Fprint(os.Stderr, w)
 		}
 	}
-	formatted := closeBlockersJSON(blockers, p.id, p.run, p.flags, entry)
-	for _, value := range formatted {
-		o := value.(ledger.Object)
-		if o.Get("code") == "light_limits" {
-			o.Set("fix", "no automatic fix: light_limits; stop this attempt, then reopen with --kind code --attempt <n+1> and the original base, ownership and acceptance, or split the block within light limits")
-		}
-	}
+	formatted := closeBlockersRows(blockers, p.id, p.run, p.flags, entry, true)
 	ready := len(blockers) == 0
 	if p.flags["json"] == true {
 		out := ledger.Object{{Key: "block", Value: p.id}, {Key: "ready", Value: ready}, {Key: "blockers", Value: formatted}}

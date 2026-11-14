@@ -346,7 +346,7 @@ func TestB493HookCommandInTranscript(t *testing.T) {
 			code, out, _ = b493Ready(t, f, "--json")
 			wantJSON := `{"block":"B1","ready":true,"blockers":[]}` + "\n"
 			if c.line != "" {
-				wantJSON = `{"block":"B1","ready":false,"blockers":[{"code":"rule_break","file":null,"detail":"` + detail + `","fix":"` + fix(f.home) + `"}]}` + "\n"
+				wantJSON = `{"block":"B1","ready":false,"blockers":[{"code":"rule_break","file":null,"detail":"` + detail + `","fix":"` + fix(f.home) + `","clears_by":"owner"}]}` + "\n"
 			}
 			if code != wantCode || out != wantJSON {
 				t.Fatalf("ready --json: exit=%d\nout=%q", code, out)
