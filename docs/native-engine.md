@@ -189,6 +189,11 @@ Go also decides the git, gh, rm and code-forge launcher rules (`npx`, `./bin/cod
 a `forge/r-…` branch name no longer hands over.
 Since B466, Go also reads Codex `exec --json` logs and decides the `code-forge-reviews-write` rule
 (writes into `.code-forge/reviews` or a `.code-forge/queue/*.done` file) with Node's hits.
+Since B628, a log that is only the final result object of `claude -p --output-format json` (every
+non-empty line a JSON object with `type` `result` and a text `result`) is read as a Claude result
+log in Go and Node: it holds no tool calls, so nothing in it counts as a command run, and a flag the
+coder only quotes in its answer (such as `--no-require-reviews`) is no `rule_break`. A file that mixes
+a result object with any other line stays a plain-text log.
 `close-transcript-format` now names only invalid UTF-8, a lone surrogate escape, a number JavaScript
 reads as infinite, and line separators JavaScript reads differently. An unreadable `--transcript`
 file prints Node's error (for example `ENOENT: no such file or directory, open '<path>'`), exits 1
