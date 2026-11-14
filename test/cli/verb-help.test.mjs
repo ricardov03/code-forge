@@ -106,32 +106,8 @@ test('every exported subcommand prints only its own help without effects', async
   } finally { cli.close(); }
 });
 
-test('command reference generation refuses missing usage or summary without overwriting the page', () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'missing-verb-help-'));
-  try {
-    for (const dir of ['scripts', 'bin', 'src/cli', 'docs/reference', 'home', 'tmp']) {
-      mkdirSync(path.join(root, dir), { recursive: true });
-    }
-    const script = path.join(root, 'scripts/gen-commands-doc.mjs');
-    const doc = path.join(root, 'docs/reference/commands.md');
-    writeFileSync(script, readFileSync(path.join(REPO, 'scripts/gen-commands-doc.mjs')));
-    writeFileSync(path.join(root, 'bin/code-forge.mjs'), 'export async function listVerbs() { return ["example"]; }\n');
-    writeFileSync(doc, 'existing page\n');
-    for (const missing of ['USAGE', 'SUMMARY']) {
-      writeFileSync(path.join(root, 'src/cli/example.mjs'), missing === 'USAGE'
-        ? 'export const SUMMARY = "Print an example.";\n'
-        : 'export const USAGE = "usage: code-forge example\\n";\n');
-      const response = spawnSync(process.execPath, [script], {
-        cwd: root, encoding: 'utf8', timeout: 15000,
-        env: { PATH: path.dirname(process.execPath), HOME: path.join(root, 'home'), TMPDIR: path.join(root, 'tmp') },
-      });
-      assert.equal(response.status, 1, missing);
-      assert.match(response.stderr, new RegExp(`Missing CLI help metadata: example\\.${missing}`));
-      assert.equal(response.stdout, '');
-      assert.equal(readFileSync(doc, 'utf8'), 'existing page\n');
-    }
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
+// B648: the missing-usage refusal of the command reference generator is a Go test now
+// (TestB648MissingUsageRefusesWithoutWriting): the page comes from the Go help table.
 
 const VERBS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive', 'reopen', 'accept-hit', 'unwaive', 'ack-waivers', 'human-pass', 'amend-acceptance'];
 
