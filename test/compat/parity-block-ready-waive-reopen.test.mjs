@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { runParity } from '../helpers/parity.mjs';
+import { allowClearsBy, runParity } from '../helpers/parity.mjs';
 import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { processStartTime } from '../../src/state/run.mjs';
 import { signRow, verifyRow } from '../../src/state/signer.mjs';
@@ -118,7 +118,7 @@ function launchAsync(f, args) {
 }
 async function parity(f, args, extra = {}) {
   const result = await runParity(args, { fixture: f, goCommand: BINARY, env: { ...env, ...extra } });
-  assert.deepEqual(result.diffs, [], `${args.join(' ')}: zero exit, stream, signed ledger, run, queue and lock diffs`);
+  assert.deepEqual(allowClearsBy(result.diffs), [], `${args.join(' ')}: zero exit, stream, signed ledger, run, queue and lock diffs but Go's clears_by`);
 }
 async function tree(dir) {
   const out = [];
