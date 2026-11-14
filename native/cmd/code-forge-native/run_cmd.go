@@ -29,13 +29,14 @@ import (
 // Go too (run_reload.go); odd cases keep named hand-overs.
 func init() { routes["run"] = runRun }
 
-const runUsage = "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>\n"
+const runUsage = "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id> | human-checks list --run <id> [--json] | human-checks clear --run <id> --block <id> --clause <C<n>> --note <text> [--json]\n"
 
 var runSubUsage = map[string]string{
-	"start":  "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief]\nusage: code-forge run start --add-worker --run <id>\nusage: code-forge run start --reattach --run <id> [--worker-pid <pid>]\n",
-	"status": "usage: code-forge run status --run <id>\n",
-	"reload": "usage: code-forge run reload --run <id>\n",
-	"end":    "usage: code-forge run end --run <id>\n",
+	"start":        "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief]\nusage: code-forge run start --add-worker --run <id>\nusage: code-forge run start --reattach --run <id> [--worker-pid <pid>]\n",
+	"status":       "usage: code-forge run status --run <id>\n",
+	"reload":       "usage: code-forge run reload --run <id>\n",
+	"end":          "usage: code-forge run end --run <id>\n",
+	"human-checks": rhcListUsage + rhcClearUsage,
 }
 
 // runFail is a refusal printed as `run <sub>: <message>`; usage exits 2.
@@ -176,6 +177,19 @@ func runRun(args []string) int {
 	sub := ""
 	if len(args) > 0 {
 		sub = args[0]
+	}
+	if sub == "human-checks" { // B631: the run's human-check ledger
+		before := gatesBreadcrumbName("run human-checks")
+		o := &runOut{}
+		code := runHumanChecks(home, args[1:], runOutWriter{o, false}, runOutWriter{o, true})
+		if code != 0 {
+			var message any
+			if o.last != "" {
+				message = strings.TrimSpace(o.last)
+			}
+			nativeVerbFailure("run", sub, args, code, message, before)
+		}
+		return code
 	}
 	known := sub == "start" || sub == "status" || sub == "reload" || sub == "end"
 	var flags runFlags
