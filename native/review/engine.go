@@ -63,6 +63,18 @@ type Deps struct {
 	TimeoutFallback func(TimeoutFallbackInput) (*Fallback, error)
 	// Lock is withLock (the schema-miss mark); nil = filelock.WithLock.
 	Lock func(key string, fn func() error) error
+	// NeedsFileCarry is the worker's read-back of the file's last signed
+	// review.needs_file_timeout row that still allows a retry (B627); nil
+	// or a nil answer = none.
+	NeedsFileCarry func() (*NeedsFileCarry, error)
+}
+
+// NeedsFileCarry (B627) is a needs_file round that timed out on an earlier
+// ticket for this file: its requested paths (as the row stored them) and
+// the attempt this ticket's retry is.
+type NeedsFileCarry struct {
+	Paths   []string
+	Attempt int
 }
 
 // Input is one ticket's review input (Node's ReviewInput).
@@ -82,6 +94,7 @@ type Input struct {
 	ChangedFiles []string // nil = Peers
 	TestFiles    []string
 	Secrets      []string // the registered redact values
+	Ticket       string   // the queue ticket id ("" = none; B627's row)
 }
 
 // GapError: a session already ran and its result needs a step not ported yet.
@@ -293,6 +306,8 @@ type prepared struct {
 	sections []sectionPacket
 	// extras: the movedOf parts every packet carries (B537)
 	extras packetParts
+	// carry: B627's retry of an earlier needs_file round that timed out
+	carry *NeedsFileCarry
 }
 
 // packetsFor is engine.mjs packetsFor: one packet per reviewer lens, each
@@ -475,6 +490,12 @@ func File(in Input, deps Deps) (ledger.Object, error) {
 	if p.early != nil {
 		return p.early, nil
 	}
+	if deps.NeedsFileCarry != nil {
+		// a read failure is no carry: the review runs as before B627
+		if c, err := deps.NeedsFileCarry(); err == nil && c != nil && len(c.Paths) > 0 {
+			p.carry = c
+		}
+	}
 	result := func(fields ledger.Object, tail ...ledger.Field) ledger.Object {
 		out := append(ledger.Object{}, fields...)
 		out = append(out, p.head...)
@@ -525,13 +546,24 @@ func reviewPart(p *prepared, part *FileDiff, packets []*Packet, in Input, deps D
 	schemaFallback := p.plan.mode != "consensus"
 	done := []ledger.Object{}
 	for i, spec := range p.plan.reviewers {
-		res, err := runOneWith(spec, packets[i].Text, packets[i], in, deps, schemaFallback)
+		text, carried := packets[i].Text, false
+		if spec.role == "reviewer" && p.carry != nil {
+			extra, ok := attachCarry(p.carry.Paths, in)
+			if ok {
+				text, carried = text+extra, true
+			}
+		}
+		res, err := runOneWith(spec, text, packets[i], in, deps, schemaFallback)
 		if err != nil {
 			return partOutcome{}, err
 		}
-		if res, err = needsFileRound(res, spec, packets[i], in, deps); err != nil {
+		if res, err = needsFileRound(res, spec, text, packets[i], in, deps); err != nil {
 			return partOutcome{}, err
 		}
+		if carried {
+			res.Set("needs_file_carried", float64(p.carry.Attempt))
+		}
+		noteNeedsFileTimeout(res, spec, p.carry, carried, in, deps, rowExtra)
 		done = append(done, res)
 	}
 	out := partOutcome{}
@@ -687,7 +719,7 @@ var errFellBack = errors.New("fell back")
 // answer that asks for files gets ONE more session with them attached
 // (attachFiles), or needs_file-refused when none could be attached and none
 // was refused by policy.
-func needsFileRound(summary ledger.Object, spec sessionSpec, packet *Packet, in Input, deps Deps) (ledger.Object, error) {
+func needsFileRound(summary ledger.Object, spec sessionSpec, base string, packet *Packet, in Input, deps Deps) (ledger.Object, error) {
 	review, _ := summary.Get("review").(ledger.Object)
 	needs, _ := get(review, "needs_file").([]any)
 	if spec.role != "reviewer" || summary.Get("status") != "ok" || len(needs) == 0 {
@@ -726,7 +758,7 @@ func needsFileRound(summary ledger.Object, spec sessionSpec, packet *Packet, in 
 		out.Set("review", nil)
 		return out, nil
 	}
-	out, err := runOneWith(spec, packet.Text+extra, packet, in, deps, true)
+	out, err := runOneWith(spec, base+extra, packet, in, deps, true)
 	if err != nil {
 		return nil, err
 	}

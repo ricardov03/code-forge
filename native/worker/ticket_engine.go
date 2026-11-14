@@ -319,7 +319,7 @@ func (w *TicketRunner) planOrdinary(t ledger.Object, cfg map[string]any, content
 	}
 	workDir := filepath.Join(w.RunRootDir, "packets", id)
 	in := review.Input{RepoRoot: contentRoot, File: file, Cfg: cfg, Kind: e.kind, RulesDigest: digest, FactsExcerpt: facts, WorkDir: workDir,
-		Peers: peers, HasPeerDiffs: len(peers) > 0, OwnedFiles: ownedFiles, ChangedFiles: changed, TestFiles: tests, Secrets: w.secrets()}
+		Peers: peers, HasPeerDiffs: len(peers) > 0, OwnedFiles: ownedFiles, ChangedFiles: changed, TestFiles: tests, Secrets: w.secrets(), Ticket: id}
 	if e.base != nil {
 		in.Base = *e.base
 	}
@@ -344,6 +344,7 @@ func (w *TicketRunner) planOrdinary(t ledger.Object, cfg map[string]any, content
 		Review: func(write func(ledger.Object) error) (ledger.Object, error) {
 			return review.File(in, review.Deps{Spawn: w.pooled(id, cfg, session.ReviewSpawn(sopts, sdeps)), WriteRow: write, Warn: w.Warn,
 				ReadRows: w.readRows, SchemaHistory: schemaHistory(w.readRows, w.Key, w.RunID, file, hash),
+				NeedsFileCarry: needsFileCarry(w.readRows, w.Key, w.RunID, block, file),
 				TimeoutFallback: func(ti review.TimeoutFallbackInput) (*review.Fallback, error) {
 					fb, err := timeoutFallbackFor(ti.Cfg, ti, w.now())
 					if err != nil || fb == nil {
@@ -543,10 +544,10 @@ func recordedVerdict(outcome ledger.Object) ledger.Object {
 }
 
 // needsFileSessions is complete's ledger `sessions`: the needs_file
-// diagnostics of the result's sessions only.
+// diagnostics of the result's sessions only (B627: and the carried retry).
 func needsFileSessions(v any) []any {
 	list, _ := v.([]any)
-	fields := []string{"needs_file_round", "needs_file_requested", "needs_file_errors"}
+	fields := []string{"needs_file_round", "needs_file_requested", "needs_file_errors", "needs_file_carried"}
 	out := []any{}
 	for _, s := range list {
 		o, _ := s.(ledger.Object)

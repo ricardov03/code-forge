@@ -916,6 +916,16 @@ classes. These diagnostics store no file content. The worker's `review.result` l
 keeps only sessions with needs-file diagnostics. Each stores `lens`, `status`, `needs_file_round`,
 `needs_file_requested` and `needs_file_errors` when present. Finding text stays out of this row.
 
+When the second round's session times out (`unavailable: timeout`), the Go worker writes one
+signed `review.needs_file_timeout` ledger row with the ticket, the lens, `requested_paths` (the
+stored redacted paths), `attempt: 1` and `retry: true` (B627). The next ticket for that file reads
+the row back and its reviewer starts with those files already attached, in a new session with its
+own timeout clock, so it need not ask again. The attach applies the same refusals as the round.
+Its session summary and the `review.result` row's sessions carry `needs_file_carried: 2`, which
+uses up the retry. If the retry times out too, a second row has `attempt: 2` and `retry: false`,
+and later tickets for the file start plain again. Only signed rows of the same run, block and file
+are read. An engine call without a worker ticket writes no such row.
+
 Over budget, drop `## paired` first, then shrink the context to minimal
 (`review.context.min_context_lines`), then trim the rules digest from the end. The diff is never
 cut. A diff alone over budget gives `split_required`: the file is not reviewed, and the result

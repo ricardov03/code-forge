@@ -25,6 +25,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Fixed
 
 - The Go ledger writer now gives `ps` 5 seconds to read its own process start time for the append lock, as Node does (was 1 second), and retries a failed read on the next append as Node does, instead of failing every later ledger append in that process after one slow `ps` on a loaded host. B624
+- When a review's `needs_file` round times out, the Go worker no longer loses it: it writes one signed `review.needs_file_timeout` ledger row (ticket, lens, requested paths, attempt, retry) and the next ticket for that file starts its reviewer with the requested files already attached, in a new session with its own timeout clock; the attach refuses paths outside the project as the round does, and a second timeout falls back to today's unavailable result (B627)
 
 ## [0.23.0] — 2026-11-13
 
