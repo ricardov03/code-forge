@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 )
@@ -185,7 +186,7 @@ func Scope(top, prefix, id, run string, blocks ledger.Object, changed []string, 
 							continue
 						}
 						b := Object(other.Value)
-						if b.Get("status") == "closed" && Owns(prefix, b, f) {
+						if (b.Get("status") == "closed" || b.Get("status") == humancheck.DeferredStatus) && Owns(prefix, b, f) {
 							for _, r := range rows {
 								if r["event"] == "review.approved" && r["block"] == other.Key && r["file"] == f && r["content_hash"] == hash && Verified(r, key) {
 									accounted = true

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/queue"
@@ -64,7 +65,7 @@ func reviewEnqueueRebase(args []string, flags map[string]string, paths []string,
 		}
 		blocks, _ := r.Get("blocks").(ledger.Object)
 		entry, _ := blocks.Get(block).(ledger.Object)
-		if entry.Get("worktree") == nil && entry.Get("status") != "closed" && entry.Get("status") != "awaiting_human_check" {
+		if entry.Get("worktree") == nil && entry.Get("status") != "closed" && entry.Get("status") != "awaiting_human_check" && entry.Get("status") != humancheck.DeferredStatus {
 			return reviewWaitUsageError(args, "rebase clearance requires a worktree block")
 		}
 	}
