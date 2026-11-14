@@ -181,18 +181,19 @@ test('usage errors are exact and handovers leave every fixture byte unchanged', 
     if (verb === 'reopen') for (const reason of ['\ufeff', '\u0085']) await parity(f, argv(verb, ['--file', 'sample.mjs', '--reason', reason, '--yes']));
     if (verb !== 'ready') for (const [file, reason] of [['', 'why'], ['sample.mjs', '']]) await parity(f, argv(verb, ['--file', file, '--reason', reason, '--yes']));
   }
-  for (const [kind, verb] of [['judge', 'waive'], ['judge-reopen', 'reopen']]) {
+  // B612 moved the --yes judge to Go: no Node handover. With no judge CLI the
+  // session fails, Go refuses with exit 1, writes nothing and logs no handover.
+  for (const [kind, verb, reason] of [['judge', 'waive', 'waive-yes-broken'], ['judge-reopen', 'reopen', 'reopen-yes-disagreed']]) {
     const f = await fixture(kind);
-    const before = [await tree(f.home), await tree(f.repo)];
-    const r = launch(f, argv(verb, ['--file', 'sample.mjs', '--reason', 'sample.mjs:1', '--yes']));
-    assert.equal(r.code, 127, `${verb}: judge hands over to unavailable Node`);
-    assert.deepEqual([await tree(f.home), await tree(f.repo)], before, `${verb}: no Go writes before judge handover`);
-    const original = argv(verb, ['--file', 'sample.mjs', '--reason', 'sample.mjs:1', '--yes']);
-    assert.deepEqual(launch(f, original, { CODE_FORGE_NODE: process.execPath, CF_TEST_FALLBACK_PROBE: '1' }), { code: 23, stdout: JSON.stringify(original) + '\n', stderr: '' }, `${verb}: fallback preserves argv and Node exit exactly`);
-    assert.deepEqual([await tree(f.home), await tree(f.repo)], before, `${verb}: forwarding also makes zero Go state writes`);
-    assert.equal(launch(f, original, { CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1' }).code, 127, `${verb}: telemetry does not alter the fallback exit`);
+    // .git/index is git's own stat cache; a read-only `git status` may refresh it.
+    const snap = async () => [await tree(f.home), (await tree(f.repo)).map(([n, v]) => n === '.git' ? [n, v.filter(([m]) => m !== 'index')] : [n, v])];
+    const before = await snap();
+    const args = argv(verb, ['--file', 'sample.mjs', '--reason', 'sample.mjs:1', '--yes']);
+    assert.deepEqual(launch(f, args), { code: 1, stdout: '', stderr: `block ${verb}: ${reason}: Judge answer broken: the judge session failed.; nothing was recorded\n` }, `${verb}: judge runs in Go with Node unavailable`);
+    assert.deepEqual(await snap(), before, `${verb}: a failed judge writes nothing`);
+    assert.equal(launch(f, args, { CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1' }).code, 1, `${verb}: telemetry does not change the Go exit`);
     const log = launch(f, ['logs', 'handovers', '--json']);
     assert.equal(log.code, 0, 'handover log report runs without Node');
-    assert.deepEqual(JSON.parse(log.stdout).rows.map(({ verb: command, sub, reason, count }) => ({ verb: command, sub, reason, count })), [{ verb: 'block', sub: verb, reason: 'block-unported-subcommand', count: 1 }], `${verb}: exactly one stable public reason code`);
+    assert.deepEqual(JSON.parse(log.stdout).rows, [], `${verb}: no handover row`);
   }
 });
