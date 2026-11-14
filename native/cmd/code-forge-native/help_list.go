@@ -149,6 +149,7 @@ var helpCommands = []helpEntry{
 	{name: "run status", summary: "Show the state of a run"},
 	{name: "run reload", summary: "Load the changed settings into a run"},
 	{name: "run end", summary: "End a run"},
+	{name: "run human-checks", summary: "List the open human checks of a run, or clear one (owner)"},
 	{name: "s2", summary: "Answer a decision packet with a System 2 session"},
 	{name: "setup", summary: "Check the Go binary for this system"},
 	{name: "spawn", summary: "Run a model session at a level and role"},

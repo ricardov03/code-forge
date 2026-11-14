@@ -27,7 +27,11 @@ func TestB619NativeStatusNeverHandsOverToTheCompanion(t *testing.T) {
 	for _, c := range cases {
 		b501Stdin(t, c.stdinLines)
 		code, out, errText := runCaptured(t, append([]string{"native-status"}, c.args...)...)
-		if code != c.code || out != c.out || errText != c.err {
+		want := c.out
+		if c.code == 0 { // B613: --help and -h print the wrapped help page
+			want = helpExpect(t, append([]string{"native-status"}, c.args...), 0, c.out)
+		}
+		if code != c.code || out != want || errText != c.err {
 			t.Fatalf("%q: code=%d stdout=%q stderr=%q", c.args, code, out, errText)
 		}
 	}

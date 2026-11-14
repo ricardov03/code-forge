@@ -99,6 +99,7 @@
   {"name":"review-file","summary":"Queue a file review or wait for the results","owner":false,"group":""},
   {"name":"run","summary":"Start, check, reload or end a run","owner":false,"group":"run"},
   {"name":"run end","summary":"End a run","owner":false,"group":"run"},
+  {"name":"run human-checks","summary":"List the open human checks of a run, or clear one (owner)","owner":false,"group":"run"},
   {"name":"run reload","summary":"Load the changed settings into a run","owner":false,"group":"run"},
   {"name":"run start","summary":"Start a run, or add or reattach a worker","owner":false,"group":"run"},
   {"name":"run status","summary":"Show the state of a run","owner":false,"group":"run"},

@@ -907,6 +907,8 @@ usage: code-forge run end --run <id> [--json]
 
 ### run human-checks
 
+List the open human checks of a run, or clear one (owner)
+
 ```text
 usage: code-forge run human-checks list --run <id> [--json]
 usage: code-forge run human-checks clear --run <id> --block <id> --clause <C<n>> --note <text> [--json]

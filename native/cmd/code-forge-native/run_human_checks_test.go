@@ -164,7 +164,7 @@ func TestB631HumanChecksRouted(t *testing.T) {
 	}
 	f := b631Fixture(t, nil)
 	f.run("TestB631HumanChecksRouted", "notty", "run|human-checks|list|--run|r-test").want(t, 0, b631OpenText, "")
-	f.run("TestB631HumanChecksRouted", "notty", "run|human-checks|--help").want(t, 0, rhcListUsage+rhcClearUsage, "")
+	f.run("TestB631HumanChecksRouted", "notty", "run|human-checks|--help").want(t, 0, helpWrapped(t, "run human-checks", rhcListUsage+rhcClearUsage), "")
 	f.run("TestB631HumanChecksRouted", "notty", "run|human-checks|clear|--run|r-test|--block|B1|--clause|C2|--note|x").want(t, 2, "", "run human-checks clear needs the human at a terminal to confirm; nothing was recorded (there is no --yes)\n")
 }
 
