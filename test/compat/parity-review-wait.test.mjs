@@ -7,7 +7,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { runParity } from '../helpers/parity.mjs';
+import { helpPageParity, runParity } from '../helpers/parity.mjs';
 import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -70,10 +70,12 @@ function launch(f, args, extra = {}) {
   return { child, ended };
 }
 
-async function parity(f, args, env = {}) {
+async function parity(f, args, env = {}, page) {
   const result = await runParity(args, { fixture: f, goCommand: BINARY, env: {
     CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE, ...env,
   } });
+  // B613: a page means Go prints the help page around Node's usage; nothing else may differ.
+  if (page) return assert.deepEqual(result, helpPageParity(result, page), `${args.join(' ')}: only stdout differs, Go prints the help page around Node usage`);
   assert.deepEqual(result.diffs, [], `${args.join(' ')}: zero stream, exit, or state diffs`);
   assert.equal(result.equal, true, 'parity reports equality');
 }
@@ -280,14 +282,21 @@ test('unknown wait flags, --cwd, --help and wait-block refusals run in Go with i
   ];
   await writeFile(path.join(f.repo, 'plain-file'), 'x');
   for (const args of cases) {
-    await parity(f, args, { CODE_FORGE_NO_ERROR_LOG: '0' });
+    // B613: review-file --help is the Go help page around Node's usage.
+    await parity(f, args, { CODE_FORGE_NO_ERROR_LOG: '0' }, args[1] === '--help' ? { summary: 'Queue a file review or wait for the results' } : undefined);
     const result = await launch(f, args).ended;
     assert.notEqual(result.code, 127, `${args.join(' ')}: served without Node`);
     assert.doesNotMatch(result.stderr, /node executable .* not found/, `${args.join(' ')}: no handover`);
   }
-  // No verb at all is not a review-file form; the router still hands it over.
-  await parity(f, [], { CODE_FORGE_NODE: process.execPath, CODE_FORGE_NO_ERROR_LOG: '0' });
-  assert.equal((await launch(f, []).ended).code, 127, 'no verb still requires Node');
+  // No verb at all is not a review-file form. B613: Go serves it as the command list (Node
+  // prints its bare verb list); exit, stderr and state stay equal to Node.
+  const list = await runParity([], { fixture: f, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath, CODE_FORGE_NO_ERROR_LOG: '0' } });
+  assert.deepEqual(list.diffs.map(({ where, field }) => ({ where, field })), [{ where: 'process', field: 'stdout' }], 'no verb: only stdout differs from Node');
+  assert.match(list.diffs[0].node, /^Usage: code-forge <verb> \[args\]\n\nVerbs:\n {2}author\n/, 'no verb: Node prints its verb list');
+  assert.match(list.diffs[0].go, /^code-forge \d+\.\d+\.\d+\S*\n\nUsage:\n {2}code-forge <command> \[options\] \[arguments\]\n[^]*\nAvailable commands:\n {2}author +Write or harden a plan draft from a brief\n/, 'no verb: Go prints the command list');
+  const noVerb = await launch(f, []).ended;
+  assert.equal(noVerb.code, 0, 'no verb runs in Go without Node');
+  assert.equal(noVerb.stderr, '', 'no verb: Go writes no stderr');
   const rebaseArgs = ['review-file', '--rebase-check'];
   await parity(f, rebaseArgs, { CODE_FORGE_NO_ERROR_LOG: '0' });
   const rebase = await launch(f, rebaseArgs).ended;

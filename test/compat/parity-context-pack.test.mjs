@@ -10,7 +10,7 @@ import { assemblePack, packTokens } from '../../src/context/pack.mjs';
 import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { mergeForbidden } from '../../src/util/forbidden.mjs';
 import { verifyRow } from '../../src/state/signer.mjs';
-import { runParity } from '../helpers/parity.mjs';
+import { helpPageParity, runParity } from '../helpers/parity.mjs';
 import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -62,8 +62,8 @@ function launch(f, a, extra = {}, executable = binary) {
       CODE_FORGE_HANDOVER_LOG: '0', CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '1', ...extra }),
   });
 }
-async function parity(f, a, extra = {}) {
-  assert.deepEqual(await runParity(['context', ...a], { fixture: f, goCommand: binary, samePaths: true,
+async function parity(f, a, extra = {}, page) {
+  const result = await runParity(['context', ...a], { fixture: f, goCommand: binary, samePaths: true,
     env: { CODE_FORGE_NODE: NO_NODE, ...extra },
     // Relocation moves tmp.root inside the snapshot. Re-hash the relocated
     // fixture so this tests a valid snapshot rather than two hash refusals.
@@ -73,7 +73,10 @@ async function parity(f, a, extra = {}) {
       record.config = initialConfigState(record.config.snapshots[record.config.hash]);
       await writeFile(file, JSON.stringify(record));
     } : undefined,
-  }), { equal: true, diffs: [] }, JSON.stringify(a) + ': zero exit, stream, pack-byte or signed-state differences');
+  });
+  // B613: a page means Go prints the help page around Node's usage; nothing else may differ.
+  if (page) assert.deepEqual(result, helpPageParity(result, page), JSON.stringify(a) + ': only stdout differs, Go prints the help page around Node usage');
+  else assert.deepEqual(result, { equal: true, diffs: [] }, JSON.stringify(a) + ': zero exit, stream, pack-byte or signed-state differences');
 }
 async function configure(f, context) {
   f.config.context = context;
@@ -199,7 +202,10 @@ test('B290 boundary: usage/refusals are exact; B452 runs every former hand-over 
     const result = launch(f, a);
     assert.notEqual(result.status, 127, JSON.stringify(a) + ': B452 runs the case in Go without Node');
     assert.doesNotMatch(result.stderr, /code-forge-native: node executable/, JSON.stringify(a) + ': no hand-over');
-    await parity(f, a);
+    // B613: `context --help` and `context pack --help` print the Go help page.
+    const page = a[0] === '--help' ? { summary: 'Build the context a coder gets', commands: [['context pack', 'Build the context pack of a block']] }
+      : a[0] === 'pack' && a[1] === '--help' ? { summary: 'Build the context pack of a block' } : undefined;
+    await parity(f, a, {}, page);
   }
   await parity(f, args, { CODE_FORGE_NO_ERROR_LOG: '0' });
   const files = await readdir(path.join(f.home, '.code-forge'));

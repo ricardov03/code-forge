@@ -8,7 +8,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { signRow, verifyRow } from '../../src/state/signer.mjs';
-import { runParity } from '../helpers/parity.mjs';
+import { goHelpPage, helpPageParity, runParity } from '../helpers/parity.mjs';
 import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -68,10 +68,14 @@ async function executeAsync(f, args) {
   const [code] = await once(child, 'close');
   return { code, stdout, stderr };
 }
-async function parity(f, args = ARGS, options = {}) {
+async function parity(f, args = ARGS, options = {}, page) {
   const r = await runParity(args, { fixture: f, goCommand: BIN, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE }, ...options });
-  assert.deepEqual(r.diffs, [], `${args.join(' ')}: zero output, state and verified ledger differences`);
+  // B613: a page means Go prints the help page around Node's usage; nothing else may differ.
+  if (page) assert.deepEqual(r, helpPageParity(r, page), `${args.join(' ')}: only stdout differs, Go prints the help page around Node usage`);
+  else assert.deepEqual(r.diffs, [], `${args.join(' ')}: zero output, state and verified ledger differences`);
 }
+/** B613: the Go help page of review-file. */
+const REVIEW_FILE_PAGE = { summary: 'Queue a file review or wait for the results' };
 async function done(f, id, result, marker = {}) {
   await put(f.repo, 'reviews/result.json', result);
   await put(f.repo, `queue/${id}.done`, { ticket: id, status: result.status, result: '.code-forge/reviews/result.json', ...marker });
@@ -94,7 +98,9 @@ test('help runs in Go and an unported flag records exactly one hand-over with it
   for (const args of [['review-file', '--help'], ['review-file', '-h', '--wait-block', 'B1']]) {
     const expected = execute(f, args, true);
     assert.equal(expected.code, 0, 'Node prints help with exit 0');
-    assert.deepEqual(execute(f, args, false, { CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1' }), expected, `${args.join(' ')}: Go help is byte-equal to Node without Node`);
+    assert.match(expected.stdout, /^usage: code-forge review-file /, 'Node prints the review-file usage');
+    // B613: Go prints the help page around Node's usage, same exit and stderr.
+    assert.deepEqual(execute(f, args, false, { CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1' }), { ...expected, stdout: goHelpPage(expected.stdout, REVIEW_FILE_PAGE) }, `${args.join(' ')}: Go help page holds Node's usage bytes, without Node`);
   }
   await assert.rejects(readFile(path.join(f.home, '.code-forge/native/handovers.jsonl')), { code: 'ENOENT' }, 'native help records zero hand-overs');
   const args = ['review-file', '--x=/private/value'];
@@ -223,7 +229,7 @@ test('enqueue flag refusals preserve cache bytes and unsupported cases hand over
   const before = await snapshot(f);
   assert.equal(execute(f, ['review-file', '--help']).code, 0, 'help runs in Go with Node unavailable');
   assert.deepEqual(await snapshot(f), before, 'help changes zero queue, ledger, run or log bytes and modes');
-  await parity(f, ['review-file', '--help']);
+  await parity(f, ['review-file', '--help'], {}, REVIEW_FILE_PAGE);
   await put(f.home, 'ledger/fixture.jsonl', JSON.stringify(signRow({ event: 'review.cap', run: RUN, block: 'B1', file: 'sample.mjs', open: ['f1'] }, Buffer.alloc(32, 7))) + '\n');
   const capArgs = ['review-file', 'answer.mjs', '--block=B1', `--run=${RUN}`, '--answers=f1', '--of=sample.mjs'];
   const capBefore = await snapshot(f);

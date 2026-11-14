@@ -6,7 +6,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { isolatedEnv, runParity } from '../helpers/parity.mjs';
+import { helpPageParity, isolatedEnv, runParity } from '../helpers/parity.mjs';
 import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { processStartTime } from '../../src/state/run.mjs';
 import { appendRow } from '../../src/ledger/write.mjs';
@@ -111,7 +111,7 @@ function argv(kind) {
     ...(kind.startsWith('decide') ? ['--decide', '--reason', 'Owner checked the implementation'] : []),
     ...(kind === 'human-pass' ? ['--note', 'Device checked', '--proof', 'sample.mjs'] : [])];
 }
-async function parity(f, args, keys, expected, extra = {}) {
+async function parity(f, args, keys, expected, extra = {}, page) {
   const terminal = keys !== undefined;
   const r = await runParity(args, { fixture: f, goCommand: terminal ? ['python3', '-c', PTY, BIN] : BIN,
     nodeCommand: terminal ? ['python3', '-c', PTY, process.execPath, CLI] : [process.execPath, CLI], samePaths: true, tempRoot: scratch,
@@ -124,7 +124,9 @@ async function parity(f, args, keys, expected, extra = {}) {
         assert.doesNotMatch(String(result.stdout), /\x1b\[\d+(?:;\d+)*m/, `${engine}: NO_COLOR stdout contains zero SGR colour escapes`);
       }
     } });
-  assert.deepEqual(r.diffs, [], `${args.join(' ')}: zero stdout, stderr, state and signed-row differences`);
+  // B613: a page means Go prints the help page around Node's usage; nothing else may differ.
+  if (page) assert.deepEqual(r, helpPageParity(r, page), `${args.join(' ')}: only stdout differs, Go prints the help page around Node usage`);
+  else assert.deepEqual(r.diffs, [], `${args.join(' ')}: zero stdout, stderr, state and signed-row differences`);
 }
 
 test('human close, decide and human-pass have terminal, state, signed-row and zero-handover parity', async () => {
@@ -151,7 +153,8 @@ test('human close, decide and human-pass have terminal, state, signed-row and ze
 test('B380: human-pass --help and -h print Node usage natively with no hand-over', async () => {
   for (const flags of [['--help'], ['-h'], ['B1', '--run', RUN, '--help'], ['B1', '--note', 'x', '-h']]) {
     const f = await fixture('human-pass'), args = ['block', 'human-pass', ...flags];
-    await parity(f, args, undefined, 0);
+    // B613: `block human-pass --help` (the help flag right after the sub-verb) is the Go help page.
+    await parity(f, args, undefined, 0, {}, flags.length === 1 ? { summary: "Record the owner's device check and close (owner)" } : undefined);
     const native = launch(BIN, args, f, { CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1' });
     assert.equal(native.status, 0, `${flags}: usage exits 0 with Node unavailable: ${native.stderr}`);
     assert.match(native.stdout, /block human-pass <id> --run <r> --note <text>/, `${flags}: human-pass usage on stdout`);
