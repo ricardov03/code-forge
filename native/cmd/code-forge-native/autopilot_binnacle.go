@@ -1016,6 +1016,10 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 		}
 		action(text)
 	}
+	// B626: a block whose blockers are all owner-only gets one owner line.
+	for _, line := range settleOwnerLines(all, runID, settleOpenBlock(record)) {
+		action(line)
+	}
 
 	// ---- incidents
 	incidents := []any{}
