@@ -8,6 +8,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(REPO, 'docs/reference/commands.md');
+// One-line summaries from the Go help table (`code-forge help --json`); a Go test keeps the file current.
+const SUMMARIES = path.join(REPO, 'docs/reference/command-summaries.json');
+
+/** @returns {Map<string, string>} command name ("block open") to its one-line summary */
+export function readCommandSummaries(file = SUMMARIES) {
+  /** @type {{name: string, summary: string}[]} */
+  const rows = JSON.parse(readFileSync(file, 'utf8'));
+  return new Map(rows.map((row) => [row.name, row.summary]));
+}
 
 /** @typedef {{verb: string, purpose: string, usage: string, subcommands: {name: string, usage: string}[]}} Command */
 
@@ -52,9 +61,9 @@ export function collectCommandHelp() {
 }
 
 /** Pure renderer: the same collected help always produces the same Markdown.
- * @param {Command[]} commands @returns {string}
+ * @param {Command[]} commands @param {Map<string, string>} [summaries] @returns {string}
  */
-export function renderCommandsDoc(commands) {
+export function renderCommandsDoc(commands, summaries = readCommandSummaries()) {
   const lines = [
     '# Command reference', '',
     'This page lists the CLI commands and their usage. It is generated from the CLI. ' +
@@ -69,10 +78,12 @@ export function renderCommandsDoc(commands) {
     if (!command.usage?.trim() || !command.purpose?.trim()) {
       throw new Error('missing USAGE or SUMMARY: ' + command.verb);
     }
-    lines.push('## ' + command.verb, '', command.purpose, '');
+    lines.push('## ' + command.verb, '', summaries.get(command.verb) ?? command.purpose, '');
     addUsage(command.usage);
     for (const sub of command.subcommands) {
-      lines.push('### ' + command.verb + ' ' + sub.name, '');
+      const name = command.verb + ' ' + sub.name;
+      lines.push('### ' + name, '');
+      if (summaries.has(name)) lines.push(/** @type {string} */ (summaries.get(name)), '');
       addUsage(sub.usage);
     }
   }

@@ -93,7 +93,7 @@ func TestB452ContextHelpAndUsageInGo(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	for _, args := range [][]string{{"context", "--help"}, {"context", "-h"}, {"context", "pack", "--help"}, {"context", "pack", "-h", "--run"}} {
 		code, out, errText := runCaptured(t, args...)
-		if code != 0 || out != contextUsage || errText != "" {
+		if code != 0 || out != helpExpect(t, args, 0, contextUsage) || errText != "" {
 			t.Fatalf("%v: code=%d stdout=%q stderr=%q", args, code, out, errText)
 		}
 	}
