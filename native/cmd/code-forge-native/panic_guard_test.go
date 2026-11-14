@@ -187,7 +187,7 @@ func TestB508NoPanicKeepsResults(t *testing.T) {
 		}
 	}
 	res := b508Run(t, nil, "setup", "--help")
-	if res.code != 0 || res.stdout != setupUsage {
+	if res.code != 0 || res.stdout != helpExpect(t, []string{"setup", "--help"}, 0, setupUsage) {
 		t.Errorf("setup --help: code=%d stdout=%q", res.code, res.stdout)
 	}
 }

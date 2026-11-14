@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { runParity } from '../helpers/parity.mjs';
+import { helpPageParity, runParity } from '../helpers/parity.mjs';
 import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -60,7 +60,7 @@ function invoke(args, { node = false, logging = false, home = fixture.home, node
   return { code: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
-async function parity(args, logging = false, native = binary) {
+async function parity(args, logging = false, native = binary, page) {
   // The harness deliberately disables error logging. A preload enables it in
   // both its Node reference and a transparent launcher for the native command.
   const env = { CODE_FORGE_NODE: process.execPath, ...(logging ? {
@@ -72,8 +72,10 @@ async function parity(args, logging = false, native = binary) {
     if (result.error) throw result.error;
     process.exit(result.status ?? 1);
   `, '--'] : native;
-  assert.deepEqual(await runParity(args, { fixture, goCommand, env }),
-    { equal: true, diffs: [] }, `${args.join(' ')}: zero exit, stream, and state differences`);
+  const result = await runParity(args, { fixture, goCommand, env });
+  // B613: a page means Go prints the help page around Node's usage; nothing else may differ.
+  if (page) assert.deepEqual(result, helpPageParity(result, page), `${args.join(' ')}: only stdout differs, Go prints the help page around Node usage`);
+  else assert.deepEqual(result, { equal: true, diffs: [] }, `${args.join(' ')}: zero exit, stream, and state differences`);
 }
 
 test('B247 clause: logs read verbs run without Node with byte parity; clear and report hand over', async () => {
@@ -126,9 +128,18 @@ test('B247 boundary: empty/missing logs match; unsupported arguments and legacy 
   for (const args of [['--last', '0'], ['--last=01'], ['--last=-1'], ['--last=1.5'], ['--last=9007199254740992'],
     ['--last'], ['--last='], ['--last', '--json'], ['--last', '1', '--last', '2'], ['--json=true'], ['--json', '--json'],
     ['--unknown'], ['--'], ['-x'], ['list'], ['unknown'], ['path', 'extra'], ['summary', '--days', 'NaN'],
-    ['summary', '--days'], ['summary', '--unknown'], ['path', '--json'], ['--json', 'extra'],
-    ['--help'], ['path', '-h'], ['summary', '--help'], ['clear', '--help'], ['report', '--help']]) {
+    ['summary', '--days'], ['summary', '--unknown'], ['path', '--json'], ['--json', 'extra']]) {
     await parity(['logs', ...args], true); // includes usage-error log and breadcrumb state.
+  }
+  /** @type {[string, string][]} */
+  const logsCommands = [['logs clear', 'Delete the local CLI error log'], ['logs path', 'Print the path of the CLI error log'],
+    ['logs report', 'Report CLI errors as a GitHub issue'], ['logs summary', 'Count the CLI errors of the last days']];
+  /** @type {[string[], Parameters<typeof helpPageParity>[1]][]} */
+  const helpCases = [[['--help'], { summary: 'Show the last local CLI errors', commands: logsCommands }],
+    [['path', '-h'], { summary: 'Print the path of the CLI error log' }], [['summary', '--help'], { summary: 'Count the CLI errors of the last days' }],
+    [['clear', '--help'], { summary: 'Delete the local CLI error log' }], [['report', '--help'], { summary: 'Report CLI errors as a GitHub issue' }]];
+  for (const [args, page] of helpCases) {
+    await parity(['logs', ...args], true, binary, page); // B613: help page; usage, log and breadcrumb state stay equal.
   }
   await seed(JSON.stringify({ ...entries[1], fp: undefined }) + '\n');
   for (const args of [[], ['summary']]) {

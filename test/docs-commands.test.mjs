@@ -50,7 +50,7 @@ test('committed command reference checks clean and contains every runtime verb a
   }
   const open = cli(['block', 'open', '--help']);
   assert.equal(open.status, 0, `block open help: ${open.stderr}`);
-  assert.ok(doc.includes(`### block open\n\n\x60\x60\x60text\n${open.stdout}\x60\x60\x60`), 'block open must have its exact subcommand help');
+  assert.ok(doc.includes(`### block open\n\nStart a block: owned files, acceptance tests, brief\n\n\x60\x60\x60text\n${open.stdout}\x60\x60\x60`), 'block open must have its summary (B613) and exact subcommand help');
   assert.ok(doc.includes('### plan check\n'), 'plan check must be discovered even when plan --help has no usage');
   const { collectCommandHelp, renderCommandsDoc } = await import('../scripts/gen-commands-doc.mjs');
   assert.equal(renderCommandsDoc(collectCommandHelp().commands), doc, 'pure renderer and CLI must produce identical bytes');

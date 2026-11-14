@@ -54,6 +54,7 @@ func checkSmallCases(t *testing.T, cases []smallCase) {
 	t.Helper()
 	for _, c := range cases {
 		code, out, errText := runCaptured(t, c.args...)
+		c.stdout = helpExpect(t, c.args, c.code, c.stdout) // B613 help page
 		if code != c.code || out != c.stdout || errText != c.stderrText {
 			t.Errorf("%q: code=%d stdout=%q stderr=%q\nwant code=%d stdout=%q stderr=%q", c.args, code, out, errText, c.code, c.stdout, c.stderrText)
 		}

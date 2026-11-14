@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { runParity } from '../helpers/parity.mjs';
+import { helpPageParity, runParity } from '../helpers/parity.mjs';
 import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -63,11 +63,22 @@ test('B248 clause: ledger tail counts and pure argument checks match Node with z
     ['tail', '--slug', 'sample', '-n', '-1'], ['tail', '--slug', 'sample', '--n', '1.5'],
     ['tail', '--slug', 'sample', '--n', '1', '-n', '2'],
     ['tail', '--slug', 'sample', '--unknown'], ['--unknown'],
-    ['tail', '--help'], ['--help'],
   ];
   for (const args of cases) {
     assert.deepEqual(await runParity(['ledger', ...args], { fixture: f, goCommand: binary,
       env: { CODE_FORGE_NODE: unavailable } }), { equal: true, diffs: [] }, JSON.stringify(args) + ': zero differences');
+  }
+  // B613: Go wraps Node's usage in the help page; exit, stderr and state stay equal.
+  /** @type {[string, string][]} */
+  const ledgerCommands = [['ledger add', 'Add coder spend that code-forge did not see'],
+    ['ledger calibration', 'Show how reliable the recorded answers were'], ['ledger outcome', 'Record the CI result of a pull request'],
+    ['ledger outside-review', 'Record an outside review of a pull request'], ['ledger tail', 'Print the last ledger rows']];
+  /** @type {[string[], Parameters<typeof helpPageParity>[1]][]} */
+  const helpCases = [[['tail', '--help'], { summary: 'Print the last ledger rows' }],
+    [['--help'], { summary: 'Read the ledger or record outcomes and spend', commands: ledgerCommands }]];
+  for (const [args, page] of helpCases) {
+    const result = await runParity(['ledger', ...args], { fixture: f, goCommand: binary, env: { CODE_FORGE_NODE: unavailable } });
+    assert.deepEqual(result, helpPageParity(result, page), JSON.stringify(args) + ': only stdout differs, Go prints the help page around Node usage');
   }
   assert.deepEqual(native(f, ['tail', '--slug', 'sample', '-n', '3']), {
     code: 0, stdout: f.rows.slice(-3).map((row) => JSON.stringify(row)).join('\n') + '\n', stderr: '',
