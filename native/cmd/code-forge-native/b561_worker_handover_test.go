@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/review"
 	"github.com/ricardov03/code-forge/native/session"
 	"github.com/ricardov03/code-forge/native/worker"
@@ -21,6 +22,12 @@ import (
 // is this test binary (same pid as the Go worker, through exec): it waits as a
 // slow Node start would, then boots like loop.mjs (prune the registry, refuse
 // on a live entry, announce) and answers the ticket.
+//
+// Load (B661): the fake reads its own ps start time during its start-up, before
+// the prune. Announce read it with a ps call between the prune (the hand-over
+// announcement gone) and the write of its own entry; under machine load that
+// ps took 350-380 ms, two of the waiter's 200 ms polls fell in the gap and it
+// answered worker_down. The waits below are caps, not speed bounds.
 
 // b561FakeNodeStartMs stands in for Node's start-up before its boot lock.
 const b561FakeNodeStartMs = 1000
@@ -49,9 +56,16 @@ func TestB561FakeNode(t *testing.T) {
 		return
 	}
 	root, ticket, run := os.Getenv("B561_ROOT"), os.Getenv("B561_TICKET"), os.Getenv("B561_RUN")
+	own := filelock.ProcessStartTime(os.Getpid())
+	probes := worker.Probes{StartTime: func(pid int) *string {
+		if pid == os.Getpid() && own != nil {
+			return own
+		}
+		return filelock.ProcessStartTime(pid)
+	}}
 	time.Sleep(b561FakeNodeStartMs * time.Millisecond)
 	// loop.mjs boot: workerRegistry(prune) then liveWorker for the legacy file.
-	entries, err := worker.Registry(root, true, worker.Probes{})
+	entries, err := worker.Registry(root, true, probes)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "worker:", err)
 		os.Exit(1)
@@ -62,14 +76,14 @@ func TestB561FakeNode(t *testing.T) {
 			count++
 		}
 	}
-	if legacy, _ := worker.Live(root, worker.LiveOpts{}, worker.Probes{}); legacy != nil && count == 0 {
+	if legacy, _ := worker.Live(root, worker.LiveOpts{}, probes); legacy != nil && count == 0 {
 		count++
 	}
 	if count >= 1 {
 		fmt.Fprintln(os.Stderr, "worker: review.workers limit 1: a live or unreadable worker entry already serves this queue")
 		os.Exit(1)
 	}
-	self, err := worker.Announce(root, os.Getpid(), run, worker.Probes{})
+	self, err := worker.Announce(root, os.Getpid(), run, probes)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "worker:", err)
 		os.Exit(1)
@@ -81,7 +95,7 @@ func TestB561FakeNode(t *testing.T) {
 	// Serve until the waiter has read the marker, then stop cleanly.
 	time.Sleep(500 * time.Millisecond)
 	start, _ := self.Get("start_time").(string)
-	_ = worker.Retract(root, os.Getpid(), &start, worker.Probes{})
+	_ = worker.Retract(root, os.Getpid(), &start, probes)
 	os.Exit(0)
 }
 
@@ -129,7 +143,7 @@ func TestB561WaitSurvivesWorkerHandOverToNode(t *testing.T) {
 		}
 		return false
 	}
-	for deadline := time.Now().Add(20 * time.Second); !announced(); {
+	for deadline := time.Now().Add(60 * time.Second); !announced(); {
 		if time.Now().After(deadline) {
 			t.Fatalf("the Go worker never announced itself; stderr %s", workerErr.String())
 		}
@@ -139,14 +153,14 @@ func TestB561WaitSurvivesWorkerHandOverToNode(t *testing.T) {
 	// A waiter polls the ticket, then the unported ticket arrives and the Go
 	// worker hands the run to Node.
 	waited := make(chan reviewFileRun, 1)
-	go func() { waited <- reviewFileExec(t, f.root, f.home, false, "--wait", ticket, "--max", "30s") }()
+	go func() { waited <- reviewFileExec(t, f.root, f.home, false, "--wait", ticket, "--max", "120s") }()
 	time.Sleep(300 * time.Millisecond)
 	f.unported(t)
 
 	var got reviewFileRun
 	select {
 	case got = <-waited:
-	case <-time.After(40 * time.Second):
+	case <-time.After(150 * time.Second):
 		t.Fatal("the waiter did not return")
 	}
 	if got.code != 0 || got.stdout != `{"ticket":"`+ticket+`","status":"done","result":null}`+"\n" {
@@ -157,7 +171,7 @@ func TestB561WaitSurvivesWorkerHandOverToNode(t *testing.T) {
 		if waitErr != nil {
 			t.Fatalf("the Node worker refused the hand-over: %v; stderr %s", waitErr, workerErr.String())
 		}
-	case <-time.After(20 * time.Second):
+	case <-time.After(60 * time.Second):
 		t.Fatal("the Node worker did not stop")
 	}
 	if rows := strings.Join(b460Handovers(t, f.home), ","); rows != "worker worker-ticket-unported" {

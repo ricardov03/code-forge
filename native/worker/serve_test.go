@@ -167,7 +167,7 @@ func TestB489RunStopsCleanly(t *testing.T) {
 	l.Stop()
 	select {
 	case <-ended:
-	case <-time.After(5 * time.Second):
+	case <-time.After(60 * time.Second): // a cap for a loaded machine (B661)
 		t.Fatal("Run did not end after Stop")
 	}
 	if l.Handoff() != "" {

@@ -125,7 +125,17 @@ func (f *b489Fix) ticket(t *testing.T, block, file, text string) string {
 func (f *b489Fix) unported(t *testing.T) string {
 	t.Helper()
 	id := strings.Repeat("c", 24)
-	b460Write(t, filepath.Join(worker.QueueDir(f.root), id+".json"), `{"ticket":"`+id+`","run":"r1","block":"B1","file":"a.txt","content_hash":"`+b489Sha("hello\nworld\n")+`","reopened_at":"Nov 11 2026","enqueued_at":"2026-11-11T09:00:00.000Z"}`+"\n")
+	// Written then renamed into the queue, as Node's enqueue does
+	// (writeAtomic): a worker already polling must never read it half
+	// written (B661: under load the Go worker refused it as bad-ticket).
+	tmp := filepath.Join(filepath.Dir(worker.QueueDir(f.root)), id+".json.tmp")
+	b460Write(t, tmp, `{"ticket":"`+id+`","run":"r1","block":"B1","file":"a.txt","content_hash":"`+b489Sha("hello\nworld\n")+`","reopened_at":"Nov 11 2026","enqueued_at":"2026-11-11T09:00:00.000Z"}`+"\n")
+	if err := os.MkdirAll(worker.QueueDir(f.root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, filepath.Join(worker.QueueDir(f.root), id+".json")); err != nil {
+		t.Fatal(err)
+	}
 	return id
 }
 
