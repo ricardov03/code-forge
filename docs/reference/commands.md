@@ -747,10 +747,10 @@ usage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--
 
 ## run
 
-Start, inspect, reload, or end a run and manage its workers.
+Start, inspect, reload, or end a run, manage its workers, and list or clear its open human checks.
 
 ```text
-usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>
+usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id> | human-checks list --run <id> [--json] | human-checks clear --run <id> --block <id> --clause <C<n>> --note <text> [--json]
 ```
 
 ### run start
@@ -777,6 +777,13 @@ usage: code-forge run reload --run <id>
 
 ```text
 usage: code-forge run end --run <id>
+```
+
+### run human-checks
+
+```text
+usage: code-forge run human-checks list --run <id> [--json]
+usage: code-forge run human-checks clear --run <id> --block <id> --clause <C<n>> --note <text> [--json]
 ```
 
 ## s2

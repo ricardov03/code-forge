@@ -18,7 +18,7 @@ import (
 
 const b473Now = "2026-11-11T09:30:00.123Z"
 
-const b473Usage = "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>\n"
+const b473Usage = "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id> | human-checks list --run <id> [--json] | human-checks clear --run <id> --block <id> --clause <C<n>> --note <text> [--json]\n"
 
 const b473Tail = "queued review tickets (%d) keep the config they were enqueued with; new tickets use the new config\n"
 

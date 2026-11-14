@@ -262,18 +262,19 @@ async function reloadVerb(runId, { out, err }) {
 }
 
 export const USAGE =
-  'usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>\n';
+  'usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id> | human-checks list --run <id> [--json] | human-checks clear --run <id> --block <id> --clause <C<n>> --note <text> [--json]\n';
 
 /** @param {string[]} args @returns {Promise<number>} */
 export default async function run(args) {
   return runRun(args, { startWorker: launchWorker });
 }
 
-export const SUMMARY = "Start, inspect, reload, or end a run and manage its workers.";
+export const SUMMARY = "Start, inspect, reload, or end a run, manage its workers, and list or clear its open human checks.";
 
 export const SUB_USAGE = {
   "start": "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief]\nusage: code-forge run start --add-worker --run <id>\nusage: code-forge run start --reattach --run <id> [--worker-pid <pid>]\n",
   "status": "usage: code-forge run status --run <id>\n",
   "reload": "usage: code-forge run reload --run <id>\n",
-  "end": "usage: code-forge run end --run <id>\n"
+  "end": "usage: code-forge run end --run <id>\n",
+  "human-checks": "usage: code-forge run human-checks list --run <id> [--json]\nusage: code-forge run human-checks clear --run <id> --block <id> --clause <C<n>> --note <text> [--json]\n"
 };
