@@ -210,6 +210,32 @@ While an orchestrator blocker is left, no such line is shown.
 4. Use the **Full log** when you want to check one event in detail.
 5. Comment on any row of the doc. The orchestrator answers in that thread.
 
+### Ratify or revert what autopilot did
+
+```bash
+code-forge autopilot digest --run <run>            # every act that waits for your look
+code-forge autopilot digest --run <run> --json     # the same rows, as data
+code-forge autopilot ratify <row-id> --run <run>   # keep it
+code-forge autopilot revert <row-id> --run <run>   # undo it
+```
+
+The digest (Go engine, B635) lists one row per autopilot act you have not ratified or reverted:
+
+| Kind | What autopilot did | What revert does |
+|---|---|---|
+| `deferred-human` | closed a block as `closed_deferred_human` with its human checks open | the block goes back to `awaiting_human_check` |
+| `substitute` | approved a file with a substitute review | the approval no longer counts at close; `review-file <file> --block <id> --run <run> --fresh` runs the normal review |
+| `waiver` | waived a finding (by autopilot, or a counted agent waiver) | a signed `review.unwaived` row: the finding is open again |
+| `temp-config` | a `.code-forge.yml` value approved for a while that is still active | the window ends now and the old value comes back |
+| `extend` | moved a grant's end later | nothing: ratify only |
+| `until-done-end` | ended an until-done grant when every planned block closed | nothing: ratify only |
+
+Each row shows its id, kind, block, time, why, and the exact `ratify` and `revert` commands.
+Ratify and revert are yours only: they ask at a terminal (there is no `--yes`), and they are
+refused while a grant is active (stop it first). Each writes one signed `autopilot.ratify` or
+`autopilot.revert` row, and the row leaves the digest. Ratify works on an ended run too; revert
+needs an active run, except for a temporary config change.
+
 ## Stop it
 
 ```bash
