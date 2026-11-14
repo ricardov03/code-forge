@@ -526,6 +526,12 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	gateReason := closeLockReason(lockBlockers, gatecheck.Reason(gate.Blockers))
 	gateIndex := len(checks)
 	checks = append(checks, closeCheck{gateReason, append(append([]gatecheck.Blocker{}, lockBlockers...), gate.Blockers...)})
+	if external == "" {
+		// B630: a file approved only by a substitute review
+		if check := substCloseCheck(record, run, id, rows, key, kept, gate, time.Now()); check.Reason != "" {
+			checks = append(checks, check)
+		}
+	}
 	lines, lineWarnings := closeReviewedLines(run, id, top, qdir, entry, kept, gate.Waived, inTree, external == "" && len(gate.Blockers) == 0 && len(lockBlockers) == 0)
 	if _, has := flags["report"].(string); has && external == "" {
 		if reportErr != nil {

@@ -376,15 +376,20 @@ func RoutineRefusal(result Result) string {
 	return ""
 }
 
+// SubstituteScope is the scope that lets the orchestrator run a substitute
+// review (B630).
+const SubstituteScope = "review:substitute"
+
 // DeferHumanScope (B632) lets an active grant close a block whose only open
 // items are human_check clauses as closed_deferred_human.
 const DeferHumanScope = "human-pass:deferred"
 
-// ScopeRefusal is grantFor's allow/deny test for one scope: "" when an
-// active grant allows scope and does not deny it.
+// ScopeRefusal is RoutineRefusal for any scope: "" when result's grant is
+// active and allows scope; else no-grant, the grant's state, denied or
+// not-allowed.
 func ScopeRefusal(result Result, scope string) string {
 	if result.State != "active" {
-		if result.State == "none" {
+		if result.State == "none" || result.State == "" {
 			return "no-grant"
 		}
 		return result.State

@@ -246,6 +246,10 @@ func roundOutcome(state ledger.Object, kind string, pl played) ledger.Object {
 	}
 	head = append(head, ledger.Field{Key: "engine", Value: orDefault(eng.Get("engine"), "adaptive")},
 		ledger.Field{Key: "sessions", Value: orDefault(eng.Get("sessions"), rechecks)})
+	if eng.Get("source") == review.SubstituteSource {
+		// B630: the review.result row of a substitute review says so
+		head = append(head, ledger.Field{Key: "source", Value: review.SubstituteSource}, ledger.Field{Key: "substitute", Value: eng.Get("substitute")})
+	}
 	with := func(fields ...ledger.Field) ledger.Object {
 		out := head.Clone()
 		for _, f := range fields {

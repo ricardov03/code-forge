@@ -1070,6 +1070,20 @@ success of the route on another ticket writes `review.route_reset` (`was_benched
 streak; `run start --reattach` (its signed `worker.reattach` row) clears every bench. The state
 lives only in the run's signed ledger rows, so a worker restart keeps it.
 
+**A substitute review under autopilot** (B630, Go only, no Node parity). When the review is
+still unavailable after the `review.on_unavailable` chain and the run has an active autopilot
+grant, the worker asks the grant for scope `review:substitute`. Without the scope it writes one
+signed `autopilot.decision` row to the owner (`acted: false`, once per file and content) that
+names the owner's command (`code-forge autopilot start --run <run> --until <time> --delegate L2
+--allow review:substitute`) and leaves the file unavailable, to retry when its provider answers
+again. With the scope it writes a signed `autopilot.decision` row (`decision: substitute`, the
+failed providers, the reason, the substitute's provider and model) and runs one closed-book
+review on the first configured route whose provider none of the failed sessions used. The
+`review.result`, `review.round` and `review.approved` rows it leads to carry `source:
+substitute`. `block close` counts that approval only under the active scope, with the decision
+row and green gates; otherwise it refuses with `substitute_review`. With no active grant nothing
+changes.
+
 ### How code-forge picks the reviewer
 
 By default, code-forge scores the L2 model and its fallbacks using this project's ledger across
