@@ -133,6 +133,19 @@ code-forge autopilot log --run <run> --json            # the full log, as data
 code-forge autopilot binnacle --run <run> --markdown   # write both files, print the binnacle path
 ```
 
+**Settle before you ask.** Before a block close, the orchestrator runs
+`code-forge block settle <id> --run <run>`. Settle re-reads the close blocker list each round and
+runs every fix an orchestrator may run, in a fixed order: `block rebase --accept-landed` for a stale
+base, claim the changed files under a folder the block owns, run the gates, wait for the reviews.
+It never runs a verb only you may run (waive, reopen, `close --decide`, human-pass, ack-waivers). It
+stops when no orchestrator blocker is left, when a fix fails, or when a round can change nothing
+(at most 4 rounds), and writes one signed `block.settle` row. It exits 0 when no blocker is left,
+3 when only your blockers are left, and 1 when a fix failed or an orchestrator blocker stays. Only
+in the exit 3 case do **Actions only you can take**, `code-forge status` and
+`code-forge autopilot status` show one line for the block with the exact command(s) to run, for
+example `owner: block B3 needs you: code-forge block waive B3 F1 --run <run> --file src/a.ts --reason '<reason>'`.
+While an orchestrator blocker is left, no such line is shown.
+
 ### Review it on return
 
 1. Open the link (or the two files). Read **Status at a glance** first: the result, the spend, the

@@ -212,6 +212,15 @@ func directStatus(args []string) (int, bool) {
 		if err != nil {
 			return fail(err.Error())
 		}
+		// B626: the owner line of a block whose blockers are all owner-only.
+		owner := settleOwnerLines(rows, statusRunID(record), settleOpenBlock(record))
+		if len(owner) > 0 {
+			actions := []any{}
+			for _, line := range owner {
+				actions = append(actions, line)
+			}
+			summary.Set("owner_actions", actions)
+		}
 		summaries = append(summaries, summary)
 		if !jsonFlag {
 			text := renderStatus(summary, statusEndHint(record))
@@ -219,6 +228,9 @@ func directStatus(args []string) (int, bool) {
 				for _, line := range statusQueueLines(home, id) {
 					text += "\n" + line
 				}
+			}
+			for _, line := range owner {
+				text += "\n" + line
 			}
 			texts = append(texts, text)
 		}
