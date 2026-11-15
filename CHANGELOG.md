@@ -6,6 +6,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+- CI: the Go race test job gets a 30-minute package time limit. The big native package passed 10 minutes under the race detector and timed out (B705).
 - `block reopen` at a terminal runs in Go: the owner's question, the answers, the signed human `review.reopened` row, the cleared done marker and the reopened review ticket match Node; it no longer hands over to Node. B680
 ### Changed
 
