@@ -11,55 +11,46 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: test (node ${{ matrix.node }})
+  # B690b: the product is the Go binary; Node is gone from it. This job checks what npm ships and the
+  # generated docs. npm itself needs Node, so setup-node stays here only to run npm and the
+  # maintainer doc generator (scripts/gen-config-doc.mjs, not shipped).
+  package:
+    name: package
     runs-on: ubuntu-latest
-    strategy:
-      # one Node version failing must not cancel the other: see every failure in one run
-      fail-fast: false
-      matrix:
-        # Owner 2026-11-06: Go is the goal, so Node 22 is no longer tested. Node 24 stays while the shim exists.
-        node: [24]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 24
 
-      # npm ci fails outright if npm-shrinkwrap.json and package.json disagree — this IS the
-      # shrinkwrap check (plan §1.1/§8.5), no separate step needed.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      # npm ci fails outright if npm-shrinkwrap.json and package.json disagree: the shrinkwrap check.
       - name: Install (shrinkwrap-checked)
         run: npm ci
 
-      # `npm test` = three `node --import ./test/helpers/isolate.mjs … --test` invocations:
-      # test/no-leak.test.mjs with CODE_FORGE_NO_LEAK=snapshot (pre-suite snapshot of the real
-      # dirs), then 'test/**/*.test.mjs' (--experimental-test-module-mocks), then
-      # test/no-leak.test.mjs with CODE_FORGE_NO_LEAK=final (0 new entries under the real
-      # ~/.code-forge or <repo>/.code-forge since the snapshot). The preload pins HOME, TMPDIR
-      # and the cwd of every test worker to a per-process temp root and fails a worker that
-      # writes into those real dirs (plan §9.6). No mutation-testing job (ruling R14).
-      - name: Unit tests (node --test, isolated by the test/helpers/isolate.mjs preload)
-        run: npm test
-
-      - name: Typecheck (tsc --checkJs --noEmit)
-        run: npm run typecheck
-
-      - name: npm pack --dry-run (files whitelist sanity)
-        run: npm pack --dry-run
+      - name: npm pack --dry-run ships no src/, no Node entry and no maintainer .mjs
+        run: |
+          npm pack --dry-run --json > pack.json
+          node -e '
+            const files = JSON.parse(require("fs").readFileSync("pack.json", "utf8"))[0].files.map((f) => f.path);
+            const bad = files.filter((p) => p.startsWith("src/") || p === "bin/code-forge.mjs" || /^scripts\/.*\.mjs$/.test(p) || p.startsWith("test/"));
+            if (!files.includes("bin/code-forge") || !files.includes("scripts/install.sh")) { console.error("pack misses bin/code-forge or scripts/install.sh"); process.exit(1); }
+            if (bad.length) { console.error("pack ships Node files:\n" + bad.join("\n")); process.exit(1); }
+            console.log(files.length + " files, no src/, no Node entry");'
 
       - name: npm audit (high severity)
         run: npm audit --audit-level=high
 
+      - name: gen-config-doc --check
+        run: node scripts/gen-config-doc.mjs --check
 
-      # Skill / plugin validation (`claude plugin validate .`, plan §9.2) is deliberately NOT a
-      # step here. `.claude-plugin/plugin.json` doesn't exist until B15, and the `claude` CLI
-      # isn't installed on GitHub-hosted runners — a step that only checks `command -v claude`
-      # and echoes a message when absent would go green forever without ever validating anything
-      # once B15 does add the plugin manifest (review finding, B0 fix round 1). ci.yml is B0-owned
-      # forever (§10.1) and cannot be edited later, so it doesn't promise a check it can't keep;
-      # `claude plugin validate .` runs locally in step 4 of `npm run release`, before every
-      # release (the release workflow only creates the GitHub release).
+      - name: gen-commands-doc --check
+        run: sh scripts/gen-commands-doc.sh --check
 
   # B237: the Go core (native/) has its own tests. Run them on the go.mod floor and on the
   # newest Go, so a toolchain change cannot break the native binary without a red run.
@@ -81,18 +72,6 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: false
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: npm-shrinkwrap.json
-
-      # B541: the Go parity tests run the Node reference (bin/code-forge.mjs), which imports
-      # npm packages such as yaml. Without node_modules they die with ERR_MODULE_NOT_FOUND.
-      - name: Install npm deps for the Node reference (shrinkwrap-checked)
-        working-directory: .
-        run: npm ci
-
       - name: gofmt (no unformatted files)
         run: test -z "$(find . -path ./vendor -prune -o -name '*.go' -print | xargs gofmt -l)" || { find . -path ./vendor -prune -o -name '*.go' -print | xargs gofmt -l; exit 1; }
 
@@ -102,9 +81,11 @@ jobs:
       - name: go test (race detector)
         run: go test -race -count=1 -timeout 30m ./...
 
-      # The same script the release runs: all four targets must build, and the host binary must run.
+      # All four release targets must build, and the host binary must run (B690b: plain go build,
+      # the same flags the release tool uses; no Node).
       - name: build-native (all release targets)
-        working-directory: .
         run: |
-          node scripts/build-native.mjs
-          native/bin/linux-x64/code-forge-native version
+          for t in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+            CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build -trimpath -ldflags "-s -w" -o "bin-ci/${t%/*}-${t#*/}/code-forge-native" ./cmd/code-forge-native
+          done
+          bin-ci/linux-amd64/code-forge-native version

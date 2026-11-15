@@ -1,6 +1,6 @@
 # The whole tool, step by step
 
-Start here to take a project from install to release. Use Node.js 22 or newer and Git.
+Start here to take a project from install to release. Use Git, and npm to install (any Node that runs npm; code-forge itself never runs Node).
 Run commands at the root of your Git repository (the folder Git tracks).
 The CLI is the command-line tool. A **harness** is the app that runs your coding agent.
 An **orchestrator** is the agent that assigns work and checks the results.

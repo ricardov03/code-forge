@@ -120,7 +120,7 @@ func b517Request(t *testing.T, home, repo, dir string, l *b496Ledger, cfg map[st
 // Node goldens read).
 func b517Lenses(t *testing.T) {
 	t.Helper()
-	lenses, err := filepath.Abs(filepath.Join("..", "..", "src", "review", "lenses"))
+	lenses, err := filepath.Abs(filepath.Join("..", "review", "lenses"))
 	if err != nil {
 		t.Fatal(err)
 	}

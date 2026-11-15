@@ -15,61 +15,30 @@
   "publishConfig": {
     "access": "public"
   },
-  "engines": {
-    "node": ">=22"
-  },
   "bin": {
     "code-forge": "bin/code-forge"
   },
   "files": [
     "bin",
-    "src",
     "schema",
     "skill",
     "docs/reference",
     "examples",
-    "scripts",
-    "!scripts/cf-release.sh",
-    "!scripts/known-fix.mjs",
-    "!scripts/bench-review.mjs",
-    "!scripts/bench-block.mjs",
-    "!scripts/bench-verbs.mjs",
-    "!scripts/build-native.mjs",
-    "!scripts/compat-golden.mjs",
-    "!scripts/gen-commands-doc.mjs",
-    "!scripts/gen-commands-doc.sh",
-    "!scripts/gen-site-data.mjs",
+    "scripts/install.sh",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
-    "test": "sh test/helpers/run-suite.sh",
-    "typecheck": "tsc --checkJs --noEmit",
     "release": "sh scripts/cf-release.sh release",
     "release:site": "sh scripts/cf-release.sh release-site",
     "docs-block": "sh scripts/cf-release.sh docs-block",
-    "changelog": "sh scripts/cf-release.sh changelog",
-    "known-fix": "node scripts/known-fix.mjs",
-    "bench:review": "node scripts/bench-review.mjs",
-    "bench:block": "node scripts/bench-block.mjs",
-    "bench:verbs": "node scripts/bench-verbs.mjs",
-    "setup": "node scripts/setup.mjs"
-  },
-  "dependencies": {
-    "@clack/prompts": "1.8.1",
-    "ajv": "8.20.0",
-    "yaml": "2.9.1"
+    "changelog": "sh scripts/cf-release.sh changelog"
   },
   "optionalDependencies": {
     "@codedology/code-forge-darwin-arm64": "0.24.0",
     "@codedology/code-forge-darwin-x64": "0.24.0",
     "@codedology/code-forge-linux-arm64": "0.24.0",
-    "@codedology/code-forge-linux-x64": "0.24.0",
-    "@napi-rs/keyring": "2.1.0"
-  },
-  "devDependencies": {
-    "@types/node": "22.20.4",
-    "typescript": "7.0.2"
+    "@codedology/code-forge-linux-x64": "0.24.0"
   }
 }

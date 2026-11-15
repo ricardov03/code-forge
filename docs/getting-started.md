@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Node.js 22 or newer.
+- npm to install code-forge (any Node that runs npm). code-forge itself is a Go binary and never runs Node.
 - `git`. code-forge works inside a git repository: blocks record a base sha.
 - At least one provider CLI for the sessions it starts: `claude`, `codex` or `grok`.
   `code-forge resolve L<n>` shows which CLI each level uses. Reviews, System 2 and the plan

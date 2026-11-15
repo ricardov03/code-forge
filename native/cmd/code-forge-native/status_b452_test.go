@@ -182,17 +182,6 @@ func TestB452StatusNodeSuccessShapesRunInGo(t *testing.T) {
 	}
 }
 
-// A block id outside printable ASCII needs ICU collation, which Go lacks: it
-// stays with Node (here no Node exists, so the handover reports that).
-func TestB452StatusNonASCIIBlockIDStaysWithNode(t *testing.T) {
-	home, ws := b452StatusFixture(t)
-	b452Record(t, home, "r-uni", map[string]any{"run_id": "r-uni", "workspace": ws, "project": "proj", "blocks": map[string]any{"Bé": map[string]any{}, "B1": map[string]any{}}})
-	code, out, errText := runCaptured(t, "status", "--run", "r-uni")
-	if code != 1 || out != "" || !b690aIsRefusal(errText) {
-		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errText)
-	}
-}
-
 // Worker pins Node reads by throwing (a null pin, a non-text start time) give no
 // warning; the plain unpinned and replaced cases warn like Node.
 func TestB452StatusWorkerWarningsRunInGo(t *testing.T) {

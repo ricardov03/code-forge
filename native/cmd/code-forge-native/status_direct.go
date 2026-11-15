@@ -205,10 +205,6 @@ func directStatus(args []string) (int, bool) {
 			}
 		}
 		summary, err := runstatus.ComputeErr(record, rows, home)
-		if errors.Is(err, runstatus.ErrUnorderedBlockID) {
-			// Node orders such ids with ICU localeCompare: Node serves it.
-			return 0, false
-		}
 		if err != nil {
 			return fail(err.Error())
 		}

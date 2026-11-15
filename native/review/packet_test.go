@@ -25,7 +25,7 @@ type fixture struct {
 func useRepoLenses(t *testing.T) {
 	t.Helper()
 	old := LensDir
-	dir, err := filepath.Abs(filepath.Join("..", "..", "src", "review", "lenses"))
+	dir, err := filepath.Abs(filepath.Join("lenses"))
 	if err != nil {
 		t.Fatal(err)
 	}

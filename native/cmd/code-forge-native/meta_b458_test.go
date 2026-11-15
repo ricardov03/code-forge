@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -76,32 +74,6 @@ func b458Go(t *testing.T, args []string) b458Side {
 	return side
 }
 
-// b458Node runs the same call through the Node CLI with its own empty HOME and cwd.
-func b458Node(t *testing.T, args []string) b458Side {
-	t.Helper()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not on PATH; the Go side is checked by the golden cases")
-	}
-	home, cwd := t.TempDir(), t.TempDir()
-	cmd := exec.Command(node, append([]string{filepath.Join(b458Repo(t), "bin", "code-forge.mjs")}, args...)...)
-	cmd.Dir = cwd
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + os.TempDir(), "CODE_FORGE_NATIVE=0", "CODE_FORGE_HANDOVER_LOG=0", "NO_COLOR=1"}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	code := 0
-	if err := cmd.Run(); err != nil {
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) {
-			t.Fatal(err)
-		}
-		code = exit.ExitCode()
-	}
-	side := b458Side{code: code, stdout: stdout.String(), stderr: stderr.String()}
-	side.crumbs, side.errors = b458Logs(t, home)
-	return side
-}
-
 // Every form below handed over to Node before B458; Go must now answer it
 // with Node's stdout, stderr, exit code, breadcrumb and error-log entry.
 // Since B613 the command list ({}, --help, -h, help) is Go's own page
@@ -131,30 +103,6 @@ var b458GoForms = [][]string{
 	{"proof", "red-green", "B1", "--run", "r", "--test", "a/../.."}, {"proof", "red-green", "B1", "--run", "r", "--test", ".code-forge/x.mjs"},
 	{"proof", "red-green", "B1", "--run", "r", "--test", "a\\b.mjs"}, {"proof", "red-green", "B1", "--run", "r", "--test", "::case"},
 	{"proof", "red-green", "B1", "--run", "r", "--test", "t.mjs", "--mechanism", "mutate"},
-}
-
-func TestB458FormsMatchNode(t *testing.T) {
-	for _, args := range b458GoForms {
-		goSide := b458Go(t, args)
-		nodeSide := b458Node(t, args)
-		routed := append([]string{}, args...)
-		if len(routed) > 0 && (routed[0] == "--version" || routed[0] == "-v") {
-			routed[0] = "version" // the router's alias
-		}
-		if name, ok := helpTarget(routed); ok && nodeSide.code == 0 && helpIsUsage(nodeSide.stdout) {
-			nodeSide.stdout = helpWrapped(t, name, nodeSide.stdout)
-		}
-		if goSide.code != nodeSide.code || goSide.stdout != nodeSide.stdout || goSide.stderr != nodeSide.stderr {
-			t.Errorf("%q:\n go   code=%d stdout=%q stderr=%q\n node code=%d stdout=%q stderr=%q", args, goSide.code, goSide.stdout, goSide.stderr, nodeSide.code, nodeSide.stdout, nodeSide.stderr)
-			continue
-		}
-		if goSide.crumbs != nodeSide.crumbs {
-			t.Errorf("%q: breadcrumbs go=%q node=%q", args, goSide.crumbs, nodeSide.crumbs)
-		}
-		if !reflect.DeepEqual(goSide.errors, nodeSide.errors) {
-			t.Errorf("%q: error log\n go   %v\n node %v", args, goSide.errors, nodeSide.errors)
-		}
-	}
 }
 
 // Golden checks that hold without Node on PATH.

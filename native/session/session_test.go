@@ -107,7 +107,7 @@ func TestSpawnTimeoutStopsTheChild(t *testing.T) {
 func TestReviewSpawnRunsAClosedBookReviewer(t *testing.T) {
 	o, _ := testSetup(t)
 	here, _ := os.Getwd()
-	schema := filepath.Join(here, "..", "..", "src", "review", "finding.schema.json")
+	schema := filepath.Join(here, "finding.schema.json")
 	before := FindingSchemaPath
 	FindingSchemaPath = func() (string, error) { return schema, nil }
 	t.Cleanup(func() { FindingSchemaPath = before })

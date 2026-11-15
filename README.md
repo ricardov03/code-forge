@@ -13,7 +13,7 @@ You approve the plan and keep control of budgets, permissions, and landing the r
 
 ## Install
 
-Requires Node.js >= 22 and git. Install the CLI with `npm install -g @codedology/code-forge`.
+Requires git, and npm to install (any Node that runs npm; code-forge itself never runs Node). Install the CLI with `npm install -g @codedology/code-forge`.
 The Go binary for your system comes in its own small package, `@codedology/code-forge-<platform>-<arch>` (darwin-arm64, darwin-x64, linux-x64 or linux-arm64). npm installs only the one that matches your machine, as an optional dependency, so the main package stays under 5 MB.
 npm runs no install script, so then run `code-forge setup`: it checks the Go binary for your system and prints `OK` or the one command that fixes it.
 The Go binary is required: with no usable binary, `code-forge` stops with exit 69 and names the fix. To check or repair the binary on its own, run `sh "$(npm root -g)/@codedology/code-forge/scripts/install.sh"`; if that fails, run `npm i -g @codedology/code-forge` again.
@@ -169,10 +169,11 @@ See [security details](skill/references/security.md) and [privacy](docs/privacy.
 
 ### Development
 
-The package ships plain ESM `.mjs` files with no build step. In a checkout, run `npm install`,
-`npm test`, and `npm run typecheck`. Check the generated config reference before releasing.
-Record changes with `npm run changelog -- <type> "<text>"`; record fixed error reports with
-`npm run known-fix -- add <fp> <version> "<summary>"`. `npm run release -- <bump> [--dry-run]`
+The engine is Go, in `native/` (B690b removed the Node code). In a checkout, run
+`cd native && go build ./... && go test ./<package>` for the packages you change; CI runs the
+Go suite and checks the generated config and command references. Record changes with
+`npm run changelog -- <type> "<text>"`; record fixed error reports by adding an entry to
+`native/cmd/code-forge-native/data/known-fixes.json`. `npm run release -- <bump> [--dry-run]`
 bumps versions, releases the CHANGELOG, updates the optional Latest line, checks, commits, and
 tags. Publish with `npm publish`, then push the tag; CI creates the GitHub release.
 See [releasing](docs/releasing.md).

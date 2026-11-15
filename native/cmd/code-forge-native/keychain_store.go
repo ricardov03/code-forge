@@ -6,26 +6,17 @@ package main
 // (backends/constants.mjs SERVICE, the same pair @napi-rs/keyring uses in
 // backends/keychain.mjs), account = the key name.
 //
-// The backend's name follows Node's chain [keychain, security-cli, file]:
-// "keychain" when Node would load @napi-rs/keyring for this platform from the
-// package, else "security-cli". Both read the same login-keychain item, so a
-// read through `security` gives Node's value under Node's backend name.
-// Off macOS, or without a usable `security`, Go does not open the keychain
-// and the callers keep their hand-over.
+// B690b: Node is gone, so the backend no longer depends on whether Node
+// could load @napi-rs/keyring. On macOS the keychain is the login keychain
+// through `security`, named "keychain" (the name Node's npm installs used);
+// off macOS and Linux, or without a usable `security`, Go does not open it.
 //
-// B679: on Linux the keychain is @napi-rs/keyring's Secret Service store
-// (keychain_secretservice.go). Node's Linux chain is [keychain, file]
-// (security-cli is macOS only): with the package's Linux binding, the
-// keychain is the Secret Service when it connects and answers the probe,
-// else the kernel keyutils store (keyring-node linux_credential_builder.rs),
-// which Go does not serve (the callers hand over); without the binding the
-// chain is the file store alone (kcChain).
+// B679, B690b: on Linux the keychain is the Secret Service store
+// (keychain_secretservice.go) when it connects and answers the probe; else the
+// chain is the file store alone (kcChain). Node's kernel keyutils fallback is
+// not served: a key kept only there has to be set again.
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -38,20 +29,6 @@ const (
 var (
 	// kcTimeout is security-cli.mjs TIMEOUT_MS.
 	kcTimeout = 10 * time.Second
-	// kcPackageRoot is the npm package root the binary ships in (bin/<os-arch>
-	// three levels up, as handover finds bin/code-forge.mjs); tests stand in.
-	kcPackageRoot = func() string {
-		exe, err := os.Executable()
-		if err != nil {
-			return ""
-		}
-		if exe, err = filepath.EvalSymlinks(exe); err != nil {
-			return ""
-		}
-		return filepath.Join(filepath.Dir(exe), "..", "..", "..")
-	}
-	// kcArch is Node's process.arch for the binding name.
-	kcArch = map[string]string{"amd64": "x64", "arm64": "arm64"}[runtime.GOARCH]
 )
 
 // kcStore is the keychain backend Go reads and writes; name is the backend
@@ -61,9 +38,9 @@ type kcStore struct {
 	ss   *ssStore // B679: the Secret Service store on Linux; nil is `security`
 }
 
-// kcOpen is the keychain half of the default chain: ok false means Go cannot
-// stand in for it (not macOS, or `security help` fails like Node's
-// available()).
+// kcOpen is the keychain half of the default chain: ok false means Go has no
+// keychain here (macOS without a usable `security`, like Node's available(),
+// or another OS; on Linux a Secret Service that does not connect or answer).
 func kcOpen() (kcStore, bool) {
 	if keysGOOS == "linux" {
 		return kcOpenLinux()
@@ -71,20 +48,12 @@ func kcOpen() (kcStore, bool) {
 	if keysGOOS != "darwin" || !keysSecurityAvailable() {
 		return kcStore{}, false
 	}
-	if kcNapiKeyring(kcPackageRoot()) {
-		return kcStore{name: "keychain"}, true
-	}
-	return kcStore{name: "security-cli"}, true
+	return kcStore{name: "keychain"}, true
 }
 
-// kcOpenLinux is Node's keychain backend on Linux: the binding loads, the
-// Secret Service connects and the probe read does not throw. ok false is
-// "Go cannot stand in" (no binding: see kcChain; no Secret Service: Node's
-// keyutils store).
+// kcOpenLinux is the keychain backend on Linux: the Secret Service connects
+// and the probe read does not fail.
 func kcOpenLinux() (kcStore, bool) {
-	if !kcNapiKeyring(kcPackageRoot()) {
-		return kcStore{}, false
-	}
 	api, err := ssConnect()
 	if err != nil {
 		return kcStore{}, false
@@ -96,93 +65,19 @@ func kcOpenLinux() (kcStore, bool) {
 	return kcStore{name: "keychain", ss: store}, true
 }
 
-// kcChain is the keychain part of createDefaultKeyStore for the callers
-// that also read the file store: kc nil with ok true is a chain with no
-// keychain backend at all (Linux without @napi-rs/keyring's binding, where
-// Node's chain is the file store alone); ok false keeps the hand-over.
+// kcChain is the keychain part of the default chain for the callers that
+// also read the file store: kc nil with ok true is a chain with no keychain
+// backend (Linux without a working Secret Service: the file store alone); ok
+// false keeps the hand-over (macOS without a usable `security`).
 func kcChain() (*kcStore, bool) {
-	if keysGOOS == "linux" && !kcNapiKeyring(kcPackageRoot()) {
-		return nil, true
-	}
 	store, ok := kcOpen()
 	if !ok {
+		if keysGOOS == "linux" {
+			return nil, true
+		}
 		return nil, false
 	}
 	return &store, true
-}
-
-// kcLinuxMusl is the binding loader's isMusl (/usr/bin/ldd names musl);
-// tests stand in.
-var kcLinuxMusl = func() bool {
-	data, err := os.ReadFile("/usr/bin/ldd")
-	return err == nil && strings.Contains(string(data), "musl")
-}
-
-// kcNapiKeyring says whether import('@napi-rs/keyring') from
-// src/keys/backends would find the package and its binding for keysGOOS
-// (the package's index.js: on macOS ./keyring.darwin-universal.node, the
-// -darwin-universal package, then the same two for process.arch; on Linux
-// ./keyring.linux-<arch>-<gnu|musl>.node, then that package).
-func kcNapiKeyring(root string) bool {
-	if root == "" {
-		return false
-	}
-	dir := kcResolvePackage(filepath.Join(root, "src", "keys", "backends"), "@napi-rs/keyring")
-	if dir == "" {
-		return false
-	}
-	names := []string{"darwin-universal"}
-	if kcArch != "" {
-		names = append(names, "darwin-"+kcArch)
-	}
-	if keysGOOS == "linux" {
-		names = nil
-		if kcArch != "" {
-			libc := "gnu"
-			if kcLinuxMusl() {
-				libc = "musl"
-			}
-			names = []string{"linux-" + kcArch + "-" + libc}
-		}
-	}
-	for _, name := range names {
-		if kcIsFile(filepath.Join(dir, "keyring."+name+".node")) || kcResolvePackage(dir, "@napi-rs/keyring-"+name) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// kcResolvePackage is Node's node_modules lookup from dir upward: the
-// package directory whose main file (package.json "main", else index.js)
-// exists, or "".
-func kcResolvePackage(dir, pkg string) string {
-	for {
-		candidate := filepath.Join(dir, "node_modules", filepath.FromSlash(pkg))
-		if data, err := os.ReadFile(filepath.Join(candidate, "package.json")); err == nil {
-			var meta struct {
-				Main string `json:"main"`
-			}
-			_ = json.Unmarshal(data, &meta)
-			entry := meta.Main
-			if entry == "" {
-				entry = "index.js"
-			}
-			if kcIsFile(filepath.Join(candidate, entry)) || kcIsFile(filepath.Join(candidate, entry+".js")) {
-				return candidate
-			}
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-}
-
-func kcIsFile(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
 }
 
 // kcExec is security-cli.mjs's exec call: the absolute binary, a new

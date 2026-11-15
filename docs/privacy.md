@@ -82,7 +82,7 @@ A path is only replaced at a path boundary: `/Users/bob` never changes `/Users/b
 ## What `logs report` does, in order
 
 0. **Known fixes.** The selected errors' fingerprints are looked up in the list of known fixes
-   that ships inside code-forge (`src/util/known-fixes.json`, built into the Go binary too; a local file, no network). An error
+   that is built into the code-forge binary (a local table, no network). An error
    fixed in a newer version than yours is not reported (`--force` reports it anyway, with a note);
    one your version already has the fix for gets a "may be a regression" note. If nothing is left
    to report, it stops here and nothing else below runs.

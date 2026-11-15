@@ -6,7 +6,35 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildSpend } from '../src/ledger/report.mjs';
+
+// B690b: the site total is the ledger spend total that src/ledger/spend.mjs computed (src/ is gone):
+// session and session.background rows that are not shadow; `usd` when the row carries it, else
+// `usd_unknown` counts 0, else `cost_usd`, else tokens x the fixed price table (session rows only).
+const SITE_PRICE_PER_1K_USD = {
+  anthropic: { L0: 0.001, L1: 0.003, L2: 0.015, L3: 0.03 },
+  openai: { L0: 0.001, L1: 0.0025, L2: 0.012, L3: 0.025 },
+  xai: { L0: 0.001, L1: 0.002, L2: 0.01, L3: 0.02 },
+};
+const siteIsAmount = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+function siteRowUsd(row) {
+  if (row.usd !== undefined) return siteIsAmount(row.usd) ? row.usd : null;
+  if (row.usd_unknown === true) return null;
+  if (row.cost_usd !== undefined && row.cost_usd !== null) return siteIsAmount(row.cost_usd) ? row.cost_usd : null;
+  if (row.event === 'session.background') return null;
+  if (!siteIsAmount(row.tokens_in) || !siteIsAmount(row.tokens_out)) return null;
+  const perK = Object.hasOwn(SITE_PRICE_PER_1K_USD, row.provider) ? SITE_PRICE_PER_1K_USD[row.provider][row.level] : undefined;
+  if (typeof perK !== 'number') return null;
+  return Math.round(((row.tokens_in + row.tokens_out) / 1000) * perK * 10000) / 10000;
+}
+function siteSpendUsd(rows) {
+  let usd = 0;
+  for (const row of rows) {
+    if ((row?.event !== 'session' && row?.event !== 'session.background') || row.source === 'shadow') continue;
+    const cost = siteRowUsd(row);
+    if (cost !== null) usd += cost;
+  }
+  return Math.round(usd * 10000) / 10000;
+}
 
 /**
  * The `## [<name>]` section of CHANGELOG lines: `{ start, end }` with `start` its heading line and
@@ -163,7 +191,7 @@ function proofOf(dir, date) {
   const blocks = new Set(rows.filter((row) => row.event === 'block.close' && row.status === 'complete'
     && typeof row.run === 'string' && row.run && typeof row.block === 'string' && row.block)
     .map((row) => JSON.stringify([row.run, row.block])));
-  return { runs: runs.size, blocks: blocks.size, spend: Math.round(buildSpend(rows).total.usd * 100) / 100, date };
+  return { runs: runs.size, blocks: blocks.size, spend: Math.round(siteSpendUsd(rows) * 100) / 100, date };
 }
 
 function main() {
