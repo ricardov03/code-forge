@@ -268,50 +268,8 @@ func landFirst(values ...string) string {
 type landErrorStream struct{ last string }
 
 func (s *landErrorStream) Write(data []byte) (int, error) {
-	if text := strings.TrimSpace(string(data)); text != "" {
+	if text := jsTrim(string(data)); text != "" {
 		s.last = text
 	}
 	return os.Stderr.Write(data)
-}
-
-// Fingerprints use the router's message normalization, including numeric values
-// in a captured gate refusal. Keep runtime durations out of long-wait digests.
-func landFingerprintMessage(text string) string {
-	alnum := func(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' }
-	var quoted strings.Builder
-	for i := 0; i < len(text); {
-		quote := text[i]
-		if quote == '"' || quote == '\x60' || quote == '\x27' && (i == 0 || !alnum(text[i-1])) {
-			end := strings.IndexByte(text[i+1:], quote)
-			if end >= 0 && !strings.ContainsRune(text[i+1:i+1+end], '\n') {
-				quoted.WriteByte(' ')
-				i += end + 2
-				continue
-			}
-		}
-		quoted.WriteByte(text[i])
-		i++
-	}
-	text = reviewWaitLogPlaceholders.ReplaceAllString(quoted.String(), " ")
-	text = reviewWaitLogPaths.ReplaceAllString(text, " ")
-	text = regexp.MustCompile(`\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b`).ReplaceAllString(text, " ")
-	text = regexp.MustCompile(`\b\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?\b`).ReplaceAllString(text, " ")
-	text = regexp.MustCompile(`(?i)\b[0-9a-f]{7,}\b`).ReplaceAllStringFunc(text, func(value string) string {
-		if strings.ContainsAny(value, "0123456789") {
-			return " "
-		}
-		return value
-	})
-	matches := regexp.MustCompile(`\d{4,}(?:\.\d+)?`).FindAllStringIndex(text, -1)
-	for i := len(matches) - 1; i >= 0; i-- {
-		a, b := matches[i][0], matches[i][1]
-		if a > 0 && (alnum(text[a-1]) || text[a-1] == '_' || text[a-1] == '.') {
-			continue
-		}
-		if b < len(text) && (alnum(text[b]) || text[b] == '_') {
-			continue
-		}
-		text = text[:a] + " " + text[b:]
-	}
-	return strings.TrimSpace(reviewWaitLogWords.ReplaceAllString(text, " "))
 }

@@ -152,3 +152,7 @@ func errorLogDropNumbers(s string) string {
 	}
 	return out.String()
 }
+
+// errorLogJSSpaceClass is errorLogSpace as the body of a regexp character
+// class: JavaScript's \s for a pattern Go compiles (B706).
+const errorLogJSSpaceClass = `\t\n\v\f\r \x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}`

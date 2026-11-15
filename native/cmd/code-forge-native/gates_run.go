@@ -54,7 +54,9 @@ func gatesScrubber(slug string) (func(string) string, func() []any) {
 		re             *regexp.Regexp
 		left, right    bool
 	}
-	steps := []step{{rule: "op_ref", to: "op://<ref>", re: regexp.MustCompile("op://(?:[^/\\r\\n\"'`<>]+/[^/\\r\\n\"'`<>]+/)?[^\\s\"'`<>)\\]]+")}}
+	// B706: the op:// value ends at a JavaScript \s (Unicode spaces and \v
+	// too), not Go's ASCII \s.
+	steps := []step{{rule: "op_ref", to: "op://<ref>", re: regexp.MustCompile("op://(?:[^/\\r\\n\"'`<>]+/[^/\\r\\n\"'`<>]+/)?[^" + errorLogJSSpaceClass + "\"'`<>)\\]]+")}}
 	cwd, _ := os.Getwd()
 	home := os.Getenv("HOME")
 	paths := []step{}
@@ -79,27 +81,41 @@ func gatesScrubber(slug string) (func(string) string, func() []any) {
 	word := func(c byte) bool {
 		return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
 	}
+	// item_id's lookarounds are (?<![A-Za-z0-9]) and (?![A-Za-z0-9]): an
+	// underscore or a dash next to the id does not keep it.
+	alnum := func(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' }
 	clean := func(s string) string {
 		for _, step := range steps {
 			r := step.re
 			if r == nil {
 				r = regexp.MustCompile(regexp.QuoteMeta(step.from))
 			}
-			matches := r.FindAllStringIndex(s, -1)
-			for i := len(matches) - 1; i >= 0; i-- {
-				a, b := matches[i][0], matches[i][1]
-				if step.left && a > 0 && (word(s[a-1]) || step.rule == "project_name" && s[a-1] == '<') {
+			edge := word
+			if step.rule == "item_id" {
+				edge = alnum
+			}
+			// String.prototype.replace with a global regex: a match its
+			// lookarounds refuse is tried again one character later.
+			var out strings.Builder
+			done := 0
+			for at := 0; at <= len(s); {
+				loc := r.FindStringIndex(s[at:])
+				if loc == nil {
+					break
+				}
+				a, b := at+loc[0], at+loc[1]
+				if step.left && a > 0 && (edge(s[a-1]) || step.rule == "project_name" && s[a-1] == '<') ||
+					step.right && b < len(s) && (edge(s[b]) || step.rule == "project_name" && s[b] == '>') ||
+					step.rule == "project_name" && strings.HasPrefix(s[b:], "://") {
+					_, size := utf8.DecodeRuneInString(s[a:])
+					at = a + max(size, 1)
 					continue
 				}
-				if step.right && b < len(s) && (word(s[b]) || step.rule == "project_name" && s[b] == '>') {
-					continue
-				}
-				if step.rule == "project_name" && strings.HasPrefix(s[b:], "://") {
-					continue
-				}
-				s = s[:a] + step.to + s[b:]
+				out.WriteString(s[done:a] + step.to)
+				done, at = b, b
 				tally[step.rule]++
 			}
+			s = out.String() + s[done:]
 		}
 		return s
 	}
@@ -174,9 +190,13 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 			}
 		}
 	}
-	clean, counts := gatesScrubber(slug)
+	// buildEntry's clean is scrub(redact(s)): the process's registered secrets
+	// (Node's redact.mjs set) are masked first, then the scrubber runs (B706).
+	scrub, counts := gatesScrubber(slug)
+	clean := func(s string) string { return scrub(errorLogRedact(s)) }
 	if text, ok := message.(string); ok {
-		text = clean(text)
+		// buildEntry trims with JavaScript's trim (U+FEFF yes, U+0085 no).
+		text = clean(jsTrim(text))
 		if len(text) > 2048 {
 			end := 2048
 			for !utf8.RuneStart(text[end]) {
@@ -219,9 +239,6 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 	nativeReportedKind = ""
 	normalized, _ := message.(string)
 	normalized = errorLogNormalize(normalized)
-	if verbName == "block" && subName == "" {
-		normalized = landFingerprintMessage(blockString(message))
-	}
 	fp := sha256.Sum256([]byte(verb + "\n" + subName + "\n" + kind + "\n" + normalized))
 	var sub any
 	if subName != "" {

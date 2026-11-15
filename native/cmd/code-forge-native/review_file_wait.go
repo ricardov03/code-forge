@@ -125,12 +125,17 @@ func runReviewFileWaitWith(args []string, poll func(context.Context, string, tim
 	flags, paths, usage := reviewEnqueueFlags(args)
 	if usage != "" {
 		// The wait logger handles fixed usage text and ordinary flag names.
-		// Unknown flags containing arbitrary values need Node's full scrubber.
+		// An unknown flag holding an arbitrary value goes through the error
+		// log's full writer: redact, Node's scrubber and normalizeMessage (B706).
 		if reviewWaitLogging() && strings.HasPrefix(usage, "unknown flag ") {
 			var arg string
 			_ = json.Unmarshal([]byte(strings.TrimPrefix(usage, "unknown flag ")), &arg)
 			if arg != "--" && !reviewEnqueueSafeUnknown.MatchString(arg) {
-				return reviewWaitHandover(args, hEnqueueFlagRedaction)
+				before := reviewWaitBreadcrumb()
+				text := "review-file: " + usage + "\n" + reviewWaitUsage
+				fmt.Fprint(os.Stderr, text)
+				nativeVerbFailure("review-file", "", args, 2, text, before)
+				return 2
 			}
 		}
 		return reviewWaitUsageError(args, usage)

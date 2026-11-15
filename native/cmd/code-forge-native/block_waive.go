@@ -60,7 +60,7 @@ func (p *blockPreview) errorText(code int, text string) int {
 	name, sub := p.crumb()
 	before := gatesBreadcrumbName(name)
 	fmt.Fprint(os.Stderr, text)
-	nativeVerbFailure("block", sub, append([]string{p.sub}, p.args...), code, strings.TrimSpace(text), before)
+	nativeVerbFailure("block", sub, append([]string{p.sub}, p.args...), code, jsTrim(text), before)
 	return code
 }
 func (p *blockPreview) refusal(code, detail string) int {
