@@ -1,0 +1,37 @@
+asked=
+exit=1
+--- stdout
+--- stderr
+block close: ENOTDIR: not a directory, scandir '<WS>/.code-forge/queue'
+--- new rows
+--- status open
+--- ws/queue
+not a directory
+
+--- ws/runs/r-b684.json
+{
+  "run_id": "r-b684",
+  "project": "fixture",
+  "workspace": "<WS>",
+  "status": "active",
+  "blocks": {
+    "B1": {
+      "status": "open",
+      "owned_files": [
+        "sample.mjs"
+      ],
+      "base_sha": "<SHA>",
+      "base_branch": "main",
+      "tree_at_open": {},
+      "kind": "code",
+      "test_files": [],
+      "worktree": {
+        "path": "<WS>/.code-forge/worktrees/B1",
+        "branch": "block-B1",
+        "base_sha": "<SHA>"
+      }
+    }
+  },
+  "orphans": []
+}
+

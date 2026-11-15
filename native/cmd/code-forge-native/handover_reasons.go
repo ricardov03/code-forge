@@ -49,7 +49,6 @@ const (
 	hCloseChangedFiles
 	hCloseFileSet
 	hCloseRequeue
-	hCloseQueueRefresh
 	hCloseQueueIdentity
 	hCloseReportRedaction
 	hCloseCoderTests
@@ -352,7 +351,6 @@ var handoverReasons = [...]string{
 	hCloseChangedFiles:        "close-changed-files",
 	hCloseFileSet:             "close-file-set",
 	hCloseRequeue:             "close-requeue",
-	hCloseQueueRefresh:        "close-queue-refresh",
 	hCloseQueueIdentity:       "close-queue-identity",
 	hCloseReportRedaction:     "close-report-redaction",
 	hCloseCoderTests:          "close-coder-tests",

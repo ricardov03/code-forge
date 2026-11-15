@@ -382,10 +382,6 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		return fallback(hCloseRequeue)
 	}
 	qdir := filepath.Join(mainTop, ".code-forge/queue")
-	idx := queue.Index{Dir: qdir}
-	if idx.Refresh() != nil {
-		return fallback(hCloseQueueRefresh)
-	}
 	for _, f := range files {
 		p := ticket.Parts{Run: run, Block: id, File: f.File, ContentHash: f.Hash}
 		if inTree {
@@ -394,7 +390,8 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		if rev, ok := entry.Get("acceptance_revision").(string); ok {
 			p.AcceptanceRevision = &rev
 		}
-		if _, e := queue.Identity(qdir, p); e != nil {
+		// toolLines prints "no ticket" for any other error, as Node does.
+		if _, e := queue.Identity(qdir, p); errors.Is(e, queue.ErrUnsupported) {
 			return fallback(hCloseQueueIdentity)
 		}
 	}
@@ -594,8 +591,22 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 	}
 	event, reason := blockclose.Pin(record, live, statusStart)
-	if !closeQueuePins(home, run, id, record, rows, &event, &reason, mainTop) {
+	if ok, err := closeQueuePins(home, run, id, record, rows, &event, &reason, mainTop); !ok {
 		return fallback(hCloseQueuePins)
+	} else if err != nil {
+		// B718: Node's closeBlock throws readTicket's WorkerError or the raw
+		// scandir error here; with --decide it would have printed the gate's
+		// load warnings first, which Go reads later. A preflight (block
+		// land, --auto-claim, the human close) wraps close in its own
+		// output, so it keeps handing over.
+		if (deciding && !confirmed) || (step != nil && step.preflight && step.dry == nil) {
+			return fallback(hCloseQueuePins)
+		}
+		var te *queue.TicketError
+		if errors.As(err, &te) {
+			err = &state.Error{Code: te.Code, Message: te.Message}
+		}
+		return fail(err)
 	}
 	if event == "" {
 		if why := blockclose.Tamper(run, id, rows, key); why != "" {
@@ -1178,7 +1189,9 @@ func closeExcluded(cfg map[string]any, file string) bool {
 	return len(patterns) > 0 && blockMap(cfg["review"])["exclude"] != nil
 }
 
-func closeQueuePins(home, run, id string, record ledger.Object, rows []gatecheck.Row, event, reason *string, top string) bool {
+// closeQueuePins is closeBlock's pin check over the counted rows and the
+// queued tickets' claims. ok false hands over; err is what Node throws.
+func closeQueuePins(home, run, id string, record ledger.Object, rows []gatecheck.Row, event, reason *string, top string) (ok bool, err error) {
 	pins, _ := record.Get("workers").([]any)
 	if pins == nil {
 		if p := record.Get("worker"); p != nil {
@@ -1202,39 +1215,36 @@ func closeQueuePins(home, run, id string, record ledger.Object, rows []gatecheck
 		}
 	}
 	if *event != "" {
-		return true
+		return true, nil
 	}
-	names, err := os.ReadDir(filepath.Join(top, ".code-forge/queue"))
-	if err != nil && !os.IsNotExist(err) {
-		return false
+	dir := filepath.Join(top, ".code-forge/queue")
+	names, err := queue.TicketNames(dir)
+	if err != nil {
+		return true, err
 	}
 	for _, name := range names {
-		if !regexp.MustCompile(`^[0-9a-f]{24}\.json$`).MatchString(name.Name()) {
-			continue
+		ticket := strings.TrimSuffix(name, ".json")
+		queued, err := queue.ReadTicket(dir, ticket)
+		if errors.Is(err, queue.ErrUnsupported) {
+			return false, nil
 		}
-		data, e := os.ReadFile(filepath.Join(top, ".code-forge/queue", name.Name()))
-		if e != nil {
-			return false
-		}
-		var queued map[string]any
-		if json.Unmarshal(data, &queued) != nil {
-			return false
+		if err != nil {
+			return true, err
 		}
 		if queued["run"] != run || queued["block"] != id {
 			continue
 		}
-		ticket := strings.TrimSuffix(name.Name(), ".json")
 		sum := sha256.Sum256([]byte("ticket\x00" + run + "\x00" + ticket))
-		data, e = os.ReadFile(filepath.Join(home, ".code-forge/locks", hex.EncodeToString(sum[:])+".lock"))
+		data, e := os.ReadFile(filepath.Join(home, ".code-forge/locks", hex.EncodeToString(sum[:])+".lock"))
 		if os.IsNotExist(e) {
 			continue
 		}
 		if e != nil {
-			return false
+			return false, nil
 		}
 		var claim map[string]any
 		if json.Unmarshal(data, &claim) != nil {
-			return false
+			return false, nil
 		}
 		for _, v := range pins {
 			p := blockObject(v)
@@ -1242,12 +1252,12 @@ func closeQueuePins(home, run, id string, record ledger.Object, rows []gatecheck
 				_, why := blockclose.Pin(ledger.Object{{Key: "worker", Value: p}}, nil, statusStart)
 				if why != "" {
 					*event, *reason = "worker.down", fmt.Sprintf("dead pinned worker pid %v holds ticket %s", p.Get("pid"), ticket)
-					return true
+					return true, nil
 				}
 			}
 		}
 	}
-	return true
+	return true, nil
 }
 
 func closeReviewedLines(run, id, top, qdir string, entry ledger.Object, files []gatecheck.File, waived []gatecheck.Waived, inTree, passed bool) ([]any, []string) {

@@ -4,8 +4,6 @@ package queue
 import (
 	"bytes"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/ticket"
 )
@@ -48,16 +45,12 @@ func (idx *Index) Refresh() error {
 	if idx.entries == nil {
 		idx.entries = make(map[string]cached)
 	}
-	names, err := os.ReadDir(idx.Dir)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("queue-unreadable")
+	names, err := TicketNames(idx.Dir)
+	if err != nil {
+		return err
 	}
 	seen := make(map[string]bool)
-	for _, entry := range names {
-		name := entry.Name()
-		if !ticketName.MatchString(name) {
-			continue
-		}
+	for _, name := range names {
 		seen[name] = true
 		if _, err := idx.read(name, true); err != nil {
 			return err
@@ -89,34 +82,46 @@ func (idx *Index) read(name string, isTicket bool) (Object, error) {
 	info, err := os.Stat(file)
 	if os.IsNotExist(err) {
 		delete(idx.entries, name)
+		// A dangling link is still listed: readTicket cannot read it.
+		if _, lerr := os.Lstat(file); isTicket && lerr == nil {
+			return nil, notReadable(name[:24])
+		}
 		return nil, nil
 	}
 	if err != nil {
+		if isTicket {
+			return nil, notReadable(name[:24])
+		}
 		return nil, fmt.Errorf("queue-unreadable")
 	}
 	if prev, ok := idx.entries[name]; ok && os.SameFile(prev.info, info) && prev.info.Size() == info.Size() && prev.info.ModTime().Equal(info.ModTime()) {
 		return prev.value, prev.err
 	}
-	var value Object
 	if !info.Mode().IsRegular() {
+		if isTicket {
+			return nil, notReadable(name[:24])
+		}
 		return nil, fmt.Errorf("bad-ticket")
 	}
 	data, err := os.ReadFile(file)
+	var value Object
 	if isTicket {
 		idx.TicketsParsed++
-	}
-	if err == nil {
-		err = json.Unmarshal(data, &value)
-	}
-	if err == nil && isTicket {
-		err = validate(name[:24], value)
-	}
-	if err != nil || value == nil {
-		code := "result-unreadable"
-		if isTicket {
-			code = "bad-ticket"
+		if err != nil {
+			data = nil
 		}
-		err = fmt.Errorf("%s", code)
+		// readTicket: readFileSync + JSON.parse, then its checks in order.
+		value, err = checkTicket(name[:24], parseTicketJSON(data))
+		if err != nil {
+			value = nil
+		}
+	} else {
+		if err == nil {
+			err = json.Unmarshal(data, &value)
+		}
+		if err != nil || value == nil {
+			err = fmt.Errorf("result-unreadable")
+		}
 	}
 	idx.entries[name] = cached{info: info, value: value, err: err, data: data}
 	return value, err
@@ -368,103 +373,8 @@ func (idx *Index) prune(run string, block *string) (tickets, markers int, err er
 
 func text(obj Object, key string) string { s, _ := obj[key].(string); return s }
 
-func validPath(s string) bool {
-	if s == "" || filepath.IsAbs(s) || strings.Contains(s, "\\") {
-		return false
-	}
-	parts := strings.Split(s, "/")
-	for _, part := range parts {
-		if part == "" || part == "." || part == ".." {
-			return false
-		}
-	}
-	return parts[0] != ".git" && parts[0] != ".code-forge"
-}
-
-func optional(t Object, key string) (*string, bool) {
-	v, exists := t[key]
-	if !exists {
-		return nil, true
-	}
-	s, ok := v.(string)
-	return &s, ok
-}
-
+// validate is readTicket's checks of an already parsed ticket.
 func validate(id string, t Object) error {
-	bad := fmt.Errorf("bad-ticket")
-	if !validPath(text(t, "file")) {
-		return bad
-	}
-	for _, key := range []string{"run", "block", "content_hash"} {
-		if _, ok := t[key].(string); !ok {
-			return bad
-		}
-	}
-	tree, ok := optional(t, "tree")
-	if t["tree"] == nil {
-		tree, ok = nil, true
-	}
-	if !ok || tree != nil && !filepath.IsAbs(*tree) {
-		return bad
-	}
-	p := ticket.Parts{Run: text(t, "run"), Block: text(t, "block"), File: text(t, "file"), ContentHash: text(t, "content_hash"), Tree: tree}
-	if kind, exists := t["kind"]; exists {
-		if kind != "answers" || !validPath(text(t, "by_file")) {
-			return bad
-		}
-		if _, ok := t["by_hash"].(string); !ok {
-			return bad
-		}
-		values, ok := t["answers"].([]any)
-		if !ok || len(values) == 0 || len(values) > 10 {
-			return bad
-		}
-		ids := []string{}
-		for _, v := range values {
-			s, ok := v.(string)
-			if !ok || !answerID.MatchString(s) {
-				return bad
-			}
-			ids = append(ids, s)
-		}
-		if !sort.StringsAreSorted(ids) {
-			return bad
-		}
-		for i := 1; i < len(ids); i++ {
-			if ids[i] == ids[i-1] {
-				return bad
-			}
-		}
-		parts := []string{"answers", p.Run, p.Block, p.File, p.ContentHash, text(t, "by_file"), text(t, "by_hash"), strings.Join(ids, ",")}
-		if tree != nil {
-			parts = append(parts, *tree)
-		}
-		hash := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
-		if hex.EncodeToString(hash[:])[:24] != id {
-			return bad
-		}
-		return nil
-	}
-	p.AcceptanceRevision, ok = optional(t, "acceptance_revision")
-	if !ok {
-		return bad
-	}
-	p.ReopenedAt, ok = optional(t, "reopened_at")
-	if !ok {
-		return bad
-	}
-	if p.ReopenedAt != nil {
-		// readTicket's Number.isFinite(Date.parse(reopened_at)).
-		_, finite, known := gatecheck.JSDateParse(*p.ReopenedAt, true)
-		if !known {
-			return fmt.Errorf("unsupported reopen time")
-		}
-		if !finite {
-			return bad
-		}
-	}
-	if ticket.ReviewID(p) != id {
-		return bad
-	}
-	return nil
+	_, err := checkTicket(id, t)
+	return err
 }

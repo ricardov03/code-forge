@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,15 +11,12 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/ticket"
 )
-
-var surrogate = regexp.MustCompile(`(?i)\\ud[89a-f][0-9a-f]{2}`)
 
 // Identity is Node's reviewIdentity without a reopen boundary: the ticket of
 // p's current content, reusing the latest reopened attempt. No files have
@@ -45,7 +41,7 @@ func Resolve(dir string, p ticket.Parts, after *string) (ticket.Parts, string, e
 	if after != nil {
 		ms, ok, known := gatecheck.JSDateParse(*after, true)
 		if !known {
-			return p, "", fmt.Errorf("unsupported reopen time")
+			return p, "", unsupported("unsupported reopen time")
 		}
 		afterMs, afterOK = ms, ok
 	}
@@ -57,7 +53,7 @@ func Resolve(dir string, p ticket.Parts, after *string) (ticket.Parts, string, e
 		if afterOK {
 			ms, ok, known := gatecheck.JSDateParse(t["enqueued_at"], true)
 			if !known {
-				return p, "", fmt.Errorf("unsupported ticket time")
+				return p, "", unsupported("unsupported ticket time")
 			}
 			if ok && ms > afterMs {
 				fresh = t
@@ -84,57 +80,59 @@ func Resolve(dir string, p ticket.Parts, after *string) (ticket.Parts, string, e
 var canonicalStamp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$`)
 
 // scan returns the valid tickets of p's scope (reopen attempts included) in
-// Node's order: enqueued_at, then ticket id. Scope is checked before
-// validation, like reviewIdentity.
+// Node's order: enqueued_at, then ticket id. Like reviewIdentity it reads each
+// ticket as readJSON does (UTF-8 with replacement, lone surrogate escapes
+// kept), checks scope on that raw value, then runs readTicket's checks, whose
+// WorkerError it returns.
 func scan(dir string, p ticket.Parts) ([]Object, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil && !os.IsNotExist(err) {
-		return nil, err
+		return nil, &TicketError{Code: "queue-unreadable", Message: "the review queue cannot be read"}
 	}
 	matching := []Object{}
-	ordered := false
 	for _, entry := range entries {
 		if !ticketName.MatchString(entry.Name()) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-		if err != nil || !json.Valid(data) {
+		if err != nil {
 			continue
 		}
-		if !utf8.Valid(data) || surrogate.Match(data) {
-			return nil, fmt.Errorf("unsupported ticket encoding")
-		}
-		var t Object
-		if json.Unmarshal(data, &t) != nil || t == nil {
+		t, ok := parseTicketJSON(data).(map[string]any)
+		if !ok || truthy(t["kind"]) {
 			continue
 		}
 		if t["run"] != p.Run || t["block"] != p.Block || t["file"] != p.File || t["content_hash"] != p.ContentHash || !same(t, "tree", p.Tree, true) || !same(t, "acceptance_revision", p.AcceptanceRevision, false) {
 			continue
 		}
-		// Any present kind would fail readTicket or select an answers ticket.
-		if kind, exists := t["kind"]; exists {
-			if kind == "answers" {
-				continue
-			}
-			return nil, fmt.Errorf("unsupported ticket kind")
-		}
-		if err := validate(entry.Name()[:24], t); err != nil {
+		if _, err := checkTicket(entry.Name()[:24], t); err != nil {
 			return nil, err
-		}
-		if _, ok := t["enqueued_at"].(string); !ok {
-			return nil, fmt.Errorf("unsupported ticket time")
-		}
-		if _, reopened := t["reopened_at"]; reopened {
-			ordered = true
 		}
 		matching = append(matching, t)
 	}
-	// The order decides only between reopen attempts; Go's byte order equals
-	// localeCompare for toISOString stamps and hand over anything else.
-	if ordered && len(matching) > 1 {
+	if len(matching) < 2 {
+		return matching, nil
+	}
+	// Sorting calls enqueued_at.localeCompare, which throws on a non-string
+	// receiver; which ticket is the receiver is V8's sort detail.
+	attempts := map[string]bool{}
+	for _, t := range matching {
+		if _, ok := t["enqueued_at"].(string); !ok {
+			return nil, unsupported("unsupported ticket time")
+		}
+		key := "ordinary"
+		if at, reopened := t["reopened_at"].(string); reopened {
+			key = "reopened " + at
+		}
+		attempts[key] = true
+	}
+	// The order decides only between distinct attempts; Go's byte
+	// order equals localeCompare for toISOString stamps and hands over
+	// anything else.
+	if len(attempts) > 1 {
 		for _, t := range matching {
 			if !canonicalStamp.MatchString(text(t, "enqueued_at")) {
-				return nil, fmt.Errorf("unsupported ticket time")
+				return nil, unsupported("unsupported ticket time")
 			}
 		}
 	}
