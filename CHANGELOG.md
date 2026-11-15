@@ -13,6 +13,9 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Changed
 
 - `logs report` now asks its terminal questions and runs `--with-doctor` in the Go engine instead of handing them to Node: "Report anyway?", the send menu with "Edit in my editor" (`$VISUAL`/`$EDITOR`, secret check of the edited text, fingerprint added back), "Send without the AI check?" and "What now?" are drawn like clack's select and confirm, and the setup check runs `code-forge doctor --json` with Node's 60 s limit, row filter and `### Setup check` table; only a question on a stdout that is not a terminal or a terminal smaller than 40x12 still goes to Node (`logs-report-prompt`), and the `logs-report-doctor` hand-over reason is gone. B677
+### Changed
+
+- `keys set <name>` (the hidden prompt on a terminal), `keys set --op` and `keys test --ref` with an `op://` reference, a 1Password item ID or an item link now run in the Go engine with Node's output, exit codes and stored files; the typed value is read with echo off and the terminal mode comes back on every path, including a signal. B678
 
 ## [0.24.0] — 2026-11-14
 

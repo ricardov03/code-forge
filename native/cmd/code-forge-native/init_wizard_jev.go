@@ -193,7 +193,11 @@ func iwjPickField(fields []any) (ledger.Object, string) {
 // iwjResolveItem is resolveOpItemRef: `op item get <id> --format json`
 // (retried once after a first-call timeout) turned into
 // op://<vaultId>/<itemId>/<fieldId>; only ids and labels are taken.
-func iwjResolveItem(itemID string) iwjOpResult {
+func iwjResolveItem(itemID string) iwjOpResult { return iwjResolveItemFor("init", itemID) }
+
+// iwjResolveItemFor is iwjResolveItem with the verb its op_retry warning
+// is logged under (B678: `keys` resolves item IDs too).
+func iwjResolveItemFor(verb, itemID string) iwjOpResult {
 	bad := iwjOpResult{kind: "op_bad_output", err: opMessages["op_bad_output"]}
 	if !opOnPath() {
 		return iwjOpResult{kind: "op_missing", err: opMessages["op_missing"]}
@@ -202,7 +206,7 @@ func iwjResolveItem(itemID string) iwjOpResult {
 	res := toolsExec(argv, opAttemptTimeout(1))
 	if !res.ok && res.timedOut {
 		res = toolsExec(argv, opAttemptTimeout(2))
-		logNativeWarning("init", "op_retry", "1Password did not answer in time; the call was retried once")
+		logNativeWarning(verb, "op_retry", "1Password did not answer in time; the call was retried once")
 	}
 	if !res.ok {
 		kind, message := iwjOpFailure(res, "op item get "+itemID, " (item "+itemID+")")

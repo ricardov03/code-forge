@@ -248,11 +248,11 @@ func TestB456KeysDarwinListProbesSecurity(t *testing.T) {
 func TestB456KeysNodeOnlyCasesHandOver(t *testing.T) {
 	_, project := b456KeysHome(t, "", nil)
 	for _, args := range [][]string{
+		// B678: no terminal for the hidden prompt (go test has none)
 		{"set", "zz"},
-		{"set", "zz", "--op", "op://a/b/c"},
-		{"set", "zz", "--op", "abcdefghijklmnopqrstuvwxyz"},
-		{"test", "zz", "--ref", "op://a/b/c"},
-		{"test", "zz", "--ref", "https://start.1password.com/open/i?i=abcdefghijklmnopqrstuvwxyz"},
+		// B678: a 1Password-like link Go cannot read an item ID from
+		{"set", "zz", "--op", "https://my.1password.com/open/i?v=abc"},
+		{"test", "zz", "--ref", "https://my.1password.com/open/i?v=abc"},
 	} {
 		if keysDecide(args, project) != nil {
 			t.Errorf("%v: Go served a case that needs Node", args)

@@ -443,7 +443,12 @@ func keysWritePrivate(file string, content []byte) error {
 		return err
 	}
 	_ = handle.Close()
-	return os.Rename(tmp, file)
+	// B678: rename(2) as libuv calls it (os.Rename turns a directory in the
+	// way into EEXIST; Node reports EISDIR)
+	if err := syscall.Rename(tmp, file); err != nil {
+		return &os.LinkError{Op: "rename", Old: tmp, New: file, Err: err}
+	}
+	return nil
 }
 
 func keysUpdateIndex(file string, change func(*ledger.Object)) error {
@@ -517,6 +522,9 @@ func runKeys(args []string) int {
 		return code
 	}
 	contextApplyTmpRoot()
+	// B678: the lazy run root an `op` child made goes at exit (releaseLazyRoot)
+	lrRoot = ""
+	defer toolsReleaseRoot()
 	name := "keys"
 	for _, arg := range args {
 		if !strings.HasPrefix(arg, "-") {
@@ -528,8 +536,9 @@ func runKeys(args []string) int {
 	}
 	before := gatesBreadcrumbName(name)
 	stderr := &contextErrWriter{}
+	keysEnded = false
 	code := plan(os.Stdout, stderr)
-	if code != 0 {
+	if code != 0 && !keysEnded {
 		var message any
 		if stderr.last != "" {
 			message = stderr.last
@@ -648,9 +657,21 @@ func keysDecide(args []string, cwd string) keysRun {
 			return 0
 		}
 	case "set":
-		if !p.hasFlag {
-			// the hidden prompt stays in Node
+		// B678: the writer is the keychain through `security`, or the file
+		var w keysWriter
+		w.dir, w.indexFile = dir, indexFile
+		if !fileOnly {
+			store, ok := kcOpen()
+			if !ok {
+				return nil
+			}
+			w.kc = &store
+		}
+		if _, err := keysIndex(indexFile); err != nil {
 			return nil
+		}
+		if !p.hasFlag {
+			return keysPromptDecide(p.name, w, storeWarning, r)
 		}
 		cache := keysCacheHoursFor(p, cwd, true)
 		if cache.handOff {
@@ -659,16 +680,42 @@ func keysDecide(args []string, cwd string) keysRun {
 		if cache.refuse != "" {
 			return func(_, stderr io.Writer) int { r.write(stderr, cache.refuse); return 2 }
 		}
-		if keysOpRef.MatchString(p.flagArg) || keysOpItemFromInput(p.flagArg) != "" || keysOpLike(p.flagArg) {
-			// a 1Password call follows: Node only
-			return nil
+		fullRef := keysOpRef.MatchString(p.flagArg)
+		itemID := ""
+		if !fullRef {
+			itemID = keysOpItemFromInput(p.flagArg)
 		}
-		return func(_, stderr io.Writer) int {
-			if cache.warning != "" {
-				r.write(stderr, cache.warning)
+		if !fullRef && itemID == "" {
+			if keysOpLike(p.flagArg) {
+				// a link Go's URL parser may read unlike Node's
+				return nil
 			}
-			r.write(stderr, p.name+": --op must be a 1Password item ID, item link or op://vault/item/field reference\n")
-			return 2
+			return func(_, stderr io.Writer) int {
+				r.write(stderr, cache.warning)
+				r.write(stderr, p.name+": --op must be a 1Password item ID, item link or op://vault/item/field reference\n")
+				return 2
+			}
+		}
+		return func(stdout, stderr io.Writer) int {
+			r.write(stderr, cache.warning+keysOpApproveNote+"\n")
+			ref := p.flagArg
+			if itemID != "" {
+				resolved, ok := keysOpResolve(p.name, itemID, r, stdout, stderr)
+				if !ok {
+					return 1
+				}
+				ref = resolved
+			}
+			r.write(stderr, storeWarning)
+			value, exp, errs := keysReadOpAndCache(w, p.name, ref, now, cache.hours, r)
+			for _, e := range errs {
+				r.write(stderr, p.name+": "+e+"\n")
+			}
+			if value == "" {
+				return 1
+			}
+			r.write(stdout, "stored "+p.name+" in "+w.name()+" (source=op, expires="+keysFormatExpiry(exp, now)+")"+keysCacheFrom(cache)+"\n")
+			return 0
 		}
 	case "test":
 		var kc *kcStore
@@ -684,48 +731,93 @@ func keysDecide(args []string, cwd string) keysRun {
 			return nil
 		}
 		fullRef := p.hasFlag && keysOpRef.MatchString(p.flagArg)
-		if p.hasFlag && !fullRef && (keysOpItemFromInput(p.flagArg) != "" || keysOpLike(p.flagArg)) {
-			return nil
+		itemID := ""
+		if p.hasFlag && !fullRef {
+			itemID = keysOpItemFromInput(p.flagArg)
+			if itemID == "" && keysOpLike(p.flagArg) {
+				return nil
+			}
 		}
-		prefix := ""
-		if cache.warning != "" {
-			prefix = cache.warning
-		}
-		if fullRef {
+		prefix := cache.warning
+		if fullRef || itemID != "" {
 			prefix += keysOpApproveNote + "\n"
 		}
 		ref := p.flagArg
 		envName := "CODE_FORGE_KEY_" + strings.ReplaceAll(strings.ToUpper(p.name), "-", "_")
-		if strings.HasPrefix(ref, "env:") {
-			envName = ref[4:]
-		}
 		storeName := p.name
-		if strings.HasPrefix(ref, "keychain:") {
-			storeName = ref[9:]
-			if !keysNamePattern.MatchString(storeName) {
+		opRef := ""
+		if fullRef {
+			opRef = ref
+		}
+		if itemID == "" {
+			// an item ID's reference is parsed once 1Password resolved it
+			if strings.HasPrefix(ref, "env:") {
+				envName = ref[4:]
+			}
+			if strings.HasPrefix(ref, "keychain:") {
+				storeName = ref[9:]
+				if !keysNamePattern.MatchString(storeName) {
+					return func(_, stderr io.Writer) int {
+						r.write(stderr, prefix+"keys: "+keysNamePatternText+"\n")
+						return 2
+					}
+				}
+			}
+			if strings.HasPrefix(ref, "op://") && !fullRef {
 				return func(_, stderr io.Writer) int {
-					r.write(stderr, prefix+"keys: "+keysNamePatternText+"\n")
+					r.write(stderr, prefix+"keys: key \""+p.name+"\": malformed 1Password reference\n")
 					return 2
 				}
 			}
 		}
-		if strings.HasPrefix(ref, "op://") && !fullRef {
-			return func(_, stderr io.Writer) int {
-				r.write(stderr, prefix+"keys: key \""+p.name+"\": malformed 1Password reference\n")
-				return 2
+		w := keysWriter{kc: kc, dir: dir, indexFile: indexFile}
+		// resolve is the item ID step; ok false ends the run (exit 1)
+		resolve := func(stdout, stderr io.Writer) bool {
+			r.write(stderr, prefix)
+			if itemID != "" {
+				resolved, ok := keysOpResolve(p.name, itemID, r, stdout, stderr)
+				if !ok {
+					return false
+				}
+				opRef = resolved
 			}
+			r.write(stderr, storeWarning)
+			return true
+		}
+		// fromOp is the 1Password read after a store miss
+		fromOp := func(stdout, stderr io.Writer, errs []string) int {
+			if opRef != "" {
+				value, exp, opErrs := keysReadOpAndCache(w, storeName, opRef, now, cache.hours, r)
+				errs = append(errs, opErrs...)
+				if value != "" {
+					for _, e := range errs {
+						r.write(stderr, p.name+": "+e+"\n")
+					}
+					r.write(stdout, p.name+": ok source=op expires="+keysFormatExpiry(exp, now)+"\n")
+					return 0
+				}
+			}
+			for _, e := range errs {
+				r.write(stderr, p.name+": "+e+"\n")
+			}
+			r.write(stderr, p.name+": not found\n")
+			return 1
 		}
 		if value := os.Getenv(envName); value != "" {
 			return func(stdout, stderr io.Writer) int {
-				r.write(stderr, prefix+storeWarning)
+				if !resolve(stdout, stderr) {
+					return 1
+				}
 				r.register(value)
 				r.write(stdout, p.name+": ok source=env expires=never\n")
 				return 0
 			}
 		}
-		if strings.HasPrefix(ref, "op://") {
-			// a store miss would read 1Password: Node only
-			return nil
+		if opRef != "" || itemID != "" {
+			// a store miss caches the 1Password value: the index must be readable
+			if _, err := keysIndex(indexFile); err != nil {
+				return nil
+			}
 		}
 		if kc != nil {
 			// B610: the keychain is read first; a miss goes on to the file
@@ -738,15 +830,16 @@ func keysDecide(args []string, cwd string) keysRun {
 					return nil
 				}
 				return func(stdout, stderr io.Writer) int {
-					r.write(stderr, prefix+storeWarning)
+					if !resolve(stdout, stderr) {
+						return 1
+					}
 					errs := []string{}
 					found, exp := keysKeychainRead(*kc, storeName, indexFile, raw, now, cache.hours, r, &errs)
+					if !found {
+						return fromOp(stdout, stderr, errs)
+					}
 					for _, e := range errs {
 						r.write(stderr, p.name+": "+e+"\n")
-					}
-					if !found {
-						r.write(stderr, p.name+": not found\n")
-						return 1
 					}
 					r.write(stdout, p.name+": ok source="+kc.name+" expires="+keysFormatExpiry(exp, now)+"\n")
 					return 0
@@ -766,15 +859,16 @@ func keysDecide(args []string, cwd string) keysRun {
 			}
 		}
 		return func(stdout, stderr io.Writer) int {
-			r.write(stderr, prefix+storeWarning)
+			if !resolve(stdout, stderr) {
+				return 1
+			}
 			errs := []string{}
 			found, exp := keysFileRead(storeName, keyFile, indexFile, raw, readErr, now, cache.hours, r, &errs)
+			if !found {
+				return fromOp(stdout, stderr, errs)
+			}
 			for _, e := range errs {
 				r.write(stderr, p.name+": "+e+"\n")
-			}
-			if !found {
-				r.write(stderr, p.name+": not found\n")
-				return 1
 			}
 			r.write(stdout, p.name+": ok source=file expires="+keysFormatExpiry(exp, now)+"\n")
 			return 0
