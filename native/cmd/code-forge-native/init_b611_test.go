@@ -180,22 +180,22 @@ func TestB611InitWizardKeychain(t *testing.T) {
 	t.Run("found", func(t *testing.T) {
 		home, cwd, _ := b611Setup(t, nil, false)
 		b528Unset(t, "CODE_FORGE_KEY_BACKEND")
-		kc := b610Fake(t, false)
+		kc := b610Fake(t)
 		kc.put(t, "jev", `{"v":"kc-value-b611","exp":null}`)
 		code, transcript := b528Run(t, cwd, b611Defaults, "--skip-doctor")
 		b611Served(t, home, code)
-		if code != 0 || strings.Contains(transcript, "Where is the Jev key?") || !strings.Contains(transcript, "keys: jev from security-cli\n") || strings.Contains(transcript, "kc-value-b611") {
+		if code != 0 || strings.Contains(transcript, "Where is the Jev key?") || !strings.Contains(transcript, "keys: jev from keychain\n") || strings.Contains(transcript, "kc-value-b611") {
 			t.Fatalf("code=%d transcript tail %q", code, transcript[max(0, len(transcript)-400):])
 		}
 		user, _ := os.ReadFile(filepath.Join(home, ".code-forge", "config.yml"))
-		if !strings.Contains(string(user), "source: security-cli") {
+		if !strings.Contains(string(user), "source: keychain") {
 			t.Fatalf("user config:\n%s", user)
 		}
 	})
 	t.Run("paste", func(t *testing.T) {
 		home, cwd, _ := b611Setup(t, nil, false)
 		b528Unset(t, "CODE_FORGE_KEY_BACKEND")
-		kc := b610Fake(t, false)
+		kc := b610Fake(t)
 		keys := append(append([]string{}, b611Defaults...), b611Up, "\r", b611Pasted, "\r")
 		code, transcript := b528Run(t, cwd, keys, "--skip-doctor")
 		b611Served(t, home, code)
@@ -209,14 +209,14 @@ func TestB611InitWizardKeychain(t *testing.T) {
 			t.Fatal("the key reached security's argv")
 		}
 		index, _ := os.ReadFile(filepath.Join(home, ".code-forge", "store", "index.json"))
-		if !strings.Contains(string(index), `"backend": "security-cli"`) {
+		if !strings.Contains(string(index), `"backend": "keychain"`) {
 			t.Fatalf("index %s", index)
 		}
 	})
 	t.Run("paste write fails", func(t *testing.T) {
 		home, cwd, _ := b611Setup(t, nil, false)
 		b528Unset(t, "CODE_FORGE_KEY_BACKEND")
-		kc := b610Fake(t, false)
+		kc := b610Fake(t)
 		// items can be read (none there) but not written: add exits 1
 		if err := os.Chmod(filepath.Join(kc.dir, "items"), 0o500); err != nil {
 			t.Fatal(err)

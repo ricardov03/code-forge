@@ -242,21 +242,22 @@ func TestB456KeysDarwinListProbesSecurity(t *testing.T) {
 	if keysDecide([]string{"list"}, project) != nil {
 		t.Fatal("list with no usable keychain must hand over")
 	}
-	// B694: Linux with the binding but no Secret Service is Node's keyutils
-	// store (no binding is the file store alone: TestB694KeysLinuxNoBindingFileChain)
-	b679Linux(t, true, nil)
+	// B690b: Linux with no Secret Service is the file store in Go (Node's
+	// keyutils binding is gone), so Go serves the list.
+	b679Linux(t, nil)
 	ssConnect = func() (ssAPI, error) { return nil, errors.New("b694: no bus") }
-	if keysDecide([]string{"list"}, project) != nil {
-		t.Fatal("linux keyutils chain must hand over")
+	if keysDecide([]string{"list"}, project) == nil {
+		t.Fatal("linux without Secret Service: Go must serve the file store")
 	}
 }
 
 func TestB456KeysNodeOnlyCasesHandOver(t *testing.T) {
 	_, project := b456KeysHome(t, "", nil)
+	// B690b: input ending at the prompt is Go's own refusal now (no Node launcher line).
+	if keysDecide([]string{"set", "zz"}, project) == nil {
+		t.Error("[set zz]: want Go to serve it")
+	}
 	for _, args := range [][]string{
-		// B678: no launcher line to name if the input ends at the prompt
-		// (B694 draws it on any stdin and stdout)
-		{"set", "zz"},
 		// B694: a 1Password-like link only IDNA reads
 		{"set", "zz", "--op", "https://xn--zz.1password.com/open/i?i=abcdefghijklmnopqrstuvwxyz"},
 		{"test", "zz", "--ref", "https://１password.com/open/i?i=abcdefghijklmnopqrstuvwxyz"},

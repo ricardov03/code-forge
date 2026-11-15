@@ -1,57 +1,42 @@
 package main
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// A line Go cannot answer as Node does (a listed block id outside printable
-// ASCII among two or more, which ICU's localeCompare orders; B687 serves
-// Infinity, lone surrogates and bytes that are not UTF-8 in Go) hands that
-// line and the rest of stdin, byte for byte, to Node's companion; Go keeps
-// the lines before it, prints the router line after it and records one
-// native-status-line hand-over.
-func TestB501NativeStatusHandsTheRestToNodesCompanion(t *testing.T) {
-	served := `{"runs":[{"run_id":"a","status":null,"mode":"plan","spent_usd":0,"unknown_usd_sessions":0,"budget_usd":5,"blocks":[],"more":0,"closed":0,"stopped":0}]}` + "\n"
-	for name, line := range map[string]string{
-		"icu":           `{"record":{"blocks":{"é":{},"B1":{}}},"rows":[]}`,
-		"icu-surrogate": `{"record":{"blocks":{"\ud800":{},"B1":{}}},"rows":[]}`,
+// B690b: Node's companion is gone. A line whose listed block ids hold a
+// character outside printable ASCII (B501 handed it and the rest of stdin to
+// Node) is answered in Go: printable ASCII ids first in their usual order,
+// the other ids after them by UTF-16 code units; the lines after it are
+// answered too, and no hand-over is recorded.
+func TestB690bNativeStatusAnswersNonASCIIBlockIDsInGo(t *testing.T) {
+	first := `{"runs":[{"run_id":"a","status":null,"mode":"plan","spent_usd":0,"unknown_usd_sessions":0,"budget_usd":5,"blocks":[],"more":0,"closed":0,"stopped":0}]}` + "\n"
+	after := `{"runs":[{"run_id":"after","status":null,"mode":"plan","spent_usd":0,"unknown_usd_sessions":0,"budget_usd":5,"blocks":[],"more":0,"closed":0,"stopped":0}]}` + "\n"
+	unreadable := `{"ok":false,"error":"status-unreadable"}` + "\n"
+	block := func(id string) string {
+		return `{"id":"` + id + `","state":"open","level":null,"model":null,"gate":{"result":"none","name":null},"findings":0}`
+	}
+	for name, tc := range map[string]struct{ line, blocks string }{
+		"non-ascii": {`{"record":{"blocks":{"é":{},"B1":{}}},"rows":[]}`, block("B1") + "," + block("é")},
+		"surrogate": {`{"record":{"blocks":{"\ud800":{},"B1":{}}},"rows":[]}`, block("B1") + "," + block(`\ud800`)},
+		"utf16-order": {`{"record":{"blocks":{"ｚ":{},"😀":{},"B2":{},"é":{},"B10":{}}},"rows":[]}`,
+			block("B2") + "," + block("B10") + "," + block("é") + "," + block("😀") + "," + block("ｚ")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			home := b501NativeStatusFixture(t, false)
 			t.Setenv("CODE_FORGE_HANDOVER_LOG", "")
-			rest := line + "\r\n{\"record\":{\"run_id\":\"after\"},\"rows\":[]}\nbad"
-			var got string
-			saved := nativeStatusCompanion
-			nativeStatusCompanion = func(stdin io.Reader, stdout io.Writer) (int, error) {
-				data, err := io.ReadAll(stdin)
-				got = string(data)
-				_, _ = io.WriteString(stdout, "NODE\n")
-				return 0, err
-			}
-			t.Cleanup(func() { nativeStatusCompanion = saved })
-			b501Stdin(t, "{\"record\":{\"run_id\":\"a\"},\"rows\":[]}\n"+rest)
+			b501Stdin(t, "{\"record\":{\"run_id\":\"a\"},\"rows\":[]}\n"+tc.line+"\r\n{\"record\":{\"run_id\":\"after\"},\"rows\":[]}\nbad")
 			code, out, errText := runCaptured(t, "native-status")
-			if code != 1 || out != served+"NODE\n" || errText != b501RouterLine || got != rest {
-				t.Fatalf("code=%d stdout=%q stderr=%q node stdin=%q", code, out, errText, got)
+			want := first + `{"runs":[{"run_id":"undefined","status":null,"mode":"plan","spent_usd":0,"unknown_usd_sessions":0,"budget_usd":5,"blocks":[` + tc.blocks + `],"more":0,"closed":0,"stopped":0}]}` + "\n" + after + unreadable
+			if code != 1 || out != want || errText != b501RouterLine {
+				t.Fatalf("code=%d\nstdout=%q\n  want=%q\nstderr=%q", code, out, want, errText)
 			}
-			log, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
-			if strings.Count(string(log), "\n") != 1 || !strings.Contains(string(log), `"verb":"native-status","sub":"","reason":"native-status-line"`) {
-				t.Fatalf("handovers.jsonl = %s", log)
+			if log, err := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl")); err == nil && strings.Contains(string(log), "native-status") {
+				t.Fatalf("a hand-over was recorded: %s", log)
 			}
 		})
-	}
-}
-
-// A companion that cannot start ends with its own exit code and no router line.
-func TestB501NativeStatusCompanionThatCannotStart(t *testing.T) {
-	b501NativeStatusFixture(t, false)
-	b501Stdin(t, `{"record":{"blocks":{"é":{},"B1":{}}},"rows":[]}`+"\n")
-	code, out, errText := runCaptured(t, "native-status")
-	if code != 127 || out != "" || !strings.HasPrefix(errText, "code-forge-native: node executable \"/nonexistent-b501-node\" not found") {
-		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errText)
 	}
 }

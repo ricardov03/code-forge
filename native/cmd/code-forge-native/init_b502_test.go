@@ -3,9 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -96,101 +94,9 @@ func b502Go(t *testing.T, args []string, noHome bool, setup func(cwd string)) b5
 	return side
 }
 
-func b502Node(t *testing.T, args []string, noHome bool, setup func(cwd string)) b502Side {
-	t.Helper()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not on PATH")
-	}
-	home, cwd := t.TempDir(), b502Project(t, setup)
-	env := []string{"PATH=" + os.Getenv("PATH"), "TMPDIR=" + os.TempDir(), "CODE_FORGE_NATIVE=0", "CODE_FORGE_HANDOVER_LOG=0", "NO_COLOR=1"}
-	if noHome {
-		home = ""
-	} else {
-		env = append(env, "HOME="+home)
-	}
-	cmd := exec.Command(node, append([]string{filepath.Join(b458Repo(t), "bin", "code-forge.mjs"), "init"}, args...)...)
-	cmd.Dir, cmd.Env = cwd, env
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	code := 0
-	if err := cmd.Run(); err != nil {
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) {
-			t.Fatal(err)
-		}
-		code = exit.ExitCode()
-	}
-	side := b502Side{code: code, stdout: stdout.String(), stderr: stderr.String()}
-	b502Collect(t, &side, home, cwd)
-	return side
-}
-
 func b502WriteConfig(text string) func(string) {
 	return func(cwd string) {
 		_ = os.WriteFile(filepath.Join(cwd, ".code-forge.yml"), []byte(text), 0o644)
-	}
-}
-
-func TestB502InitRefusalsMatchNode(t *testing.T) {
-	cases := []struct {
-		name   string
-		args   []string
-		noHome bool
-		setup  func(string)
-	}{
-		{"unknown flag", []string{"--bogus"}, false, nil},
-		{"positional", []string{"extra"}, false, nil},
-		{"needs a value", []string{"--tools"}, false, nil},
-		{"value starts with dash", []string{"--provider", "-g"}, false, nil},
-		{"bad tools", []string{"--tools=all"}, false, nil},
-		{"bad yes-tool", []string{"--yes-tool", "vim"}, false, nil},
-		{"empty harness list", []string{"--harness", " , "}, false, nil},
-		{"unknown harness", []string{"--harness", "claude,vim"}, false, nil},
-		{"bad provider", []string{"--second-provider", "google"}, false, nil},
-		{"level no key", []string{"--level", "=x"}, false, nil},
-		{"level name", []string{"--level", "L4=x"}, false, nil},
-		{"level provider", []string{"--level", "L2=m:high@google"}, false, nil},
-		{"level effort", []string{"--level", "L2=m:@xai"}, false, nil},
-		{"level model", []string{"--level", "L2=:high"}, false, nil},
-		{"multimodel", []string{"--multimodel", "yes"}, false, nil},
-		{"jev-ref", []string{"--jev-ref", "not-a-ref"}, false, nil},
-		{"jev-env", []string{"--jev-env", "1BAD"}, false, nil},
-		{"engine subprocess", []string{"--engine", "subprocess"}, false, nil},
-		{"engine", []string{"--engine=cloud"}, false, nil},
-		{"solo project", []string{"--solo-project", "01"}, false, nil},
-		{"gate no key", []string{"--gate", "test"}, false, nil},
-		{"gate name", []string{"--gate", "build=make"}, false, nil},
-		{"gate quote", []string{"--gate", `test=npm "run`}, false, nil},
-		{"gate empty", []string{"--gate", "test=  "}, false, nil},
-		{"coder flag", []string{"--coder-may-push", "maybe"}, false, nil},
-		{"proof key", []string{"--proof", "speed=1"}, false, nil},
-		{"proof isolation", []string{"--proof", "isolation=copy"}, false, nil},
-		{"boolean value", []string{"--skip-doctor=1"}, false, nil},
-		{"repeated", []string{"--engine", "auto", "--engine", "solo"}, false, nil},
-		{"scope exclusive", []string{"-g", "-p"}, false, nil},
-		{"jev exclusive", []string{"--no-jev", "--jev-ref", "op://v/i/f", "--jev-env", "K"}, false, nil},
-		{"no HOME", []string{"--no-interaction"}, true, nil},
-		{"config is a directory", []string{"--no-interaction"}, false, func(cwd string) { _ = os.Mkdir(filepath.Join(cwd, ".code-forge.yml"), 0o755) }},
-		{"config is a list", nil, false, b502WriteConfig("- a\n- b\n")},
-		{"config is empty", nil, false, b502WriteConfig("")},
-		{"config version newer", nil, false, b502WriteConfig("version: 2\n")},
-		{"config version text", []string{"--no-interaction"}, false, b502WriteConfig("version: one\n")},
-		{"draft PR without push", []string{"--no-interaction", "--coder-may-open-draft-pr", "yes", "--skip-doctor", "--no-jev"}, false, nil},
-		{"draft PR, push no", []string{"--coder-may-open-draft-pr=yes", "--coder-may-push=no"}, false, nil},
-		{"draft PR, existing push no", []string{"--coder-may-open-draft-pr", "yes"}, false, b502WriteConfig("version: 1\nautonomy:\n  coder_may_push: false\n")},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			goSide := b502Go(t, c.args, c.noHome, c.setup)
-			nodeSide := b502Node(t, c.args, c.noHome, c.setup)
-			if goSide != nodeSide {
-				t.Fatalf("%q:\n go:   %#v\n node: %#v", c.args, goSide, nodeSide)
-			}
-			if goSide.code == 0 {
-				t.Fatalf("%q: a refusal exited 0", c.args)
-			}
-		})
 	}
 }
 

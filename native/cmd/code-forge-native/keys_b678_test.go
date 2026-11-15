@@ -14,12 +14,13 @@ import (
 // with a fake op on PATH), recorded on 2026-11-14 with a temp HOME and the
 // file backend. No test reads the real keychain or the real op.
 
-// Node's transcripts (CRLF of the pty as LF; @MJS@ is bin/code-forge.mjs).
+// Node's transcripts (CRLF of the pty as LF; input that ends at the prompt prints
+// b690bPromptEOFText since B690b).
 const (
 	b678Typed = "WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store\n\u001b[?25l\u001b[90m│\u001b[39m\n\u001b[36m◆\u001b[39m  Value for key \"foo\" (input hidden)\n\u001b[36m│\u001b[39m  \u001b[7m\u001b[8m_\u001b[28m\u001b[27m\n\u001b[36m└\u001b[39m\n\u001b[999D\u001b[4A\u001b[2B\u001b[2K\u001b[G\u001b[36m│\u001b[39m  ▪\u001b[7m\u001b[8m_\u001b[28m\u001b[27m\u001b[2B\u001b[999D\u001b[4A\u001b[2B\u001b[2K\u001b[G\u001b[36m│\u001b[39m  ▪▪\u001b[7m\u001b[8m_\u001b[28m\u001b[27m\u001b[2B\u001b[999D\u001b[4A\u001b[2B\u001b[2K\u001b[G\u001b[36m│\u001b[39m  ▪▪▪\u001b[7m\u001b[8m_\u001b[28m\u001b[27m\u001b[2B\u001b[999D\u001b[4A\u001b[2B\u001b[2K\u001b[G\u001b[36m│\u001b[39m  ▪▪▪▪\u001b[7m\u001b[8m_\u001b[28m\u001b[27m\u001b[2B\u001b[999D\u001b[4A\u001b[2B\u001b[2K\u001b[G\u001b[36m│\u001b[39m  ▪▪▪▪▪\u001b[7m\u001b[8m_\u001b[28m\u001b[27m\u001b[2B\u001b[999D\u001b[4A\u001b[2B\u001b[2K\u001b[G\u001b[36m│\u001b[39m  ▪▪▪▪▪▪\u001b[7m\u001b[8m_\u001b[28m\u001b[27m\u001b[2B\u001b[999D\u001b[4A\u001b[1B\u001b[J\u001b[32m◇\u001b[39m  Value for key \"foo\" (input hidden)\n\u001b[90m│\u001b[39m  \u001b[2m▪▪▪▪▪▪\u001b[22m\n\u001b[?25hstored foo in file (source=user, expires=never)\n"
 	b678CtrlC = "WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store\n\u001b[?25l\u001b[90m│\u001b[39m\n\u001b[36m◆\u001b[39m  Value for key \"foo\" (input hidden)\n\u001b[36m│\u001b[39m  \u001b[7m\u001b[8m_\u001b[28m\u001b[27m\n\u001b[36m└\u001b[39m\n\u001b[999D\u001b[4A\u001b[1B\u001b[J\u001b[31m■\u001b[39m  Value for key \"foo\" (input hidden)\n\u001b[90m│\u001b[39m  \n\u001b[?25hfoo: nothing stored\n"
 	b678Empty = "WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store\n\u001b[?25l\u001b[90m│\u001b[39m\n\u001b[36m◆\u001b[39m  Value for key \"foo\" (input hidden)\n\u001b[36m│\u001b[39m  \u001b[7m\u001b[8m_\u001b[28m\u001b[27m\n\u001b[36m└\u001b[39m\n\u001b[999D\u001b[4A\u001b[1B\u001b[J\u001b[32m◇\u001b[39m  Value for key \"foo\" (input hidden)\n\u001b[90m│\u001b[39m  \n\u001b[?25hfoo: nothing stored\n"
-	b678CtrlD = "WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store\n\u001b[?25l\u001b[90m│\u001b[39m\n\u001b[36m◆\u001b[39m  Value for key \"foo\" (input hidden)\n\u001b[36m│\u001b[39m  \u001b[7m\u001b[8m_\u001b[28m\u001b[27m\n\u001b[36m└\u001b[39m\nWarning: Detected unsettled top-level await at file://@MJS@:212\n  const code = await run(process.argv.slice(2), { configureTmpRoot: true });\n               ^\n\n\n\n"
+	b678CtrlD = "WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store\n\u001b[?25l\u001b[90m│\u001b[39m\n\u001b[36m◆\u001b[39m  Value for key \"foo\" (input hidden)\n\u001b[36m│\u001b[39m  \u001b[7m\u001b[8m_\u001b[28m\u001b[27m\n\u001b[36m└\u001b[39m\n" + b690bPromptEOFText
 	b678Bs    = "WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store\n\u001b[?25l\u001b[90m│\u001b[39m\n\u001b[36m◆\u001b[39m  Value for key \"foo\" (input hidden)\n\u001b[36m│\u001b[39m  \u001b[7m\u001b[8m_\u001b[28m\u001b[27m\n\u001b[36m└\u001b[39m\n\u001b[999D\u001b[4A\u001b[2B\u001b[2K\u001b[G\u001b[36m│\u001b[39m  ▪\u001b[7m\u001b[8m_\u001b[28m\u001b[27m\u001b[2B\u001b[999D\u001b[4A\u001b[2B\u001b[2K\u001b[G\u001b[36m│\u001b[39m  ▪▪\u001b[7m\u001b[8m_\u001b[28m\u001b[27m\u001b[2B\u001b[999D\u001b[4A\u001b[2B\u001b[2K\u001b[G\u001b[36m│\u001b[39m  ▪\u001b[7m\u001b[8m_\u001b[28m\u001b[27m\u001b[2B\u001b[999D\u001b[4A\u001b[2B\u001b[2K\u001b[G\u001b[36m│\u001b[39m  ▪▪\u001b[7m\u001b[8m_\u001b[28m\u001b[27m\u001b[2B\u001b[999D\u001b[4A\u001b[1B\u001b[J\u001b[32m◇\u001b[39m  Value for key \"foo\" (input hidden)\n\u001b[90m│\u001b[39m  \u001b[2m▪▪\u001b[22m\n\u001b[?25hstored foo in file (source=user, expires=never)\n"
 )
 
@@ -33,11 +34,7 @@ func b678PromptHome(t *testing.T) (string, string, string) {
 	saved := upgradePackageRoot
 	upgradePackageRoot = func() (string, bool) { return repo, true }
 	t.Cleanup(func() { upgradePackageRoot = saved })
-	mjs, err := filepath.EvalSymlinks(filepath.Join(repo, "bin", "code-forge.mjs"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return dir, project, mjs
+	return dir, project, repo
 }
 
 // b678Prompt runs `keys args...` on a fake 80x24 terminal fed with keys;
@@ -89,9 +86,9 @@ func TestB678KeysSetPromptMatchesNode(t *testing.T) {
 		{"input ends", nil, 13, b678CtrlD, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir, project, mjs := b678PromptHome(t)
+			dir, project, _ := b678PromptHome(t)
 			code, got := b678Prompt(t, project, tc.keys, "set", "foo")
-			want := strings.ReplaceAll(tc.golden, "@MJS@", mjs)
+			want := tc.golden
 			if code != tc.code || got != want {
 				t.Fatalf("exit %d (want %d)\n%s", code, tc.code, b528Diff(want, got))
 			}
@@ -124,7 +121,7 @@ func TestB678KeysSetPromptMatchesNode(t *testing.T) {
 func TestB678KeysSetPromptKeychain(t *testing.T) {
 	_, project, _ := b678PromptHome(t)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	kc := b610Fake(t, true)
+	kc := b610Fake(t)
 	code, got := b678Prompt(t, project, []string{"p", "w", "\r"}, "set", "foo")
 	if code != 0 || !strings.HasSuffix(got, "\x1b[?25hstored foo in keychain (source=user, expires=never)\n") || strings.Contains(got, "WARN") {
 		t.Fatalf("exit %d: %q", code, got)
@@ -171,9 +168,11 @@ func TestB678KeysSetPromptHandsOver(t *testing.T) {
 		t.Fatal("FORCE_COLOR with NO_COLOR: Go served the prompt")
 	}
 	b528Unset(t, "NO_COLOR", "FORCE_COLOR")
+	// B690b: the EOF text no longer names Node's launcher, so a package with
+	// no launcher file is served in Go
 	upgradePackageRoot = func() (string, bool) { return "", false }
-	if keysDecide([]string{"set", "foo"}, project) != nil {
-		t.Fatal("no launcher to name at EOF: Go served the prompt")
+	if keysDecide([]string{"set", "foo"}, project) == nil {
+		t.Fatal("no package root: the prompt was handed over")
 	}
 }
 
@@ -348,7 +347,7 @@ func TestB678KeysOpTimeoutRetriedOnce(t *testing.T) {
 func TestB678KeysSetOpKeychain(t *testing.T) {
 	dir, project, _ := b678Op(t, "ok", "", false)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	kc := b610Fake(t, true)
+	kc := b610Fake(t)
 	code, stdout, stderr := b456Keys(t, project, "set", "foo", "--op", "op://v/i/f")
 	if code != 0 || stdout != "stored foo in keychain (source=op, expires=2027-01-15T16:00:00.000Z)\n" || stderr != b678Approve {
 		t.Fatalf("exit %d %q %q", code, stdout, stderr)

@@ -198,22 +198,20 @@ func TestB569LauncherSetupExitCodes(t *testing.T) {
 	b569Expect(t, "setup crash", p.launch(nil, "setup"), 69, "go:setup\n", p.noEngine("the Go engine for "+p.target+" failed to run setup (exit 5)"))
 }
 
-func TestB569LauncherNativeZeroRunsNodeRouter(t *testing.T) {
+// B690b: Node is gone. CODE_FORGE_NATIVE=0 no longer reaches a Node router:
+// the Go binary still runs, and a missing binary stops with the usual message.
+func TestB690bLauncherNativeZeroStillRunsGo(t *testing.T) {
 	p := newB569Pkg(t)
-	for _, missing := range []bool{false, true} {
-		if missing {
-			if err := os.Remove(p.binary); err != nil {
-				t.Fatal(err)
-			}
-		}
-		for _, args := range [][]string{{"status", "a b"}, {"setup"}} {
-			got := p.launch([]string{"CODE_FORGE_NATIVE=0"}, args...)
-			want := filepath.Join(p.pkg, "bin", "code-forge.mjs") + "\n" + strings.Join(args, "\n") + "\n"
-			if got.code != 0 || got.stdout != "node served it\n" || got.stderr != "" || got.nodeArgs != want {
-				t.Errorf("missing=%v %v: exit=%d stdout=%q stderr=%q node=%q; want the Node router", missing, args, got.code, got.stdout, got.stderr, got.nodeArgs)
-			}
-		}
+	env := []string{"CODE_FORGE_NATIVE=0"}
+	b569Expect(t, "native=0 status", p.launch(env, "status", "a b"), 0, "go:status a b\n", "")
+	b569Expect(t, "native=0 setup", p.launch(env, "setup"), 0, "go:setup\n", "")
+	if err := os.Remove(p.binary); err != nil {
+		t.Fatal(err)
 	}
+	p.binary = p.nested(p.target)
+	want := p.noEngine("the Go engine for " + p.target + " is missing")
+	b569Expect(t, "native=0 missing", p.launch(env, "status", "a b"), 69, "", want)
+	b569Expect(t, "native=0 missing setup", p.launch(env, "setup"), 69, "", want)
 }
 
 func TestB569InstallOK(t *testing.T) {

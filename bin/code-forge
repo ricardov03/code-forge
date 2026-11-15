@@ -20,12 +20,7 @@ while [ -L "$entry" ]; do
 done
 pkg=$(CDPATH= cd -P "${entry%/*}/.." && pwd) || exit 1
 
-# CODE_FORGE_NATIVE=0 is the explicit maintainer and test switch: it runs the Node router.
-if [ "${CODE_FORGE_NATIVE:-}" = 0 ]; then
-  exec node "$pkg/bin/code-forge.mjs" "$@"
-fi
-
-# P4-0 (B569): the Go binary is required. Keep this mapping the same as scripts/install.sh.
+# P4-0 (B569): the Go binary is required; B690b removed the Node router, so there is no fallback. Keep this mapping the same as scripts/install.sh.
 sys=$(uname -s)
 mach=$(uname -m)
 case "$sys" in

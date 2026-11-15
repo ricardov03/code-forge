@@ -7,12 +7,12 @@ and read the report.
 
 It takes one block, so you see every step once. The site's other blocks are yours to run after.
 
-> Want a fully automated rehearsal first? See [the rehearsal](#the-automated-rehearsal) at the
-> end. It runs the same steps on the example library shipped with the package.
+> Want a practice run first? See [the rehearsal](#the-rehearsal) at the end. It runs the same
+> steps on the example library shipped with the package.
 
 ## Before you start
 
-- Node 22+, `git`, and Claude Code (the `harness` engine) or Solo.
+- npm to install (any Node that runs npm), `git`, and Claude Code (the `harness` engine) or Solo.
 - A provider CLI that `code-forge resolve L0` … `L3` can use (`claude` for the default
   `anthropic` matrix). Keep the default: with `openai` on L2 or L3 the reviews, the plan author
   and System 2 are refused, because Codex cannot run closed book.
@@ -389,22 +389,11 @@ The first test passes when all of these hold:
 
 Then run B2 and B3 the same way. B3 is where the link and unscoped-command checks land.
 
-## The automated rehearsal
+## The rehearsal
 
-This package already has an automated version of the same walk-through. It runs on a **copy** of
-the shipped example library `examples/node-lib` (block B1 "add `clamp()` with tests"), in a temp
-folder, never in this repository. From the package repository:
-
-```bash
-node scripts/first-use.mjs --engine harness
-```
-
-It prints one `== <n>. <step> ==` line per step (`copy`, `init`, `facts`, `author`, `start`,
-`open`, `code`, `review`, `proof`, `close`, `report`), then a final `FIRST-USE {json}` line.
-
-- With `--engine harness` the coder step waits for a harness subagent to write
-  `===BLOCK B1 COMPLETE===` into `.code-forge/runs/<run>/B1.log` in the copy (up to one hour,
-  `--coder-timeout <s>`).
-- `--coder scripted` applies a fixed edit instead of a live coder: the fully automatic form.
-- `--until <step>` stops after a step. `--tmp-root <abs dir>` chooses where the copy goes.
-- Facts, author and reviews still make real calls to the provider CLI.
+The package ships a small example library, `examples/node-lib`, and the inputs of one block for
+it, `examples/first-use` ("add `clamp()` with tests"). To practise, copy the library to a temp
+folder, rename its `gitignore` to `.gitignore`, run `git init` and one commit there, and walk the
+steps above with `examples/first-use/clamp.brief.md` as the brief and
+`examples/first-use/clamp.acceptance.yml` as the acceptance file. Never run it inside this
+repository. The scripted rehearsal (`scripts/first-use.mjs`) was removed with the Node CLI (B690b).

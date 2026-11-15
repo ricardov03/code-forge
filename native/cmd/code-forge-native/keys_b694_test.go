@@ -20,7 +20,7 @@ const b694Warn = "WARN keys: no OS keychain available; secrets are stored in 060
 func TestB694KeysLinuxNoBindingFileChain(t *testing.T) {
 	dir, project := b456KeysHome(t, `{"jev":{"source":"user","backend":"file","exp":null}}`, map[string]string{"jev": "sk-b694-fake\n"})
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	b679Linux(t, false, nil)
+	b679Linux(t, nil)
 	for _, tc := range []struct {
 		args           []string
 		code           int
@@ -50,7 +50,7 @@ func TestB694KeysLinuxNoBindingFileChain(t *testing.T) {
 func TestB694KeysLinuxNoBindingSetPrompt(t *testing.T) {
 	dir, project, _ := b678PromptHome(t)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	b679Linux(t, false, nil)
+	b679Linux(t, nil)
 	code, got := b678Prompt(t, project, []string{"s", "e", "k", "r", "i", "t", "\r"}, "set", "foo")
 	if code != 0 || got != b678Typed {
 		t.Fatalf("exit %d\n%s", code, b528Diff(b678Typed, got))

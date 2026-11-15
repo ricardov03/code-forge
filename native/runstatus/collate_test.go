@@ -19,3 +19,20 @@ func TestB452BlockIDOrderMatchesNode(t *testing.T) {
 		t.Fatal("a non-ASCII id must not claim Node's order")
 	}
 }
+
+// B690b: every id has a place. Printable ASCII ids keep Node's order; any
+// other id sorts after them, by UTF-16 code units (U+1F600 is D83D DE00, so it
+// sorts before U+FF5A although its code point is larger).
+func TestB690bBlockIDLessOrdersEveryID(t *testing.T) {
+	want := []string{"B1", "B2", "B10", "b20", "é", "\U0001F600", "ｚ"}
+	ids := []string{"ｚ", "B10", "é", "\U0001F600", "b20", "B2", "B1"}
+	sort.SliceStable(ids, func(i, j int) bool { return b690bBlockIDLess(ids[i], ids[j]) })
+	if strings.Join(ids, ",") != strings.Join(want, ",") {
+		t.Fatalf("order\n got %q\nwant %q", ids, want)
+	}
+	for _, a := range want {
+		if b690bBlockIDLess(a, a) {
+			t.Fatalf("%q < %q: the order is not strict", a, a)
+		}
+	}
+}

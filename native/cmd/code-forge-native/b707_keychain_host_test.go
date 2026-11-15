@@ -12,15 +12,15 @@ import (
 // B707: the keychain hand-over cases of TestB474DoctorHandsOverUnportedCases,
 // TestB489WorkerHandOverCases, TestB458/B502/B527/B548 init hand-overs run
 // as macOS with no usable `security` (the package default, every host). On
-// Linux without @napi-rs/keyring's binding, Node's default chain is the file
-// store alone (B679), so the same cases run in Go with no hand-over. These
-// tests state that Linux expectation on every host.
+// Linux with no Secret Service the chain is the file store alone (B679,
+// B690b), so the same cases run in Go with no hand-over. These tests state
+// that Linux expectation on every host.
 
 // doctor --quick with no key anywhere: the keys WARN row, no hand-over.
 func TestB707DoctorLinuxNoBindingRunsInGo(t *testing.T) {
 	b474Project(t, "provider: anthropic\n"+b474Levels, 0)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	b679Linux(t, false, nil)
+	b679Linux(t, nil)
 	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0, "OK   config: valid\n" + b474NoLinks + b474NoKey, b474Summary(1, 2, 0)}})
 }
 
@@ -50,9 +50,8 @@ func TestB707InitLinuxNoBindingRunsInGo(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			ss := newB679SS()
 			side := b548Go(t, b548Case{name: c.name, args: c.args, home: func(home string) {
-				b679Linux(t, false, ss)
+				b679Linux(t, nil)
 				if c.key != "" {
 					writeHomeFile(t, home, ".code-forge/store/jev.key", c.key)
 				}
@@ -66,21 +65,17 @@ func TestB707InitLinuxNoBindingRunsInGo(t *testing.T) {
 					t.Fatalf("missing %q\nstdout %s\nstderr %s\nlog %s", want, side.stdout, side.stderr, side.log)
 				}
 			}
-			if len(ss.calls) != 0 {
-				t.Fatalf("the Secret Service was asked: %q", ss.calls)
-			}
 		})
 	}
 }
 
 // worker boot with the keychain case of TestB489WorkerHandOverCases: on
-// Linux without the binding no keychain is asked and the worker runs in Go.
+// Linux with no Secret Service no keychain is asked and the worker runs in Go.
 func TestB707WorkerLinuxNoBindingRunsInGo(t *testing.T) {
 	f := newB489Fix(t)
 	f.withConfig(t, strings.Repeat("0", 40), `{"version":1}`)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	ss := newB679SS()
-	b679Linux(t, false, ss)
+	b679Linux(t, nil)
 	asked := false
 	oldProbe := workerJevProbe
 	t.Cleanup(func() { workerJevProbe = oldProbe })
@@ -91,7 +86,7 @@ func TestB707WorkerLinuxNoBindingRunsInGo(t *testing.T) {
 	if rows := b460Handovers(t, f.home); code != 0 || len(rows) != before {
 		t.Fatalf("worker = %d %q handovers %v", code, errText, rows)
 	}
-	if asked || len(ss.calls) != 0 {
-		t.Fatalf("a keychain was asked: probe %v, Secret Service %q", asked, ss.calls)
+	if asked {
+		t.Fatal("a keychain was asked")
 	}
 }
