@@ -1067,7 +1067,7 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 	if repo == "" {
 		return failed(1, "logs: package.json names no GitHub repository to report to\n")
 	}
-	system := lrSystem{version: pkgVersion, node: nodeRunVersion(), os: platform + " " + release + " " + arch}
+	system := lrSystem{version: pkgVersion, node: errorLogNode, os: platform + " " + release + " " + arch}
 
 	latest, why := lrLatestOnNpm()
 	if why != "" {

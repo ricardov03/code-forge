@@ -132,7 +132,7 @@ func (f *b408Fixture) call(extra []string, args ...string) (code int, stdout, st
 	cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
 	cmd.Dir = f.repo
 	cmd.Env = append(f.env(), "HOME="+f.home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_TEST_QUEUE=off", "CODE_FORGE_NODE="+f.fakeNode,
-		"CF_B408_LOG="+f.log, "CF_B408_TREE="+f.tree, "PATH="+f.goDir+string(os.PathListSeparator)+os.Getenv("PATH"), "CF_GATES_PROCESS=1", "CF_GATES_NODE_VERSION=v24.22.1", "CF_GATES_ARGS="+string(encoded))
+		"CF_B408_LOG="+f.log, "CF_B408_TREE="+f.tree, "PATH="+f.goDir+string(os.PathListSeparator)+os.Getenv("PATH"), "CF_GATES_PROCESS=1", "CF_GATES_ARGS="+string(encoded))
 	cmd.Env = append(cmd.Env, extra...)
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
@@ -150,7 +150,7 @@ func (f *b408Fixture) call(extra []string, args ...string) (code int, stdout, st
 // worktree's native/, argv and env are the script's, and the temp name is
 // <binary>.<pid>.tmp.
 func (f *b408Fixture) buildCall() string {
-	return b575BuildLine(filepath.Join(f.realTree(), "native"), f.bin, "9.8.7", "v24.22.1")
+	return b575BuildLine(filepath.Join(f.realTree(), "native"), f.bin, "9.8.7")
 }
 
 func (f *b408Fixture) calls() string {

@@ -19,9 +19,6 @@ func TestGatesProcess(t *testing.T) {
 	if os.Getenv("CF_GATES_PROCESS") != "1" {
 		return
 	}
-	if version := os.Getenv("CF_GATES_NODE_VERSION"); version != "" {
-		reviewWaitNodeVersion = version
-	}
 	var args []string
 	if err := json.Unmarshal([]byte(os.Getenv("CF_GATES_ARGS")), &args); err != nil {
 		os.Exit(99)
@@ -101,7 +98,7 @@ func TestGatesChangedTextOnlyAffectedGates(t *testing.T) {
 				encoded, _ := json.Marshal(args)
 				cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
 				cmd.Dir = repo
-				cmd.Env = append(envWithoutGit(), "HOME="+home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_NODE_VERSION=v24.22.1", "CF_GATES_ARGS="+string(encoded))
+				cmd.Env = append(envWithoutGit(), "HOME="+home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_ARGS="+string(encoded))
 				out, err := cmd.CombinedOutput()
 				if err != nil {
 					t.Fatalf("gates run: %v: %s", err, out)

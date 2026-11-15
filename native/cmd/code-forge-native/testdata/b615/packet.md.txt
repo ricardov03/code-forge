@@ -20,7 +20,7 @@ Each "text" must be copied exactly from the report. Return { "items": [] } when 
 
 - code-forge: 0.23.0
 - latest on npm: 0.22.1
-- Node: v24.22.1
+- Node: none
 - OS: darwin 25.2.0 arm64
 
 ### Error details

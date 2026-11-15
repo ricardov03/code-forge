@@ -134,7 +134,7 @@ func proofRedGreenPlan(runID, blockID, file, testCase string, hasCase bool, mech
 	if !proofNodeTestFile.MatchString(file) {
 		return nil, proofRefuse(sub, "only node:test files (.mjs, .cjs, .js) have a filtered test command in this version — add a proof.runners entry for it (see proof.md §2)", 1), 0
 	}
-	node, err := contextNode()
+	node, err := proofNode()
 	if err != nil {
 		return nil, nil, hProofRedGreen
 	}
@@ -787,4 +787,21 @@ func proofSignalName(sig syscall.Signal) string {
 		}
 	}
 	return "SIG" + strconv.Itoa(int(sig))
+}
+
+// proofNode resolves the node that runs a user project's `node --test`
+// red/green proof: CODE_FORGE_NODE when it resolves, else node on PATH.
+func proofNode() (string, error) {
+	if override := os.Getenv("CODE_FORGE_NODE"); override != "" {
+		if p, err := exec.LookPath(override); err == nil {
+			if p, err = filepath.EvalSymlinks(p); err == nil {
+				return p, nil
+			}
+		}
+	}
+	p, err := exec.LookPath("node")
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(p)
 }

@@ -146,6 +146,9 @@ shift
 exec sh "$script.sh" "$@"
 `
 
+// fixtureCommands is the tagged command reference a site case's data names (B690d).
+const fixtureCommands = "# Command reference\n\n## sample\n\nDo sample work.\n\n```text\nusage: pkg sample\n```\n"
+
 // caseScript is a case repository's .mjs: it runs its .sh twin, so the real node (Node goldens)
 // and the fake node (Go port) do the same thing.
 const caseScript = `import { spawnSync } from 'node:child_process';
@@ -268,7 +271,7 @@ func newFixture(t *testing.T, o fixtureOpts) *fixture {
 	f.env["HOME"] = filepath.Join(dir, "home")
 	f.env["TMPDIR"] = filepath.Join(dir, "tmp")
 	f.env["FAKE_LOG"] = filepath.Join(dir, "fake.log")
-	f.env["CODE_FORGE_NODE"] = "" // the build's node --version comes from PATH (B580)
+	f.env["CODE_FORGE_NODE"] = "" // a node a step might find comes from PATH (B580)
 	f.env["PATH"] = f.bin + string(os.PathListSeparator) + "/usr/bin" + string(os.PathListSeparator) + "/bin"
 	for _, d := range []string{f.bin, f.env["HOME"], f.env["TMPDIR"]} {
 		f.mkdir(d)
@@ -314,6 +317,11 @@ func newFixture(t *testing.T, o fixtureOpts) *fixture {
 	}
 	for _, s := range []string{"gen-config-doc", "gen-commands-doc", "gen-site-data"} {
 		files["scripts/"+s+".mjs"] = caseScript
+	}
+	if o.site {
+		// B690d: release-site reads the tagged command reference and the local ledger in Go.
+		files["docs/reference/commands.md"] = fixtureCommands
+		f.mkdir(filepath.Join(f.env["HOME"], ".code-forge", "ledger"))
 	}
 	if o.native {
 		files["native/go.mod"] = "module example.invalid/native\n\ngo 1.22\n"

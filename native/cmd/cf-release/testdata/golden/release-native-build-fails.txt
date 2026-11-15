@@ -220,6 +220,6 @@ refs/tags/v0.21.0 b9c5d385efa93371559af7835644c99d47d9c391
 <CASE>/repo npm view @example/pkg version
 <CASE>/repo gh run list --commit 915bef24e353ffbb667a9c5e9565df3911b452bb --workflow CI --limit 1 --json headSha,status,conclusion
 <CASE>/repo go version
-<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/darwin-arm64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 GOTOOLCHAIN=local GOPROXY=off
-<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/darwin-x64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 GOTOOLCHAIN=local GOPROXY=off
-<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/linux-x64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOTOOLCHAIN=local GOPROXY=off
+<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -o <CASE>/repo/native/bin/darwin-arm64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 GOTOOLCHAIN=local GOPROXY=off
+<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -o <CASE>/repo/native/bin/darwin-x64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 GOTOOLCHAIN=local GOPROXY=off
+<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -o <CASE>/repo/native/bin/linux-x64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOTOOLCHAIN=local GOPROXY=off
