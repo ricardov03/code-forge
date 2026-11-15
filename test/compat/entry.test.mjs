@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { linkGoBinary } from '../helpers/go-binary.mjs';
+import { linkDependenciesWithoutPlatformPackages } from '../helpers/package-deps.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -130,8 +131,8 @@ test('internal namespace preserves native callers including doctor and daemon st
   // Copy the helper into a private package so nativePath cannot race installation tests.
   cpSync(path.join(root, 'src'), path.join(f.dir, 'src'), { recursive: true });
   symlinkSync(path.join(root, 'schema'), path.join(f.dir, 'schema'));
-  const modules = path.dirname(path.dirname(fileURLToPath(import.meta.resolve('yaml/package.json'))));
-  symlinkSync(modules, path.join(f.dir, 'node_modules'));
+  // B701: never the installed @codedology platform packages (CI has them), only the private binary.
+  linkDependenciesWithoutPlatformPackages(f.dir);
   const native = await import(pathToFileURL(path.join(f.dir, 'src/util/native.mjs')).href);
   const previous = { HOME: process.env.HOME, CODE_FORGE_NATIVE: process.env.CODE_FORGE_NATIVE };
   process.env.HOME = path.join(scratch, `h-${process.pid}`);

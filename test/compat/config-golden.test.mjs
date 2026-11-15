@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { linkDependenciesWithoutPlatformPackages } from '../helpers/package-deps.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const goEnv = { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' };
@@ -83,8 +84,8 @@ async function versionFixture(t) {
     await mkdir(path.dirname(target), { recursive: true });
     await cp(path.join(root, relative), target, { recursive: true });
   }
-  const dependencies = path.dirname(path.dirname(fileURLToPath(import.meta.resolve('ajv/package.json'))));
-  await symlink(dependencies, path.join(repo, 'node_modules'), 'dir');
+  // B701: never the installed @codedology platform packages (CI has them).
+  linkDependenciesWithoutPlatformPackages(repo);
   const pkgPath = path.join(repo, 'package.json');
   const pkg = JSON.parse(await readFile(pkgPath, 'utf8'));
   pkg.version = '9.8.7';

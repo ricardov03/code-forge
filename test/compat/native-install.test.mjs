@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -11,6 +11,7 @@ import { ledgerPath } from '../../src/ledger/paths.mjs';
 import { appendRow, readAllRows } from '../../src/ledger/write.mjs';
 import { runKeyPath, runRecordPath } from '../../src/state/paths.mjs';
 import { generateKey, signRow, verifyRows } from '../../src/state/signer.mjs';
+import { linkDependenciesWithoutPlatformPackages } from '../helpers/package-deps.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const binary = path.join(root, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
@@ -152,8 +153,8 @@ test('disabled, missing, and nonexecutable native binaries keep doctor on the No
   for (const relative of ['src', 'schema', 'package.json']) {
     await cp(path.join(root, relative), path.join(pkg, relative), { recursive: true });
   }
-  const dependencies = path.dirname(path.dirname(fileURLToPath(import.meta.resolve('ajv/package.json'))));
-  await symlink(dependencies, path.join(pkg, 'node_modules'), 'dir');
+  // B701: never the installed @codedology platform packages (CI has them), only this package's binary.
+  linkDependenciesWithoutPlatformPackages(pkg);
   const privateBinary = path.join(pkg, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
   await mkdir(path.dirname(privateBinary), { recursive: true });
   await cp(binary, privateBinary).catch((err) => { if (err.code !== 'ENOENT') throw err; });
