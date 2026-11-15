@@ -369,7 +369,27 @@ func doctorKeysResolve(cfg map[string]any, home string, now float64) (func() doc
 // (B533). opOK false: a chain that would run `op read` returns
 // hDoctorKeyRefresh instead (the worker leaves a live 1Password read to
 // Node).
+//
+// B715: every value the resolver reads (Node's store registers each key it
+// reads, an expired one too) joins the verb's safe-output set when the
+// resolver runs, so later stdout and stderr lines mask it as writeSafe does.
 func jevKeyChain(cfg map[string]any, home string, now float64, opOK bool) (func() doctorKeyResult, doctorKeyPlan, handoverReason) {
+	chain, plan, reason := b715JevKeyChain(cfg, home, now, opOK)
+	if chain == nil {
+		return nil, plan, reason
+	}
+	return func() doctorKeyResult {
+		r := chain()
+		for _, value := range r.secrets {
+			autopilotRegisterSecret(value)
+		}
+		return r
+	}, plan, reason
+}
+
+// b715JevKeyChain is the resolveKey chain itself (jevKeyChain registers
+// what it read).
+func b715JevKeyChain(cfg map[string]any, home string, now float64, opOK bool) (func() doctorKeyResult, doctorKeyPlan, handoverReason) {
 	none := doctorKeyPlan{}
 	fixed := func(row doctorRow, secrets ...string) func() doctorKeyResult {
 		return func() doctorKeyResult { return doctorKeyResult{row: row, secrets: secrets} }

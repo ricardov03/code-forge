@@ -633,6 +633,17 @@ example `block open` failing on a claim path that holds the key, prints
 `[REDACTED]` in Go as in Node. A child process that shares the terminal
 (a gate, `git`) writes its own output, unmasked, as in Node.
 
+Since B715 the Go set holds the same secrets as Node's: every API key the
+key store reads, stores, gets from the environment, from `op read` or from a
+typed answer (`keys`, `jev ask`, the Jev key that `doctor` and the worker
+resolve), and every gate env value of 8 or more UTF-16 characters, which
+`gates run` registers when it starts the gates. Each later line of the
+command masks them once, as `writeSafe` does; for example `jev ask` with the
+key in its failure line, or the `repeat_new_tests: skipped` line when a gate
+env value is that word, prints `[REDACTED]`. Each command starts with an
+empty set, as each Node process does. `init` keeps its own masking: Node's
+`init` writes with a plain write, not `writeSafe`.
+
 New hand-over reasons go at the end only: one constant at the end of the
 `const` block and one entry at the end of the `handoverReasons` array in
 `native/cmd/code-forge-native/handover_reasons.go`. That file holds only the

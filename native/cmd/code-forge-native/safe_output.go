@@ -45,3 +45,22 @@ func safeHasSecrets() bool {
 	defer autopilotSecretsMu.Unlock()
 	return len(autopilotSecrets) > 0
 }
+
+// safeSecretList is a copy of every registered secret: redactJSON's set.
+func safeSecretList() []string {
+	autopilotSecretsMu.Lock()
+	defer autopilotSecretsMu.Unlock()
+	return append([]string(nil), autopilotSecrets...)
+}
+
+// safeRouted reports whether w is a verb's safe stream (safeStdout,
+// safeStderr, or a contextErrWriter on safeStderr), which masks every
+// registered secret on each write: a caller that masks too would mask twice
+// where Node's writeSafe masks once (B715).
+func safeRouted(w io.Writer) bool {
+	switch w.(type) {
+	case safeStream, *contextErrWriter:
+		return true
+	}
+	return false
+}

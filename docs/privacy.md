@@ -65,7 +65,7 @@ for each fingerprint (fingerprints and times only). A warning never shows the hi
 
 Every message and stack is first passed through code-forge's secret redaction, then these rules,
 in this order. The redaction masks, as `[REDACTED]`, every key the command has read so far,
-including the run's signer key in every command that reads it (in the Go engine since B710). The same redaction masks every line a command prints on its output and error streams (in the Go engine since B712). They run when a line is written, on the whole report, again after the AI check's
+including the run's signer key in every command that reads it (in the Go engine since B710). The same redaction masks every line a command prints on its output and error streams (in the Go engine since B712, with every API key read and every gate env value of 8+ characters since B715). They run when a line is written, on the whole report, again after the AI check's
 replacements, and again after you edit the text.
 
 | Rule | Replaced by |
