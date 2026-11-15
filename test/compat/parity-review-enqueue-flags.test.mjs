@@ -241,7 +241,7 @@ test('enqueue flag refusals preserve cache bytes and unsupported cases hand over
   await parity(f, capArgs, { env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } });
 });
 
-test('unsupported answers marker and result encodings hand over before publication', async () => {
+test('answers marker and result with a lone surrogate run in Go with zero Node parity differences', async () => {
   const f = await fixture();
   const source = JSON.parse(execute(f).stdout);
   await put(f.home, 'ledger/fixture.jsonl', JSON.stringify(signRow({ event: 'review.result', run: RUN, block: 'B1', file: 'sample.mjs', content_hash: source.content_hash, status: 'reviewed', approved: false, open: [{ id: 'f1', severity: 'warning' }] }, Buffer.alloc(32, 7))) + '\n');
@@ -249,12 +249,14 @@ test('unsupported answers marker and result encodings hand over before publicati
   const answer = execute(f, args);
   assert.equal(answer.code, 0, 'supported answers enqueue supplies the ticket identity');
   const id = JSON.parse(answer.stdout).ticket;
-  await rm(path.join(f.repo, '.code-forge/queue', `${id}.json`));
   for (const location of ['marker', 'result']) {
+    // B727: both runs start from the same state: no queued ticket, one unavailable marker.
+    await rm(path.join(f.repo, '.code-forge/queue', `${id}.json`), { force: true });
     await done(f, id, { status: 'unavailable', ...(location === 'result' ? { detail: '\ud800' } : {}) }, location === 'marker' ? { detail: '\ud800' } : {});
-    const before = await snapshot(f);
-    assert.equal(execute(f, args).code, 127, `unsupported ${location} hands over with Node unavailable`);
-    assert.deepEqual(await snapshot(f), before, `unsupported ${location} changes zero state bytes or modes`);
-    await parity(f, args, { env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } });
+    // runParity works on copies, so f keeps this state for the native run below; Node is unavailable to Go.
+    await parity(f, args);
+    const r = execute(f, args);
+    assert.equal(r.code, 0, `${location} with a lone surrogate runs in Go with Node unavailable: ${r.stderr}`);
+    assert.equal(JSON.parse(r.stdout).retry, true, `${location}: the unavailable cached answers ticket retries`);
   }
 });
