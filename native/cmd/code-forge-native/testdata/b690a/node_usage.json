@@ -1,0 +1,375 @@
+[
+ {
+  "args": [
+   "block"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]\n       code-forge block ready <id> --run <r> [--transcript <file>] [--report <file>]\n       code-forge block rebase <id> --run <r> --accept-landed\n       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--dry-run] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n       code-forge block accept-hit <id> --run <r> [--rule <rule-id>] --line <n> --transcript <path> --reason <text>\n       code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>\n       code-forge block ack-waivers <id> --run <r>\n       code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>] [--dry-run]\n       code-forge block settle <id> --run <r> [--report <file>] [--transcript <file>]\n       code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>\n       code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links]\n       code-forge block land <id> <id>... --run <r> [--max <dur>] [--push] [--watch-ci] [--copy-links]\n       every block verb takes --json: one JSON line on stdout ({\"block\",\"event\",…}) instead of the text\n",
+  "breadcrumbs": "[\"block\"]\n",
+  "error_row": {
+   "verb": "block",
+   "sub": null,
+   "flags": [],
+   "exit": 2,
+   "kind": "usage",
+   "message": "usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]\n       code-forge block ready <id> --run <r> [--transcript <file>] [--report <file>]\n       code-forge block rebase <id> --run <r> --accept-landed\n       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--dry-run] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n       code-forge block accept-hit <id> --run <r> [--rule <rule-id>] --line <n> --transcript <path> --reason <text>\n       code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>\n       code-forge block ack-waivers <id> --run <r>\n       code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>] [--dry-run]\n       code-forge block settle <id> --run <r> [--report <file>] [--transcript <file>]\n       code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>\n       code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links]\n       code-forge block land <id> <id>... --run <r> [--max <dur>] [--push] [--watch-ci] [--copy-links]\n       every block verb takes --json: one JSON line on stdout ({\"block\",\"event\",…}) instead of the text",
+   "stack": null,
+   "cleaned": [],
+   "fp": "6e02a752af1b",
+   "before": []
+  },
+  "home_files": [
+   ".code-forge/logs/breadcrumbs.json",
+   ".code-forge/logs/errors.jsonl"
+  ]
+ },
+ {
+  "args": [
+   "block",
+   "foo",
+   "--json"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]\n       code-forge block ready <id> --run <r> [--transcript <file>] [--report <file>]\n       code-forge block rebase <id> --run <r> --accept-landed\n       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--dry-run] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n       code-forge block accept-hit <id> --run <r> [--rule <rule-id>] --line <n> --transcript <path> --reason <text>\n       code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>\n       code-forge block ack-waivers <id> --run <r>\n       code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>] [--dry-run]\n       code-forge block settle <id> --run <r> [--report <file>] [--transcript <file>]\n       code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>\n       code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links]\n       code-forge block land <id> <id>... --run <r> [--max <dur>] [--push] [--watch-ci] [--copy-links]\n       every block verb takes --json: one JSON line on stdout ({\"block\",\"event\",…}) instead of the text\n",
+  "breadcrumbs": "[\"block\"]\n",
+  "error_row": {
+   "verb": "block",
+   "sub": null,
+   "flags": [
+    "--json"
+   ],
+   "exit": 2,
+   "kind": "usage",
+   "message": "usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]\n       code-forge block ready <id> --run <r> [--transcript <file>] [--report <file>]\n       code-forge block rebase <id> --run <r> --accept-landed\n       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--dry-run] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n       code-forge block accept-hit <id> --run <r> [--rule <rule-id>] --line <n> --transcript <path> --reason <text>\n       code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>\n       code-forge block ack-waivers <id> --run <r>\n       code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>] [--dry-run]\n       code-forge block settle <id> --run <r> [--report <file>] [--transcript <file>]\n       code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>\n       code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links]\n       code-forge block land <id> <id>... --run <r> [--max <dur>] [--push] [--watch-ci] [--copy-links]\n       every block verb takes --json: one JSON line on stdout ({\"block\",\"event\",…}) instead of the text",
+   "stack": null,
+   "cleaned": [],
+   "fp": "6e02a752af1b",
+   "before": []
+  },
+  "home_files": [
+   ".code-forge/logs/breadcrumbs.json",
+   ".code-forge/logs/errors.jsonl"
+  ]
+ },
+ {
+  "args": [
+   "review-file",
+   "--x=/private/value"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "review-file: unknown flag \"--x=/private/value\"\nusage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]\n       code-forge review-file --wait-block <id> --run <id> [--max <seconds>s]\n       code-forge review-file --rebase-check --block <id> --run <id>\n       code-forge review-file <answering file> --block <id> --answers <id,id,…> --of <source> [--run <id>]\n       --cwd <dir> applies to queueing and both wait modes\n",
+  "breadcrumbs": "[\"review-file\"]\n",
+  "error_row": {
+   "verb": "review-file",
+   "sub": null,
+   "flags": [
+    "--x"
+   ],
+   "exit": 2,
+   "kind": "usage",
+   "message": "review-file: unknown flag \"--x=/private/value\"\nusage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]\n       code-forge review-file --wait-block <id> --run <id> [--max <seconds>s]\n       code-forge review-file --rebase-check --block <id> --run <id>\n       code-forge review-file <answering file> --block <id> --answers <id,id,…> --of <source> [--run <id>]\n       --cwd <dir> applies to queueing and both wait modes",
+   "stack": null,
+   "cleaned": [],
+   "fp": "3349b37ed0dd",
+   "before": []
+  },
+  "home_files": [
+   ".code-forge/logs/breadcrumbs.json",
+   ".code-forge/logs/errors.jsonl"
+  ]
+ },
+ {
+  "args": [
+   "review-file",
+   "--zz=<TOKEN>"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "review-file: unknown flag \"--zz=<TOKEN>\"\nusage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]\n       code-forge review-file --wait-block <id> --run <id> [--max <seconds>s]\n       code-forge review-file --rebase-check --block <id> --run <id>\n       code-forge review-file <answering file> --block <id> --answers <id,id,…> --of <source> [--run <id>]\n       --cwd <dir> applies to queueing and both wait modes\n",
+  "breadcrumbs": "[\"review-file\"]\n",
+  "error_row": {
+   "verb": "review-file",
+   "sub": null,
+   "flags": [
+    "--zz"
+   ],
+   "exit": 2,
+   "kind": "usage",
+   "message": "review-file: unknown flag \"--zz=<TOKEN>\"\nusage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]\n       code-forge review-file --wait-block <id> --run <id> [--max <seconds>s]\n       code-forge review-file --rebase-check --block <id> --run <id>\n       code-forge review-file <answering file> --block <id> --answers <id,id,…> --of <source> [--run <id>]\n       --cwd <dir> applies to queueing and both wait modes",
+   "stack": null,
+   "cleaned": [],
+   "fp": "3349b37ed0dd",
+   "before": []
+  },
+  "home_files": [
+   ".code-forge/logs/breadcrumbs.json",
+   ".code-forge/logs/errors.jsonl"
+  ]
+ },
+ {
+  "args": [
+   "logs",
+   "summary",
+   "bad-<FF>-arg"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "logs: unexpected argument \"bad-�-arg\"\nusage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n       code-forge logs report [--last N] [--kind K] [--verb V] [--note \"text\"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]\n",
+  "breadcrumbs": "[\"logs summary\"]\n",
+  "error_row": {
+   "verb": "logs",
+   "sub": "summary",
+   "flags": [],
+   "exit": 2,
+   "kind": "usage",
+   "message": "logs: unexpected argument \"bad-�-arg\"\nusage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n       code-forge logs report [--last N] [--kind K] [--verb V] [--note \"text\"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]",
+   "stack": null,
+   "cleaned": [],
+   "fp": "92e96942ea67",
+   "before": []
+  },
+  "home_files": [
+   ".code-forge/logs/breadcrumbs.json",
+   ".code-forge/logs/errors.jsonl"
+  ]
+ },
+ {
+  "args": [
+   "logs",
+   "<FF>"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "logs: unknown subcommand \"�\"\nusage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n       code-forge logs report [--last N] [--kind K] [--verb V] [--note \"text\"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]\n",
+  "breadcrumbs": "[\"logs\"]\n",
+  "error_row": {
+   "verb": "logs",
+   "sub": null,
+   "flags": [],
+   "exit": 2,
+   "kind": "usage",
+   "message": "logs: unknown subcommand \"�\"\nusage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n       code-forge logs report [--last N] [--kind K] [--verb V] [--note \"text\"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]",
+   "stack": null,
+   "cleaned": [],
+   "fp": "f1a63a011883",
+   "before": []
+  },
+  "home_files": [
+   ".code-forge/logs/breadcrumbs.json",
+   ".code-forge/logs/errors.jsonl"
+  ]
+ },
+ {
+  "args": [
+   "logs",
+   "clear",
+   "<FF>"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "logs: unexpected argument \"�\"\nusage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n       code-forge logs report [--last N] [--kind K] [--verb V] [--note \"text\"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]\n",
+  "breadcrumbs": "[\"logs clear\"]\n",
+  "error_row": {
+   "verb": "logs",
+   "sub": "clear",
+   "flags": [],
+   "exit": 2,
+   "kind": "usage",
+   "message": "logs: unexpected argument \"�\"\nusage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n       code-forge logs report [--last N] [--kind K] [--verb V] [--note \"text\"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]",
+   "stack": null,
+   "cleaned": [],
+   "fp": "5a234a9e9164",
+   "before": []
+  },
+  "home_files": [
+   ".code-forge/logs/breadcrumbs.json",
+   ".code-forge/logs/errors.jsonl"
+  ]
+ },
+ {
+  "args": [
+   "init",
+   "<FF>"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "init: init takes no positional argument\nusage: code-forge init [--no-interaction] [--tools recommended|current] [--yes-tool <tool>]…\n  [--harness a,b] [-g|-p] [--copy] [--provider P] [--level Ln=model[:effort][@provider]]…\n  [--refresh-models] [--multimodel on|off] [--second-provider P]\n  [--jev-ref <item-id|link|op://…> | --jev-env NAME | --no-jev] [--engine auto|solo|harness] [--solo-project N]\n  [--coder-may-push yes|no] [--coder-may-open-draft-pr yes|no]\n  [--gate name=cmd]… [--proof isolation=export|lock | high=a,b | link_dirs=a,b | copy_untracked=a,b]… [--skip-doctor]\n",
+  "breadcrumbs": "[\"init\"]\n",
+  "error_row": {
+   "verb": "init",
+   "sub": null,
+   "flags": [],
+   "exit": 2,
+   "kind": "usage",
+   "message": "init: init takes no positional argument\nusage: code-forge init [--no-interaction] [--tools recommended|current] [--yes-tool <tool>]…\n  [--harness a,b] [-g|-p] [--copy] [--provider P] [--level Ln=model[:effort][@provider]]…\n  [--refresh-models] [--multimodel on|off] [--second-provider P]\n  [--jev-ref <item-id|link|op://<ref>> | --jev-env NAME | --no-jev] [--engine auto|solo|harness] [--solo-project N]\n  [--coder-may-push yes|no] [--coder-may-open-draft-pr yes|no]\n  [--gate name=cmd]… [--proof isolation=export|lock | high=a,b | link_dirs=a,b | copy_untracked=a,b]… [--skip-doctor]",
+   "stack": null,
+   "cleaned": [
+    {
+     "rule": "op_ref",
+     "count": 1
+    }
+   ],
+   "fp": "68ba95567d88",
+   "before": []
+  },
+  "home_files": [
+   ".code-forge/logs/breadcrumbs.json",
+   ".code-forge/logs/errors.jsonl"
+  ]
+ },
+ {
+  "args": [
+   "block",
+   "close",
+   "--run",
+   "<TOKEN>"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "block close: a block id and --run are required\n",
+  "breadcrumbs": "[\"block close\"]\n",
+  "error_row": {
+   "verb": "block",
+   "sub": "close",
+   "flags": [
+    "--run"
+   ],
+   "exit": 2,
+   "kind": "usage",
+   "message": "block close: a block id and --run are required",
+   "stack": null,
+   "cleaned": [],
+   "fp": "af234e25ad1f",
+   "before": []
+  },
+  "home_files": [
+   ".code-forge/logs/breadcrumbs.json",
+   ".code-forge/logs/errors.jsonl"
+  ]
+ },
+ {
+  "args": [
+   "block",
+   "close",
+   "B1",
+   "--bogus",
+   "<TOKEN>"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "block close: unknown flag \"--bogus\"\n",
+  "breadcrumbs": "[\"block close\"]\n",
+  "error_row": {
+   "verb": "block",
+   "sub": "close",
+   "flags": [
+    "--bogus"
+   ],
+   "exit": 2,
+   "kind": "usage",
+   "message": "block close: unknown flag \"--bogus\"",
+   "stack": null,
+   "cleaned": [],
+   "fp": "3761960fdcea",
+   "before": []
+  },
+  "home_files": [
+   ".code-forge/logs/breadcrumbs.json",
+   ".code-forge/logs/errors.jsonl"
+  ]
+ },
+ {
+  "args": [
+   "block",
+   "waive",
+   "--zz=<TOKEN>"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "block waive: unknown flag \"--zz=<TOKEN>\"\n",
+  "breadcrumbs": "[\"block waive\"]\n",
+  "error_row": {
+   "verb": "block",
+   "sub": "waive",
+   "flags": [
+    "--zz"
+   ],
+   "exit": 2,
+   "kind": "usage",
+   "message": "block waive: unknown flag \"--zz=<TOKEN>\"",
+   "stack": null,
+   "cleaned": [],
+   "fp": "7a7311fb7a89",
+   "before": []
+  },
+  "home_files": [
+   ".code-forge/logs/breadcrumbs.json",
+   ".code-forge/logs/errors.jsonl"
+  ]
+ },
+ {
+  "args": [
+   "block",
+   "ready",
+   "--zz=<TOKEN>"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "block ready: unknown flag \"--zz=<TOKEN>\"\n",
+  "breadcrumbs": "[\"block\"]\n",
+  "error_row": {
+   "verb": "block",
+   "sub": null,
+   "flags": [
+    "--zz"
+   ],
+   "exit": 2,
+   "kind": "usage",
+   "message": "block ready: unknown flag \"--zz=<TOKEN>\"",
+   "stack": null,
+   "cleaned": [],
+   "fp": "ff12835b5f91",
+   "before": []
+  },
+  "home_files": [
+   ".code-forge/logs/breadcrumbs.json",
+   ".code-forge/logs/errors.jsonl"
+  ]
+ },
+ {
+  "args": [
+   "block",
+   "attempt",
+   "B1",
+   "--run",
+   "r1",
+   "--bogus=a b"
+  ],
+  "exit": 2,
+  "stdout": "",
+  "stderr": "block attempt: unknown flag \"--bogus=a b\"\n",
+  "breadcrumbs": "[\"block attempt\"]\n",
+  "error_row": {
+   "verb": "block",
+   "sub": "attempt",
+   "flags": [
+    "--run",
+    "--bogus"
+   ],
+   "exit": 2,
+   "kind": "usage",
+   "message": "block attempt: unknown flag \"--bogus=a b\"",
+   "stack": null,
+   "cleaned": [],
+   "fp": "a61a64e3b1ba",
+   "before": []
+  },
+  "home_files": [
+   ".code-forge/logs/breadcrumbs.json",
+   ".code-forge/logs/errors.jsonl"
+  ]
+ }
+]

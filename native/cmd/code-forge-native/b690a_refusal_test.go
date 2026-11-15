@@ -46,12 +46,12 @@ func b690aInRepo(t *testing.T, args ...string) (b508Result, string) {
 	return b508Run(t, nil, args...), repo
 }
 
-// A case that used to start Node (logs with an argument that is not UTF-8)
-// now gets the Go refusal: one stderr line, exit 1, empty stdout, and the
+// A case that used to start Node (block close with secret-like text in argv,
+// past Node's usage checks) now gets the Go refusal: one stderr line, exit 1, empty stdout, and the
 // only file written is the handovers.jsonl row (with its lock file).
 func TestB690aFormerHandOverRefuses(t *testing.T) {
-	res, repo := b690aInRepo(t, "logs", "summary", "bad-\xff-arg")
-	want := "code-forge: logs summary is not supported in this case yet (logs-flags-or-home). Please report it: code-forge logs report\n"
+	res, repo := b690aInRepo(t, "block", "close", "B1", "--run", "r1", "--reason=sk-private")
+	want := "code-forge: block close is not supported in this case yet (close-unsupported-flag). Please report it: code-forge logs report\n"
 	if res.code != 1 || res.err != nil || res.stdout != "" || res.stderr != want {
 		t.Fatalf("code=%d err=%v stdout=%q stderr=%q; want exit 1 and %q", res.code, res.err, res.stdout, res.stderr, want)
 	}
@@ -67,13 +67,13 @@ func TestB690aFormerHandOverRefuses(t *testing.T) {
 // The refusal still writes the handovers.jsonl row, with its fields kept:
 // verb, sub, reason and version.
 func TestB690aRefusalWritesHandOverRow(t *testing.T) {
-	res, _ := b690aInRepo(t, "logs", "summary", "bad-\xff-arg")
+	res, _ := b690aInRepo(t, "block", "close", "B1", "--run", "r1", "--reason=sk-private")
 	if res.code != 1 || res.err != nil {
 		t.Fatalf("code=%d err=%v; want the refusal, exit 1", res.code, res.err)
 	}
 	rows := b508Rows(t, res.home)
-	if len(rows) != 1 || rows[0].Verb != "logs" || rows[0].Sub != "summary" || rows[0].Reason != "logs-flags-or-home" || rows[0].Version != version || rows[0].At == "" {
-		t.Fatalf("rows %+v; want one logs summary logs-flags-or-home row", rows)
+	if len(rows) != 1 || rows[0].Verb != "block" || rows[0].Sub != "close" || rows[0].Reason != "close-unsupported-flag" || rows[0].Version != version || rows[0].At == "" {
+		t.Fatalf("rows %+v; want one block close close-unsupported-flag row", rows)
 	}
 }
 
@@ -109,3 +109,53 @@ var b690aRefusalLine = regexp.MustCompile(`^code-forge: [^\n]+ is not supported 
 
 // b690aIsRefusal reports whether stderr is exactly one Go refusal line.
 func b690aIsRefusal(stderr string) bool { return b690aRefusalLine.MatchString(stderr) }
+
+// b690aWithSecrets registers values as Node's registerSecret would and
+// restores the registry when the test ends.
+func b690aWithSecrets(t *testing.T, values ...string) {
+	t.Helper()
+	saved := append([]string(nil), autopilotSecrets...)
+	t.Cleanup(func() { autopilotSecrets = saved })
+	for _, v := range values {
+		autopilotRegisterSecret(v)
+	}
+}
+
+// b690aFakeToken is shaped like an API key and built here; it is not a key.
+func b690aFakeToken() string { return "sk-ant-api03-" + strings.Repeat("x", 40) }
+
+// Node's entry (bin/code-forge.mjs) passes the unknown-verb text through
+// redact(). Recorded from Node: with no secret registered (the entry
+// registers none before this line) the verb prints as typed; once the value
+// is registered, redact() prints [REDACTED] in its place. Go does the same.
+func TestB690aUnknownVerbRedactsLikeNode(t *testing.T) {
+	token := b690aFakeToken()
+	t.Run("nothing registered prints the verb as Node does", func(t *testing.T) {
+		res, _ := b690aInRepo(t, token)
+		// Recorded: node bin/code-forge.mjs <token> (HOME empty), first two lines.
+		want := "code-forge: unknown verb \"sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\nVerbs:\n"
+		if res.code != 1 || !strings.HasPrefix(res.stderr, want) {
+			t.Fatalf("code=%d stderr=%q; want exit 1 and prefix %q", res.code, res.stderr, want)
+		}
+	})
+	t.Run("a registered secret is masked", func(t *testing.T) {
+		b690aWithSecrets(t, token)
+		res, _ := b690aInRepo(t, token)
+		// Recorded: redact() of the same text after registerSecret(token).
+		want := "code-forge: unknown verb \"[REDACTED]\"\nVerbs:\n"
+		if res.code != 1 || !strings.HasPrefix(res.stderr, want) || strings.Contains(res.stderr, token) {
+			t.Fatalf("code=%d stderr=%q; want exit 1, prefix %q and no raw token", res.code, res.stderr, want)
+		}
+	})
+}
+
+// The refusal line goes through the same redaction (recorded from Node's
+// redact() after registerSecret("close")).
+func TestB690aRefusalLineRedacts(t *testing.T) {
+	b690aWithSecrets(t, "close")
+	res, _ := b690aInRepo(t, "block", "close", "B1", "--run", "r1", "--reason=sk-private")
+	want := "code-forge: block [REDACTED] is not supported in this case yet ([REDACTED]-unsupported-flag). Please report it: code-forge logs report\n"
+	if res.code != 1 || res.stderr != want {
+		t.Fatalf("code=%d stderr=%q; want exit 1 and %q", res.code, res.stderr, want)
+	}
+}

@@ -71,7 +71,8 @@ func unknownVerb(verb string) int {
 	for _, name := range verbs {
 		b.WriteString("  " + name + "\n")
 	}
-	fmt.Fprint(os.Stderr, b.String())
+	// Node writes it through redact() (src/util/redact.mjs): registered secrets are masked.
+	fmt.Fprint(os.Stderr, autopilotRedact(b.String()))
 	return 1
 }
 
@@ -95,7 +96,7 @@ func refuseUnportedTo(w io.Writer, args []string, reason handoverReason) int {
 	if refusal := untilDoneHandoverRefusal(args); refusal != "" {
 		// B649: an until-done grant keeps its own refusal text
 		recordHandover(args, handoverReasons[hUntilDoneGrant])
-		fmt.Fprint(w, refusal)
+		fmt.Fprint(w, autopilotRedact(refusal))
 		return 1
 	}
 	recordHandover(args, handoverReasons[reason])
@@ -103,6 +104,7 @@ func refuseUnportedTo(w io.Writer, args []string, reason handoverReason) int {
 	if sub != "" && sub != "unknown" {
 		name += " " + sub
 	}
-	fmt.Fprintf(w, "code-forge: %s is not supported in this case yet (%s). Please report it: code-forge logs report\n", name, handoverReasons[reason])
+	// Like every Node stderr path, the line goes through redact() (registered secrets masked).
+	fmt.Fprint(w, autopilotRedact(fmt.Sprintf("code-forge: %s is not supported in this case yet (%s). Please report it: code-forge logs report\n", name, handoverReasons[reason])))
 	return 1
 }

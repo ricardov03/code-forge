@@ -551,11 +551,9 @@ func runInitVerb(args []string) int {
 	if metaHelp(args, initUsage, nil) {
 		return 0
 	}
-	for _, arg := range args {
-		if !utf8.ValidString(arg) {
-			return metaHandover("init", args, hInitArgEncoding)
-		}
-	}
+	// Node reads argv as UTF-8 with U+FFFD for bad bytes; Go decodes the same
+	// way and serves the call (B690a fix1; was a refusal).
+	args = reviewArgsText(args)
 	parsed, usage, hand := initParseArgs(args)
 	if hand {
 		return metaHandover("init", args, hInitJevLink)

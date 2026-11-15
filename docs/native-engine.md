@@ -29,6 +29,16 @@ The command works in three steps:
    exits 1. The exit code is the number that tells the shell whether a
    command succeeded. Go still records the case in the hand-over log (see
    [See hand-overs](#see-hand-overs)).
+   Where Node answers with a usage error (exit 2), Go prints the same usage
+   text and exits 2 instead of refusing, and writes no hand-over row (B690a fix1):
+   an unknown or missing `block` subcommand (the `block` usage, which now also
+   lists `--dry-run` for `close` and `human-pass` and the `settle` line), an
+   unknown `review-file` flag with a value, an unknown flag or a missing id or
+   `--run` for `block close` and the human `block` verbs, even when the text
+   looks like a secret, and `logs` or `init` arguments that are not UTF-8,
+   which Go decodes as Node does (each bad byte becomes U+FFFD). Text that
+   looks like a secret in a refusal line or in the unknown-verb text is
+   masked only when the command registered that secret, as in Node.
 
 The skill's `forge <verb>` shim (`skill/scripts/forge`) starts this same shell
 entry, `bin/code-forge`, so skill verbs run in Go too (B547). With
@@ -245,7 +255,8 @@ state in Go (`setup`, `status`, `run status`, `queue` and `queue status`, `heal 
 `heal show`, `decisions list`, `docs path`, `logs`, `logs summary`, `logs path`,
 `logs handovers` and `ledger tail`) gets the B690a refusal with the reason `go-panic`
 (exit 1) and a `go-panic` row. Any other command may already have changed state: Go prints one line that names the command and the code site, never the panic
-text or an argument, writes a `go-panic-stopped` row and exits 1. Check `code-forge status`
+text or an argument, says `it was not run again because it may have changed state` (B690a fix1),
+writes a `go-panic-stopped` row and exits 1. Check `code-forge status`
 before you retry. A panic in a goroutine a command starts (for example the gates that
 `block land` runs next to its review wait) gets the same answer, rows and exit codes (B509).
 Since B649, Go never hands a command to Node while a run it names (`--run <id>`, `--run=<id>`,
@@ -253,6 +264,8 @@ or for `review-file` with no `--run` the run of a registered worker) holds a liv
 autopilot grant (`until: null`, from `autopilot start --until-done`): Node reads `until: null`
 as a date it cannot parse, so it would treat the grant wrongly. Go prints one line that names
 the command, the run and the grant, writes an `until-done-grant` row, runs nothing and exits 1.
+The line says `this case is not supported yet, and an until-done grant is never passed on, so
+nothing was run (until-done-grant)` (B690a fix1).
 Since B690a no case goes to Node at all; a case under such a grant keeps this grant line,
 every other case gets the B690a refusal.
 Run the command again after the grant ends (`code-forge autopilot status --run <id>`), or stop
