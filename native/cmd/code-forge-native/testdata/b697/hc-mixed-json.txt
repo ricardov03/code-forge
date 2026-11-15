@@ -1,0 +1,41 @@
+asked=
+exit=0
+--- stdout
+{"block":"B1","event":"awaiting_human_check","status":"awaiting_human_check","reason":null,"close_event":null,"human_checks":["look",7,null],"next_command":"code-forge block human-pass B1 --run r-b684 --note \"<device check note>\"","reviewed":[{"file":"sample.mjs","ticket":"<ID>","via":"approved"}]}
+--- stderr
+--- new rows
+{"run":"r-b684","event":"block.close","block":"B1","status":"complete","tokens_source":null,"cost_source":null}
+{"run":"r-b684","event":"block.awaiting_human_check","block":"B1","checks":["look",7,null],"tokens_source":null,"cost_source":null}
+--- status awaiting_human_check
+--- ws/runs/r-b684.json
+{
+  "run_id": "r-b684",
+  "project": "fixture",
+  "workspace": "<WS>",
+  "status": "active",
+  "blocks": {
+    "B1": {
+      "status": "awaiting_human_check",
+      "owned_files": [
+        "sample.mjs"
+      ],
+      "base_sha": "<SHA>",
+      "base_branch": "main",
+      "tree_at_open": {},
+      "kind": "code",
+      "test_files": [],
+      "worktree": {
+        "path": "<WS>/.code-forge/worktrees/B1",
+        "branch": "block-B1",
+        "base_sha": "<SHA>"
+      },
+      "human_checks": [
+        "look",
+        7,
+        null
+      ]
+    }
+  },
+  "orphans": []
+}
+

@@ -1,0 +1,8 @@
+asked=
+exit=1
+--- stdout
+--- stderr
+block close: --no-require-reviews is refused while an autopilot grant is active on run r-close-fixture (stop it first: code-forge autopilot stop --run r-close-fixture)
+--- new rows
+--- status open
+--- grant active

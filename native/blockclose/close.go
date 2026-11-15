@@ -155,12 +155,16 @@ func CloseDeferring(home, run, id string, closeRows []ledger.Object, deferral De
 			result.Reason = "orphans: " + strings.Join(files, ", ")
 			return []ledger.Object{}, nil
 		}
-		checks, _ := block.Get("human_checks").([]any)
+		// B697: Node's closeBlock reads `(block.human_checks ?? []).length`, so a
+		// nonblank string awaits too and any other shape closes; the row keeps
+		// the raw value.
+		checks := block.Get("human_checks")
+		count := humanChecksLength(checks)
 		var deferred ledger.Object
-		if len(checks) > 0 && deferral != nil {
+		if _, list := checks.([]any); count > 0 && list && deferral != nil {
 			deferred = deferral(*record, *block)
 		}
-		if len(checks) > 0 {
+		if count > 0 {
 			result.Status = "awaiting_human_check"
 			if deferred != nil {
 				result.Status = deferredStatus
@@ -170,12 +174,32 @@ func CloseDeferring(home, run, id string, closeRows []ledger.Object, deferral De
 		rows := append(slices.Clone(closeRows), ledger.Object{{Key: "event", Value: "block.close"}, {Key: "block", Value: id}, {Key: "status", Value: "complete"}})
 		if deferred != nil {
 			rows = append(rows, deferred)
-		} else if len(checks) > 0 {
+		} else if count > 0 {
 			rows = append(rows, ledger.Object{{Key: "event", Value: "block.awaiting_human_check"}, {Key: "block", Value: id}, {Key: "checks", Value: checks}})
 		}
 		return rows, nil
 	})
 	return result, err
+}
+
+// humanChecksLength is JavaScript's `.length` of a decoded human_checks value:
+// an array's length, a string's UTF-16 length, 0 for any other shape (a value
+// with its own length key never reaches here: close hands it over).
+func humanChecksLength(v any) int {
+	switch x := v.(type) {
+	case []any:
+		return len(x)
+	case string:
+		n := 0
+		for _, r := range x {
+			n++
+			if r > 0xFFFF {
+				n++
+			}
+		}
+		return n
+	}
+	return 0
 }
 
 // Findings uses the gate's own finding rules at the last reviewed hashes, just

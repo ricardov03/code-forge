@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -76,6 +77,10 @@ func landTicket(root, ticket string) landResult {
 	return landResult{output: string(data) + "\n", data: out}
 }
 
+// errClaimScopeUnchecked is a block with no tree_at_open and no own worktree:
+// Node's unownedChanges returns null there and its auto-claim claims nothing.
+var errClaimScopeUnchecked = errors.New("cannot auto-claim without a checked block scope")
+
 func landClaimFiles(home, run, id, top, main string, record, entry ledger.Object) ([]string, error) {
 	base := blockString(blockObject(entry.Get("worktree")).Get("base_sha"))
 	if base == "" {
@@ -101,7 +106,7 @@ func landClaimFiles(home, run, id, top, main string, record, entry ledger.Object
 	}
 	files, warnings, checked := gatecheck.Scope(top, gatecheck.Prefix(main, blockString(record.Get("workspace"))), id, run, blockObject(record.Get("blocks")), changed, rows, key, entry.Get("worktree") != nil)
 	if !checked {
-		return nil, fmt.Errorf("cannot auto-claim without a checked block scope")
+		return nil, errClaimScopeUnchecked
 	}
 	// Scope warnings identify siblings in a shared tree; auto-claim includes them.
 	for _, warning := range warnings {

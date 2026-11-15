@@ -1,0 +1,12 @@
+asked=Close block B1 of run r-close-fixture WITHOUT the per-file review checks? Only the owner may say yes.
+exit=0
+--- stdout
+block B1 auto-claimed extra.txt
+block B1 closed
+--- stderr
+--- new rows
+{"run":"r-close-fixture","event":"block.claim","block":"B1","path":"extra.txt","auto":true,"reason":"auto-claim: changed outside owned files","tokens_source":null,"cost_source":null}
+{"run":"r-close-fixture","event":"gate.reviews_waived","block":"B1","by":"human","tokens_source":null,"cost_source":null}
+{"run":"r-close-fixture","event":"coder.tests","block":"B1","command":"go test ./...","exit":0,"tokens_source":null,"cost_source":null}
+{"run":"r-close-fixture","event":"block.close","block":"B1","status":"complete","tokens_source":null,"cost_source":null}
+--- status closed

@@ -1,0 +1,7 @@
+asked=
+exit=2
+--- stdout
+--- stderr
+block close: --no-require-reviews needs the human at a terminal to confirm; the block stays open (there is no --yes)
+--- new rows
+--- status open

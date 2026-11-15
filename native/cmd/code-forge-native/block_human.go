@@ -11,11 +11,8 @@ import (
 
 	"github.com/ricardov03/code-forge/native/autopilot"
 	"github.com/ricardov03/code-forge/native/blockclose"
-	"github.com/ricardov03/code-forge/native/blockstate"
-	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
-	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -51,98 +48,6 @@ func humanConfirm(stderr io.Writer, sub, id, message string) int {
 type humanDecision struct {
 	label string
 	row   ledger.Object
-}
-
-// Ordinary signed finding rows have all the facts needed by Node's decision
-// preview. Queue-only descriptions and other decision dialects retain the
-// existing close-decide boundary before a prompt or a write.
-func humanDecisions(run, id, reason string, gate gatecheck.Result, rows []gatecheck.Row, key []byte) ([]humanDecision, []gatecheck.Row, bool) {
-	actions := []humanDecision{}
-	preview := append([]gatecheck.Row{}, rows...)
-	seen := map[string]bool{}
-	for _, b := range gate.Blockers {
-		// Cap, autopilot and acknowledgement decisions keep Node's preview.
-		if b.Code == "rule_break" || b.Code == "review_cap" || b.Code == "autopilot_waiver_invalid" || b.Code == "agent-waivers-not-acked" {
-			return nil, nil, false
-		}
-		if b.Code != "not_approved" && b.Code != "late_unruled" {
-			continue
-		}
-		if b.Raw != nil {
-			// A late row's file or finding that is not text: Node decides
-			// it only when both are truthy, with the values as they are.
-			if b.File != "" && gatecheck.Truthy(b.Raw.Finding, b.Raw.HasFinding) {
-				return nil, nil, false
-			}
-			continue
-		}
-		if b.File == "" || b.Finding == "" || b.Finding == "proof" {
-			continue
-		}
-		if blockstate.Finding(b.Finding) != "" || blockstate.File(b.File, false) != "" {
-			return nil, nil, false
-		}
-		pair := b.File + "\x00" + b.Finding
-		if seen[pair] {
-			continue
-		}
-		seen[pair] = true
-		claim, named := "", false
-		for _, r := range rows {
-			if r["run"] != run || r["block"] != id || r["file"] != b.File {
-				continue
-			}
-			if r["ticket"] != nil {
-				return nil, nil, false
-			}
-			findings := []map[string]any{}
-			if (r["event"] == "review.triage" || r["event"] == "review.late_finding") && r["finding"] == b.Finding {
-				named = true
-			}
-			if r["finding"] == b.Finding {
-				findings = append(findings, r)
-			}
-			for _, v := range blockstate.Array(r["open"]) {
-				f := blockstate.Map(v)
-				if f["id"] == b.Finding {
-					if r["event"] == "review.result" {
-						named = true
-					}
-					findings = append(findings, f)
-				}
-			}
-			if gatecheck.Verified(r, key) {
-				for _, f := range findings {
-					if s, ok := f["claim"].(string); ok {
-						claim = s
-					}
-				}
-			}
-		}
-		if !named {
-			return nil, nil, false
-		}
-		if claim == "" {
-			claim = b.Detail
-		}
-		if !closeTextSafe(claim) {
-			return nil, nil, false
-		}
-		severity := blockstate.Severity(rows, id, b.File, b.Finding, key)
-		if severity == "not-recorded" {
-			severity = "unknown"
-		}
-		row := ledger.Object{{Key: "event", Value: "review.waived"}, {Key: "block", Value: id}, {Key: "file", Value: b.File}, {Key: "finding", Value: b.Finding}, {Key: "reason", Value: humanTrim(reason)}, {Key: "by", Value: "human"}}
-		signed := row.Map()
-		signed["run"] = run
-		signed, err := sign.SignRow(signed, key)
-		if err != nil {
-			return nil, nil, false
-		}
-		preview = append(preview, signed)
-		actions = append(actions, humanDecision{fmt.Sprintf("%s %s %s: %s", b.File, b.Finding, severity, claim), row})
-	}
-	return actions, preview, true
 }
 
 func runBlockHumanPass(args []string) int {

@@ -1,0 +1,12 @@
+asked=
+exit=0
+--- stdout
+reviewed file0.txt ticket <ID>
+block B1 closed
+--- stderr
+WARN block B1: opened before code-forge recorded the tree at block open; unowned changes were not checked
+--- new rows
+{"run":"r-close-fixture","event":"coder.tests","block":"B1","command":"go test ./...","exit":0,"tokens_source":null,"cost_source":null}
+{"run":"r-close-fixture","event":"block.close","block":"B1","status":"complete","tokens_source":null,"cost_source":null}
+--- status closed
+--- grant active

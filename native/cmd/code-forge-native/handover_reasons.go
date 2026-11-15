@@ -40,7 +40,6 @@ const (
 	hCloseExternalReview
 	hCloseLight
 	hCloseHumanChecksShape
-	hCloseHumanChecksValue
 	hCloseRepo
 	hCloseWorktreeBranch
 	hCloseWorktreeCommonDir
@@ -97,7 +96,6 @@ const (
 	hEnqueuePublish
 	hCloseAutoClaim
 	hCloseDecide
-	hCloseNoRequireReviews
 	hEnqueueFresh
 	hEnqueueAnswers
 	hEnqueueRebaseCheck
@@ -351,7 +349,6 @@ var handoverReasons = [...]string{
 	hCloseExternalReview:      "close-external-review",
 	hCloseLight:               "close-light",
 	hCloseHumanChecksShape:    "close-human-checks-shape",
-	hCloseHumanChecksValue:    "close-human-checks-value",
 	hCloseRepo:                "close-repo",
 	hCloseWorktreeBranch:      "close-worktree-branch",
 	hCloseWorktreeCommonDir:   "close-worktree-common-dir",
@@ -408,7 +405,6 @@ var handoverReasons = [...]string{
 	hEnqueuePublish:           "enqueue-publish",
 	hCloseAutoClaim:           "close-auto-claim",
 	hCloseDecide:              "close-decide",
-	hCloseNoRequireReviews:    "close-no-require-reviews",
 	hEnqueueFresh:             "enqueue-fresh",
 	hEnqueueAnswers:           "enqueue-answers",
 	hEnqueueRebaseCheck:       "enqueue-rebase-check",

@@ -29,6 +29,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - A Markdown recheck over the budget runs in Go section by section, one session per heading section, with the same rows, state and packets as Node; a Markdown heading cut inside an emoji's surrogate pair no longer sends a review to Node unless the review names that heading. B683
 - `block close --no-require-reviews` and `block close --decide` at a terminal run in Go: the owner's question and answers, the autopilot grant refusal, the signed `gate.reviews_waived` (by human) and `agent_waivers.acked` rows, the scope warnings and the close output match Node; they no longer hand over to Node. B684
 - `init` reads and rewrites a `.code-forge.yml` or user config with YAML anchors, aliases, `<<` keys and the standard tags in Go, byte-equal to Node: a shared object is written once with `&a1` and then as `*a1`, a merged one is written out; custom or unfitting tags, anchors on keys, aliases to empty collections and `%` directives still hand over to Node. B686
+- `block close` runs more owner cases in Go: `--auto-claim --no-require-reviews` at a terminal; `--decide` waivers for review caps, late findings and invalid autopilot waivers, claims from a signed ticket result, accepted transcript hits and Node's waive prechecks; and `human_checks` of any shape (a string, a number, an object, mixed values) as Node judges it. B697
 
 ## [0.24.0] — 2026-11-14
 

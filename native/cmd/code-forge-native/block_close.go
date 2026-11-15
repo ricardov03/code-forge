@@ -201,14 +201,21 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	if flags["remove-worktree"] == true && entry.Get("worktree") == nil {
 		return usage(fmt.Sprintf("block %s has no worktree (proof.isolation is not worktree); --remove-worktree does not apply", id))
 	}
+	// B697: any human_checks shape closes as Node's closeBlock judges it (a
+	// nonblank string or array awaits; numbers, booleans and objects close).
+	// Only an object with its own length key, which Node's .length reads and
+	// then fails to iterate, keeps the hand-over. The B632 deferral needs an
+	// array of text.
+	plainChecks := true
 	if checks := entry.Get("human_checks"); checks != nil {
-		values, ok := checks.([]any)
-		if !ok {
+		if obj, ok := checks.(ledger.Object); ok && slices.ContainsFunc(obj, func(f ledger.Field) bool { return f.Key == "length" }) {
 			return fallback(hCloseHumanChecksShape)
 		}
+		values, ok := checks.([]any)
+		plainChecks = ok
 		for _, value := range values {
 			if _, ok := value.(string); !ok {
-				return fallback(hCloseHumanChecksValue)
+				plainChecks = false
 			}
 		}
 	}
@@ -346,7 +353,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	if step != nil && step.preflight {
 		step.pastClaim = true
 	}
-	transcript, missing, err := closeTranscript(record, entry, id, blockString(flags["transcript"]))
+	transcript, transcriptFile, missing, err := closeTranscriptAt(record, entry, id, blockString(flags["transcript"]))
 	if err != nil {
 		// B466: Node's readFile error ends the close (exit 1, no state written).
 		return fail(errors.New(closeTranscriptReadMessage(err)))
@@ -446,7 +453,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 		if deciding && !confirmed {
 			// B684: the owner's --decide acknowledges them (Node's ack action).
-			decision, ok := closeAckDecision(run, id, rows, key)
+			decision, ok := closeAckDecision(id, rows, key, closeClaimOf(mainTop, run, id, rows, key))
 			if !ok {
 				return fallback(hCloseDecide)
 			}
@@ -503,6 +510,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		return fallback(hCloseGatesFormat)
 	}
 	var decisions []humanDecision
+	var decidePrecheck error
 	if deciding && !confirmed {
 		var supported bool
 		if autoDecide {
@@ -512,10 +520,8 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 				return refuseAuto(why)
 			}
 		} else {
-			decisions, rows, supported = humanDecisions(run, id, blockString(flags["reason"]), gate, rows, key)
-			if supported && ackDecision != nil {
-				decisions = append(decisions, *ackDecision)
-			}
+			decisions, rows, decidePrecheck, supported = closeHumanDecisions(closeDecideInput{run: run, id: id, reason: blockString(flags["reason"]), prefix: prefix,
+				entry: entry, gate: gate, rows: rows, key: key, claimOf: closeClaimOf(mainTop, run, id, rows, key), ack: ackDecision, transcript: transcript, transcriptFile: transcriptFile})
 		}
 		if !supported {
 			return fallback(hCloseDecide)
@@ -603,6 +609,10 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 				// B684: Node's decide loads the gate (its warnings), then its
 				// preview loads it again unless an earlier check failed.
 				loadWarnings()
+				if decidePrecheck != nil {
+					// B697: Node's waivePrecheck throws before its preview.
+					return fail(decidePrecheck)
+				}
 				failed := event != ""
 				for _, check := range checks[:gateIndex] {
 					failed = failed || check.Reason != ""
@@ -840,7 +850,11 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			result.Reason = "orphans: " + strings.Join(names, ", ")
 		}
 		if result.Reason == "" {
-			result, err = blockclose.CloseDeferring(home, run, id, closeRows, closeDeferral(home, run, id, &deferredRow))
+			var deferral blockclose.Deferral
+			if plainChecks {
+				deferral = closeDeferral(home, run, id, &deferredRow)
+			}
+			result, err = blockclose.CloseDeferring(home, run, id, closeRows, deferral)
 			if err != nil {
 				return publishError(err)
 			}
@@ -898,7 +912,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	}
 	if result.Status == "awaiting_human_check" {
 		if !jsonFlag {
-			for _, v := range entry.Get("human_checks").([]any) {
+			for _, v := range closeHumanCheckItems(entry.Get("human_checks")) {
 				fmt.Fprintf(stdout, "block %s awaiting human check: %s\n", id, v)
 			}
 			fmt.Fprintf(stdout, "next: code-forge block human-pass %s --run %s --note \"<device check note>\" [--proof <dir-or-file>]\n", id, run)
@@ -1060,11 +1074,18 @@ func closeRoutineProblem(external, run, id string, rows []gatecheck.Row, key []b
 }
 
 func closeTranscript(record, entry ledger.Object, id, given string) (string, bool, error) {
+	text, _, missing, err := closeTranscriptAt(record, entry, id, given)
+	return text, missing, err
+}
+
+// closeTranscriptAt is findTranscript with the file it read (Node's
+// transcriptFile: the given path as typed, else the resolved candidate).
+func closeTranscriptAt(record, entry ledger.Object, id, given string) (string, string, bool, error) {
 	// B583: Node reads the transcript with readFile(file, 'utf8'): each
 	// maximal invalid UTF-8 subpart is one U+FFFD (the WHATWG decoder).
 	if given != "" {
 		data, err := os.ReadFile(given)
-		return jsDecode(data), false, err
+		return jsDecode(data), given, false, err
 	}
 	workspace, run := blockString(record.Get("workspace")), blockString(record.Get("run_id"))
 	paths := []string{}
@@ -1072,19 +1093,20 @@ func closeTranscript(record, entry ledger.Object, id, given string) (string, boo
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(workspace, p)
 		}
-		paths = append(paths, p)
+		// path.resolve normalizes an absolute path as well.
+		paths = append(paths, filepath.Clean(p))
 	}
 	paths = append(paths, filepath.Join(workspace, ".code-forge/runs", run, id+".log"))
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if err == nil {
-			return jsDecode(data), false, nil
+			return jsDecode(data), p, false, nil
 		}
 		if !os.IsNotExist(err) {
-			return "", false, err
+			return "", "", false, err
 		}
 	}
-	return "", true, nil
+	return "", "", true, nil
 }
 
 // closeTranscriptReadMessage is Node's readFile error text: errno, reason and
@@ -1943,4 +1965,39 @@ func closeLedgerReadMessage(err error, dir string) (string, bool) {
 		return blockIOMessage(&os.PathError{Op: "scandir", Path: dir, Err: errno}), true
 	}
 	return closeTranscriptReadMessage(err), true
+}
+
+// closeHumanCheckItems is Node's `for (const check of entry.human_checks)`
+// with each item as its template literal prints it (B697): an array's items
+// through String(), a string's code points.
+func closeHumanCheckItems(v any) []string {
+	out := []string{}
+	switch x := v.(type) {
+	case []any:
+		for _, item := range x {
+			out = append(out, closeJSString(item))
+		}
+	case string:
+		for _, r := range x {
+			out = append(out, string(r))
+		}
+	}
+	return out
+}
+
+// closeJSString is JavaScript's String(value) for a decoded state value.
+func closeJSString(v any) string {
+	switch x := v.(type) {
+	case ledger.Object, map[string]any:
+		return "[object Object]"
+	case []any:
+		parts := make([]string, len(x))
+		for i, item := range x {
+			if item != nil {
+				parts[i] = closeJSString(item)
+			}
+		}
+		return strings.Join(parts, ",")
+	}
+	return gatecheck.JSString(v, true)
 }

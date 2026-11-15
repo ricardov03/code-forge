@@ -1,0 +1,7 @@
+asked=Close block B1 of run r-close-fixture WITHOUT the per-file review checks? Only the owner may say yes.
+exit=1
+--- stdout
+--- stderr
+block B1 close: cancelled — the review checks stay on
+--- new rows
+--- status open

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/autopilot"
+	"github.com/ricardov03/code-forge/native/blockops"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -159,12 +161,11 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 		return closeStep(step)
 	}
 	fallback := func(why handoverReason) int { *reason = why; return landHandover }
-	// B684: the owner's waived close claims after the question; Node keeps
-	// that combination. Without a terminal the close refuses it in Go.
-	if flags["no-require-reviews"] == true {
-		if closeMayHaveTerminal() {
-			return fallback(hCloseNoRequireReviews)
-		}
+	// B684: without a terminal the waived close refuses before any claim.
+	// B697: at a terminal Node asks the owner before its claims; Go asks at
+	// the same point below, after the whole read-only boundary.
+	waived := flags["no-require-reviews"] == true
+	if waived && !closeMayHaveTerminal() {
 		return closeStep(step)
 	}
 	// Run the entire close's read-only boundary first, including unsupported
@@ -198,10 +199,25 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 		top = main
 	}
 	files, err := landClaimFiles(home, run, id, top, main, record, entry)
+	if errors.Is(err, errClaimScopeUnchecked) {
+		// B697: Node's autoClaimChanges claims nothing without a checked scope
+		// (unownedChanges is null); the close runs as without --auto-claim.
+		files, err = nil, nil
+	}
 	if err != nil {
 		return fallback(hCloseAutoClaim)
 	}
-	if len(files) == 0 {
+	// B697: Node's claimPath refuses a path it cannot claim (a glob character,
+	// a backslash, ...) only when the claim loop reaches it, after the earlier
+	// claims and their enqueues; Go claims the same prefix, then refuses.
+	var claimErr error
+	for i, file := range files {
+		if err := blockops.ValidateClaim(file); err != nil {
+			files, claimErr = files[:i], err
+			break
+		}
+	}
+	if len(files) == 0 && claimErr == nil {
 		return closeStep(step)
 	}
 	// Recheck close against predicted ownership before any claim is signed.
@@ -227,8 +243,11 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 		return fallback(hCloseAutoClaim)
 	}
 	// An enqueue refusal ends auto-claim immediately; it needs no join support.
-	willJoin := true
+	willJoin := claimErr == nil
 	for _, file := range files {
+		if !willJoin {
+			break
+		}
 		if reviewEnqueueStep([]string{file, "--block", id, "--run", run, "--cwd", top}, &landStep{preflight: true}) != 0 {
 			willJoin = false
 			break
@@ -262,7 +281,21 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 	// at the terminal before the claims; a cancel records nothing. The close
 	// after the claims is then the confirmed one.
 	asked := false
-	if flags["decide"] != true {
+	if waived {
+		cfg, _ := blockSnapshot(record)
+		usage := func(text string) int { fmt.Fprintln(stderr, "block close:", text); return 2 }
+		failState := func(err error) int {
+			if _, ok := err.(*state.Error); !ok {
+				fmt.Fprintln(stderr, "block close:", blockIOMessage(err))
+				return 1
+			}
+			return fail(err)
+		}
+		if code := closeNoReviewsAsk(home, run, id, blockMap(cfg["close"])["require_human"] == true, stderr, failState, usage); code != 0 {
+			return code
+		}
+		asked = true
+	} else if flags["decide"] != true {
 		if cfg, ok := blockSnapshot(record); ok && blockMap(cfg["close"])["require_human"] == true {
 			grant, _ := autopilot.Read(record, time.Now())
 			active := false
@@ -281,13 +314,16 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 	// B493: Node runs the lazy grant expiry check before the claims, so an
 	// expired grant's autopilot.expire row precedes the block.claim rows. The
 	// close's own later check is then a no-op.
-	if record.Get("autopilot") != nil && flags["decide"] != true {
+	if record.Get("autopilot") != nil && flags["decide"] != true && !waived {
 		if cfg, ok := blockSnapshot(record); ok && blockMap(cfg["close"])["require_human"] != true {
 			blockGrantExpiry(home, run, stderr)
 		}
 	}
 	if err := closeAutoClaim(home, run, id, top, record, files, print, false); err != nil {
 		return fail(err)
+	}
+	if claimErr != nil {
+		return fail(claimErr)
 	}
 	var joined landResult
 	if daemonJoin {
