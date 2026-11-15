@@ -20,7 +20,13 @@ import (
 // Extra masks: the session dir sessions/facts-<ms>-<hex> and the rate-limit
 // retry wait (jittered).
 
+// The fake ignores SIGTERM (it and every child it runs: ignored signals are
+// inherited) until its logs are written, so a --timeout kill that fires
+// early on a loaded host cannot cut the logs short (B691); "hang" restores
+// the default before its sleep, so the kill ends it (SIGTERM, or SIGKILL
+// after the grace when the SIGTERM came while it was ignored).
 const b582FakeCodex = `#!/bin/sh
+trap '' TERM
 for a in "$@"; do printf '%s\n' "$a"; done > "$FAKE_LOG/codex.argv"
 pwd -P > "$FAKE_LOG/codex.cwd"
 cat > "$FAKE_LOG/codex.stdin"
@@ -37,7 +43,7 @@ limit) printf '{"type":"error","message":"unexpected status 429 Too Many Request
 auth) printf '{"type":"error","message":"unexpected status 401 Unauthorized"}\n'; exit 1;;
 busy) printf '{"type":"turn.failed","error":{"message":"unexpected status 503 Service Unavailable"}}\n'; echo "Error: 503 Service Unavailable" >&2; exit 1;;
 fail) echo "boom" >&2; exit 5;;
-hang) exec sleep 30;;
+hang) trap - TERM; exec sleep 30;;
 noout) printf '{"type":"turn.completed","usage":{"input_tokens":300,"cached_input_tokens":0,"output_tokens":40}}\n'; exit 0;;
 esac
 printf '%s' "$FAKE_ANSWER" > "$out"

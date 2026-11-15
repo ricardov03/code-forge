@@ -36,12 +36,19 @@ var appendPSPath = "/bin/ps"
 // appendPSTimeout matches Node's readStartTime execFileSync timeout (5000 ms).
 const appendPSTimeout = 5 * time.Second
 
+// appendPSContext is the time limit of one ps call. Tests replace it with a
+// limit they end themselves, so a loaded host's slow process start cannot
+// decide a test (B693).
+var appendPSContext = func() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), appendPSTimeout)
+}
+
 func appendStartTime(pid int) (string, error) {
 	ps := appendPSPath
 	if _, err := os.Stat(ps); err != nil {
 		ps = "ps"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), appendPSTimeout)
+	ctx, cancel := appendPSContext()
 	defer cancel()
 	cmd := exec.CommandContext(ctx, ps, "-o", "lstart=", "-p", strconv.Itoa(pid))
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")

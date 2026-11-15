@@ -329,11 +329,87 @@ func fakeAppendPS(t *testing.T, script string) {
 	t.Cleanup(ledger.SetAppendPS(path))
 }
 
+// appendLstart is this process's ps lstart, read once by the test without a
+// time limit. The fake ps scripts print it instead of running /bin/ps, whose
+// run time on a loaded host is unbounded and is not what they test (B693).
+func appendLstart(t *testing.T) string {
+	t.Helper()
+	cmd := exec.Command("/bin/ps", "-o", "lstart=", "-p", fmt.Sprint(os.Getpid()))
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	out, err := cmd.Output()
+	start := strings.Join(strings.Fields(string(out)), " ")
+	if err != nil || start == "" {
+		t.Fatalf("ps lstart for this process: %q %v", out, err)
+	}
+	return start
+}
+
+// appendPSLimit gives every lock-identity ps call a time limit that ends
+// only when the test calls the returned func (or the test ends), so a slow
+// process start on a loaded host never decides the test (B693).
+func appendPSLimit(t *testing.T) (expire func()) {
+	t.Helper()
+	limit, cancel := context.WithCancel(context.Background())
+	restore := ledger.SetAppendPSContext(func() (context.Context, context.CancelFunc) { return context.WithCancel(limit) })
+	t.Cleanup(func() {
+		cancel()
+		restore()
+	})
+	return cancel
+}
+
+// slowAppendPS installs a fake ps that marks its start, then prints lstart
+// once release exists.
+func slowAppendPS(t *testing.T) (started, release string) {
+	t.Helper()
+	tmp := t.TempDir()
+	started, release = filepath.Join(tmp, "started"), filepath.Join(tmp, "release")
+	fakeAppendPS(t, fmt.Sprintf(": > %q\nwhile [ ! -e %q ]; do sleep 0.01; done\nprintf '%%s\\n' %q\n", started, release, appendLstart(t)))
+	return started, release
+}
+
+// waitForFile waits until path exists; the append must not end first.
+func waitForFile(t *testing.T, path string, done <-chan error) {
+	t.Helper()
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("append ended before the fake ps started: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func goAppend(dir, event string) <-chan error {
+	done := make(chan error, 1)
+	go func() {
+		_, err := ledger.AppendRow(dir, "fixture", map[string]any{"event": event}, ledger.DefaultRotateAtBytes)
+		done <- err
+	}()
+	return done
+}
+
+func TestAppendPSTimeLimitIsNodes5000ms(t *testing.T) {
+	// Node's readStartTime gives ps timeout: 5000.
+	before := time.Now()
+	ctx, cancel := ledger.AppendPSContext()
+	after := time.Now()
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok || deadline.Sub(before) < 5*time.Second || deadline.Sub(after) > 5*time.Second {
+		t.Fatalf("ps time limit: deadline %v (ok=%v), want 5 s after the call", deadline.Sub(before), ok)
+	}
+}
+
 func TestAppendRetriesLockIdentityAfterPSFailure(t *testing.T) {
 	// Node's `selfStart ??= readStartTime(...)` retries after a failed ps read;
 	// one failed read must not fail every later append in the process.
+	appendPSLimit(t)
 	marker := filepath.Join(t.TempDir(), "failed-once")
-	fakeAppendPS(t, fmt.Sprintf("if [ ! -e %q ]; then : > %q; exit 1; fi\nexec /bin/ps \"$@\"\n", marker, marker))
+	fakeAppendPS(t, fmt.Sprintf("if [ ! -e %q ]; then : > %q; exit 1; fi\nprintf '%%s\\n' %q\n", marker, marker, appendLstart(t)))
 	dir := t.TempDir()
 	_, err := ledger.AppendRow(dir, "fixture", map[string]any{"event": "first"}, ledger.DefaultRotateAtBytes)
 	if err == nil || !strings.Contains(err.Error(), "cannot determine ledger lock owner process start time") {
@@ -349,15 +425,45 @@ func TestAppendRetriesLockIdentityAfterPSFailure(t *testing.T) {
 }
 
 func TestAppendLockIdentityAllowsSlowPS(t *testing.T) {
-	// Node gives ps 5000 ms (readStartTime); a ps slower than one second on a
-	// loaded host must still produce the lock identity.
-	fakeAppendPS(t, "sleep 1.5\nexec /bin/ps \"$@\"\n")
+	// A ps slower than one second on a loaded host must still produce the
+	// lock identity: the append waits for it while the time limit runs.
+	appendPSLimit(t)
+	started, release := slowAppendPS(t)
 	dir := t.TempDir()
-	if _, err := ledger.AppendRow(dir, "fixture", map[string]any{"event": "slow-ps"}, ledger.DefaultRotateAtBytes); err != nil {
+	done := goAppend(dir, "slow-ps")
+	waitForFile(t, started, done)
+	select {
+	case err := <-done:
+		t.Fatalf("append ended while ps was still running: %v", err)
+	case <-time.After(1500 * time.Millisecond):
+	}
+	if err := os.WriteFile(release, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
 		t.Fatalf("append with slow ps: %v", err)
 	}
 	rows, err := ledger.ReadRows(dir, "fixture")
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("want one row, got %v (%v)", rows, err)
+	}
+}
+
+func TestAppendPSKilledAtTimeLimit(t *testing.T) {
+	// A ps still running when its time limit ends is killed, and the append
+	// fails with Node's identity error (readStartTime returns null).
+	expire := appendPSLimit(t)
+	started, release := slowAppendPS(t)
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0600) })
+	dir := t.TempDir()
+	done := goAppend(dir, "killed-ps")
+	waitForFile(t, started, done)
+	expire()
+	err := <-done
+	if err == nil || !strings.Contains(err.Error(), "cannot determine ledger lock owner process start time") {
+		t.Fatalf("append with ps past its limit: want identity error, got %v", err)
+	}
+	if rows, err := ledger.ReadRows(dir, "fixture"); err != nil || len(rows) != 0 {
+		t.Fatalf("want no row, got %v (%v)", rows, err)
 	}
 }

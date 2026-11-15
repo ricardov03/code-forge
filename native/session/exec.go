@@ -112,7 +112,25 @@ func RegisterPid(dir string, pid int, argv0 string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, strconv.Itoa(pid)+".json"), append(data, '\n'), 0o600)
+	// B692: the entry appears whole or not at all (a temp file renamed into
+	// place), so a reader that finds it never reads an empty or cut entry.
+	// The temp name never matches <pid>.json, so listers skip it.
+	f, err := os.CreateTemp(dir, "."+strconv.Itoa(pid)+".json.tmp-")
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(append(data, '\n'))
+	cerr := f.Close()
+	if werr == nil {
+		werr = cerr
+	}
+	if werr == nil {
+		werr = os.Rename(f.Name(), filepath.Join(dir, strconv.Itoa(pid)+".json"))
+	}
+	if werr != nil {
+		_ = os.Remove(f.Name())
+	}
+	return werr
 }
 
 // registerPid is RegisterPid for exec, which ignores the error.
