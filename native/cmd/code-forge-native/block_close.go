@@ -203,12 +203,13 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	}
 	// B697: any human_checks shape closes as Node's closeBlock judges it (a
 	// nonblank string or array awaits; numbers, booleans and objects close).
-	// Only an object with its own length key, which Node's .length reads and
-	// then fails to iterate, keeps the hand-over. The B632 deferral needs an
-	// array of text.
+	// B714: an object with its own length key awaits when Node's
+	// `.length > 0` holds, then fails Node's output loop (not iterable). Only
+	// a length V8 cannot turn into a primitive keeps the hand-over. The B632
+	// deferral needs an array of text.
 	plainChecks := true
 	if checks := entry.Get("human_checks"); checks != nil {
-		if obj, ok := checks.(ledger.Object); ok && slices.ContainsFunc(obj, func(f ledger.Field) bool { return f.Key == "length" }) {
+		if !blockclose.ObjectLengthKnown(checks) {
 			return fallback(hCloseHumanChecksShape)
 		}
 		values, ok := checks.([]any)
@@ -911,6 +912,12 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 	}
 	if result.Status == "awaiting_human_check" {
+		if _, object := entry.Get("human_checks").(ledger.Object); object {
+			// B714: Node's `for (const check of entry.human_checks)` runs under
+			// --json too and throws on an object; the rows are already written.
+			fmt.Fprintln(stderr, "block close: entry.human_checks is not iterable")
+			return 1
+		}
 		if !jsonFlag {
 			for _, v := range closeHumanCheckItems(entry.Get("human_checks")) {
 				fmt.Fprintf(stdout, "block %s awaiting human check: %s\n", id, v)

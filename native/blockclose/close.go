@@ -183,10 +183,14 @@ func CloseDeferring(home, run, id string, closeRows []ledger.Object, deferral De
 }
 
 // humanChecksLength is JavaScript's `.length` of a decoded human_checks value:
-// an array's length, a string's UTF-16 length, 0 for any other shape (a value
-// with its own length key never reaches here: close hands it over).
+// an array's length, a string's UTF-16 length, 0 for any other shape; an
+// object with its own length key counts 1 when `.length > 0` (B714).
 func humanChecksLength(v any) int {
 	switch x := v.(type) {
+	case ledger.Object:
+		if ObjectHasLength(x) && objectLengthAwaits(x) {
+			return 1
+		}
 	case []any:
 		return len(x)
 	case string:
