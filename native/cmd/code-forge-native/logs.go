@@ -432,8 +432,8 @@ func logsList(entries []ledger.Object, asJSON bool) (string, bool) {
 	return out.String(), true
 }
 
-// logsKnownFixes is src/util/known-fixes.json built into the binary (B688),
-// so Go needs no src/ folder next to it.
+// logsKnownFixes is the known-fixes table built into the binary (B688),
+// the only copy since B690b (edit data/known-fixes.json).
 //
 //go:embed data/known-fixes.json
 var logsKnownFixes []byte

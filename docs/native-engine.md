@@ -46,9 +46,9 @@ The command works in three steps:
 The skill's `forge <verb>` shim (`skill/scripts/forge`) starts this same shell
 entry, `bin/code-forge`, so skill verbs run in Go too (B547). With
 `CODE_FORGE_BIN` set to `bin/code-forge`, or to a `bin/code-forge.mjs` that has
-the `code-forge` entry next to it, the shim starts the entry as well. Any other
-`CODE_FORGE_BIN` file, and an old package that has only `bin/code-forge.mjs`
-next to the skill, still runs in Node.
+the `code-forge` entry next to it, the shim starts the entry as well. Since B690b
+the shim never runs Node: a `CODE_FORGE_BIN` naming a `.mjs` file with no
+`code-forge` entry next to it stops with exit 127 and the install line.
 
 The public route table currently serves these read commands:
 
@@ -56,17 +56,15 @@ The public route table currently serves these read commands:
   from disk. It does not need the daemon and it never takes a lock.
   Since B452, Go also prints a run record that is a JSON array, a spend that
   adds up to infinity, and every error Node prints for a broken run file.
-  Go hands over to Node only for a run with a block id outside printable
-  ASCII among two or more listed (not closed, not stopped) blocks (Node sorts
-  those with ICU) or a ledger number Go cannot read. Since B576 one listed
-  block, or such ids on closed and stopped blocks only, run in Go.
+  Since B690b a run with listed block ids outside printable ASCII runs in Go
+  too: printable ASCII ids first in their usual order, the other ids after them
+  by UTF-16 code units (Node sorted those with ICU).
 - `logs path`, `logs [--last] [--json]` and `logs summary`. Since B704 an
   `errors.jsonl` entry with a lone surrogate escape reads in Go like
   `JSON.parse` (`--json` writes the escape back, text output writes U+FFFD as
   Node's stdout does); `logs report` with such an entry still goes to Node
-  (`logs-decode`), since its issue text and argv carry U+FFFD there. Since B688 Go uses
-  the known-fixes table built into the binary; it no longer reads
-  `src/util/known-fixes.json`.
+  (`logs-decode`), since its issue text and argv carry U+FFFD there. Go uses the
+  known-fixes table built into the binary (B688).
 - `ledger tail` and `ledger calibration` (B457). Since B704 a ledger row with a
   lone surrogate escape reads in Go and `ledger tail` writes it back as the
   escape like Node; a `ledger stale`/`scan-git` row whose file or block holds
@@ -139,7 +137,7 @@ locks and signed ledger rows as Node.
 | `native-status` | The private daemon helper (B501): one status line per standard-input line (`{"runs":[...]}`, or `{"ok":false,"error":"status-unreadable"}` for a line Node cannot read), `\n`, `\r\n`, lone `\r`, U+2028 and U+2029 line ends as Node's readline, a missing `rows` read from the ledger, then the router's `has no default export function` line with exit 1, the breadcrumb and the error log. `--help` and `-h` print the usage. Since B687 Go also serves what B501 handed to Node: lines read as Node reads them (bytes that are not UTF-8 become U+FFFD, lone surrogate escapes kept and written back as `\udXXX`, numbers `JSON.parse` reads as `Infinity`, signed rows with either checked as Node's signer checks them), no `HOME` (the password file's home, as Node's `os.homedir()`, with no error log; an empty `HOME` reads `.code-forge` in the working folder) and a terminal on stderr (the router's hint line and `hints.json`). | A line with a block id outside printable ASCII among two or more listed (not closed, not stopped) blocks, which Node must sort with ICU (since B576 one listed block or such ids on closed and stopped blocks only are answered in Go), hands that line and the rest of standard input to Node's helper (`native-status-line`). A hint state with a time only `Date.parse` reads hands the command over, as for every routed verb. |
 | `autopilot status`, `autopilot stop`, `autopilot start`, `autopilot round`, `autopilot level`, `autopilot binnacle`, `autopilot log`, `autopilot ask`, `autopilot approve` | `autopilot status --run <id>` (text and `--json`, spend per category, paused categories, the one signed `autopilot.expire` row when the window is over) and `autopilot stop --run <id>` (the signed `autopilot.stop` row and the record update), with or without a link: a grant with no link writes and refreshes the binnacle files as Node does (B478). `autopilot start --run <id> --yes`, with no terminal (refused, exit 2, as in Node), and at a terminal without `--yes` (the same yes/no prompt; anything but yes cancels) (B478): every input check, the signed `autopilot.grant` row and the grant record. `autopilot binnacle` and `autopilot log` (B478). `autopilot round` (the signed `autopilot.extra_round` row) and `autopilot level` (the recorded lane, the level rule and the signed `autopilot.level` row) with Node's checks and refusal texts (B478). Like Node, once a command has read the run's signer key (a signed write, or the decision check of `round` and `level`), every stdout and stderr line and every binnacle field masks the key as `[REDACTED]`; before that point nothing is masked, as in Node (B478). `autopilot --help`, `autopilot <sub> --help`, `-h`, usage errors, unknown flags and the `approve --yes` refusal for every subcommand (B461). A run with active approvals that are not due yet (B484). `autopilot ask` up to the delegate session: every usage, option and subject check, an unknown scope, and every grant refusal (`no-grant`, `run-ended`, `stopped`, `expired` with its one signed `autopilot.expire` row, `denied`, `not-allowed`, `paused`) in text and `--json`, exit 1, as in Node (B484). `autopilot approve` up to the owner's prompt: every input check, fixed keys, an ended run, an active approval on an overlapping key, and the no-terminal refusal (exit 2) (B484). A due approval whose check needs no `.code-forge.yml` write and no run reload: a step whose signed row is still pending, a key with a prototype segment, a config that is missing or unreadable, a value changed by hand (the signed `autopilot.restore_skipped` row) and an ended run whose file already holds the old value (the signed `autopilot.restore` row), with Node's lines, approvals lock and record update (B490). `autopilot approve` at a terminal up to the change: the same yes/no prompt, wrapped as clack wraps it, the cancel text (exit 1), a failed prompt (exit 1), `--until` checked again after the answer, and the refusals for no config, an unreadable config and a key that already holds the value (B490). A due approval of an ended run whose `.code-forge.yml` needs the old value back is written in Go with the `yaml` package's exact bytes (comments, blank lines, quoted text, flow and block lists, document markers, CRLF, no final newline), through a temp file and rename that keep the file's mode; a parent that is not a mapping and a write that fails are the same WARN lines as Node's (B494). `autopilot ask` when the grant lets the question through: the delegate model session (the same prompt, lens, schema and CLI arguments, the budget gate, the signed `session` and `autopilot.decision` rows), an answer acted on, a session that fails, times out, is refused by `budget.usd` or answers outside the schema or the options, in text and `--json`, exit 0 or 3, as in Node (B536). `autopilot approve` after the owner's yes: the `.code-forge.yml` change with the `yaml` package's exact bytes, the run reload past the grant's limit guard, the signed `autopilot.approve` row and the stored approval, and the refusal for a key under a value that is not a mapping (exit 2); a due approval of an active run is written back and the run reloaded in Go too (B536). | an `ask` delegate session Go does not run like Node (`autopilot-ask`: a run with no config snapshot, a context file that is not UTF-8, a grant whose scopes or level are not text, a session the Go spawner does not serve), `waive` (human-only grant use and issue tracking), an `approve` change in a YAML shape Go does not write byte for byte (`autopilot-approve-yaml-shape`) or an edited config Go does not load or check like Node, such as one Node calls invalid, `!!` tags, secret-shaped values or sandbox directories (`autopilot-approve-reload-shape`; the same for a due approval of an active run: `autopilot-restore-reload-shape`), an approve prompt with text that is not printable ASCII, such as a surrogate pair escape (`autopilot-approve-value`; a `--value` with a lone `\uD800`-`\uDFFF` escape runs in Go since B732: written to `.code-forge.yml` as the `yaml` package writes it, reloaded, signed and restored at until like Node), a config that changed while the owner was asked (`autopilot-approve-changed`: Node asks again), a config Go reads differently from Node, such as a BOM, bytes that are not UTF-8 or a number that is not finite (`autopilot-approve-config`, `autopilot-restore-config`), a due approval whose file needs the old value written back in a YAML shape Go does not write byte for byte (`autopilot-restore-write`: tabs, anchors, block scalars, a second document, long text the `yaml` package folds, and a second due approval read after a Go write), stdin at a terminal with stdout not (`autopilot-prompt`), and an approval or grant shape Go does not expect; a `round` or `level` whose block name, file path, plan table, lane answer or decision row Go could read differently from Node (for example a block named `constructor`, a path with `./` or `//`, a non-ASCII table header or lane answer, an object decision); a run record Go cannot read, a ledger or spend row Go cannot read, and no `HOME`. Go writes nothing before it hands over. |
 | `autopilot status`, `autopilot stop`, `autopilot start`, `autopilot extend`, `autopilot round`, `autopilot level`, `autopilot binnacle`, `autopilot log`, `autopilot ask`, `autopilot approve`, `autopilot digest`, `autopilot ratify`, `autopilot revert` | `autopilot status --run <id>` (text and `--json`, spend per category, paused categories, the one signed `autopilot.expire` row when the window is over) and `autopilot stop --run <id>` (the signed `autopilot.stop` row and the record update), with or without a link: a grant with no link writes and refreshes the binnacle files as Node does (B478). `autopilot start --run <id> --yes`, with no terminal (refused, exit 2, as in Node), and at a terminal without `--yes` (the same yes/no prompt; anything but yes cancels) (B478): every input check, the signed `autopilot.grant` row and the grant record. `autopilot binnacle` and `autopilot log` (B478). `autopilot round` (the signed `autopilot.extra_round` row) and `autopilot level` (the recorded lane, the level rule and the signed `autopilot.level` row) with Node's checks and refusal texts (B478). Like Node, once a command has read the run's signer key (a signed write, or the decision check of `round` and `level`), every stdout and stderr line and every binnacle field masks the key as `[REDACTED]`; before that point nothing is masked, as in Node (B478). `autopilot --help`, `autopilot <sub> --help`, `-h`, usage errors, unknown flags and the `approve --yes` refusal for every subcommand (B461). A run with active approvals that are not due yet (B484). `autopilot ask` up to the delegate session: every usage, option and subject check, an unknown scope, and every grant refusal (`no-grant`, `run-ended`, `stopped`, `expired` with its one signed `autopilot.expire` row, `denied`, `not-allowed`, `paused`) in text and `--json`, exit 1, as in Node (B484). `autopilot approve` up to the owner's prompt: every input check, fixed keys, an ended run, an active approval on an overlapping key, and the no-terminal refusal (exit 2) (B484). A due approval whose check needs no `.code-forge.yml` write and no run reload: a step whose signed row is still pending, a key with a prototype segment, a config that is missing or unreadable, a value changed by hand (the signed `autopilot.restore_skipped` row) and an ended run whose file already holds the old value (the signed `autopilot.restore` row), with Node's lines, approvals lock and record update (B490). `autopilot approve` at a terminal up to the change: the same yes/no prompt, wrapped as clack wraps it, the cancel text (exit 1), a failed prompt (exit 1), `--until` checked again after the answer, and the refusals for no config, an unreadable config and a key that already holds the value (B490). A due approval of an ended run whose `.code-forge.yml` needs the old value back is written in Go with the `yaml` package's exact bytes (comments, blank lines, quoted text, flow and block lists, document markers, CRLF, no final newline), through a temp file and rename that keep the file's mode; a parent that is not a mapping and a write that fails are the same WARN lines as Node's (B494). `autopilot ask` when the grant lets the question through: the delegate model session (the same prompt, lens, schema and CLI arguments, the budget gate, the signed `session` and `autopilot.decision` rows), an answer acted on, a session that fails, times out, is refused by `budget.usd` or answers outside the schema or the options, in text and `--json`, exit 0 or 3, as in Node (B536). `autopilot approve` after the owner's yes: the `.code-forge.yml` change with the `yaml` package's exact bytes, the run reload past the grant's limit guard, the signed `autopilot.approve` row and the stored approval, and the refusal for a key under a value that is not a mapping (exit 2); a due approval of an active run is written back and the run reloaded in Go too (B536). `autopilot start --until-done [--deadline <time>] [--blocks <id,…>]` and `autopilot extend --run <id> --until|--deadline <time> [--yes]`, Go only (no Node parity): an until-done grant ends when every planned block is closed (`--blocks`, else the run record's blocks; `closed` or `awaiting_human_check`), or at its deadline; the expiry check in every autopilot command and in the worker writes one signed `autopilot.expire` row with `reason: done` and the planned blocks; `extend` writes one signed `autopilot.extend` row and refuses an earlier time, an absent, stopped, expired or done grant and `--until` on an until-done grant with no deadline; status and the binnacle show the end condition (B634). `autopilot digest --run <id> [--json]`, `autopilot ratify <row-id> --run <id> [--json]` and `autopilot revert <row-id> --run <id> [--json]`, Go only (no Node parity): the digest of deferred human checks, substitute reviews, autopilot and counted agent waivers, active temporary config changes, extends and until-done ends, with each row's ratify and revert commands; ratify and revert ask the owner at a terminal (no `--yes`), are refused under an active grant, and write one signed `autopilot.ratify` or `autopilot.revert` row; revert puts a deferred block back to `awaiting_human_check`, writes a `review.unwaived` row for a waiver, makes a substitute approval stop counting at close (and `review-file --fresh` re-run it), and restores an approval's old value now (B635). | an `ask` delegate session Go does not run like Node (`autopilot-ask`: a run with no config snapshot, a context file that is not UTF-8, a grant whose scopes or level are not text, a session the Go spawner does not serve), `waive` (human-only grant use and issue tracking), an `approve` change in a YAML shape Go does not write byte for byte (`autopilot-approve-yaml-shape`) or an edited config Go does not load or check like Node, such as one Node calls invalid, `!!` tags, secret-shaped values or sandbox directories (`autopilot-approve-reload-shape`; the same for a due approval of an active run: `autopilot-restore-reload-shape`), an approve prompt with text that is not printable ASCII, such as a surrogate pair escape (`autopilot-approve-value`; a `--value` with a lone `\uD800`-`\uDFFF` escape runs in Go since B732: written to `.code-forge.yml` as the `yaml` package writes it, reloaded, signed and restored at until like Node), a config that changed while the owner was asked (`autopilot-approve-changed`: Node asks again), a config Go reads differently from Node, such as a BOM, bytes that are not UTF-8 or a number that is not finite (`autopilot-approve-config`, `autopilot-restore-config`), a due approval whose file needs the old value written back in a YAML shape Go does not write byte for byte (`autopilot-restore-write`: tabs, anchors, block scalars, a second document, long text the `yaml` package folds, and a second due approval read after a Go write), stdin at a terminal with stdout not (`autopilot-prompt`), and an approval or grant shape Go does not expect; a `round` or `level` whose block name, file path, plan table, lane answer or decision row Go could read differently from Node (for example a block named `constructor`, a path with `./` or `//`, a non-ASCII table header or lane answer, an object decision); a run record Go cannot read, a ledger or spend row Go cannot read, and no `HOME`. Go writes nothing before it hands over. |
-| `setup` | Every form when the binary runs (B463): the OK line, a version mismatch, `--help` and usage errors. | Nothing. With `CODE_FORGE_NATIVE=0` the entry runs the Node router's `setup`. When the binary is missing, not executable, unsupported, or exits other than 0, 1 or 2, the shell entry itself prints the install fix and exits 69; no Node runs (B569). |
+| `setup` | Every form when the binary runs (B463): the OK line, a version mismatch, `--help` and usage errors. | Nothing. When the binary is missing, not executable, unsupported, or exits other than 0, 1 or 2, the shell entry itself prints the install fix and exits 69; no Node runs (B569). |
 
 The Go engine skips the test gate for proven text-only `gates run --changed` changes.
 `gates run --run R --block B --changed` always stays in Go: it selects the block's tests,
@@ -221,7 +219,6 @@ code-forge logs handovers --json --since 2026-11-01
 JSON also shows the last time for each group.
 This command runs in Go. It is not in the Node-only command set.
 Set `CODE_FORGE_HANDOVER_LOG=0` to stop recording.
-`CODE_FORGE_NATIVE=0` also records no rows.
 
 Reason codes are fixed names. For example, `unrouted` means Go has no route.
 `close-auto-claim` and `enqueue-fresh` name cases that still run in Node.
@@ -278,26 +275,6 @@ grant as inside the grant's window, and uses the end from a signed `autopilot.ex
 The full code list is the `handoverReasons` table in
 [`handover_reasons.go`](../native/cmd/code-forge-native/handover_reasons.go).
 
-### Measure it
-
-Build the binary with `node scripts/build-native.mjs --host`.
-Then run `npm run bench:verbs` or `npm run bench:block`.
-
-`bench:verbs` compares the Node lane and the Go lane of the npm entry for each
-verb, after two warmup runs. The columns show the median, p90 and minimum time
-in milliseconds, the peak memory (RSS) in MB, the engine that ran, the speedup
-(Node median / Go median), and whether output and exit code are the same.
-The `block land` row measures the already-closed refusal, including its signed
-timing row, with Node unavailable in the engine probe. Successful land shapes
-and merge gates are checked by `parity-block-land-full.test.mjs`.
-
-`bench:block` compares three lanes: `node` (Node only), `go` (Node with the Go
-helper) and `entry` (Go first). It reports child processes, CLI calls, peak
-memory, wall time and leftover processes.
-
-Both benchmarks use isolated state. Both fail when a process or a daemon socket
-stays after the run. Use `--json`, or `--out <file>`, to get JSON.
-
 ## Platforms with a binary
 
 Release builds supply these four targets. Since B606 each target's binary is
@@ -348,15 +325,11 @@ and exits 0. On a failure it prints the problem and one `fix:` line, then exits 
 For an npm install the fix is `npm install -g @codedology/code-forge@<version>`.
 In a source checkout it is `node scripts/build-native.mjs --host`.
 `--help` and `-h` print the usage; any other argument is a usage error (exit 2).
-The same check runs as `npm run setup` in a checkout.
 
 The Go binary serves `setup` when it runs (B463). When the binary is
 missing, lacks execute permission, has no build for this platform and arch, or
 exits with a code other than 0, 1 or 2 (for example a crash), the shell entry
-prints the install fix itself and exits 69; it runs no Node (B569). With
-`CODE_FORGE_NATIVE=0` the Node router runs `setup` (`scripts/setup.mjs`), which
-prints the same lines as Go. An older binary without `setup` hands it to Node
-like any other verb, and Node reports the version mismatch.
+prints the install fix itself and exits 69; it runs no Node (B569).
 
 ### Repair the binary: `scripts/install.sh`
 
@@ -381,18 +354,6 @@ exits 0. On a problem it prints the problem and one `fix:` line
 install script (B463), so run it after an install or to repair one (B569).
 
 ## Switches
-
-### Use Node only
-
-```sh
-CODE_FORGE_NATIVE=0 code-forge version
-```
-
-Set `CODE_FORGE_NATIVE` to exactly `0` to skip the Go entry and disable native
-helpers and the daemon. The shell starts `node` from `PATH`. This is the
-explicit maintainer and test switch; it is the only way the entry runs Node
-without Go (B569).
-Remove the setting to allow Go again.
 
 ### Turn off the daemon
 
@@ -629,29 +590,23 @@ call. It is not part of the code-forge binary or the npm package, and it has no 
 does not fall back to Node. Since B574 the Node scripts it replaced are deleted and the release
 workflow runs it for the GitHub release notes. Since B580 `npm run release` runs no Node on the
 laptop: it builds the four native targets with `go build` itself and accepts a green `CI` run for
-HEAD in place of the local `npm test`, `npm run typecheck` and generated-doc checks. Since B606
+HEAD in place of local checks. Since B606
 it also writes one platform package per target to `dist/npm/<target>/` and checks every pack size.
 See [Releasing](releasing.md).
 
 ## How we keep Go and Node the same
 
-Contributors use parity tests. Parity means that both paths give the same
-result. The tests run commands in separate copies of a test project and home
-folder. They compare output bytes, error output, exit codes and saved state.
-They allow only known changes such as timestamps. Entry tests also check
-arguments, standard input, the working directory, environment settings,
-symbolic links, Node-only mode and missing executables. Daemon tests compare
-status and block waits with Node and check fallback when the daemon fails.
+Until B690b contributors used parity tests that ran each command through the
+Node CLI and through Go and compared output bytes, error output, exit codes and
+saved state. B690b removed the Node CLI and those tests; the Go tests keep the
+outputs they pinned as Go goldens. The sections below describe the Node rules
+Go still follows.
 
-Go reads no file from the Node `src/` tree (B688). The review lenses, the
-finding schema and the known-fixes table are built into the binary from copies
-under `native/` (`native/review/lenses/`, `native/session/finding.schema.json`,
-`native/cmd/code-forge-native/data/known-fixes.json`). Go tests fail when a
-copy differs from its `src/` file, so after `npm run known-fix -- add` copy
-`src/util/known-fixes.json` to the Go copy too.
-
-`parity-gates-custom` waits for all fixture files to be written before starting Go.
-This prevents random failures under load from reading a partial fixture.
+Since B690b there is no Node `src/` tree. The review lenses, the finding
+schema and the known-fixes table live only under `native/`
+(`native/review/lenses/`, `native/session/finding.schema.json`,
+`native/cmd/code-forge-native/data/known-fixes.json`) and are built into the
+binary; `TestB690bKnownFixes*` checks the known-fixes table.
 
 The error log (`~/.code-forge/logs/errors.jsonl`) is written by Go with Node's
 rules. Every Go command that reads a run's signer key registers it as a secret,

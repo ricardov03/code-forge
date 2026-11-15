@@ -61,7 +61,7 @@ func newB477Fixture(t *testing.T) (runFixture, string) {
 	b460Write(t, filepath.Join(repo, ".code-forge.yml"), b477Config)
 	b460Write(t, filepath.Join(repo, "brief.md"), "review this please, the packet line here\n")
 	here, _ := os.Getwd()
-	schemaPath := filepath.Join(here, "..", "..", "..", "src", "review", "finding.schema.json")
+	schemaPath := filepath.Join(here, "..", "..", "session", "finding.schema.json")
 	data, err := os.ReadFile(schemaPath)
 	if err != nil {
 		t.Fatal(err)

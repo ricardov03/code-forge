@@ -118,35 +118,6 @@ func TestGraphNativeTestsFindsMarkersThroughHelpers(t *testing.T) {
 	}
 }
 
-// B330 fact: test/gates/changed-scope-rebase.test.mjs runs `go build
-// ./cmd/code-forge-native` and was never selected by a native change.
-func TestGraphNativeTestsSelectsRepositoryNativeTests(t *testing.T) {
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	listed, err := List(root)
-	if err != nil {
-		t.Skipf("not a git checkout: %v", err)
-	}
-	got := map[string]bool{}
-	tests := NewGraph(root, listed).NativeTests()
-	for _, f := range tests {
-		got[f] = true
-	}
-	t.Logf("%d native tests: %v", len(tests), tests)
-	for _, f := range []string{"test/gates/changed-scope-rebase.test.mjs", "test/gates/stale-base.test.mjs", "test/docs-verbs.test.mjs", "test/bench-verbs.test.mjs", "test/cli/help-go-verbs.test.mjs", "test/helpers/go-binary.test.mjs", "test/compat/go.test.mjs"} {
-		if !got[f] {
-			t.Errorf("NativeTests misses %s", f)
-		}
-	}
-	for _, f := range []string{"test/helpers/go-binary.mjs", "test/config/cli-validate.test.mjs"} {
-		if got[f] {
-			t.Errorf("NativeTests must not hold %s", f)
-		}
-	}
-}
-
 func TestGraphInputs(t *testing.T) {
 	for p, want := range map[string]bool{
 		"native/gates/scope.go": true, "native/go.mod": true, "scripts/build-native.mjs": true, "native/": true, "native/**": true,
@@ -210,32 +181,5 @@ func TestGraphDependentsCLIEntryCoversEveryVerb(t *testing.T) {
 	})
 	if got := NewGraph(root, listed).Dependents([]string{"src/cli/help.mjs"}); len(got) != 0 {
 		t.Fatalf("no entry: Dependents(src/cli/help.mjs) = %v, want none", got)
-	}
-}
-
-// B373b fact: on main 479a82e a change to src/cli/version.mjs (loaded only by
-// the router's readdir) selected 0 tests, so the gate skipped the CLI tests.
-func TestGraphDependentsRepositoryVerbSelectsCLITests(t *testing.T) {
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	listed, err := List(root)
-	if err != nil {
-		t.Skipf("not a git checkout: %v", err)
-	}
-	g := NewGraph(root, listed)
-	for _, changed := range []string{"src/cli/help.mjs", "src/cli/version.mjs", "src/cli/doctor.mjs"} {
-		got := g.Dependents([]string{changed})
-		for _, want := range []string{"test/cli/verb-help.test.mjs", "test/docs-verbs.test.mjs"} {
-			if !Has(got, want) {
-				t.Errorf("Dependents(%s) misses %s (got %d tests)", changed, want, len(got))
-			}
-		}
-	}
-	// B648: the command reference test checks the page against the Go help
-	// table, so a native change (not a src/cli change) selects it.
-	if native := g.NativeTests(); !Has(native, "test/docs-commands.test.mjs") {
-		t.Errorf("NativeTests misses test/docs-commands.test.mjs (got %d tests)", len(native))
 	}
 }

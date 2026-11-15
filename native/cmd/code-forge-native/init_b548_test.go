@@ -3,9 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -101,37 +99,6 @@ func b548Go(t *testing.T, c b548Case) b527Side {
 	return b548Mask(side)
 }
 
-func b548Node(t *testing.T, c b548Case) b527Side {
-	t.Helper()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not on PATH")
-	}
-	if c.env["CODE_FORGE_KEY_JEV"] == "" && c.env["CODE_FORGE_KEY_BACKEND"] != "file" {
-		t.Fatal("a Node golden must not read the real keychain")
-	}
-	home, cwd, tmpRoot := b548Home(t, c)
-	cmd := exec.Command(node, append([]string{filepath.Join(b458Repo(t), "bin", "code-forge.mjs"), "init"}, c.args...)...)
-	cmd.Dir = cwd
-	cmd.Env = []string{"PATH=" + b548Bin(t, c.bins), "HOME=" + home, "TMPDIR=" + os.TempDir(), "CODE_FORGE_TMP_ROOT=" + tmpRoot, "CODE_FORGE_NATIVE=0", "CODE_FORGE_HANDOVER_LOG=0", "NO_COLOR=1"}
-	for k, v := range c.env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	code := 0
-	if err := cmd.Run(); err != nil {
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) {
-			t.Fatal(err)
-		}
-		code = exit.ExitCode()
-	}
-	side := b527Side{code: code, stdout: stdout.String(), stderr: stderr.String()}
-	b527Finish(t, &side, home, cwd)
-	return b548Mask(side)
-}
-
 func b548Write(rel, text string) func(string) {
 	return func(root string) {
 		file := filepath.Join(root, rel)
@@ -194,33 +161,6 @@ func b548Diff(t *testing.T, a, b b527Side) {
 				break
 			}
 		}
-	}
-}
-
-func TestB548InitStepsMatchNode(t *testing.T) {
-	for _, c := range b548Shapes {
-		t.Run(c.name, func(t *testing.T) {
-			goSide := b548Go(t, c.b548Case)
-			nodeSide := b548Node(t, c.b548Case)
-			if goSide != nodeSide {
-				b548Diff(t, goSide, nodeSide)
-				t.Fatalf("%q:\n go:   %#v\n node: %#v", c.args, goSide, nodeSide)
-			}
-			if goSide.code != c.code {
-				t.Fatalf("exit %d, want %d: %#v", goSide.code, c.code, goSide)
-			}
-			all := goSide.stdout + goSide.stderr + goSide.log + goSide.files
-			for _, want := range c.expect {
-				if !strings.Contains(all, want) {
-					t.Fatalf("no %q in %#v", want, goSide)
-				}
-			}
-			for _, secret := range []string{"sk-b548-env-secret"} {
-				if strings.Contains(goSide.stdout+goSide.stderr+goSide.log, secret) {
-					t.Fatalf("secret printed: %#v", goSide)
-				}
-			}
-		})
 	}
 }
 

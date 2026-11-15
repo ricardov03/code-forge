@@ -1,6 +1,10 @@
 package runstatus
 
-import "strings"
+import (
+	"slices"
+	"strings"
+	"unicode/utf16"
+)
 
 // collationOrder is the ICU root primary order of printable ASCII (the order
 // Node's localeCompare uses); the digit run of a numeric collation sorts where
@@ -83,4 +87,22 @@ func blockIDCompare(a, b string) (int, bool) {
 		}
 	}
 	return strings.Compare(a, b), true
+}
+
+// b690bBlockIDLess is the listed-block order (B690b: Go orders every id, no
+// Node fallback). Printable ASCII ids keep blockIDCompare (Node's
+// localeCompare with numeric collation, then code units); an id with any
+// other character sorts after every printable ASCII id, and two such ids
+// compare by UTF-16 code units. The order is total and transitive.
+func b690bBlockIDLess(a, b string) bool {
+	c, ok := blockIDCompare(a, b)
+	if ok {
+		return c < 0
+	}
+	_, okA := collationElements(a)
+	_, okB := collationElements(b)
+	if okA != okB {
+		return okA
+	}
+	return slices.Compare(utf16.Encode([]rune(a)), utf16.Encode([]rune(b))) < 0
 }

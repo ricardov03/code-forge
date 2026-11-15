@@ -8,11 +8,9 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -49,10 +47,7 @@ var initWizSettingHints = map[string]string{
 	"copy_untracked": "files git does not track but your tests need, e.g. .env, .env.testing",
 }
 
-const (
-	initWizCancelText = "cancelled — nothing written"
-	initWizEOFLine    = "  const code = await run(process.argv.slice(2), { configureTmpRoot: true });"
-)
+const initWizCancelText = "cancelled — nothing written"
 
 func initWizWithHint(message, hint string) string { return message + "\n" + hint }
 
@@ -98,56 +93,16 @@ func initWizTerminalLook(env initWizEnv) (colors, unicode, ok bool) {
 	return colors, os.Getenv("TERM") != "linux", env.cols >= 60 && env.rows >= 24
 }
 
-// initWizEOFFile is the launcher line Node names when the input ends at a
-// prompt (the unsettled top-level await), or "" when Go cannot name it.
+// initWizEOFFile is the text written when the input ends at a prompt (exit
+// 13). Node named its launcher's unsettled top-level await here; B690b
+// removed the Node entry, so Go names the event itself and the prompts no
+// longer depend on a file in the package.
 func initWizEOFFile() string {
-	root, ok := upgradePackageRoot()
-	if !ok {
-		return ""
-	}
-	file, err := filepath.EvalSymlinks(filepath.Join(root, "bin", "code-forge.mjs"))
-	if err != nil || !strings.HasPrefix(file, "/") || !utf8.ValidString(file) {
-		return ""
-	}
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return ""
-	}
-	lines := strings.Split(string(data), "\n")
-	found := 0
-	for i, l := range lines {
-		if strings.Contains(l, "await ") && !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t") {
-			return "" // another top-level await
-		}
-		if strings.TrimRight(l, "\r") == initWizEOFLine {
-			if found != 0 {
-				return ""
-			}
-			found = i + 1
-		}
-	}
-	if found == 0 {
-		return ""
-	}
-	return "Warning: Detected unsettled top-level await at " + initWizFileURL(file) + ":" + strconv.Itoa(found) + "\n" +
-		initWizEOFLine + "\n" + strings.Repeat(" ", strings.Index(initWizEOFLine, "await")) + "^\n\n\n\n"
+	return b690bPromptEOFText
 }
 
-// initWizFileURL is Node's url.pathToFileURL(file).href for a clean
-// absolute path: each byte outside the kept ASCII set is %XX (upper hex).
-func initWizFileURL(file string) string {
-	var b strings.Builder
-	b.WriteString("file://")
-	for i := 0; i < len(file); i++ {
-		c := file[i]
-		if c > 0x20 && c < 0x7f && !strings.ContainsRune("\"#%<>?[\\]^`{|}~", rune(c)) {
-			b.WriteByte(c)
-			continue
-		}
-		b.WriteString("%" + strings.ToUpper(strconv.FormatUint(uint64(c)>>4, 16)) + strings.ToUpper(strconv.FormatUint(uint64(c)&15, 16)))
-	}
-	return b.String()
-}
+// b690bPromptEOFText is the one line for input that ends at a prompt.
+const b690bPromptEOFText = "code-forge: the input ended before the prompt was answered; nothing more was asked\n"
 
 // initWizLevelText is levelText in steps.mjs; ok is false for a level shape
 // Go does not print like Node.
@@ -687,9 +642,6 @@ func initWizardPrecheck(st initSetupState, parsed initParsed, env initWizEnv, en
 		}
 	}
 	eof := initWizEOFFile()
-	if eof == "" {
-		return "", auto, hInitWizardEOF
-	}
 	// a dry run of the setup over every scope and method, with every harness;
 	// the doctor plan and each Jev answer once
 	first := true

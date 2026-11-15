@@ -4,7 +4,6 @@ package daemon
 
 import (
 	"encoding/json"
-	"errors"
 	"math"
 
 	"github.com/ricardov03/code-forge/native/runstatus"
@@ -34,13 +33,9 @@ func (s *server) status() object {
 // native-status rules): statusOf(record, rows, {gateDetails: false}), a throw
 // written as status-unreadable, a non-finite spend written as null by
 // JSON.stringify, then the daemon's own gate details. ok is false only for a
-// block id outside printable ASCII among two or more listed blocks, which
-// needs Node's ICU localeCompare, or a summary Go cannot encode.
+// summary Go cannot encode (B690b: every block id is ordered in Go).
 func (s *server) statusBrief() (object, bool) {
 	summary, err := runstatus.ComputeBriefErr(s.record, s.rows, s.home)
-	if errors.Is(err, runstatus.ErrUnorderedBlockID) {
-		return nil, false
-	}
 	if err != nil {
 		return failure("status-unreadable"), true
 	}

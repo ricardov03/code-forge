@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -142,31 +141,6 @@ func b527Go(t *testing.T, args []string, setup func(cwd string)) b527Side {
 	return side
 }
 
-func b527Node(t *testing.T, args []string, setup func(cwd string)) b527Side {
-	t.Helper()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not on PATH")
-	}
-	home, cwd, bin := t.TempDir(), b527Project(t, setup), b527Env(t)
-	cmd := exec.Command(node, append([]string{filepath.Join(b458Repo(t), "bin", "code-forge.mjs"), "init"}, args...)...)
-	cmd.Dir = cwd
-	cmd.Env = []string{"PATH=" + bin, "HOME=" + home, "TMPDIR=" + os.TempDir(), "CODE_FORGE_NATIVE=0", "CODE_FORGE_HANDOVER_LOG=0", "NO_COLOR=1"}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	code := 0
-	if err := cmd.Run(); err != nil {
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) {
-			t.Fatal(err)
-		}
-		code = exit.ExitCode()
-	}
-	side := b527Side{code: code, stdout: stdout.String(), stderr: stderr.String()}
-	b527Finish(t, &side, home, cwd)
-	return side
-}
-
 func b527Files(files map[string]string) func(string) {
 	return func(cwd string) {
 		for rel, text := range files {
@@ -206,26 +180,6 @@ var b527Shapes = []struct {
 	{"invalid result", []string{"--no-jev", "--level", "L1=same-model", "--level", "L2=same-model"}, b527Files(map[string]string{".code-forge.yml": "version: 1\n"})},
 }
 
-func TestB527InitSetupMatchesNode(t *testing.T) {
-	for _, c := range b527Shapes {
-		t.Run(c.name, func(t *testing.T) {
-			args := append([]string{"--no-interaction", "--skip-doctor"}, c.args...)
-			goSide := b527Go(t, args, c.setup)
-			nodeSide := b527Node(t, args, c.setup)
-			if goSide != nodeSide {
-				t.Fatalf("%q:\n go:   %#v\n node: %#v", args, goSide, nodeSide)
-			}
-			want := map[string]int{"invalid result": 1, "multimodel same provider": 2, "multimodel judge pinned": 2, "multimodel without second": 2}[c.name]
-			if goSide.code != want || goSide.log == "" {
-				t.Fatalf("exit %d, want %d: %#v", goSide.code, want, goSide)
-			}
-			if strings.HasPrefix(c.name, "harness") && !strings.Contains(goSide.stdout, `"harnesses":["`) {
-				t.Fatalf("no harness linked: %s", goSide.stdout)
-			}
-		})
-	}
-}
-
 // A second run on the config the first run wrote: unchanged, not written.
 func TestB527InitRerunUnchanged(t *testing.T) {
 	args := []string{"--no-interaction", "--skip-doctor", "--no-jev"}
@@ -250,10 +204,6 @@ func TestB527InitRerunUnchanged(t *testing.T) {
 		_ = os.WriteFile(filepath.Join(cwd, ".code-forge.yml"), append([]byte("# reviewed by the team\n"), data...), 0o600)
 	}
 	goSide := b527Go(t, args, setup)
-	nodeSide := b527Node(t, args, setup)
-	if goSide != nodeSide {
-		t.Fatalf("go:   %#v\n node: %#v", goSide, nodeSide)
-	}
 	if !strings.Contains(goSide.log, ".code-forge.yml: unchanged") || !strings.Contains(goSide.files, "# reviewed by the team") {
 		t.Fatalf("rerun: %#v", goSide)
 	}

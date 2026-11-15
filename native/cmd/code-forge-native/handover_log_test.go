@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
 	"time"
 )
@@ -93,14 +92,8 @@ func TestHandoverCommandVocabulary(t *testing.T) {
 	for verb := range routes {
 		verbs[verb] = true
 	}
-	entries, err := os.ReadDir("../../../src/cli")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".mjs") {
-			verbs[strings.TrimSuffix(entry.Name(), ".mjs")] = true
-		}
+	for _, verb := range b690bNodeVerbs {
+		verbs[verb] = true
 	}
 	for verb := range verbs {
 		if got, sub := handoverCommand([]string{verb}); got != verb || sub != "" {

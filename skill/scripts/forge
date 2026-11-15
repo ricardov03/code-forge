@@ -1,20 +1,19 @@
 #!/bin/sh
 # code-forge skill shim: `forge <verb> [args…]` runs the package's `bin/code-forge` sh launcher,
 # which starts the Go engine (native/bin/<platform>-<arch>/code-forge-native); with no usable
-# binary it stops with exit 69 and names the fix (`sh <package>/scripts/install.sh`, B569), and
-# CODE_FORGE_NATIVE=0 runs the Node router `bin/code-forge.mjs`.
+# binary it stops with exit 69 and names the fix (`sh <package>/scripts/install.sh`, B569).
+# The shim never runs Node (B690b).
 #
 # Resolution order (first hit wins):
 #   1. $CODE_FORGE_BIN, when set and a file (a checkout or a pinned version): the sh launcher when
 #      it names `bin/code-forge` or names `bin/code-forge.mjs` with a `code-forge` launcher next to
-#      it; any other file runs with `node` (old setups);
+#      it; an old Node entry with no launcher next to it stops with exit 127 and names the fix;
+#      any other file runs directly;
 #   2. <this skill dir>/../../bin/code-forge — the skill lives inside the package, and a symlinked
-#      install (`code-forge init`, the default) resolves back into it; an old package with only
-#      `bin/code-forge.mjs` there runs that with `node`;
+#      install (`code-forge init`, the default) resolves back into it;
 #   3. `code-forge` on PATH (a global npm install);
 #   4. `npx @codedology/code-forge@<version>` pinned to the version this skill was built with (a
-#      copied install with no package next to it); `test/skill/shim.test.mjs` asserts the pin
-#      equals package.json's version.
+#      copied install with no package next to it).
 # The shim holds no logic of its own: every verb, flag and message is the CLI's.
 PINNED_VERSION="0.24.0"
 set -eu
@@ -42,18 +41,17 @@ if [ -n "${CODE_FORGE_BIN:-}" ] && [ -f "$CODE_FORGE_BIN" ]; then
       if [ -f "${bin%.mjs}" ]; then
         exec /bin/sh "${bin%.mjs}" "$@"
       fi
+      echo "forge: CODE_FORGE_BIN=$CODE_FORGE_BIN is the old Node entry and code-forge no longer runs Node; set CODE_FORGE_BIN=<path>/bin/code-forge or install code-forge: npm install -g @codedology/code-forge@$PINNED_VERSION" >&2
+      exit 127
       ;;
     */code-forge)
       exec /bin/sh "$bin" "$@"
       ;;
   esac
-  exec node "$CODE_FORGE_BIN" "$@"
+  exec "$bin" "$@"
 fi
 if [ -f "$bindir/code-forge" ]; then
   exec /bin/sh "$bindir/code-forge" "$@"
-fi
-if [ -f "$bindir/code-forge.mjs" ]; then
-  exec node "$bindir/code-forge.mjs" "$@"
 fi
 if on_path=$(command -v code-forge 2>/dev/null); then
   exec "$on_path" "$@"

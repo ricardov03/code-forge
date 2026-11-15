@@ -17,7 +17,6 @@ import (
 
 func init() {
 	keysSecurityBin = "/nonexistent-b610/security"
-	kcPackageRoot = func() string { return "" }
 	// B707: the default is macOS with no usable `security` on every host,
 	// so the keychain hand-overs the tests expect do not depend on the OS
 	// the tests run on (since B679 a Linux host without @napi-rs/keyring's
@@ -55,10 +54,9 @@ esac
 
 type b610Keychain struct{ dir string }
 
-// b610Fake makes macOS with the fake `security`; with napi the package root
-// holds @napi-rs/keyring and its macOS binding, so the backend is named
-// "keychain" as in Node, else "security-cli".
-func b610Fake(t *testing.T, napi bool) b610Keychain {
+// b610Fake makes macOS with the fake `security`; the backend is named
+// "keychain" (B690b: no @napi-rs/keyring lookup any more).
+func b610Fake(t *testing.T) b610Keychain {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "items"), 0o700); err != nil {
@@ -67,18 +65,9 @@ func b610Fake(t *testing.T, napi bool) b610Keychain {
 	if err := os.WriteFile(filepath.Join(dir, "security"), []byte(b610Script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	root := ""
-	if napi {
-		root = t.TempDir()
-		pkg := filepath.Join(root, "node_modules", "@napi-rs", "keyring")
-		b460Write(t, filepath.Join(pkg, "package.json"), `{"name":"@napi-rs/keyring","main":"index.js"}`)
-		b460Write(t, filepath.Join(pkg, "index.js"), "")
-		b460Write(t, filepath.Join(pkg, "keyring.darwin-universal.node"), "")
-	}
-	savedOS, savedBin, savedRoot := keysGOOS, keysSecurityBin, kcPackageRoot
+	savedOS, savedBin := keysGOOS, keysSecurityBin
 	keysGOOS, keysSecurityBin = "darwin", filepath.Join(dir, "security")
-	kcPackageRoot = func() string { return root }
-	t.Cleanup(func() { keysGOOS, keysSecurityBin, kcPackageRoot = savedOS, savedBin, savedRoot })
+	t.Cleanup(func() { keysGOOS, keysSecurityBin = savedOS, savedBin })
 	return b610Keychain{dir}
 }
 
@@ -120,18 +109,17 @@ func TestB610DoctorReadsKeychain(t *testing.T) {
 	// nothing stored (the common case): the key is not resolved
 	b474Project(t, cfg, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	kc := b610Fake(t, true)
+	kc := b610Fake(t)
 	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0, "OK   config: valid\n" + b474NoLinks + b474NoKey, b474Summary(1, 2, 0)}})
 	if got := kc.calls(); got != "help\n"+b610Find {
 		t.Fatalf("security calls = %q", got)
 	}
 
-	// a keychain item, named as Node names the backend
-	for _, napi := range []bool{true, false} {
-		name := map[bool]string{true: "keychain", false: "security-cli"}[napi]
+	// a keychain item; B690b: the backend is always named "keychain"
+	for _, name := range []string{"keychain"} {
 		b474Project(t, cfg, b483Now)
 		t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-		kc = b610Fake(t, napi)
+		kc = b610Fake(t)
 		kc.put(t, "jev", "sk-b610-plain")
 		checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0, b483Rows("OK   keys: jev key from " + name + ", no expiry"), b474Summary(2, 1, 0)}})
 	}
@@ -139,7 +127,7 @@ func TestB610DoctorReadsKeychain(t *testing.T) {
 	// the keychain misses: the file store answers
 	home, _ := b474Project(t, cfg, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	b610Fake(t, true)
+	b610Fake(t)
 	writeHomeFile(t, home, ".code-forge/store/jev.key", "sk-b610-file\n")
 	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0, b483Rows("OK   keys: jev key from file, no expiry"), b474Summary(2, 1, 0)}})
 }
@@ -150,7 +138,7 @@ func TestB610DoctorReadsKeychain(t *testing.T) {
 func TestB610DoctorKeychainRefresh(t *testing.T) {
 	home, _ := b474Project(t, "provider: anthropic\n"+b474Levels, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	kc := b610Fake(t, true)
+	kc := b610Fake(t)
 	kc.put(t, "jev", `{"v":"k1","exp":1000}`)
 	writeHomeFile(t, home, ".code-forge/store/jev.key", "sk-b610-file\n")
 	writeHomeFile(t, home, ".code-forge/store/index.json", `{"jev":{"source":"op","backend":"keychain","exp":1000},"other":{"source":"user","exp":null}}`)
@@ -167,15 +155,15 @@ func TestB610DoctorKeychainRefresh(t *testing.T) {
 
 	home, _ = b474Project(t, "provider: anthropic\nkeys: {cache_hours: 3}\n"+b474Levels, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	kc = b610Fake(t, false)
+	kc = b610Fake(t)
 	kc.put(t, "jev", `{"v":"long-value","exp":99999999999999}`)
 	writeHomeFile(t, home, ".code-forge/store/index.json", `{"jev":{"source":"op","exp":99999999999999,"backend":"keychain","ref":"op://a/b/c"}}`)
 	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0,
-		b483Rows("OK   keys: jev key from security-cli, expires 1970-01-01T03:16:40.000Z (cache 3 h)"), b474Summary(2, 1, 0)}})
+		b483Rows("OK   keys: jev key from keychain, expires 1970-01-01T03:16:40.000Z (cache 3 h)"), b474Summary(2, 1, 0)}})
 	if got := kc.item("jev"); got != `{"v":"long-value","exp":11800000}` {
 		t.Fatalf("item = %q", got)
 	}
-	want := "{\n  \"jev\": {\n    \"source\": \"op\",\n    \"exp\": 11800000,\n    \"backend\": \"security-cli\",\n    \"ref\": \"op://a/b/c\"\n  }\n}"
+	want := "{\n  \"jev\": {\n    \"source\": \"op\",\n    \"exp\": 11800000,\n    \"backend\": \"keychain\",\n    \"ref\": \"op://a/b/c\"\n  }\n}"
 	if got := b483File(t, home, "store/index.json"); got != want {
 		t.Fatalf("index = %q", got)
 	}
@@ -186,7 +174,7 @@ func TestB610DoctorKeychainRefresh(t *testing.T) {
 func TestB610DoctorCachesOpInKeychain(t *testing.T) {
 	home, _ := b474Project(t, b483OpCfg, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	kc := b610Fake(t, true)
+	kc := b610Fake(t)
 	b483FakeOp(t, `[ "$1 $2" = "read op://vault/item/field" ] || exit 9; printf 'sk-fake-value\n'`)
 	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0, b483Rows("OK   keys: jev key from op, expires " + b483Expires), b474Summary(2, 1, 0)}})
 	if got := kc.item("jev"); got != `{"v":"sk-fake-value","exp":29800000}` {
@@ -208,7 +196,7 @@ func TestB610DoctorCachesOpInKeychain(t *testing.T) {
 func TestB610DoctorKeychainHandOvers(t *testing.T) {
 	b474Project(t, "provider: anthropic\n"+b474Levels, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	kc := b610Fake(t, true)
+	kc := b610Fake(t)
 	kc.fail(t)
 	expectHandover(t, "doctor-key-store", "doctor", "--quick")
 	// B679: Linux runs in Go (b679_secretservice_test.go)
@@ -219,7 +207,7 @@ func TestB610DoctorKeychainHandOvers(t *testing.T) {
 func TestB610KeysTestAndRemove(t *testing.T) {
 	dir, project := b456KeysHome(t, `{"jev":{"source":"user","backend":"keychain","exp":null}}`, nil)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	kc := b610Fake(t, true)
+	kc := b610Fake(t)
 	kc.put(t, "jev", "sk-b610-plain")
 	code, stdout, stderr := b456Keys(t, project, "test", "jev")
 	if code != 0 || stdout != "jev: ok source=keychain expires=never\n" || stderr != "" {
@@ -271,11 +259,10 @@ func TestB610KeysTestAndRemove(t *testing.T) {
 // Non-interactive init finds the Jev key in the keychain and records its
 // source; nothing goes to Node.
 func TestB610InitJevFromKeychain(t *testing.T) {
-	for _, napi := range []bool{true, false} {
-		name := map[bool]string{true: "keychain", false: "security-cli"}[napi]
+	for _, name := range []string{"keychain"} {
 		var kc b610Keychain
 		side := b548Go(t, b548Case{name: "jev from " + name, args: []string{"--no-interaction", "--skip-doctor"}, home: func(string) {
-			kc = b610Fake(t, napi)
+			kc = b610Fake(t)
 			kc.put(t, "jev", "sk-b610-plain")
 		}})
 		all := side.stdout + side.stderr + side.log + side.files
@@ -290,7 +277,7 @@ func TestB610JevAskKeychainKey(t *testing.T) {
 	f, fake := newB550Jev(t, "version: 1\n", 200, b550JevOK, false)
 	t.Setenv("CODE_FORGE_KEY_JEV", "")
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	kc := b610Fake(t, true)
+	kc := b610Fake(t)
 	kc.put(t, "jev", "sk-b610-kc")
 	code, _, errText := b460Call(t, "jev", "ask", "lane", "--state", "state.json")
 	if code != 0 || errText != "" || len(fake.calls) != 1 || !strings.HasPrefix(fake.calls[0], "Bearer sk-b610-kc ") {
@@ -304,7 +291,7 @@ func TestB610WorkerKeychainKey(t *testing.T) {
 	f := newB489Fix(t)
 	f.withConfig(t, strings.Repeat("0", 40), `{"version":1}`)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	kc := b610Fake(t, true)
+	kc := b610Fake(t)
 	kc.put(t, "jev", "sk-b610-kc")
 	// the worker's own existence probe must not reach the real keychain
 	oldProbe := workerJevProbe
