@@ -93,14 +93,13 @@ func lrTestEnv(t *testing.T, message string, noFakes bool) lrTestCase {
 	b500Write(t, c.errorLog(), text.String())
 	b500Write(t, c.pkg, `{"name":"@codedology/code-forge","version":"0.22.1","repository":{"type":"git","url":"git+https://github.com/ricardov03/code-forge.git"},"bugs":{"url":"https://github.com/ricardov03/code-forge/issues"}}`)
 
-	oldPkg, oldNow, oldHost, oldFixes, oldNode := lrPackageJSON, lrNow, lrHost, lrFixesEmpty, reviewWaitNodeVersion
+	oldPkg, oldNow, oldHost, oldFixes := lrPackageJSON, lrNow, lrHost, lrFixesEmpty
 	lrPackageJSON = func() string { return c.pkg }
 	lrNow = func() time.Time { return time.Date(2026, 11, 12, 16, 0, 0, 0, time.UTC) }
 	lrHost = func() (string, string, string) { return "darwin", "25.2.0", "arm64" }
 	lrFixesEmpty = func() bool { return true }
-	reviewWaitNodeVersion = "v24.22.1"
 	t.Cleanup(func() {
-		lrPackageJSON, lrNow, lrHost, lrFixesEmpty, reviewWaitNodeVersion = oldPkg, oldNow, oldHost, oldFixes, oldNode
+		lrPackageJSON, lrNow, lrHost, lrFixesEmpty = oldPkg, oldNow, oldHost, oldFixes
 	})
 	asked := ""
 	b500Terminal(t, false, false, humanask.Cancelled, &asked)
@@ -307,7 +306,7 @@ func TestB554LogsReportCommentsOnDuplicate(t *testing.T) {
 	t.Setenv("GHLIST", `[{"number":7,"url":"https://github.com/x/y/issues/7","state":"OPEN"}]`)
 	code, out, errText := b500Run(t, "logs", "report", "--no-ai", "--yes")
 	lrTestCheck(t, "duplicate", code, out, errText, 0, c.golden(t, "dup.stdout"), "")
-	comment := "This error happened again.\n\n- code-forge: 0.22.1\n- latest on npm: 0.22.1\n- Node: v24.22.1\n- OS: darwin 25.2.0 arm64\n- times in the local log: 2\n\n<!-- code-forge-fp: 0123456789ab -->\n"
+	comment := "This error happened again.\n\n- code-forge: 0.22.1\n- latest on npm: 0.22.1\n- Node: none\n- OS: darwin 25.2.0 arm64\n- times in the local log: 2\n\n<!-- code-forge-fp: 0123456789ab -->\n"
 	log := c.fakeLog(t)
 	if !strings.Contains(log, "gh issue comment 7 --repo ricardov03/code-forge --body-file "+c.tmpRoot+"/proc-") || !strings.HasSuffix(log, comment) || strings.Contains(log, "issue create") {
 		t.Errorf("duplicate children:\n%s", log)

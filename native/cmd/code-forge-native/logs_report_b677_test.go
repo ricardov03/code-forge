@@ -140,7 +140,10 @@ func lrTestNodeCases(t *testing.T) []lrNodeCase {
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 	for scanner.Scan() {
 		var tc lrNodeCase
-		if err := json.Unmarshal(scanner.Bytes(), &tc); err != nil {
+		// B690d: Go never starts Node, so its report names Node "none"
+		// where Node's runLogs printed its own process.version.
+		line := strings.ReplaceAll(scanner.Text(), "- Node: v24.22.1", "- Node: none")
+		if err := json.Unmarshal([]byte(line), &tc); err != nil {
 			t.Fatal(err)
 		}
 		cases = append(cases, tc)

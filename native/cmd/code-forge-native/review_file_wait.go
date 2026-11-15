@@ -744,10 +744,6 @@ func reviewWaitUsageError(args []string, message string) int {
 	return 2
 }
 
-// The release builder supplies the Node compatibility runtime version without
-// launching Node during a native wait. Plain go builds have no Node metadata.
-var reviewWaitNodeVersion = "unknown"
-
 var reviewWaitLogFlag = regexp.MustCompile(`^--([A-Za-z][A-Za-z0-9-]{0,39})(=|$)`)
 var reviewWaitLogShort = regexp.MustCompile(`^-([A-Za-z])`)
 
@@ -810,7 +806,7 @@ func reviewWaitFailure(args []string, code int, message any, before []any) {
 	}
 	entry := ledger.Object{
 		{Key: "ts", Value: time.Now().UTC().Format("2006-01-02T15:04:05.000Z")},
-		{Key: "version", Value: version}, {Key: "node", Value: nodeRunVersion()},
+		{Key: "version", Value: version}, {Key: "node", Value: errorLogNode},
 		{Key: "platform", Value: runtime.GOOS}, {Key: "arch", Value: arch},
 		{Key: "verb", Value: verb}, {Key: "sub", Value: nil}, {Key: "flags", Value: flags},
 		{Key: "exit", Value: code}, {Key: "kind", Value: kind}, {Key: "message", Value: message},

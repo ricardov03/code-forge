@@ -13,10 +13,11 @@ import (
 )
 
 // contextFixture is a HOME with one run whose workspace is a git repository,
-// and a fake install (bin/code-forge.mjs, package.json, a node file).
+// and a fake install (the bin/code-forge launcher, package.json) plus a fake
+// node that logs each run to nodeMarker (B690d: it must never run).
 type contextFixture struct {
-	t                          *testing.T
-	home, workspace, tmp, node string
+	t                                      *testing.T
+	home, workspace, tmp, node, nodeMarker string
 }
 
 func newContextFixture(t *testing.T, blocks map[string]any, config string) *contextFixture {
@@ -43,10 +44,11 @@ func newContextFixture(t *testing.T, blocks map[string]any, config string) *cont
 	record, _ := json.Marshal(map[string]any{"run_id": "r-ctx", "workspace": f.workspace, "project": "ctx", "status": "running", "blocks": blocks})
 	write(filepath.Join(f.home, ".code-forge", "runs", "r-ctx.json"), string(record), 0o600)
 	write(filepath.Join(f.home, ".code-forge", "runs", "r-ctx.key"), strings.Repeat("k", 32), 0o600)
-	write(filepath.Join(base, "pkg", "bin", "code-forge.mjs"), "", 0o600)
+	write(filepath.Join(base, "pkg", "bin", "code-forge"), "#!/bin/sh\n", 0o700)
 	write(filepath.Join(base, "pkg", "package.json"), `{"version":"9.8.7"}`, 0o600)
 	f.node = filepath.Join(base, "nodebin", "node")
-	write(f.node, "\x7fELF", 0o700)
+	f.nodeMarker = filepath.Join(base, "node-marker")
+	write(f.node, "#!/bin/sh\necho \"$@\" >> '"+f.nodeMarker+"'\n", 0o700)
 	executable := filepath.Join(base, "pkg", "native", "bin", "x", "code-forge-native")
 	write(executable, "", 0o700)
 	previous := contextExecutable
@@ -166,7 +168,7 @@ func TestB452ContextPackMakesMissingRunRoot(t *testing.T) {
 	if code != 0 || errText != "" {
 		t.Fatalf("code=%d stderr=%q", code, errText)
 	}
-	for _, want := range []string{"level: L1\n", "- a.go\n- 7\n", "run code-forge verbs with exactly: " + f.node, "version: 9.8.7\n", "test: go test\n", "- works\n  tests: T1, \n", "rule \ufffd one \ufffd\ufffd two\n"} {
+	for _, want := range []string{"level: L1\n", "- a.go\n- 7\n", "run code-forge verbs with exactly: " + filepath.Join(filepath.Dir(f.home), "pkg", "bin", "code-forge") + "\n", "version: 9.8.7\n", "test: go test\n", "- works\n  tests: T1, \n", "rule \ufffd one \ufffd\ufffd two\n"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("pack lacks %q:\n%s", want, out)
 		}
@@ -288,15 +290,17 @@ func TestB452ContextFormerHandoverRefusals(t *testing.T) {
 	}
 	// B572: no node anywhere is no longer a refusal; context_b572_test.go
 	// checks the pack that names the install's bin/code-forge instead.
-	// B469: a CODE_FORGE_NODE that names no executable (the /nonexistent
-	// speed-proof setting) falls back to node on PATH, as before B452.
-	t.Run("an unresolvable CODE_FORGE_NODE uses node on PATH", func(t *testing.T) {
+	// B690d: a node on PATH (B469 named it) is neither named nor run.
+	t.Run("node on PATH is not named", func(t *testing.T) {
 		f := newContextFixture(t, map[string]any{"B1": map[string]any{}}, "version: 1\n")
 		t.Setenv("CODE_FORGE_NODE", "/nonexistent-b452-node")
 		t.Setenv("PATH", pathWith(t, f.node))
 		code, out, errText := runCaptured(t, "context", "pack", "--run", "r-ctx", "--block", "B1")
-		if code != 0 || errText != "" || !strings.Contains(out, f.node) {
-			t.Fatalf("code=%d stdout=%q stderr=%q, want a pack naming %s", code, out, errText, f.node)
+		if code != 0 || errText != "" || strings.Contains(out, f.node) {
+			t.Fatalf("code=%d stdout=%q stderr=%q, want a pack not naming %s", code, out, errText, f.node)
+		}
+		if _, err := os.Stat(f.nodeMarker); !os.IsNotExist(err) {
+			t.Fatalf("node ran: %v", err)
 		}
 	})
 }

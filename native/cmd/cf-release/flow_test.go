@@ -497,7 +497,7 @@ func TestReleaseSiteWaitsForNpmThenDeploysOnce(t *testing.T) {
 	if err != nil || strings.TrimSpace(string(site)) != "2" {
 		t.Fatalf("polls file %q (%v), want 2", site, err)
 	}
-	if data := f.git(f.site, "show", "release-site/v0.21.0:src/data/site-data.json"); !strings.Contains(data, `"tag":"v0.21.0"`) {
+	if data := f.git(f.site, "show", "release-site/v0.21.0:src/data/site-data.json"); !strings.Contains(data, `"version": "0.21.0"`) || !strings.Contains(data, `"name": "sample"`) {
 		t.Fatalf("release branch data %q does not come from the one generation", data)
 	}
 }

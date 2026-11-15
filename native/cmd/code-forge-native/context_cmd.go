@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -203,8 +202,10 @@ func contextPack(args []string, stderr io.Writer) int {
 		}
 		return failure(err)
 	}
-	// The header names this install's node and launcher, as Node's
-	// process.execPath and import.meta.url do; Go never starts that node.
+	// B690d: the header names this install's own launcher bin/code-forge
+	// (npm's "bin" entry, which runs this Go binary) and the Go binary's
+	// version. It reads no Node entry and looks up no node: Go serves every
+	// verb, so the command needs no node (B572 named node + bin/code-forge.mjs).
 	executable, err := contextExecutable()
 	if err == nil {
 		executable, err = filepath.EvalSymlinks(executable)
@@ -212,33 +213,23 @@ func contextPack(args []string, stderr io.Writer) int {
 	if err != nil {
 		return refuse("this install's executable cannot be found (" + err.Error() + ")")
 	}
-	bin, err := filepath.EvalSymlinks(filepath.Join(pkgroot.FromExecutable(executable), "bin", "code-forge.mjs"))
+	bin, err := filepath.EvalSymlinks(filepath.Join(pkgroot.FromExecutable(executable), "bin", "code-forge"))
 	if err != nil {
-		return refuse("this install's bin/code-forge.mjs cannot be found (" + contextpack.Errno(err) + "); reinstall code-forge")
+		return refuse("this install's bin/code-forge cannot be found (" + contextpack.Errno(err) + "); reinstall code-forge")
 	}
-	// B469: a CODE_FORGE_NODE that resolves names the header's node; one that
-	// does not (e.g. /nonexistent) is skipped for node on PATH, as before B452.
-	// Go never starts it, and Node's own pack always has an execPath.
-	// B572: the header line is the command a coder runs code-forge verbs
-	// with (Node's argv of process.execPath and bin/code-forge.mjs). With no
-	// node at all, that command cannot work, so the pack names this install's
-	// own launcher bin/code-forge (npm's "bin" entry; it runs this Go binary
-	// and needs no node for a verb Go serves) instead of refusing.
-	node, err := contextNode()
-	if err != nil {
-		node = ""
-		if bin, err = filepath.EvalSymlinks(filepath.Join(filepath.Dir(bin), "code-forge")); err != nil {
-			return refuse("this install's bin/code-forge cannot be found (" + contextpack.Errno(err) + "); reinstall code-forge")
+	packVersion := version
+	if packVersion == "" || packVersion == "dev" {
+		// A plain go build carries no release version: name the install's.
+		metadata, err := os.ReadFile(filepath.Join(filepath.Dir(bin), "..", "package.json"))
+		var info struct {
+			Version string `json:"version"`
 		}
+		if err != nil || json.Unmarshal(metadata, &info) != nil || info.Version == "" {
+			return refuse("this install's package.json has no version; reinstall code-forge")
+		}
+		packVersion = info.Version
 	}
-	metadata, err := os.ReadFile(filepath.Join(filepath.Dir(bin), "..", "package.json"))
-	var info struct {
-		Version string `json:"version"`
-	}
-	if err != nil || json.Unmarshal(metadata, &info) != nil || info.Version == "" {
-		return refuse("this install's package.json has no version; reinstall code-forge")
-	}
-	result, err := contextpack.Assemble(root, run, id, entry, live, node, bin, info.Version)
+	result, err := contextpack.Assemble(root, run, id, entry, live, "", bin, packVersion)
 	if err != nil {
 		return failure(err)
 	}
@@ -471,21 +462,4 @@ func contextWriteOwner(dir string) error {
 		_ = os.Remove(temp)
 	}
 	return err
-}
-
-// contextNode resolves the node named in the pack header: CODE_FORGE_NODE
-// when it resolves, else node on PATH (B469).
-func contextNode() (string, error) {
-	if override := os.Getenv("CODE_FORGE_NODE"); override != "" {
-		if p, err := exec.LookPath(override); err == nil {
-			if p, err = filepath.EvalSymlinks(p); err == nil {
-				return p, nil
-			}
-		}
-	}
-	p, err := exec.LookPath("node")
-	if err != nil {
-		return "", err
-	}
-	return filepath.EvalSymlinks(p)
 }
