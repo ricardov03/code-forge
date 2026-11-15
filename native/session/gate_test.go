@@ -86,25 +86,33 @@ func TestBudgetGateSpendUnreadable(t *testing.T) {
 	}
 }
 
-// The 80 % warning needs the error log: with no Warn seam it is a case only
-// Node serves, found before anything is written.
-func TestBudgetGateWarningWithoutWarnSeamIsUnsupported(t *testing.T) {
-	o, stderr, written := gateSetup(t, 1)
-	deps := gateDeps(stderr, []ledger.Row{map[string]any{"event": "session", "run": "r1", "usd": 0.85}})
-	write := func(row ledger.Object) error { *written = append(*written, row); return nil }
-	_, _, err := budgetGate(o, deps, write, step{provider: "anthropic", model: "claude-x"})
-	if !IsUnsupported(err) || len(*written) != 0 || stderr.Len() != 0 {
-		t.Fatalf("err = %v, rows %v, stderr %q", err, *written, stderr.String())
-	}
-	var warned []string
-	deps.Warn = func(kind, message string) { warned = append(warned, kind+": "+message) }
-	if refused, release, err := budgetGate(o, deps, write, step{provider: "anthropic", model: "claude-x"}); err != nil || refused != nil {
-		t.Fatalf("gate = %v, %v", refused, err)
-	} else {
+// The 80 % warning runs in Go (B689: every run-pinned caller sets Warn, so
+// the old "no Warn seam" hand-over was dead): the budget.warning row, the
+// stderr line and one error-log warning; a nil Warn writes the same row and
+// line with no error-log call.
+func TestBudgetGateWarningRunsInGo(t *testing.T) {
+	for _, withWarn := range []bool{true, false} {
+		o, stderr, written := gateSetup(t, 1)
+		deps := gateDeps(stderr, []ledger.Row{map[string]any{"event": "session", "run": "r1", "usd": 0.85}})
+		write := func(row ledger.Object) error { *written = append(*written, row); return nil }
+		var warned []string
+		if withWarn {
+			deps.Warn = func(kind, message string) { warned = append(warned, kind+": "+message) }
+		}
+		refused, release, err := budgetGate(o, deps, write, step{provider: "anthropic", model: "claude-x"})
+		if err != nil || refused != nil {
+			t.Fatalf("warn=%v: gate = %v, %v", withWarn, refused, err)
+		}
 		release()
-	}
-	if len(warned) != 1 || warned[0] != BudgetWarningKind+": "+BudgetWarningMessage || len(*written) != 1 || (*written)[0].Get("event") != "budget.warning" {
-		t.Fatalf("warned %v rows %v", warned, *written)
+		if len(*written) != 1 || (*written)[0].Get("event") != "budget.warning" {
+			t.Fatalf("warn=%v: rows %v", withWarn, *written)
+		}
+		if stderr.String() != "code-forge: budget.usd: spent 0.85 of 1.00 (≥ 80%); new sessions stop at 100%\n" {
+			t.Fatalf("warn=%v: stderr %q", withWarn, stderr.String())
+		}
+		if withWarn && (len(warned) != 1 || warned[0] != BudgetWarningKind+": "+BudgetWarningMessage) || !withWarn && len(warned) != 0 {
+			t.Fatalf("warn=%v: warned %v", withWarn, warned)
+		}
 	}
 }
 

@@ -150,10 +150,6 @@ func (w *TicketRunner) ansDryPass(t ledger.Object, rec ledger.Object, cfg map[st
 	if len(w.Key) == 0 {
 		return nil, nil, unsupported("an answers ticket with no run key")
 	}
-	budget, _ := obj(cfg["budget"])
-	if usd, ok := budget["usd"].(float64); ok && usd > 0 && !math.IsInf(usd, 0) && w.sessionDeps().Warn == nil {
-		return nil, nil, unsupported("budget.usd with no error-log warning seam")
-	}
 	e := blockEntryOf(rec, p.block, p.file)
 	// both passed assertRowPath: posix.normalize leaves them as they are
 	if p.byFile == p.file {

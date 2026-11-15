@@ -9,7 +9,6 @@ package worker
 
 import (
 	"encoding/hex"
-	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -268,10 +267,6 @@ func (w *TicketRunner) planEngineDry(t ledger.Object, rec ledger.Object, cfg map
 	// B545: a light block's batch round (lightRound), re-decided under its
 	// lock in the run phase; the ordinary round is planned too
 	if e.kind == "light" && len(w.Key) > 0 {
-		budget, _ := obj(cfg["budget"])
-		if usd, ok := budget["usd"].(float64); ok && usd > 0 && !math.IsInf(usd, 0) && w.sessionDeps().Warn == nil {
-			return nil, nil, unsupported("budget.usd with no error-log warning seam")
-		}
 		light := &lightPlan{t: t, block: block, file: file, hash: hash, id: id, e: e, cfg: cfg, contentRoot: contentRoot, digest: digest, facts: facts,
 			workDir: filepath.Join(w.RunRootDir, "packets", id), sopts: w.sessionOpts(cfg, block, timeoutS), sdeps: w.sessionDeps()}
 		ordinary, err := w.lightDry(light)
@@ -308,10 +303,6 @@ func (w *TicketRunner) planOrdinary(t ledger.Object, cfg map[string]any, content
 		if err := review.CheckJev(cfg); err != nil {
 			return nil, nil, unsupported(err.Error())
 		}
-	}
-	budget, _ := obj(cfg["budget"])
-	if usd, ok := budget["usd"].(float64); ok && usd > 0 && !math.IsInf(usd, 0) && w.sessionDeps().Warn == nil {
-		return nil, nil, unsupported("budget.usd with no error-log warning seam")
 	}
 	peers, changed, ownedFiles, tests, err := w.fileContext(e, contentRoot, file, cfg)
 	if err != nil {
