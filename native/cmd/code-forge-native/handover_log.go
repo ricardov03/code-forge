@@ -194,8 +194,8 @@ type handoverCount struct {
 
 func runHandoverLogs(args []string) int {
 	usage := func(message string) int {
-		fmt.Fprintln(os.Stderr, "logs handovers: "+message)
-		fmt.Fprintln(os.Stderr, "usage: code-forge logs handovers [--json] [--since <ISO date>]")
+		fmt.Fprintln(safeStderr, "logs handovers: "+message)
+		fmt.Fprintln(safeStderr, "usage: code-forge logs handovers [--json] [--since <ISO date>]")
 		return 2
 	}
 	asJSON, seenSince := false, false
@@ -232,7 +232,7 @@ func runHandoverLogs(args []string) int {
 	total := 0
 	data, err := os.ReadFile(handoverLogPath())
 	if err != nil && !os.IsNotExist(err) {
-		fmt.Fprintln(os.Stderr, "logs handovers: cannot read hand-over log")
+		fmt.Fprintln(safeStderr, "logs handovers: cannot read hand-over log")
 		return 1
 	}
 	for _, line := range bytes.Split(data, []byte("\n")) {
@@ -275,18 +275,18 @@ func runHandoverLogs(args []string) int {
 		return a.Reason < b.Reason
 	})
 	if asJSON {
-		_ = json.NewEncoder(os.Stdout).Encode(struct {
+		_ = json.NewEncoder(safeStdout).Encode(struct {
 			Total int             `json:"total"`
 			Rows  []handoverCount `json:"rows"`
 		}{total, rows})
 	} else if total == 0 {
-		fmt.Fprintln(os.Stdout, "no hand-overs recorded")
+		fmt.Fprintln(safeStdout, "no hand-overs recorded")
 	} else {
-		fmt.Fprintln(os.Stdout, "count  verb  sub  reason")
+		fmt.Fprintln(safeStdout, "count  verb  sub  reason")
 		for _, row := range rows {
-			fmt.Fprintf(os.Stdout, "%d  %s  %s  %s\n", row.Count, row.Verb, row.Sub, row.Reason)
+			fmt.Fprintf(safeStdout, "%d  %s  %s  %s\n", row.Count, row.Verb, row.Sub, row.Reason)
 		}
-		fmt.Fprintf(os.Stdout, "total  %d\n", total)
+		fmt.Fprintf(safeStdout, "total  %d\n", total)
 	}
 	return 0
 }

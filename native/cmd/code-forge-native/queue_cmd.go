@@ -28,7 +28,7 @@ const queueUsage = "usage: code-forge queue [status] [--json]\n" +
 
 func runQueue(args []string) int {
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprint(os.Stdout, queueUsage)
+		fmt.Fprint(safeStdout, queueUsage)
 		return 0
 	}
 	if len(args) > 0 && args[0] == "run" {
@@ -43,10 +43,10 @@ func runQueue(args []string) int {
 		case "--json":
 			jsonFlag = true
 		case "--help", "-h":
-			fmt.Fprint(os.Stdout, queueUsage)
+			fmt.Fprint(safeStdout, queueUsage)
 			return 0
 		default:
-			fmt.Fprint(os.Stderr, queueUsage)
+			fmt.Fprint(safeStderr, queueUsage)
 			return 2
 		}
 	}
@@ -83,12 +83,12 @@ func queueEntryOf(t testslot.Ticket, position int, now time.Time) queueEntry {
 func queueStatus(jsonFlag bool) int {
 	q, err := testslot.Default()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "queue:", err)
+		fmt.Fprintln(safeStderr, "queue:", err)
 		return 1
 	}
 	holders, waiters, err := q.Snapshot()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "queue:", err)
+		fmt.Fprintln(safeStderr, "queue:", err)
 		return 1
 	}
 	now := time.Now()
@@ -105,24 +105,24 @@ func queueStatus(jsonFlag bool) int {
 	}
 	if jsonFlag {
 		data, _ := json.Marshal(view)
-		fmt.Fprintln(os.Stdout, string(data))
+		fmt.Fprintln(safeStdout, string(data))
 		return 0
 	}
 	if len(holders)+len(waiters) == 0 {
-		fmt.Fprintf(os.Stdout, "test queue: empty · changed slots %d\n", view.Slots)
+		fmt.Fprintf(safeStdout, "test queue: empty · changed slots %d\n", view.Slots)
 		return 0
 	}
-	fmt.Fprintf(os.Stdout, "test queue: %d holding, %d waiting · changed slots %d\n", len(holders), len(waiters), view.Slots)
+	fmt.Fprintf(safeStdout, "test queue: %d holding, %d waiting · changed slots %d\n", len(holders), len(waiters), view.Slots)
 	ms := func(n int64) string { return (time.Duration(n) * time.Millisecond).Round(time.Second).String() }
 	for _, e := range view.Holders {
 		held := int64(0)
 		if e.HeldMS != nil {
 			held = *e.HeldMS
 		}
-		fmt.Fprintf(os.Stdout, "holding  %-7s pid %-7d %s · held %s · waited %s\n", e.Kind, e.PID, e.Label, ms(held), ms(e.WaitMS))
+		fmt.Fprintf(safeStdout, "holding  %-7s pid %-7d %s · held %s · waited %s\n", e.Kind, e.PID, e.Label, ms(held), ms(e.WaitMS))
 	}
 	for _, e := range view.Waiters {
-		fmt.Fprintf(os.Stdout, "#%-7d %-7s pid %-7d %s · waiting %s\n", e.Position, e.Kind, e.PID, e.Label, ms(e.WaitMS))
+		fmt.Fprintf(safeStdout, "#%-7d %-7s pid %-7d %s · waiting %s\n", e.Position, e.Kind, e.PID, e.Label, ms(e.WaitMS))
 	}
 	return 0
 }
@@ -162,18 +162,18 @@ func queueRun(args []string) int {
 		case strings.HasPrefix(a, "--label="):
 			label = strings.TrimPrefix(a, "--label=")
 		case a == "--help" || a == "-h":
-			fmt.Fprint(os.Stdout, queueUsage)
+			fmt.Fprint(safeStdout, queueUsage)
 			return 0
 		default:
 			ok = false
 		}
 		if !ok {
-			fmt.Fprint(os.Stderr, queueUsage)
+			fmt.Fprint(safeStderr, queueUsage)
 			return 2
 		}
 	}
 	if len(argv) == 0 || (kind != testslot.Full && kind != testslot.Changed) {
-		fmt.Fprint(os.Stderr, queueUsage)
+		fmt.Fprint(safeStderr, queueUsage)
 		return 2
 	}
 	if label == "" {
@@ -181,11 +181,11 @@ func queueRun(args []string) int {
 	}
 	q, err := testslot.Default()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "queue run:", err)
+		fmt.Fprintln(safeStderr, "queue run:", err)
 		return 1
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	onWait, onAdmit := queueNotices(os.Stderr)
+	onWait, onAdmit := queueNotices(safeStderr)
 	release, err := q.Acquire(ctx, testslot.Request{Kind: kind, Label: label, OnWait: onWait, OnAdmit: onAdmit})
 	interrupted := ctx.Err() != nil // read before stop(), which cancels ctx
 	stop()
@@ -193,7 +193,7 @@ func queueRun(args []string) int {
 		if interrupted {
 			return 130
 		}
-		fmt.Fprintln(os.Stderr, "queue run:", err)
+		fmt.Fprintln(safeStderr, "queue run:", err)
 		return 1
 	}
 	defer release()
@@ -212,7 +212,7 @@ func queueRun(args []string) int {
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(signals)
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintln(os.Stderr, "queue run:", err)
+		fmt.Fprintln(safeStderr, "queue run:", err)
 		return 127
 	}
 	done := make(chan struct{})
@@ -236,7 +236,7 @@ func queueRun(args []string) int {
 		return exit.ExitCode()
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "queue run:", err)
+		fmt.Fprintln(safeStderr, "queue run:", err)
 		return 1
 	}
 	return 0

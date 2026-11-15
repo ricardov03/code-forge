@@ -70,7 +70,7 @@ func reviewEnqueueSay(args []string, out ledger.Object, code int) int {
 		return reviewWaitHandover(args, hEnqueueEncoding)
 	}
 	before := reviewWaitBreadcrumb()
-	fmt.Fprintln(os.Stdout, string(data))
+	fmt.Fprintln(safeStdout, string(data))
 	if code != 0 {
 		reviewWaitFailure(args, code, nil, before)
 	}

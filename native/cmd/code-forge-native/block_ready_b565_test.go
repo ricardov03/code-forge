@@ -35,19 +35,35 @@ func TestBlockReadySecretLikeWorkspacePathRunsInGo(t *testing.T) {
 	}
 }
 
-// The one text Node masks in ready output is the run's signer key in hex; a
-// blocker that would print it still goes to Node (here unavailable: exit 127).
-func TestBlockReadySignerKeyTextHandsOver(t *testing.T) {
+// B713: the one text Node masks in ready output is the run's signer key in
+// hex (writeSafe after loadKey registered it). Go prints it masked too, with
+// no hand-over (Node is unreachable here). Node builds each line with the
+// key's hex (a plain word: no shell quotes in the fix) and writeSafe then
+// swaps it for [REDACTED], so the golden is the same fixture's output for a
+// plain orphan name with that name swapped, in --json and in text form.
+func TestB713BlockReadySignerKeyTextRunsInGo(t *testing.T) {
 	f := newReadyFixture(t)
 	keyHex := strings.Repeat("29", 32)
-	if err := state.UpdateRun(f.home, f.run, func(record *ledger.Object) error {
-		record.Set("orphans", []any{keyHex + ".txt"})
-		return nil
-	}); err != nil {
-		t.Fatal(err)
+	setOrphan := func(name string) {
+		if err := state.UpdateRun(f.home, f.run, func(record *ledger.Object) error {
+			record.Set("orphans", []any{name})
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	code, stdout, stderr := f.call("block", "ready", "B1", "--run", f.run, "--json")
-	if code != 127 || stdout != "" || !strings.Contains(stderr, "node") {
-		t.Fatalf("code=%d stdout=%q stderr=%q; want the Node hand-over", code, stdout, stderr)
+	for _, form := range [][]string{{"--json"}, {}} {
+		args := append([]string{"block", "ready", "B1", "--run", f.run}, form...)
+		setOrphan("plainorphan.txt")
+		wantCode, plain, wantErr := f.call(args...)
+		want := strings.ReplaceAll(plain, "plainorphan", "[REDACTED]")
+		if wantCode != 1 || !strings.Contains(plain, "orphan in run registry: plainorphan.txt") || wantErr != "" {
+			t.Fatalf("%v baseline: code=%d stdout=%q stderr=%q", form, wantCode, plain, wantErr)
+		}
+		setOrphan(keyHex + ".txt")
+		code, stdout, stderr := f.call(args...)
+		if code != 1 || stdout != want || stderr != "" {
+			t.Fatalf("%v: code=%d stdout=%q stderr=%q; want code=1 stdout=%q, no hand-over", form, code, stdout, stderr, want)
+		}
 	}
 }

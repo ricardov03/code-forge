@@ -69,7 +69,7 @@ type sweepReport struct {
 func runSweepCmd(args []string) int {
 	// The Node router answers help before the tmp root, breadcrumbs and handler.
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprint(os.Stdout, sweepUsage)
+		fmt.Fprint(safeStdout, sweepUsage)
 		return 0
 	}
 	home := os.Getenv("HOME")
@@ -88,12 +88,12 @@ func runSweepCmd(args []string) int {
 	}
 	before := gatesBreadcrumbName("sweep")
 	if !parsed {
-		fmt.Fprint(os.Stderr, sweepUsage)
+		fmt.Fprint(safeStderr, sweepUsage)
 		nativeVerbFailure("sweep", "", args, 2, strings.TrimSpace(sweepUsage), before)
 		return 2
 	}
 	if help {
-		fmt.Fprint(os.Stdout, sweepUsage)
+		fmt.Fprint(safeStdout, sweepUsage)
 		return 0
 	}
 	if apply {
@@ -101,7 +101,7 @@ func runSweepCmd(args []string) int {
 	}
 	if asJSON {
 		data, _ := ledger.Stringify(sweepJSON(report, apply), false)
-		fmt.Fprint(os.Stdout, string(data)+"\n")
+		fmt.Fprint(safeStdout, string(data)+"\n")
 		return 0
 	}
 	var out strings.Builder
@@ -123,14 +123,14 @@ func runSweepCmd(args []string) int {
 		label = "sweep"
 	}
 	fmt.Fprintf(&out, "%s: %d processes, total %s MB; %d dead-run roots\n", label, len(report.items), jsToFixed1(report.totalRSS), len(report.roots))
-	fmt.Fprint(os.Stdout, out.String())
+	fmt.Fprint(safeStdout, out.String())
 	return 0
 }
 
 func sweepHandover(args []string, reason handoverReason) int {
 	code, err := handover(append([]string{"sweep"}, args...), reason)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	return code
 }

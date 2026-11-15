@@ -58,7 +58,7 @@ func (p *blockPreview) errorText(code int, text string) int {
 	}
 	name, sub := p.crumb()
 	before := gatesBreadcrumbName(name)
-	fmt.Fprint(os.Stderr, text)
+	fmt.Fprint(safeStderr, text)
 	nativeVerbFailure("block", sub, append([]string{p.sub}, p.args...), code, text, before)
 	return code
 }
@@ -71,9 +71,9 @@ func prepareBlockPreview(sub string, args []string) (*blockPreview, int) {
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
 			forms := map[string]string{"ready": "<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>]", "waive": "<id> <finding-id> --run <r> --file <path> --reason <text> [--yes]", "reopen": "<id> --run <r> --file <path> --reason <text> [--yes]"}
-			fmt.Printf("usage: code-forge block %s %s [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n", sub, forms[sub])
+			fmt.Fprintf(safeStdout, "usage: code-forge block %s %s [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n", sub, forms[sub])
 			if sub == "ready" {
-				fmt.Print("  Read-only close checks: list every blocker and its fix; exit 1 while any remain.\n")
+				fmt.Fprint(safeStdout, "  Read-only close checks: list every blocker and its fix; exit 1 while any remain.\n")
 			}
 			return nil, 0
 		}

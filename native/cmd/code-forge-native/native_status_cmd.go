@@ -70,14 +70,14 @@ func runNativeStatus(args []string) int {
 	// The router prints USAGE for `native-status --help` before anything else;
 	// native-status has no SUB_USAGE, so `native-status x --help` serves.
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprint(os.Stdout, nativeStatusUsageText)
+		fmt.Fprint(safeStdout, nativeStatusUsageText)
 		return 0
 	}
 	if !routerHintReadable() {
 		// The router's maybeHint would judge a time only Date.parse reads.
 		code, err := handover(append([]string{"native-status"}, args...), hRouterHintState)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+			fmt.Fprintln(safeStderr, "code-forge-native:", err)
 		}
 		return code
 	}
@@ -94,7 +94,7 @@ func runNativeStatus(args []string) int {
 		}
 	}
 	in := bufio.NewReaderSize(os.Stdin, 64*1024)
-	code, done := nativeStatusServe(in, os.Stdout, home, args)
+	code, done := nativeStatusServe(in, safeStdout, home, args)
 	if !homeSet {
 		_ = os.Unsetenv("HOME")
 	}
@@ -121,7 +121,7 @@ func nativeStatusServe(in *bufio.Reader, out io.Writer, home nsHome, args []stri
 			recordHandover(append([]string{"native-status"}, args...), handoverReasons[hNativeStatusLine])
 			code, err := nativeStatusCompanion(io.MultiReader(bytes.NewReader(raw), in), out)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+				fmt.Fprintln(safeStderr, "code-forge-native:", err)
 				return code, true
 			}
 			if code != 0 {

@@ -37,7 +37,7 @@ type landStep struct {
 
 func (s *landStep) writers() (io.Writer, io.Writer) {
 	if s == nil {
-		return os.Stdout, os.Stderr
+		return safeStdout, safeStderr
 	}
 	out, err := s.stdout, s.stderr
 	if out == nil {
@@ -278,5 +278,5 @@ func (s *landErrorStream) Write(data []byte) (int, error) {
 	if text := errorLogTrim(string(data)); text != "" {
 		s.last = text
 	}
-	return os.Stderr.Write(data)
+	return safeStderr.Write(data)
 }

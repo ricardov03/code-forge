@@ -42,7 +42,7 @@ func init() { blockSubs["close"] = runBlockClose }
 func runBlockClose(args []string) int {
 	// B622: --dry-run previews the close in Go and never hands over.
 	if rest, dry, message := dryRunArgs(args); message != "" {
-		fmt.Fprintln(os.Stderr, "block close:", message)
+		fmt.Fprintln(safeStderr, "block close:", message)
 		return 2
 	} else if dry {
 		return closeDryRun(rest)
@@ -672,9 +672,9 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 					loadWarnings()
 				}
 			}
-			print := io.Writer(os.Stdout)
+			print := io.Writer(safeStdout)
 			if flags["json"] == true {
-				print = os.Stderr
+				print = safeStderr
 			}
 			for i, decision := range decisions {
 				fmt.Fprintf(print, "%d. %s\n", i+1, decision.label)
@@ -928,7 +928,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		doneFile = closeWriteDone(home, run, id, record, result, lines, rows, key, stderr)
 		if len(endHook) > 0 {
 			// The flags caller flushes its buffered output before invoking this.
-			*endHook[0] = func() { blockRunEndHook(home, run, id, result.Status, doneFile, record, os.Stderr) }
+			*endHook[0] = func() { blockRunEndHook(home, run, id, result.Status, doneFile, record, safeStderr) }
 		} else {
 			defer blockRunEndHook(home, run, id, result.Status, doneFile, record, stderr)
 		}
@@ -1956,7 +1956,7 @@ func closeBlockerValues(p gatecheck.Blocker) (file, finding any) {
 }
 
 func closeWriteDone(home, run, id string, record ledger.Object, result blockclose.Result, lines []any, rows []gatecheck.Row, key []byte, writers ...io.Writer) string {
-	stderr := io.Writer(os.Stderr)
+	stderr := io.Writer(safeStderr)
 	if len(writers) > 0 {
 		stderr = writers[0]
 	}
@@ -2047,7 +2047,7 @@ func closeWriteDone(home, run, id string, record ledger.Object, result blockclos
 }
 
 func closeWarnMovedBase(workspace string, entry ledger.Object, id, run string, writers ...io.Writer) {
-	stderr := io.Writer(os.Stderr)
+	stderr := io.Writer(safeStderr)
 	if len(writers) > 0 {
 		stderr = writers[0]
 	}

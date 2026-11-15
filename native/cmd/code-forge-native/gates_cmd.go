@@ -36,7 +36,7 @@ func gatesHandover(args []string, reason handoverReason) int {
 	args = slices.DeleteFunc(slices.Clone(args), func(s string) bool { return s == "--preflight" || s == "--no-preflight" })
 	code, e := handover(append([]string{"gates"}, args...), reason)
 	if e != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", e)
+		fmt.Fprintln(safeStderr, "code-forge-native:", e)
 	}
 	return code
 }
@@ -151,14 +151,14 @@ func gatesStaleBase(o gatesOptions) (code int, stop bool) {
 	fix, moved := gatesStaleText(o.run, o.block, stale)
 	switch {
 	case o.allowStaleBase:
-		fmt.Fprint(os.Stderr, gatesStaleWarnLine(o.run, o.block, stale))
+		fmt.Fprint(safeStderr, gatesStaleWarnLine(o.run, o.block, stale))
 	case o.autoRebase:
 		result, err := rebase.Run(home, o.run, o.block)
 		if err != nil {
 			gatesErrf("gates run: block %s of run %s: --auto-rebase failed (%s): %s; no gate was run; fix by hand: %s\n", o.block, o.run, moved, strings.ReplaceAll(err.Error(), "\n", " "), fix)
 			return 1, true
 		}
-		fmt.Fprintf(os.Stderr, "gates run: block %s rebased %s → %s (--auto-rebase)\n", o.block, gatesShort(result.OldBase), gatesShort(result.NewBase))
+		fmt.Fprintf(safeStderr, "gates run: block %s rebased %s → %s (--auto-rebase)\n", o.block, gatesShort(result.OldBase), gatesShort(result.NewBase))
 	default:
 		gatesErrf("gates run: block %s of run %s has a stale base (%s); no gate was run; fix: %s\n", o.block, o.run, moved, fix)
 		return 1, true
@@ -261,9 +261,9 @@ func runGates(args []string) int {
 	gatesBaseChecked = false
 	_ = os.Unsetenv(gatesBaseCheckedEnv)
 	if len(args) > 0 && args[0] == "classes" {
-		return gatesClasses(args[1:], os.Getenv("HOME"), os.Stdout, os.Stderr)
+		return gatesClasses(args[1:], os.Getenv("HOME"), safeStdout, safeStderr)
 	}
-	if code, done := gatesHelp(args, os.Stdout); done {
+	if code, done := gatesHelp(args, safeStdout); done {
 		return code
 	}
 	if len(args) == 0 || args[0] != "run" {

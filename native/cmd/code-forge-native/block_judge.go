@@ -176,7 +176,7 @@ func (p *blockPreview) bjJudge(cfg map[string]any, packet ledger.Object, lens st
 	if !hasRunID {
 		runID = p.run
 	}
-	deps := session.Deps{Stderr: os.Stderr, RunID: runID, Warn: spawnLogWarning, RunRoot: lazyRoot, PidsRoot: lazyRoot, Home: p.home,
+	deps := session.Deps{Stderr: safeStderr, RunID: runID, Warn: spawnLogWarning, RunRoot: lazyRoot, PidsRoot: lazyRoot, Home: p.home,
 		WriteRow: func(ledger.Object) error { return nil }}
 	var res ledger.Object
 	for i, c := range ladder {
@@ -211,7 +211,7 @@ func (p *blockPreview) bjRefuse(code int, text string) int {
 	}
 	name, sub := p.crumb()
 	before := gatesBreadcrumbName(name)
-	fmt.Fprint(os.Stderr, text)
+	fmt.Fprint(safeStderr, text)
 	nativeVerbFailure("block", sub, append([]string{p.sub}, p.args...), code, blockstate.Trim(text), before)
 	return code
 }
@@ -436,9 +436,9 @@ func (p *blockPreview) bjWaive(c bjWaiveCase) int {
 	}
 	if p.flags["json"] == true {
 		data, _ := ledger.Stringify(ledger.Object{{Key: "block", Value: p.id}, {Key: "event", Value: "waived"}, {Key: "finding", Value: c.finding}, {Key: "file", Value: c.file}, {Key: "by", Value: "agent"}}, false)
-		fmt.Fprintln(os.Stdout, string(data))
+		fmt.Fprintln(safeStdout, string(data))
 	} else {
-		fmt.Fprintf(os.Stdout, "block %s waived %s in %s (by: agent)\n", p.id, c.finding, c.file)
+		fmt.Fprintf(safeStdout, "block %s waived %s in %s (by: agent)\n", p.id, c.finding, c.file)
 	}
 	return 0
 }
@@ -662,12 +662,12 @@ func (p *blockPreview) bjReopenWrite(c bjReopenCase, mainTop, dir string, parts 
 			out = append(out, ledger.Field{Key: "ticket", Value: tid})
 		}
 		data, _ := ledger.Stringify(out, false)
-		fmt.Fprintln(os.Stdout, string(data))
+		fmt.Fprintln(safeStdout, string(data))
 		return 0
 	}
-	fmt.Fprintf(os.Stdout, "block %s reopened %s (from %s; by: %s)\n", p.id, c.file, fromText, by)
+	fmt.Fprintf(safeStdout, "block %s reopened %s (from %s; by: %s)\n", p.id, c.file, fromText, by)
 	if tid != "" {
-		fmt.Fprintf(os.Stdout, "ticket %s\nnext: code-forge review-file --wait %s\n", tid, tid)
+		fmt.Fprintf(safeStdout, "ticket %s\nnext: code-forge review-file --wait %s\n", tid, tid)
 	}
 	return 0
 }

@@ -130,7 +130,7 @@ func reviewWaitBlockDirect(args []string, flags map[string]string, paths []strin
 	if !valid {
 		return reviewWaitUsageError(args, "--max must look like 90s or 1500ms")
 	}
-	joined := reviewWaitBlockJoin(cwd, root, run, block, maxWait, os.Stderr)
+	joined := reviewWaitBlockJoin(cwd, root, run, block, maxWait, safeStderr)
 	switch {
 	case joined.handed:
 		return reviewWaitHandover(args, joined.handover)
@@ -143,7 +143,7 @@ func reviewWaitBlockDirect(args []string, flags map[string]string, paths []strin
 		return reviewWaitHandover(args, hWaitBlockEncoding)
 	}
 	before := reviewWaitBreadcrumb()
-	fmt.Fprintln(os.Stdout, string(data))
+	fmt.Fprintln(safeStdout, string(data))
 	if joined.code == 3 {
 		reviewWaitFailure(args, 3, nil, before)
 	}

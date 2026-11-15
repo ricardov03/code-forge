@@ -1048,9 +1048,9 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 		}
 	}()
 	before := gatesBreadcrumbName(crumb)
-	out := func(s string) { fmt.Fprint(os.Stdout, s) }
+	out := func(s string) { fmt.Fprint(safeStdout, s) }
 	failed := func(code int, text string) int {
-		fmt.Fprint(os.Stderr, text)
+		fmt.Fprint(safeStderr, text)
 		var message any
 		if trimmed := strings.TrimFunc(text, errorLogSpace); trimmed != "" {
 			message = trimmed

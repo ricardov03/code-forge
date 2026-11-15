@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/ricardov03/code-forge/native/canon"
 	"github.com/ricardov03/code-forge/native/config"
@@ -26,7 +25,7 @@ func statusCommand(args []string) int {
 	// printable ASCII, a ledger number Go cannot read) reach Node.
 	code, err := handover(append([]string{"status"}, args...))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	return code
 }

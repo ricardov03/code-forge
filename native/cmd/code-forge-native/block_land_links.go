@@ -34,7 +34,7 @@ func landPrepareMergeGate(main, temporary, workspace string, settings config.Mer
 			return err
 		}
 		if _, err := os.Stat(source); os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "warning: gates.merge_gate_links source missing: %s\n", name)
+			fmt.Fprintf(safeStderr, "warning: gates.merge_gate_links source missing: %s\n", name)
 			continue
 		} else if err != nil {
 			return fmt.Errorf("gates.merge_gate_links cannot read source metadata: %s", name)

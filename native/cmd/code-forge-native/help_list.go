@@ -435,10 +435,10 @@ func helpWrap(name string, args []string, route func([]string) int) int {
 	entry, _ := helpLookup(name)
 	code, stdout, _ := helpCapture(false, func() int { return route(args) })
 	if code != 0 || !helpIsUsage(stdout) {
-		fmt.Fprint(os.Stdout, stdout)
+		fmt.Fprint(safeStdout, stdout)
 		return code
 	}
-	fmt.Fprint(os.Stdout, helpPage(helpPainter(helpColor()), entry, stdout))
+	fmt.Fprint(safeStdout, helpPage(helpPainter(helpColor()), entry, stdout))
 	return code
 }
 

@@ -1796,7 +1796,7 @@ func reportDecide(args []string) reportRun {
 
 func runReportVerb(args []string) int {
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprint(os.Stdout, reportUsage)
+		fmt.Fprint(safeStdout, reportUsage)
 		return 0
 	}
 	plan := reportDecide(args)
@@ -1807,7 +1807,7 @@ func runReportVerb(args []string) int {
 	contextApplyTmpRoot()
 	before := gatesBreadcrumbName("report")
 	stderr := &contextErrWriter{}
-	code := plan(os.Stdout, stderr)
+	code := plan(safeStdout, stderr)
 	if code == -1 {
 		// an export directory or file Go could not write: Node redoes the same idempotent
 		// writes and reports its own error text

@@ -52,7 +52,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	mergeGateTree, mergeGateReason := "", ""
 	emit := func(out ledger.Object) {
 		data, _ := ledger.Stringify(out, false)
-		fmt.Fprintln(os.Stdout, string(data))
+		fmt.Fprintln(safeStdout, string(data))
 	}
 	stop := func(reason string) int {
 		// No suite ran when gates.test is missing, so ignored files are not the cause.
@@ -214,7 +214,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		defer finish()
 		defer timing()
 		deadline := time.Now().Add(time.Duration(maxMs) * time.Millisecond)
-		print := io.Writer(os.Stdout)
+		print := io.Writer(safeStdout)
 		if json {
 			print = stderr
 		}
@@ -356,7 +356,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		}
 		fmt.Fprint(stderr, closed.error)
 	}
-	print := io.Writer(os.Stdout)
+	print := io.Writer(safeStdout)
 	if json {
 		print = stderr
 	}
@@ -379,7 +379,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		if json {
 			emit(ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "closed"}, {Key: "merge", Value: command}})
 		} else {
-			fmt.Fprintf(os.Stdout, "block %s closed; merge: %s\n", id, command)
+			fmt.Fprintf(safeStdout, "block %s closed; merge: %s\n", id, command)
 		}
 		return 0
 	}
@@ -448,7 +448,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		}
 		emit(landed)
 	} else {
-		fmt.Fprintf(os.Stdout, "block %s landed\n", id)
+		fmt.Fprintf(safeStdout, "block %s landed\n", id)
 	}
 	return 0
 }

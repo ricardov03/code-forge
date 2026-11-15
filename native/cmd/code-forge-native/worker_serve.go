@@ -268,7 +268,7 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 	runner.Secrets = append(runner.Secrets, jevSecrets...)
 	// B489 step 3: Node's worker sets its process root to the run root
 	// (setRunRoot), so a session's child pid entry lands in <run root>/pids.
-	runner.SessionDeps = session.Deps{Stderr: os.Stderr, PidsRoot: func() (string, error) { return runRootDir, nil }}
+	runner.SessionDeps = session.Deps{Stderr: safeStderr, PidsRoot: func() (string, error) { return runRootDir, nil }}
 	spawnWarnVerb = "worker"
 	runner.Warn = spawnLogWarning
 
@@ -295,7 +295,7 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 	runner.Stopping = wk.Stopping
 	pool := &worker.Pool{Root: runner.RepoRoot, Run: a.runID, PollMs: a.pollMs, BootCfg: cfg,
 		Settings: runner.Settings, FileKey: runner.FileKey, ProviderHint: runner.ProviderHint,
-		Warn: runner.Warn, Stderr: os.Stderr, Stopping: wk.Stopping,
+		Warn: runner.Warn, Stderr: safeStderr, Stopping: wk.Stopping,
 		GuardPath: filepath.Join(home, ".code-forge", "runs", a.runID+".json")}
 	runner.Pool = pool
 	loop := &worker.Loop{Worker: wk, Pool: pool, Runner: runner, PollMs: a.pollMs,

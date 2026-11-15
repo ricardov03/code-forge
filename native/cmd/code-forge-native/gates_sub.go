@@ -138,7 +138,7 @@ func gatesOther(args []string) int {
 	if errors.As(err, &hand) {
 		code, e := handover(append([]string{"gates"}, args...), hand.reason)
 		if e != nil {
-			fmt.Fprintln(os.Stderr, "code-forge-native:", e)
+			fmt.Fprintln(safeStderr, "code-forge-native:", e)
 		}
 		return code
 	}
@@ -147,7 +147,7 @@ func gatesOther(args []string) int {
 		code = 1
 	} else if value != nil {
 		data, _ := ledger.Stringify(value, false)
-		os.Stdout.Write(append(data, '\n'))
+		safeStdout.Write(append(data, '\n'))
 	}
 	name := "gates"
 	known := gatesSubOf(args)
