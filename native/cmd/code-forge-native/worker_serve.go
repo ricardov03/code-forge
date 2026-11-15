@@ -162,6 +162,21 @@ func workerRunRoot(run string, cfg map[string]any) (string, error) {
 	return contextMakeRunRoot(run, root)
 }
 
+// Seams for tests of startNativeDaemon (B737): the daemon binary, one ping
+// (timeout 0: the client's default), the pause between pings and the clock.
+var (
+	daemonStartBinary = os.Executable
+	daemonStartPing   = func(run string, timeout time.Duration) bool {
+		answer, _ := daemonclient.Request(run, map[string]any{"method": "ping"}, timeout)
+		return answer != nil
+	}
+	daemonStartSleep = time.Sleep
+	daemonStartNow   = time.Now
+	// daemonStartBudget is the nominal length of Node's wait (100 tries,
+	// 20 ms apart) as a wall-time limit (B737).
+	daemonStartBudget = 2 * time.Second
+)
+
 // startNativeDaemon is native.mjs startNativeDaemon: a daemon already
 // answering is left alone; else this binary serves one until stop.
 func startNativeDaemon(run string, cfg map[string]any) (func(), error) {
@@ -169,10 +184,10 @@ func startNativeDaemon(run string, cfg map[string]any) (func(), error) {
 	if !daemonclient.Enabled(cfg) {
 		return noop, nil
 	}
-	if answer, _ := daemonclient.Request(run, map[string]any{"method": "ping"}, 0); answer != nil {
+	if daemonStartPing(run, 0) {
 		return noop, nil
 	}
-	binary, err := os.Executable()
+	binary, err := daemonStartBinary()
 	if err != nil {
 		return noop, nil
 	}
@@ -186,16 +201,24 @@ func startNativeDaemon(run string, cfg map[string]any) (func(), error) {
 	}
 	exited := make(chan struct{})
 	go func() { _ = child.Wait(); close(exited) }()
+	// B737: Node's 100 tries 20 ms apart, and also at most daemonStartBudget
+	// of wall time: under load each try stretched (84 tries took 14.4 s) and
+	// the worker missed run start's 15 s launch window. A daemon that is not
+	// up yet keeps starting; the worker goes on without it, as after 100 tries.
+	began := daemonStartNow()
 	for i := 0; i < 100; i++ {
 		select {
 		case <-exited:
 			return noop, nil
 		default:
 		}
-		if answer, _ := daemonclient.Request(run, map[string]any{"method": "ping"}, 100*time.Millisecond); answer != nil {
+		if daemonStartPing(run, 100*time.Millisecond) {
 			break
 		}
-		time.Sleep(20 * time.Millisecond)
+		if daemonStartNow().Sub(began) >= daemonStartBudget {
+			break
+		}
+		daemonStartSleep(20 * time.Millisecond)
 	}
 	return func() {
 		select {

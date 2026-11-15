@@ -564,6 +564,12 @@ When the optional native binary is installed and the daemon is enabled,
 the review worker starts one Go daemon for its run.
 It stops the daemon it started when the worker exits.
 Another worker can share a daemon that is already running.
+The worker waits for its new daemon to answer before it announces itself.
+In Node the wait is up to 100 tries, 20 ms apart. The Go worker also stops
+waiting after 2 seconds (B737), because under load the tries can take
+much longer and `run start` gives the worker 15 seconds to announce.
+A daemon that is not ready yet keeps starting, and the worker goes on
+without it until it answers.
 
 The private `native.sock` Unix socket carries requests between local programs.
 The daemon serves block waits and Node status from cached ledger and queue data.
