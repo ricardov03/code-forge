@@ -53,6 +53,8 @@ type server struct {
 	trees                                        map[string]*treeState
 	psProcesses                                  int64
 	lastSweep                                    time.Time
+	// sweepKeys keeps each run's verified key file across sweeps (B755).
+	sweepKeys map[string]sweepKeyEntry
 	// A local join (Join) has no socket: it reads the scope mirror the CLI
 	// found, asks the CLI's liveness probe and never sweeps the queue.
 	local bool

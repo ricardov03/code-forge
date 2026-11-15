@@ -605,6 +605,10 @@ A new daemon opens its socket first and then reads the whole ledger and
 sweeps old review tickets (B749). A request that arrives during that first
 read waits for it, so no answer comes from a partly read ledger. A first
 read that fails still stops the daemon with its error.
+Later sweeps reuse each run key they already read while the key file is
+unchanged (same size, times, mode and file), and look at the queue only
+for runs that still have review tickets (B755). A changed, removed or
+newly opened key file is read again on the next sweep.
 
 The full doctor shows `native daemon` as `live`, `off` or `fallback`.
 Use the switches above to turn off all native code or just the daemon.

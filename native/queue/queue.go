@@ -374,6 +374,18 @@ func (idx *Index) Ensure(p ticket.Parts) error {
 	return idx.Refresh()
 }
 
+// TicketRuns names the runs that hold at least one indexed ticket. A run not
+// named has nothing PruneRun could remove (B755).
+func (idx *Index) TicketRuns() map[string]bool {
+	runs := make(map[string]bool)
+	for name, item := range idx.entries {
+		if run, ok := item.value["run"].(string); ok && ticketName.MatchString(name) {
+			runs[run] = true
+		}
+	}
+	return runs
+}
+
 // Prune removes only entries indexed to this run/block, across all revisions,
 // trees and ticket kinds. Callers must authorize it with a signed close row.
 func (idx *Index) Prune(run, block string) (tickets, markers int, err error) {

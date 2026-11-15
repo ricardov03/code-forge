@@ -77,22 +77,51 @@ func (s *server) sweep(now time.Time) {
 			s.prune(block)
 		}
 	}
+	// B755: PruneRun refreshes the whole queue (one directory read and one
+	// stat per ticket) even for a run with no ticket, which was half of a
+	// sweep over 100k ended runs; only runs that hold a ticket are pruned.
+	held := s.queue.TicketRuns()
 	for run := range runs {
-		s.queue.PruneRun(run)
+		if held[run] {
+			s.queue.PruneRun(run)
+		}
 	}
 }
 
+// sweepKeyEntry is a key file read by an earlier sweep and the stamp of the
+// file when it was read (B755).
+type sweepKeyEntry struct {
+	stamp string
+	key   []byte
+}
+
+// sweepKey returns run's 32-byte key, or nil when the file is missing, open
+// to group or others, or not 32 bytes. B755: a key read by an earlier sweep
+// is reused while the file's stamp (size, mtime, ctime, mode, device, inode)
+// is the same; any change to the file, its mode or its identity reads it
+// again, so the cache never hides a change.
 func (s *server) sweepKey(run string) []byte {
 	file := filepath.Join(s.home, ".code-forge", "runs", run+".key")
 	info, err := os.Stat(file)
 	if err != nil || info.Mode().Perm()&0077 != 0 {
+		delete(s.sweepKeys, run)
 		return nil
 	}
+	stamp := sweepStamp(info)
+	if cached, ok := s.sweepKeys[run]; ok && cached.stamp == stamp {
+		sign.KeyLoaded(cached.key) // loadKey registers the key (B710)
+		return cached.key
+	}
+	delete(s.sweepKeys, run)
 	key, err := os.ReadFile(file)
 	if err != nil || len(key) != 32 {
 		return nil
 	}
 	sign.KeyLoaded(key) // loadKey registers the key (B710)
+	if s.sweepKeys == nil {
+		s.sweepKeys = make(map[string]sweepKeyEntry)
+	}
+	s.sweepKeys[run] = sweepKeyEntry{stamp: stamp, key: key}
 	return key
 }
 
