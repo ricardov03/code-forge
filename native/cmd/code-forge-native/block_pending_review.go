@@ -104,5 +104,5 @@ func pendingReviewLine(id string, files []string) {
 	if len(files) == 0 {
 		return
 	}
-	fmt.Printf("block %s %s: the coder's work is complete; only the review of %s is missing because the reviewer could not run; review again (fix lines above), no coder session needed\n", id, gatecheck.PendingReviewState, strings.Join(files, ", "))
+	fmt.Fprintf(safeStdout, "block %s %s: the coder's work is complete; only the review of %s is missing because the reviewer could not run; review again (fix lines above), no coder session needed\n", id, gatecheck.PendingReviewState, strings.Join(files, ", "))
 }

@@ -141,13 +141,13 @@ func (o *runOut) out(s string) {
 	if o.redact != nil {
 		s = o.redact(s)
 	}
-	fmt.Fprint(os.Stdout, s)
+	fmt.Fprint(safeStdout, s)
 }
 func (o *runOut) err(s string) {
 	if o.redact != nil {
 		s = o.redact(s)
 	}
-	fmt.Fprint(os.Stderr, s)
+	fmt.Fprint(safeStderr, s)
 	if jsTrim(s) != "" { // captureStderr: text.trim().length > 0
 		o.last = s
 	}
@@ -156,7 +156,7 @@ func (o *runOut) err(s string) {
 func runHandover(args []string, reason handoverReason) int {
 	code, err := handover(append([]string{"run"}, args...), reason)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	return code
 }
@@ -165,12 +165,12 @@ func runRun(args []string) int {
 	help := func(s string) bool { return s == "--help" || s == "-h" }
 	// The Node router answers help before breadcrumbs and handlers.
 	if len(args) > 0 && help(args[0]) {
-		fmt.Fprint(os.Stdout, runUsage)
+		fmt.Fprint(safeStdout, runUsage)
 		return 0
 	}
 	if len(args) > 1 && help(args[1]) {
 		if usage, ok := runSubUsage[args[0]]; ok {
-			fmt.Fprint(os.Stdout, usage)
+			fmt.Fprint(safeStdout, usage)
 			return 0
 		}
 	}

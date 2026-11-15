@@ -115,16 +115,16 @@ func ciParse(args []string) (ciOptions, string) {
 func runCI(args []string) int {
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
-			fmt.Fprintln(os.Stdout, ciUsage)
+			fmt.Fprintln(safeStdout, ciUsage)
 			return 0
 		}
 	}
 	o, message := ciParse(args)
 	if message != "" {
 		if message != ciUsage {
-			fmt.Fprintln(os.Stderr, "ci watch: "+message)
+			fmt.Fprintln(safeStderr, "ci watch: "+message)
 		}
-		fmt.Fprintln(os.Stderr, ciUsage)
+		fmt.Fprintln(safeStderr, ciUsage)
 		return 2
 	}
 	return ciWatch(o)
@@ -177,7 +177,7 @@ func (l *ciLimiter) gh(args ...string) (string, error) {
 			l.gaveUp, l.retryAt = true, retry
 			return out, err
 		}
-		fmt.Fprintf(os.Stderr, "ci watch: GitHub API rate limit; retry at %s UTC\n", retry.UTC().Format("15:04"))
+		fmt.Fprintf(safeStderr, "ci watch: GitHub API rate limit; retry at %s UTC\n", retry.UTC().Format("15:04"))
 		ciSleep(retry.Sub(ciNow()))
 	}
 }
@@ -225,7 +225,7 @@ func ciLock(cwd, sha string) (release func(), ok bool) {
 	}
 	lock, err := filelock.TryLock("ci-watch "+repo+" "+full, filelock.Options{})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "ci watch: watch lock not taken: "+err.Error())
+		fmt.Fprintln(safeStderr, "ci watch: watch lock not taken: "+err.Error())
 		return func() {}, true
 	}
 	if !lock.OK {
@@ -250,12 +250,12 @@ func ciWatch(o ciOptions) int {
 	finish := func(status, message string, code int) int {
 		report.Status, report.Message = status, message
 		if o.json {
-			_ = json.NewEncoder(os.Stdout).Encode(report)
+			_ = json.NewEncoder(safeStdout).Encode(report)
 		} else {
-			fmt.Fprintln(os.Stdout, "ci watch: "+message)
+			fmt.Fprintln(safeStdout, "ci watch: "+message)
 		}
 		if code != 0 && o.json {
-			fmt.Fprintln(os.Stderr, "ci watch: "+message)
+			fmt.Fprintln(safeStderr, "ci watch: "+message)
 		}
 		return code
 	}
@@ -285,7 +285,7 @@ func ciWatch(o ciOptions) int {
 		if err != nil {
 			// A gh hiccup is transient; it only ends the watch at the timeout.
 			lastError = err.Error()
-			fmt.Fprintln(os.Stderr, "ci watch: "+lastError)
+			fmt.Fprintln(safeStderr, "ci watch: "+lastError)
 		} else {
 			report.Runs = runs
 			if len(runs) == 0 && ciNow().Sub(started) >= ciNoRunAfter {
@@ -348,7 +348,7 @@ func ciFailure(o ciOptions, cwd string, limiter *ciLimiter, failed []ciRun, repo
 			lines = lines[:200]
 		}
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "ci watch: "+err.Error())
+			fmt.Fprintln(safeStderr, "ci watch: "+err.Error())
 		}
 		for _, line := range lines {
 			fields := strings.SplitN(line, "\t", 3)

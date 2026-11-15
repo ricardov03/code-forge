@@ -49,7 +49,7 @@ func runBlockOpen(args []string) int {
 	// Node's router logs a failed verb with its last stderr write, trimmed.
 	logged := func(code int, text string) int {
 		before := gatesBreadcrumbName("block open")
-		fmt.Fprintln(os.Stderr, text)
+		fmt.Fprintln(safeStderr, text)
 		nativeVerbFailure("block", "open", logArgs, code, jsTrim(text), before)
 		return code
 	}
@@ -69,7 +69,7 @@ func runBlockOpen(args []string) int {
 		}
 		if se != nil && flags["json"] == true && id != "" && slices.Contains([]string{"after-not-done", "bad-after", "outcome-not-ready", "bad-after-outcome", "api-fit", "bad-uses"}, se.Code) {
 			out, _ := ledger.Stringify(ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "refused"}, {Key: "code", Value: se.Code}, {Key: "message", Value: se.Message}}, false)
-			fmt.Fprintln(os.Stdout, string(out))
+			fmt.Fprintln(safeStdout, string(out))
 		}
 		if se != nil && (se.Code == "usage" || se.Code == "api-fit") {
 			return logged(2, "block open: "+err.Error())
@@ -80,7 +80,7 @@ func runBlockOpen(args []string) int {
 	// Node prints the verb usage for an exact --help or -h anywhere in args,
 	// before breadcrumbs or the error log.
 	if slices.Contains(logArgs, "--help") || slices.Contains(logArgs, "-h") {
-		fmt.Fprint(os.Stdout, blockOpenUsage())
+		fmt.Fprint(safeStdout, blockOpenUsage())
 		return 0
 	}
 	var positionals []string
@@ -210,7 +210,7 @@ func runBlockOpen(args []string) int {
 	}
 	deferExpiry := flags["after"] != nil || flags["after-outcome"] != nil
 	if !deferExpiry {
-		blockGrantExpiry(home, run, os.Stderr)
+		blockGrantExpiry(home, run, safeStderr)
 	}
 	root := blockString(blockObject(blockObject(blockObject(record.Get("blocks")).Get(id)).Get("worktree")).Get("path"))
 	if root == "" {
@@ -342,11 +342,11 @@ func runBlockOpen(args []string) int {
 		return failure(err)
 	}
 	if deferExpiry {
-		blockGrantExpiry(home, run, os.Stderr)
+		blockGrantExpiry(home, run, safeStderr)
 	}
 	blockBreadcrumb("open")
 	for _, note := range result.Notes {
-		fmt.Fprintln(os.Stderr, note)
+		fmt.Fprintln(safeStderr, note)
 	}
 	b := result.Block
 	tree := blockObject(b.Get("worktree"))
@@ -371,7 +371,7 @@ func runBlockOpen(args []string) int {
 			out.Set("additive", additive)
 		}
 		encoded, _ := ledger.Stringify(out, false)
-		fmt.Fprintln(os.Stdout, string(encoded))
+		fmt.Fprintln(safeStdout, string(encoded))
 	} else {
 		raised := ""
 		if b.Get("level") != opts.Level {
@@ -391,24 +391,24 @@ func runBlockOpen(args []string) int {
 			}
 			testText = fmt.Sprintf(" · %d test file%s", testCount, plural)
 		}
-		fmt.Fprintf(os.Stdout, "block %s open · %s%s%s · %s · attempt %d · base %s%s\n", id, blockString(b.Get("level")), raised, chosen, blockString(b.Get("kind")), opts.Attempt, blockString(b.Get("base_sha"))[:12], testText)
+		fmt.Fprintf(safeStdout, "block %s open · %s%s%s · %s · attempt %d · base %s%s\n", id, blockString(b.Get("level")), raised, chosen, blockString(b.Get("kind")), opts.Attempt, blockString(b.Get("base_sha"))[:12], testText)
 		if result.Kept > 0 {
-			fmt.Fprintf(os.Stdout, "kept claims: %d\n", result.Kept)
+			fmt.Fprintf(safeStdout, "kept claims: %d\n", result.Kept)
 		}
 		if tree != nil {
 			reuse := ""
 			if result.Reused {
 				reuse = " · reused"
 			}
-			fmt.Fprintf(os.Stdout, "worktree %s · branch %s%s\n", blockString(tree.Get("path")), blockString(tree.Get("branch")), reuse)
+			fmt.Fprintf(safeStdout, "worktree %s · branch %s%s\n", blockString(tree.Get("path")), blockString(tree.Get("branch")), reuse)
 		}
 		pointer := result.Pointer
 		if pointer == "" {
 			pointer = "brief: none given (--brief <file>)"
 		}
-		fmt.Fprintln(os.Stdout, pointer)
+		fmt.Fprintln(safeStdout, pointer)
 		for _, rule := range result.Rules {
-			fmt.Fprintln(os.Stdout, rule)
+			fmt.Fprintln(safeStdout, rule)
 		}
 	}
 	return 0

@@ -38,7 +38,7 @@ var spawnRunID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 func spawnHandover(args []string, reason handoverReason) int {
 	code, err := handover(append([]string{"spawn"}, args...), reason)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	return code
 }
@@ -138,7 +138,7 @@ func spawnResolve(cwd, file string) string {
 
 func runSpawnVerb(args []string) int {
 	if len(args) > 0 && cliHelp(args[0]) {
-		fmt.Fprint(os.Stdout, spawnUsage)
+		fmt.Fprint(safeStdout, spawnUsage)
 		return 0
 	}
 	home := os.Getenv("HOME")

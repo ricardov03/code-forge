@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 )
 
 // Each block implementation registers its subcommands from its own file.
@@ -13,7 +12,7 @@ func init() { routes["block"] = runBlock }
 func runBlock(args []string) int {
 	// B648: `block --help` and `block -h` print Node's block USAGE in Go.
 	if len(args) > 0 && metaIsHelp(args[0]) {
-		fmt.Fprint(os.Stdout, blockUsage)
+		fmt.Fprint(safeStdout, blockUsage)
 		return 0
 	}
 	if len(args) > 0 {
@@ -43,7 +42,7 @@ const blockUsage = "usage: code-forge block open <id> --run <r> [--level L<n>] -
 func blockHandover(args []string, reason handoverReason) int {
 	code, err := handover(append([]string{"block"}, args...), reason)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	return code
 }

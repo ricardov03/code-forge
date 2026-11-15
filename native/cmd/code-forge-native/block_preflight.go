@@ -246,19 +246,19 @@ func runBlockPreflight(args []string) int {
 		}
 		out := ledger.Object{{Key: "block", Value: p.id}, {Key: "preflight", Value: true}, {Key: "ready", Value: ready}, {Key: "blockers", Value: formatted}, {Key: "skipped", Value: skipped}}
 		data, _ := ledger.Stringify(pendingReviewJSON(out, pending), false)
-		fmt.Println(string(data))
+		fmt.Fprintln(safeStdout, string(data))
 	} else {
 		for _, b := range formatted {
 			o := b.(ledger.Object)
-			fmt.Printf("%s %s %s\n  fix: %s\n", o.Get("code"), closeDash(o.Get("file")), o.Get("detail"), o.Get("fix"))
+			fmt.Fprintf(safeStdout, "%s %s %s\n  fix: %s\n", o.Get("code"), closeDash(o.Get("file")), o.Get("detail"), o.Get("fix"))
 		}
 		for _, s := range result.skipped {
-			fmt.Printf("skipped %s\n", s)
+			fmt.Fprintf(safeStdout, "skipped %s\n", s)
 		}
 		if ready {
-			fmt.Printf("block %s preflight clean\n", p.id)
+			fmt.Fprintf(safeStdout, "block %s preflight clean\n", p.id)
 		} else {
-			fmt.Printf("block %s preflight: %d blockers\n", p.id, len(formatted))
+			fmt.Fprintf(safeStdout, "block %s preflight: %d blockers\n", p.id, len(formatted))
 		}
 		pendingReviewLine(p.id, pending)
 	}

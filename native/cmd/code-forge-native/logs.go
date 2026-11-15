@@ -27,7 +27,7 @@ func init() { routes["logs"] = runLogs }
 func logsHandover(args []string, reason handoverReason) int {
 	code, err := handover(append([]string{"logs"}, args...), reason)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	return code
 }
@@ -64,12 +64,12 @@ func runLogs(args []string) int {
 	}
 	// The Node router answers help before parsing or touching any state.
 	if len(args) > 0 && logsHelpFlag(args[0]) {
-		fmt.Fprint(os.Stdout, logsUsage)
+		fmt.Fprint(safeStdout, logsUsage)
 		return 0
 	}
 	if len(args) > 1 && logsHelpFlag(args[1]) {
 		if usage, ok := logsSubUsage[args[0]]; ok {
-			fmt.Fprint(os.Stdout, usage)
+			fmt.Fprint(safeStdout, usage)
 			return 0
 		}
 	}
@@ -88,7 +88,7 @@ func runLogs(args []string) int {
 	}
 	fail := func(code int, text string) int {
 		before := gatesBreadcrumbName(crumb)
-		fmt.Fprint(os.Stderr, text)
+		fmt.Fprint(safeStderr, text)
 		var message any
 		if trimmed := strings.TrimFunc(text, errorLogSpace); trimmed != "" {
 			message = trimmed
@@ -176,8 +176,8 @@ func runLogs(args []string) int {
 		}
 	}
 	gatesBreadcrumbName(crumb)
-	// Node writes a lone surrogate to stdout as U+FFFD (B704)
-	fmt.Fprint(os.Stdout, jsonx.WellFormed(output))
+	// Node writes a lone surrogate to stdout as U+FFFD (B704), through writeSafe (B712)
+	fmt.Fprint(safeStdout, jsonx.WellFormed(output))
 	return 0
 }
 
@@ -219,7 +219,7 @@ var (
 func logsClear(args []string, file string, flags map[string]string, crumb string, fail func(int, string) int) int {
 	if _, err := os.ReadFile(file); err != nil {
 		gatesBreadcrumbName(crumb)
-		fmt.Fprint(os.Stdout, "no errors logged\n")
+		fmt.Fprint(safeStdout, "no errors logged\n")
 		return 0
 	}
 	if _, yes := flags["yes"]; !yes {
@@ -241,7 +241,7 @@ func logsClear(args []string, file string, flags map[string]string, crumb string
 			return logsHandover(args, hLogsClearPrompt)
 		}
 		if answer != humanask.Confirmed {
-			fmt.Fprint(os.Stdout, "cancelled — nothing deleted\n")
+			fmt.Fprint(safeStdout, "cancelled — nothing deleted\n")
 			routerHint(nativeVerbFailure("logs", "clear", args, 1, nil, before), 1)
 			return 1
 		}
@@ -251,7 +251,7 @@ func logsClear(args []string, file string, flags map[string]string, crumb string
 	if err := os.Remove(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return logsHandover(args, hLogsClearPrompt)
 	}
-	fmt.Fprint(os.Stdout, "deleted "+file+"\n")
+	fmt.Fprint(safeStdout, "deleted "+file+"\n")
 	return 0
 }
 

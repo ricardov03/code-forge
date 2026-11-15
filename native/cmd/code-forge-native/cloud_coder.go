@@ -40,7 +40,7 @@ func runCloudCoder(args []string) int {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--help", "-h":
-			fmt.Fprint(os.Stdout, cloudCoderUsage)
+			fmt.Fprint(safeStdout, cloudCoderUsage)
 			return 0
 		case "--run", "--block":
 			name := strings.TrimPrefix(args[i], "--")
@@ -70,7 +70,7 @@ func runCloudCoder(args []string) int {
 }
 
 func cloudUsage(message string) int {
-	fmt.Fprint(os.Stderr, "cloud-coder: "+message+"\n"+cloudCoderUsage)
+	fmt.Fprint(safeStderr, "cloud-coder: "+message+"\n"+cloudCoderUsage)
 	return 2
 }
 
@@ -84,12 +84,12 @@ func quoteArg(s string) string {
 func cloudSay(out ledger.Object, code int) int {
 	data, err := ledger.Stringify(out, false)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "cloud-coder:", err)
+		fmt.Fprintln(safeStderr, "cloud-coder:", err)
 		return 1
 	}
-	fmt.Fprintln(os.Stdout, string(data))
+	fmt.Fprintln(safeStdout, string(data))
 	if message, ok := out.Get("message").(string); ok && code != 0 {
-		fmt.Fprintln(os.Stderr, "cloud-coder: "+message)
+		fmt.Fprintln(safeStderr, "cloud-coder: "+message)
 	}
 	return code
 }

@@ -102,14 +102,14 @@ func directStatus(args []string) (int, bool) {
 	run, jsonFlag, message := statusFlags(args)
 	if message != "" {
 		if message == "bad-run-id" {
-			fmt.Fprintln(os.Stderr, "status: run id must match /^[a-z0-9][a-z0-9-]{0,63}$/")
+			fmt.Fprintln(safeStderr, "status: run id must match /^[a-z0-9][a-z0-9-]{0,63}$/")
 			return 1, true
 		}
-		fmt.Fprint(os.Stderr, "status: "+message+"\n"+statusUsage)
+		fmt.Fprint(safeStderr, "status: "+message+"\n"+statusUsage)
 		return 2, true
 	}
 	fail := func(cause string) (int, bool) {
-		fmt.Fprintln(os.Stderr, "status: "+cause)
+		fmt.Fprintln(safeStderr, "status: "+cause)
 		return 1, true
 	}
 	home, err := os.UserHomeDir()
@@ -257,9 +257,9 @@ func directStatus(args []string) (int, bool) {
 		output = strings.Join(texts, "\n\n") + "\n"
 	}
 	for _, w := range warnings {
-		fmt.Fprintln(os.Stderr, w)
+		fmt.Fprintln(safeStderr, w)
 	}
-	if _, err := fmt.Fprint(os.Stdout, output); err != nil {
+	if _, err := fmt.Fprint(safeStdout, output); err != nil {
 		return 1, true
 	}
 	return 0, true

@@ -17,13 +17,13 @@ const docsUsage = "usage: code-forge docs sync|path [--json]"
 // input is a usage error here instead of a handover.
 func runDocs(args []string) int {
 	if len(args) == 0 || (args[0] != "sync" && args[0] != "path") {
-		fmt.Fprintln(os.Stderr, docsUsage)
+		fmt.Fprintln(safeStderr, docsUsage)
 		return 2
 	}
 	asJSON := false
 	for _, arg := range args[1:] {
 		if arg != "--json" || asJSON {
-			fmt.Fprintln(os.Stderr, docsUsage)
+			fmt.Fprintln(safeStderr, docsUsage)
 			return 2
 		}
 		asJSON = true
@@ -42,9 +42,9 @@ func runDocs(args []string) int {
 			result = docsync.Sync(context.Background(), docsync.URL(), home, root, want)
 		}
 		if asJSON {
-			_ = json.NewEncoder(os.Stdout).Encode(result)
+			_ = json.NewEncoder(safeStdout).Encode(result)
 		} else {
-			fmt.Println(result.Line())
+			fmt.Fprintln(safeStdout, result.Line())
 		}
 		return 0
 	}
@@ -53,13 +53,13 @@ func runDocs(args []string) int {
 		path, source, ok = docsync.Best(home, root, want)
 	}
 	if !ok {
-		fmt.Fprintln(os.Stderr, "docs: none; run code-forge docs sync")
+		fmt.Fprintln(safeStderr, "docs: none; run code-forge docs sync")
 		return 1
 	}
 	if asJSON {
-		_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"path": path, "source": source})
+		_ = json.NewEncoder(safeStdout).Encode(map[string]string{"path": path, "source": source})
 	} else {
-		fmt.Println(path)
+		fmt.Fprintln(safeStdout, path)
 	}
 	return 0
 }

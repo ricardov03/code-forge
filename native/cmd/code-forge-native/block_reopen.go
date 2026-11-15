@@ -244,7 +244,7 @@ func (p *blockPreview) reopenHuman() int {
 	if code := h.ask(p.id, fmt.Sprintf("Reopen the review of %s in block %s (run %s)? Only the owner may say yes.", file, p.id, p.run), precheck); code >= 0 {
 		return code
 	}
-	blockGrantExpiry(p.home, p.run, os.Stderr)
+	blockGrantExpiry(p.home, p.run, safeStderr)
 	c, code := p.reopenChecks(false, reopenOut{refuse: h.refuse, fail: h.fail, fallback: h.fallback})
 	if code >= 0 {
 		return code

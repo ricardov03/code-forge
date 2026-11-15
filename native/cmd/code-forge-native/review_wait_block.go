@@ -194,7 +194,7 @@ func reviewWaitBlockDirect(args []string, flags map[string]string, paths []strin
 			return reviewWaitHandover(args, hWaitBlockEncoding)
 		}
 		before := reviewWaitBreadcrumb()
-		fmt.Fprintln(os.Stdout, string(data))
+		fmt.Fprintln(safeStdout, string(data))
 		if answer["status"] == "worker_down" {
 			reviewWaitFailure(args, 3, nil, before)
 			return 3
