@@ -20,6 +20,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/procguard"
+	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -733,7 +734,11 @@ func runGenerateKey(home, runID string) error {
 	if err := errors.Join(writeErr, f.Close()); err != nil {
 		return err
 	}
-	return os.Chmod(file, 0o600)
+	if err := os.Chmod(file, 0o600); err != nil {
+		return err
+	}
+	sign.KeyLoaded(key) // generateKey registers the key (B710)
+	return nil
 }
 
 // --- run start --add-worker --run <id> ---

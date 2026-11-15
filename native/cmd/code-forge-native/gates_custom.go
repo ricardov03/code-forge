@@ -39,6 +39,7 @@ func gatesSignedRow(home, run, slug string, row ledger.Object) error {
 	if len(key) != 32 {
 		return fmt.Errorf("run %s signer key is not 32 bytes", run)
 	}
+	sign.KeyLoaded(key) // loadKey registers the key (B710)
 	signed, err := sign.SignRow(row.Map(), key)
 	if err != nil {
 		return err
