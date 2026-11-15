@@ -16,9 +16,6 @@ import (
 	"github.com/ricardov03/code-forge/native/docsync"
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/ledger"
-	"github.com/ricardov03/code-forge/native/yamledit"
-
-	"gopkg.in/yaml.v3"
 )
 
 // `code-forge init` past the refusals, without prompts (B527): the setup
@@ -408,31 +405,6 @@ func initChangedPaths(a, b any, prefix string) []string {
 		prefix = "(root)"
 	}
 	return []string{prefix}
-}
-
-// initYAMLPlain reports a YAML text with no anchor, alias, explicit tag or
-// merge key, the constructs Go's reader and Node's may build differently.
-func initYAMLPlain(source string) bool {
-	var doc yaml.Node
-	if err := yaml.Unmarshal([]byte(source), &doc); err != nil {
-		return false
-	}
-	var walk func(n *yaml.Node) bool
-	walk = func(n *yaml.Node) bool {
-		if n.Kind == yaml.AliasNode || n.Anchor != "" || n.Style&yaml.TaggedStyle != 0 {
-			return false
-		}
-		for i, c := range n.Content {
-			if n.Kind == yaml.MappingNode && i%2 == 0 && c.Value == "<<" {
-				return false
-			}
-			if !walk(c) {
-				return false
-			}
-		}
-		return true
-	}
-	return walk(&doc)
 }
 
 // initDefaultLevels is defaultsForProvider(p).levels in key order.
@@ -1032,28 +1004,36 @@ func initMergeConfig(existing, generated ledger.Object) ledger.Object {
 	return merged
 }
 
-// initReadUserConfig is readUserConfig: nil for a missing file or a value
-// that is not a mapping; false for a file Go cannot read like Node.
-func initReadUserConfig(file string) (ledger.Object, bool) {
+// initReadUserConfig is readUserConfig: nil for a missing file, a value
+// that is not a mapping, or a text Node's parse throws on (a repeated key,
+// too many aliases); false for a file Go cannot read like Node. ref is the
+// same value read through refs, its aliased objects shared (B686).
+func initReadUserConfig(file string, refs *initYAMLRefs) (plain, ref ledger.Object, ok bool) {
 	raw, err := os.ReadFile(file)
 	if os.IsNotExist(err) {
-		return nil, true
+		return nil, nil, true
 	}
-	if err != nil || !utf8.Valid(raw) || strings.HasPrefix(string(raw), "\ufeff") || !initYAMLPlain(string(raw)) {
-		return nil, false
+	if err != nil || !utf8.Valid(raw) || strings.HasPrefix(string(raw), "\ufeff") || !initYAMLServed(string(raw)) {
+		return nil, nil, false
 	}
 	parsed, err := config.ParseOrdered(string(raw))
 	if err != nil {
-		return nil, false
+		// the YAML is well formed (initYAMLServed parsed it): Go's reader
+		// fails it only for the checks Node's parse throws on
+		return nil, nil, true
 	}
 	if _, ok := parsed.([]config.Pair); !ok {
-		return nil, true
+		return nil, nil, true
 	}
 	value, ok := initPlainValue(parsed)
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
-	return value.(ledger.Object), true
+	shared, ok := refs.value(parsed, config.Ordered{})
+	if !ok {
+		return nil, nil, false
+	}
+	return value.(ledger.Object), shared.(ledger.Object), true
 }
 
 // initLinkStep is one harness link of step 2.
@@ -1080,8 +1060,12 @@ type initSetupState struct {
 	home, cwd, configFile, userFile string
 	existingFile                    bool
 	existing, user                  ledger.Object
-	ctx                             initCtx
-	v                               initValues
+	// existingRef and userRef are existing and user read through refs:
+	// what mergeInto merges into, an aliased object shared (B686)
+	existingRef, userRef ledger.Object
+	refs                 *initYAMLRefs
+	ctx                  initCtx
+	v                    initValues
 }
 
 // initSetupWizard is what the terminal wizard (B528) adds to the setup:
@@ -1103,10 +1087,11 @@ type initSetupWizard struct {
 // project, and resolves the answers from defaults, existing and flags.
 func initSetupLoad(parsed initParsed, home, cwd string, existingFile bool) (initSetupState, handoverReason) {
 	configFile := filepath.Join(cwd, config.Filename)
-	var existing ledger.Object
+	refs := newInitYAMLRefs()
+	var existing, existingRef ledger.Object
 	if existingFile {
 		raw, err := os.ReadFile(configFile)
-		if err != nil || !initYAMLPlain(string(raw)) {
+		if err != nil || !initYAMLServed(string(raw)) {
 			return initSetupState{}, hInitConfigShape
 		}
 		m, order, err := config.ParseTextOrdered(string(raw), configFile)
@@ -1118,9 +1103,14 @@ func initSetupLoad(parsed initParsed, home, cwd string, existingFile bool) (init
 			return initSetupState{}, hInitConfigShape
 		}
 		existing = value.(ledger.Object)
+		shared, ok := refs.value(m, order)
+		if !ok {
+			return initSetupState{}, hInitConfigShape
+		}
+		existingRef = shared.(ledger.Object)
 	}
 	userFile := filepath.Join(home, ".code-forge", "config.yml")
-	user, ok := initReadUserConfig(userFile)
+	user, userRef, ok := initReadUserConfig(userFile, refs)
 	if !ok {
 		return initSetupState{}, hInitUserConfig
 	}
@@ -1130,7 +1120,7 @@ func initSetupLoad(parsed initParsed, home, cwd string, existingFile bool) (init
 		return initSetupState{}, hInitConfigShape
 	}
 	return initSetupState{home: home, cwd: cwd, configFile: configFile, userFile: userFile, existingFile: existingFile,
-		existing: existing, user: user, ctx: ctx, v: v}, 0
+		existing: existing, user: user, existingRef: existingRef, userRef: userRef, refs: refs, ctx: ctx, v: v}, 0
 }
 
 // initSetupFinish is runInit from the summary on, decided without side
@@ -1138,7 +1128,7 @@ func initSetupLoad(parsed initParsed, home, cwd string, existingFile bool) (init
 // --no-interaction path (B527).
 func initSetupFinish(st initSetupState, parsed initParsed, jsonMode bool, wiz *initSetupWizard) (initSetupResult, handoverReason) {
 	home, cwd, configFile, userFile := st.home, st.cwd, st.configFile, st.userFile
-	existingFile, existing, user, ctx, v := st.existingFile, st.existing, st.user, st.ctx, st.v
+	existingFile, existing, ctx, v := st.existingFile, st.existing, st.ctx, st.v
 	var err error
 	settings, blank, summaryLines := initSummary(v, ctx)
 	if wiz != nil && wiz.summary != nil {
@@ -1232,8 +1222,8 @@ func initSetupFinish(st initSetupState, parsed initParsed, jsonMode bool, wiz *i
 		}
 	}
 
-	merged := initMergeConfig(existing, initGenerated(v, ctx, jevRef))
-	text, err := yamledit.StringifyPlain(merged)
+	merged := initMergeConfig(st.existingRef, initGenerated(v, ctx, jevRef))
+	text, err := initYAMLStringify(merged, st.refs)
 	if err != nil {
 		return initSetupResult{}, hInitConfigShape
 	}
@@ -1332,14 +1322,14 @@ func initSetupFinish(st initSetupState, parsed initParsed, jsonMode bool, wiz *i
 	if v.soloProject != nil {
 		userOver = append(userOver, ledger.Field{Key: "solo", Value: ledger.Object{{Key: "project_id", Value: v.soloProject}}})
 	}
-	userBase := user
+	userBase := st.userRef
 	if userBase == nil {
 		userBase = ledger.Object{}
 	}
 	userNext := initMergeInto(userBase, userOver)
 	userText := ""
 	if len(initChangedPaths(userBase, userNext, "")) > 0 {
-		if userText, err = yamledit.StringifyPlain(userNext); err != nil {
+		if userText, err = initYAMLStringify(userNext, st.refs); err != nil {
 			return initSetupResult{}, hInitConfigShape
 		}
 	}

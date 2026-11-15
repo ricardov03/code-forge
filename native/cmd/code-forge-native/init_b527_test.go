@@ -288,7 +288,7 @@ func TestB527InitHandOvers(t *testing.T) {
 		{"jev item id", []string{"--skip-doctor", "--jev-ref", "abcdefghijklmnopqrstuvwxyz"}, "", "", false, "init-jev-op"},
 		{"doctor reads the keychain", []string{"--no-jev"}, "", "", false, "doctor-key-store"},
 		{"links", []string{"--skip-doctor", "--no-jev", "--harness", "claude"}, "", "", true, "init-links"},
-		{"config anchor", []string{"--skip-doctor", "--no-jev"}, "version: 1\nx: &a [1]\ny: *a\n", "", false, "init-config-shape"},
+		{"config custom tag", []string{"--skip-doctor", "--no-jev"}, "version: 1\nx: !custom 1\n", "", false, "init-config-shape"},
 		{"config gate shape", []string{"--skip-doctor", "--no-jev"}, "version: 1\ngates:\n  test: 5\n", "", false, "init-config-shape"},
 		{"config sandbox", []string{"--skip-doctor", "--no-jev"}, "version: 1\ncoder:\n  sandbox:\n    add_dirs: [/x]\n", "", false, "init-config-check"},
 		{"config unknown key", []string{"--skip-doctor", "--no-jev"}, "version: 1\ncustom: 1\n", "", false, "init-config-check"},
