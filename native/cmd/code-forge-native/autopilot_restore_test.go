@@ -266,8 +266,8 @@ func TestAutopilotRestoreHandsOverInGo(t *testing.T) {
 	f.record(t, "r-write", "ended", `,"autopilot_approvals":[`+apApproval("apr-1", "review.max_rounds_per_file", "")+`]`)
 	before := map[string][]byte{"r-reload": apRecordBytes(t, f, "r-reload"), "r-write": apRecordBytes(t, f, "r-write")}
 	for _, args := range [][]string{{"status", "--run", "r-reload"}, {"stop", "--run", "r-write"}} {
-		if code, out, errText := autopilotCall(t, args...); code != 127 || out != "" || strings.Contains(errText, "autopilot:") {
-			t.Fatalf("%v = %d %q %q, want hand-over", args, code, out, errText)
+		if code, out, errText := autopilotCall(t, args...); code != 1 || out != "" || strings.Contains(errText, "autopilot:") {
+			t.Fatalf("%v = %d %q %q, want the Go refusal", args, code, out, errText)
 		}
 	}
 	bom := filepath.Join(t.TempDir(), "bom")
@@ -280,13 +280,13 @@ func TestAutopilotRestoreHandsOverInGo(t *testing.T) {
 	f2 := f
 	f2.workspace = bom
 	f2.record(t, "r-bom", "active", `,"autopilot_approvals":[`+apApproval("apr-1", "review.max_rounds_per_file", "")+`]`)
-	if code, _, _ := autopilotCall(t, "status", "--run", "r-bom"); code != 127 {
+	if code, _, _ := autopilotCall(t, "status", "--run", "r-bom"); code != 1 {
 		t.Fatalf("bom = %d", code)
 	}
 	if err := os.WriteFile(filepath.Join(bom, ".code-forge.yml"), []byte("review:\n  max_rounds_per_file: .inf\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, _ := autopilotCall(t, "status", "--run", "r-bom"); code != 127 {
+	if code, _, _ := autopilotCall(t, "status", "--run", "r-bom"); code != 1 {
 		t.Fatalf("inf = %d", code)
 	}
 	want := []string{"autopilot-restore-write", "autopilot-restore-write", "autopilot-restore-config", "autopilot-restore-config"}
@@ -365,23 +365,23 @@ func TestAutopilotApproveAtTerminalInGo(t *testing.T) {
 	// lock; B536: this config (no provider, no levels) is one Node calls
 	// invalid with key paths Go does not carry, so Node runs it
 	during = func() { apWriteConfig(t, f, "review:\n  max_rounds_per_file: 2\n") }
-	if code, out, _ = approve("4"); code != 127 || out != "" {
+	if code, out, _ = approve("4"); code != 1 || out != "" {
 		t.Fatalf("changed during prompt = %d %q", code, out)
 	}
 	during = func() {}
 	asked = nil
 	// B536: a change Go cannot reload like Node (the invalid config above)
 	// goes to Node before any prompt
-	if code, _, _ = approve("5"); code != 127 {
+	if code, _, _ = approve("5"); code != 1 {
 		t.Fatalf("write = %d", code)
 	}
 	// B732: a lone surrogate is a value Go holds now; this invalid config
 	// still goes to Node at the reload check, before any prompt
-	if code, _, _ = approve(`"\ud800"`); code != 127 {
+	if code, _, _ = approve(`"\ud800"`); code != 1 {
 		t.Fatalf("surrogate = %d", code)
 	}
 	// clack measures wide text by display width: non-ASCII prompts stay on Node
-	if code, _, _ = approve(`"caf\u00e9"`); code != 127 {
+	if code, _, _ = approve(`"caf\u00e9"`); code != 1 {
 		t.Fatalf("non-ASCII = %d", code)
 	}
 	if len(asked) != 0 {
@@ -516,7 +516,7 @@ func TestAutopilotRestoreSecondReadHandsOver(t *testing.T) {
 	apWriteConfig(t, f, config)
 	f.record(t, "r-two", "ended", `,"autopilot_approvals":[`+apApproval("apr-1", "review.max_rounds_per_file", "")+`,`+apApproval("apr-2", "budget.coding", "")+`]`)
 	before := apRecordBytes(t, f, "r-two")
-	if code, out, _ := autopilotCall(t, "status", "--run", "r-two"); code != 127 || out != "" {
+	if code, out, _ := autopilotCall(t, "status", "--run", "r-two"); code != 1 || out != "" {
 		t.Fatalf("two = %d %q", code, out)
 	}
 	if got := apHandoverReasons(t, f); strings.Join(got, " ") != "autopilot-restore-write" {

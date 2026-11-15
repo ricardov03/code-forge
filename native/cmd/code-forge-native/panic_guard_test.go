@@ -23,7 +23,7 @@ type b508Result struct {
 }
 
 // b508Run runs main's guarded entry in-process with a panic seam, a temp
-// HOME and no Node (CODE_FORGE_NODE points nowhere, so a hand-over is 127).
+// HOME and no Node (CODE_FORGE_NODE points nowhere; B690a: Go never starts it).
 func b508Run(t *testing.T, seam func([]string), args ...string) b508Result {
 	t.Helper()
 	home := t.TempDir()
@@ -91,8 +91,9 @@ func b508NoRawPanic(t *testing.T, args []string, text string) {
 	}
 }
 
-// A panic in a verb that only reads (Go wrote no state) goes to Node with
-// the original arguments and one go-panic hand-over row; never exit 2.
+// A panic in a verb that only reads (Go wrote no state) gets the B690a
+// refusal (it went to Node before): one line, exit 1, empty stdout and one
+// go-panic hand-over row; never exit 2.
 func TestB508PanicInReadOnlyVerbHandsOver(t *testing.T) {
 	cases := []struct {
 		args      []string
@@ -115,8 +116,13 @@ func TestB508PanicInReadOnlyVerbHandsOver(t *testing.T) {
 	}
 	for _, c := range cases {
 		res := b508Run(t, b508Panic, c.args...)
-		if res.code != 127 || res.err == nil || !strings.Contains(res.err.Error(), "node executable") {
-			t.Errorf("%v: code=%d err=%v; want the Node hand-over (127 with no Node)", c.args, res.code, res.err)
+		name := c.verb
+		if c.sub != "" && c.sub != "unknown" {
+			name += " " + c.sub
+		}
+		want := "code-forge: " + name + " is not supported in this case yet (go-panic). Please report it: code-forge logs report\n"
+		if res.code != 1 || res.err != nil || res.stdout != "" || res.stderr != want {
+			t.Errorf("%v: code=%d err=%v stdout=%q stderr=%q; want exit 1 and %q", c.args, res.code, res.err, res.stdout, res.stderr, want)
 		}
 		b508NoRawPanic(t, c.args, res.stdout+res.stderr)
 		rows := b508Rows(t, res.home)
@@ -193,8 +199,9 @@ func TestB508NoPanicKeepsResults(t *testing.T) {
 }
 
 // The real launcher (bin/code-forge) with a Go binary built with the
-// cfpanicseam tag, which panics in every command: Node gets a read-only
-// command (setup included), a writing command stops with exit 1.
+// cfpanicseam tag, which panics in every command: a read-only command
+// (setup included) gets the B690a refusal and Node never runs; a writing
+// command stops with exit 1.
 func TestB508LauncherWithPanickingBinary(t *testing.T) {
 	host := map[string]string{"darwin": "darwin", "linux": "linux"}[runtime.GOOS]
 	arch := map[string]string{"arm64": "arm64", "amd64": "x64"}[runtime.GOARCH]
@@ -252,9 +259,9 @@ func TestB508LauncherWithPanickingBinary(t *testing.T) {
 	}
 	for _, args := range [][]string{{"status"}, {"setup"}, {"logs", "summary"}} {
 		code, stdout, stderr, nodeArgs := launch(args...)
-		want := filepath.Join(pkg, "bin", "code-forge.mjs") + "\n" + strings.Join(args, "\n") + "\n"
-		if code != 0 || stdout != "node served it\n" || nodeArgs != want {
-			t.Errorf("%v: exit=%d stdout=%q stderr=%q node args=%q; want Node to run the command", args, code, stdout, stderr, nodeArgs)
+		want := "code-forge: " + strings.Join(args, " ") + " is not supported in this case yet (go-panic). Please report it: code-forge logs report\n"
+		if code != 1 || stdout != "" || stderr != want || nodeArgs != "" {
+			t.Errorf("%v: exit=%d stdout=%q stderr=%q node args=%q; want the refusal %q and no Node", args, code, stdout, stderr, nodeArgs, want)
 		}
 		b508NoRawPanic(t, args, stdout+stderr)
 	}

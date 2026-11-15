@@ -137,11 +137,7 @@ func autopilotParse(sub string, args []string) (autopilotFlags, error) {
 }
 
 func autopilotHandover(args []string, reason handoverReason) int {
-	code, err := handover(append([]string{"autopilot"}, args...), reason)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
-	}
-	return code
+	return refuseUnported(append([]string{"autopilot"}, args...), reason)
 }
 
 func runAutopilot(args []string) int {

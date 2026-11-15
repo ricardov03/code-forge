@@ -171,7 +171,7 @@ func b528Setup(t *testing.T) (string, string, string) {
 
 // b528Run runs `init args...` in Go on a fake 80x24 terminal fed with keys;
 // stdout, stderr and the drawing share one file, as on the terminal. It
-// returns the exit code and the transcript; a hand-over gives code 127.
+// returns the exit code and the transcript; a Go refusal (B690a) gives code 1.
 func b528Run(t *testing.T, cwd string, keys []string, args ...string) (int, string) {
 	t.Helper()
 	file, err := os.CreateTemp(t.TempDir(), "tty-")
@@ -220,9 +220,8 @@ func TestB528InitWizardMatchesNode(t *testing.T) {
 			}
 			home, cwd, repo := b528Setup(t)
 			code, transcript := b528Run(t, cwd, c.keys, "--skip-doctor", "--no-jev")
-			if code == 127 {
-				handed, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
-				t.Fatalf("handed over to Node: %s", handed)
+			if handed, err := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl")); err == nil {
+				t.Fatalf("refused in Go (exit %d): %s", code, handed)
 			}
 			log, files := b528Collect(t, home, cwd, repo)
 			got := b528Golden{Code: code, Transcript: b528Mask(transcript, home, cwd, repo), Log: log, Files: files}
@@ -288,8 +287,8 @@ func TestB528InitWizardHandOvers(t *testing.T) {
 			before := b528Tree(t, cwd, home, cwd)
 			code, transcript := b528Run(t, cwd, []string{"\r"}, c.args...)
 			// the only output is the launcher's own line: no Node here
-			if code != 127 || !strings.HasPrefix(transcript, "code-forge-native: node executable") || strings.Count(transcript, "\n") != 1 {
-				t.Fatalf("code=%d transcript=%q; want the Node hand-over before any output", code, transcript)
+			if code != 1 || !b690aIsRefusal(transcript) {
+				t.Fatalf("code=%d transcript=%q; want the Go refusal before any output", code, transcript)
 			}
 			data, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
 			var row handoverRow

@@ -61,8 +61,8 @@ func checkSmallCases(t *testing.T, cases []smallCase) {
 	}
 }
 
-// expectHandover checks the run is left to Node with reason: with no Node
-// executable the handover exits 127 after logging its row.
+// expectHandover checks the run is refused in Go with reason (B690a): the
+// refusal exits 1 after logging its handovers.jsonl row.
 func expectHandover(t *testing.T, reason string, args ...string) {
 	t.Helper()
 	t.Setenv("CODE_FORGE_HANDOVER_LOG", "")
@@ -70,7 +70,7 @@ func expectHandover(t *testing.T, reason string, args ...string) {
 	code, _ := run(args)
 	data, _ := os.ReadFile(handoverLogPath())
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if code != 127 || !strings.Contains(lines[len(lines)-1], `"reason":"`+reason+`"`) {
-		t.Fatalf("%q: want a Node handover (%s), got code=%d log=%s", args, reason, code, data)
+	if code != 1 || !strings.Contains(lines[len(lines)-1], `"reason":"`+reason+`"`) {
+		t.Fatalf("%q: want the Go refusal (%s), got code=%d log=%s", args, reason, code, data)
 	}
 }

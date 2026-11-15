@@ -371,8 +371,8 @@ func TestAutopilotVerbHandsOver(t *testing.T) {
 	}
 	for _, tc := range cases {
 		code, out, _ := autopilotCall(t, tc.args...)
-		if code != 127 || out != "" {
-			t.Fatalf("%v: hand-over exit = %d stdout %q, want 127", tc.args, code, out)
+		if code != 1 || out != "" {
+			t.Fatalf("%v: refusal exit = %d stdout %q, want 1", tc.args, code, out)
 		}
 	}
 	data, err := os.ReadFile(filepath.Join(f.home, ".code-forge", "native", "handovers.jsonl"))

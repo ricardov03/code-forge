@@ -11,8 +11,9 @@ import (
 )
 
 // B649: Go never hands a command to Node while a run it names holds a live
-// until-done autopilot grant (Node's Date.parse(null) misreads it). The fake
-// Node on CODE_FORGE_NODE records its argv: no file means Node never ran.
+// until-done autopilot grant (Node's Date.parse(null) misreads it). B690a:
+// Go never starts Node at all; the fake Node on CODE_FORGE_NODE records its
+// argv, so no file means Node never ran.
 
 const b649UntilDone = `{"grant_id":"ap-done","status":"active","until":null,"until_done":true,"scopes":["waive:critical","close:routine"],"deny":[],"delegate":"L2","caps":{},"stop_at":0.9,"started_at":"2026-01-01T00:00:00.000Z","stopped_at":null,"expired_at":null,"link":null}`
 const b649Timed = `{"grant_id":"ap-timed","status":"active","until":"2999-01-01T00:00:00.000Z","scopes":["waive:critical","close:routine"],"deny":[],"delegate":"L2","caps":{},"stop_at":0.9,"started_at":"2026-01-01T00:00:00.000Z","stopped_at":null,"expired_at":null,"link":null}`
@@ -126,7 +127,7 @@ func TestB649HandoverRefusedUnderUntilDoneGrant(t *testing.T) {
 		"other run's grant":    "", // the until-done grant belongs to a run the command does not name
 		"until-done, no --run": b649UntilDone,
 	} {
-		t.Run(name+": hands over as before", func(t *testing.T) {
+		t.Run(name+": the plain B690a refusal", func(t *testing.T) {
 			home := b649Home(t, grant)
 			args := "block|frobnicate|B1|--run|r-test"
 			if name == "other run's grant" {
@@ -136,8 +137,9 @@ func TestB649HandoverRefusedUnderUntilDoneGrant(t *testing.T) {
 				args = "block|frobnicate|B1"
 			}
 			r := b649Run(t, test, home, t.TempDir(), args)
-			want := append([]string{}, strings.Split(args, "|")...)
-			if r.code != 0 || r.stdout != "fake-node-ran\n" || len(r.nodeArgv) != len(want)+1 || strings.Join(r.nodeArgv[1:], "|") != args {
+			// B690a: Go never starts Node; this case was a hand-over before
+			want := "code-forge: block is not supported in this case yet (block-unported-subcommand). Please report it: code-forge logs report\n"
+			if r.code != 1 || r.stdout != "" || r.stderr != want || r.nodeArgv != nil {
 				t.Fatalf("exit %d stdout %q stderr %q node %q", r.code, r.stdout, r.stderr, r.nodeArgv)
 			}
 		})

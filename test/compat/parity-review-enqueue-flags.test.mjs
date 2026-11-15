@@ -68,6 +68,12 @@ async function executeAsync(f, args) {
   const [code] = await once(child, 'close');
   return { code, stdout, stderr };
 }
+// B690a: Go refuses a case it does not run yet: exit 1, no stdout, one stderr line.
+function b690aAssertRefusal(result, label) {
+  assert.equal(result.code, 1, `${label}: the Go refusal exits 1`);
+  assert.equal(result.stdout, '', `${label}: no stdout`);
+  assert.match(result.stderr, /^code-forge: review-file is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/, `${label}: one refusal line`);
+}
 async function parity(f, args = ARGS, options = {}, page) {
   const r = await runParity(args, { fixture: f, goCommand: BIN, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE }, ...options });
   // B613: a page means Go prints the help page around Node's usage; nothing else may differ.
@@ -93,7 +99,7 @@ async function snapshot(f) {
   return files;
 }
 
-test('help runs in Go and an unported flag records exactly one hand-over with its reason', async () => {
+test('help runs in Go and an unported flag gets the Go refusal and records exactly one hand-over row with its reason', async () => {
   const f = await fixture();
   for (const args of [['review-file', '--help'], ['review-file', '-h', '--wait-block', 'B1']]) {
     const expected = execute(f, args, true);
@@ -105,8 +111,7 @@ test('help runs in Go and an unported flag records exactly one hand-over with it
   await assert.rejects(readFile(path.join(f.home, '.code-forge/native/handovers.jsonl')), { code: 'ENOENT' }, 'native help records zero hand-overs');
   const args = ['review-file', '--x=/private/value'];
   const env = { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: process.execPath, CODE_FORGE_HANDOVER_LOG: '1', CODE_FORGE_NO_ERROR_LOG: '0' };
-  const expected = execute(f, args, true, { CODE_FORGE_NO_ERROR_LOG: '0' });
-  assert.deepEqual(execute(f, args, false, env), expected, 'recording preserves Node output and exit');
+  b690aAssertRefusal(execute(f, args, false, env), 'the unported flag gets the Go refusal, even with a working Node');
   const rows = (await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
   assert.equal(rows.length, 1, 'one hand-over writes exactly one JSONL row');
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
@@ -199,7 +204,7 @@ test('enqueue flag modes and cache retries run in Go with zero Node parity diffe
   assert.deepEqual(execute(rebased, rebaseArgs), execute(rebased, rebaseArgs, true), 'existing path-derived rebase tickets give byte-equal replies on their original tree');
 });
 
-test('enqueue flag refusals preserve cache bytes and unsupported cases hand over before writes', async () => {
+test('enqueue flag refusals preserve cache bytes and unsupported cases get the Go refusal before writes', async () => {
   const f = await fixture();
   assert.equal(execute(f, [...ARGS, '--fresh', '--answers=f1', '--of=sample.mjs']).code, 2, 'fresh plus answers is native usage');
   const cases = [
@@ -233,12 +238,13 @@ test('enqueue flag refusals preserve cache bytes and unsupported cases hand over
   await put(f.home, 'ledger/fixture.jsonl', JSON.stringify(signRow({ event: 'review.cap', run: RUN, block: 'B1', file: 'sample.mjs', open: ['f1'] }, Buffer.alloc(32, 7))) + '\n');
   const capArgs = ['review-file', 'answer.mjs', '--block=B1', `--run=${RUN}`, '--answers=f1', '--of=sample.mjs'];
   const capBefore = await snapshot(f);
-  assert.equal(execute(f, capArgs).code, 127, 'unsupported cap clearing rules hand over');
-  assert.deepEqual(await snapshot(f), capBefore, 'unsupported answers case changes zero state bytes or modes');
-  await parity(f, capArgs, { env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } });
+  for (const node of [NO_NODE, process.execPath]) {
+    b690aAssertRefusal(execute(f, capArgs, false, { CODE_FORGE_NODE: node }), 'unsupported cap clearing rules');
+    assert.deepEqual(await snapshot(f), capBefore, 'unsupported answers case changes zero state bytes or modes');
+  }
 });
 
-test('unsupported answers marker and result encodings hand over before publication', async () => {
+test('unsupported answers marker and result encodings get the Go refusal before publication', async () => {
   const f = await fixture();
   const source = JSON.parse(execute(f).stdout);
   await put(f.home, 'ledger/fixture.jsonl', JSON.stringify(signRow({ event: 'review.result', run: RUN, block: 'B1', file: 'sample.mjs', content_hash: source.content_hash, status: 'reviewed', approved: false, open: [{ id: 'f1', severity: 'warning' }] }, Buffer.alloc(32, 7))) + '\n');
@@ -250,8 +256,9 @@ test('unsupported answers marker and result encodings hand over before publicati
   for (const location of ['marker', 'result']) {
     await done(f, id, { status: 'unavailable', ...(location === 'result' ? { detail: '\ud800' } : {}) }, location === 'marker' ? { detail: '\ud800' } : {});
     const before = await snapshot(f);
-    assert.equal(execute(f, args).code, 127, `unsupported ${location} hands over with Node unavailable`);
-    assert.deepEqual(await snapshot(f), before, `unsupported ${location} changes zero state bytes or modes`);
-    await parity(f, args, { env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } });
+    for (const node of [NO_NODE, process.execPath]) {
+      b690aAssertRefusal(execute(f, args, false, { CODE_FORGE_NODE: node }), `unsupported ${location}`);
+      assert.deepEqual(await snapshot(f), before, `unsupported ${location} changes zero state bytes or modes`);
+    }
   }
 });

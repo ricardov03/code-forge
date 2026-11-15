@@ -23,11 +23,7 @@ func init() { routes["worker"] = runWorkerVerb }
 const workerUsage = "usage: code-forge worker --run <id> [--cwd <dir>] [--poll-ms <n>] [--once]\n"
 
 func workerHandover(args []string, reason handoverReason) int {
-	code, err := handover(append([]string{"worker"}, args...), reason)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
-	}
-	return code
+	return refuseUnported(append([]string{"worker"}, args...), reason)
 }
 
 // workerPlan decides the invocation without writing anything. A nil plan

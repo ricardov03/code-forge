@@ -101,11 +101,7 @@ func metaServe(verb, sub string, args []string, fn func(stdout, stderr io.Writer
 }
 
 func metaHandover(verb string, args []string, reason handoverReason) int {
-	code, err := handover(append([]string{verb}, args...), reason)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
-	}
-	return code
+	return refuseUnported(append([]string{verb}, args...), reason)
 }
 
 // runHelpVerb is `code-forge help` (B613, Artisan's list and help <command>):

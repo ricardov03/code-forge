@@ -189,8 +189,8 @@ func TestB555FactsSessionAndParseErrorHandOver(t *testing.T) {
 				}
 			}
 			fcChdir(t, map[string]string{"proj": f.proj, "bad": f.bad}[c.dir])
-			if code, _ := run(append([]string{"facts"}, c.args...)); code != 127 {
-				t.Fatalf("code=%d; want the Node hand-over", code)
+			if code, _ := run(append([]string{"facts"}, c.args...)); code != 1 {
+				t.Fatalf("code=%d; want the Go refusal", code)
 			}
 			data, _ := os.ReadFile(filepath.Join(f.home, ".code-forge", "native", "handovers.jsonl"))
 			var row handoverRow

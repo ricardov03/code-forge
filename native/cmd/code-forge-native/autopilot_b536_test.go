@@ -331,8 +331,8 @@ func TestB536ApproveNarrowHandOvers(t *testing.T) {
 			asked := false
 			autopilotConfirm = func(string) (humanask.Result, error) { asked = true; return humanask.Confirmed, nil }
 			code, out, _ := b536Approve(t, tc.key, tc.value, "2026-11-11T11:00:00.000Z")
-			if code != 127 || out != "" || asked {
-				t.Fatalf("= %d %q asked %v, want a hand-over before the prompt", code, out, asked)
+			if code != 1 || out != "" || asked {
+				t.Fatalf("= %d %q asked %v, want the Go refusal before the prompt", code, out, asked)
 			}
 			if f.state(t) != before {
 				t.Fatal("wrote before handing over")
@@ -366,8 +366,8 @@ func TestB536RestoreNarrowHandOvers(t *testing.T) {
 			before := f.state(t)
 			f.at("2026-11-11T11:00:00.000Z")
 			code, out, _ := autopilotCall(t, "status", "--run", "r-fix")
-			if code != 127 || out != "" {
-				t.Fatalf("status = %d %q, want a hand-over", code, out)
+			if code != 1 || out != "" {
+				t.Fatalf("status = %d %q, want the Go refusal", code, out)
 			}
 			if f.state(t) != before {
 				t.Fatal("wrote before handing over")

@@ -244,8 +244,8 @@ func TestB502InitHandOvers(t *testing.T) {
 		code, _ := run(c.args)
 		_ = os.Chdir(here)
 		initStdinTTY = saved
-		if code != 127 {
-			t.Fatalf("%q: code=%d; want the Node hand-over", c.args, code)
+		if code != 1 {
+			t.Fatalf("%q: code=%d; want the Go refusal", c.args, code)
 		}
 		data, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
 		var row handoverRow

@@ -136,11 +136,7 @@ func gatesOther(args []string) int {
 	}
 	var hand *gatesHand
 	if errors.As(err, &hand) {
-		code, e := handover(append([]string{"gates"}, args...), hand.reason)
-		if e != nil {
-			fmt.Fprintln(os.Stderr, "code-forge-native:", e)
-		}
-		return code
+		return refuseUnported(append([]string{"gates"}, args...), hand.reason)
 	}
 	if err != nil {
 		gatesErrf("gates %s: %s\n", sub, err.Error())

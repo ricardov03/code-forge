@@ -350,7 +350,7 @@ test('concurrent orphan is observed under the lock after a confirmed lock wait',
   assert.equal(JSON.parse(await readFile(path.join(clone.home, '.code-forge/runs', `${RUN}.json`), 'utf8')).blocks.B1.status, 'open', 'concurrent refusal preserves the open block');
 });
 
-test('Node accepts missing and invalid gate timestamps; native dates match and uncertain dates hand over', async () => {
+test('Node accepts missing and invalid gate timestamps; native dates match and uncertain dates are refused', async () => {
   for (const [ts, expected, native] of [
     [undefined, 0, true], [null, 0, true], ['', 0, true],
     ['2000-01-01T00:00:00.000Z', 1, true], ['2099-01-01T00:00:00.000Z', 0, true],
@@ -367,20 +367,27 @@ test('Node accepts missing and invalid gate timestamps; native dates match and u
     // Preserve a genuinely missing ts: signRow/appendRow would stamp one.
     await writeFile(ledger, await readFile(ledger, 'utf8') + JSON.stringify({ ...row, mac: macFor(row, KEY) }) + '\n');
     const env = { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: native ? '/nonexistent' : process.execPath };
+    if (!native) {
+      // B690a: Go never starts Node; an uncertain date gets one refusal line, exit 1,
+      // and no state write, even with a working Node.
+      const before = await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]);
+      for (const nodeEnv of [{}, { CODE_FORGE_NODE: process.execPath }]) {
+        const refused = await launch(f, [...args, '--json'], false, nodeEnv);
+        assert.equal(refused.code, 1, `timestamp ${String(ts)} is refused before writing`);
+        assert.equal(refused.stdout, '', `timestamp ${String(ts)}: no stdout`);
+        assert.match(refused.stderr, /^code-forge: block close is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/, `timestamp ${String(ts)}: one refusal line`);
+        assert.deepEqual(await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]), before);
+      }
+      continue;
+    }
     const result = await runParity([...args, '--json'], { fixture: f, goCommand: BINARY, env });
     assert.deepEqual(result.diffs, [], `timestamp ${String(ts)}: exact Node parity, native=${native}`);
-    if (!native) {
-      const before = await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]);
-      const missingNode = await launch(f, [...args, '--json']);
-      assert.equal(missingNode.code, 127, `timestamp ${String(ts)} hands over before writing`);
-      assert.deepEqual(await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]), before);
-    }
     const direct = await launch(f, [...args, '--json'], false, env);
     assert.equal(direct.code, expected, `timestamp ${String(ts)}: ${direct.stderr}`);
   }
 });
 
-test('unsupported close cases hand over the original arguments before any state write; native usage and refusal boundaries match Node', async () => {
+test('unsupported close cases are refused before any state write; native usage and refusal boundaries match Node', async () => {
   const usage = await launch(await fixture(), ['block', 'close']);
   assert.equal(usage.code, 2, 'missing close arguments are a native usage refusal with Node unavailable');
   /** @type {[string, number][]} */
@@ -439,12 +446,15 @@ test('unsupported close cases hand over the original arguments before any state 
   }
   for (const [kind, config, extra] of delegated) {
     const f = await fixture(kind, config), before = await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]);
+    // B690a: Go never starts Node; the case gets one refusal line, exit 1.
     const result = await launch(f, [...args, ...extra, '--json']);
-    assert.equal(result.code, 127, `${kind} ${JSON.stringify(config)} ${extra}: fallback exits 127 when Node is unavailable`);
-    assert.deepEqual(await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]), before, 'handover preserves every state byte and directory');
+    assert.equal(result.code, 1, `${kind} ${JSON.stringify(config)} ${extra}: refused in Go`);
+    assert.equal(result.stdout, '', `${kind}: the refusal writes no stdout`);
+    assert.match(result.stderr, /^code-forge: block close is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/, `${kind}: one refusal line`);
+    assert.deepEqual(await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]), before, 'the refusal preserves every state byte and directory');
     const probe = await launch(f, [...args, ...extra, '--json'], false, { CODE_FORGE_NODE: PROBE });
-    assert.deepEqual([probe.code, probe.stdout, probe.stderr], [0, JSON.stringify([...args, ...extra, '--json']) + '\n', ''], 'handover passes every original argument once and in order');
-    assert.deepEqual(await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]), before, 'successful handover also preserves every state byte');
+    assert.deepEqual([probe.code, probe.stdout, probe.stderr], [result.code, result.stdout, result.stderr], 'a Node probe on CODE_FORGE_NODE never runs');
+    assert.deepEqual(await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]), before, 'the second refusal also preserves every state byte');
   }
   for (const argv of [['block', 'close'], ['block', 'close', 'B1'], [...args, '--json=true'], [...args, '--run', RUN], [...args, '--worker-pid', 'bad'], [...args, '--unknown']]) {
     const result = await runParity(argv, { fixture: await fixture(), goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });

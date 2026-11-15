@@ -188,7 +188,7 @@ func TestB452StatusNonASCIIBlockIDStaysWithNode(t *testing.T) {
 	home, ws := b452StatusFixture(t)
 	b452Record(t, home, "r-uni", map[string]any{"run_id": "r-uni", "workspace": ws, "project": "proj", "blocks": map[string]any{"Bé": map[string]any{}, "B1": map[string]any{}}})
 	code, out, errText := runCaptured(t, "status", "--run", "r-uni")
-	if code != 127 || out != "" || !strings.Contains(errText, "node executable") {
+	if code != 1 || out != "" || !b690aIsRefusal(errText) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errText)
 	}
 }

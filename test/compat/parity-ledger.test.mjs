@@ -85,7 +85,7 @@ test('B248 clause: ledger tail counts and pure argument checks match Node with z
   }, 'exactly the final three ordered, redacted rows are emitted with no Node executable');
 });
 
-test('B248 boundary: missing state and unported ledger subcommands preserve Node handover', async (t) => {
+test('B248 boundary: missing state and unported ledger forms get the Go refusal', async (t) => {
   const f = await fixture(t);
   await rm(f.ledger, { recursive: true });
   assert.deepEqual(native(f, ['tail', '--slug', 'absent']), {
@@ -103,16 +103,20 @@ test('B248 boundary: missing state and unported ledger subcommands preserve Node
     assert.deepEqual(await runParity(['ledger', ...args], { fixture: f, goCommand: binary,
       env: { CODE_FORGE_NODE: unavailable } }), { equal: true, diffs: [] }, sub + ': Go without Node yields zero differences');
   }
-  // A form Go still hands over (a review.done timestamp that is not a string: ledger-js-value).
+  // B690a: a form Go does not run yet (a review.done timestamp that is not a string:
+  // ledger-js-value) gets the Go refusal, even with a working Node, and writes nothing.
   await mkdir(f.ledger, { recursive: true });
-  await writeFile(path.join(f.ledger, 'odd.jsonl'), JSON.stringify({ event: 'review.done', file: 'a.mjs', ts: { at: 1 } }) + '\n');
+  const oddFile = path.join(f.ledger, 'odd.jsonl');
+  const oddBytes = JSON.stringify({ event: 'review.done', file: 'a.mjs', ts: { at: 1 } }) + '\n';
+  await writeFile(oddFile, oddBytes);
   const oddArgs = ['outcome', '--slug', 'odd', '--scan-git'];
-  const handed = native(f, oddArgs);
-  assert.equal(handed.code, 127, 'odd row: exactly exit 127 when Node is unavailable');
-  assert.equal(handed.stdout, '', 'odd row: no stdout before handover');
-  assert.match(handed.stderr, /code-forge-native: node executable .* not found:/, 'odd row: Node lookup failed');
-  assert.deepEqual(await runParity(['ledger', ...oddArgs], { fixture: f, goCommand: binary,
-    env: { CODE_FORGE_NODE: process.execPath } }), { equal: true, diffs: [] }, 'odd row: working Node handover yields zero differences');
+  for (const node of [unavailable, process.execPath]) {
+    const refused = native(f, oddArgs, node);
+    assert.equal(refused.code, 1, 'odd row: the Go refusal exits 1');
+    assert.equal(refused.stdout, '', 'odd row: no stdout');
+    assert.match(refused.stderr, /^code-forge: ledger outcome is not supported in this case yet \(ledger-js-value\)\. Please report it: code-forge logs report\n$/, 'odd row: one refusal line');
+    assert.equal(await readFile(oddFile, 'utf8'), oddBytes, 'odd row: the ledger is unchanged');
+  }
   await rm(f.ledger, { recursive: true });
   // Enable router logging in both harness copies (the harness normally disables it).
   const preload = path.join(f.repo, 'logging.cjs');

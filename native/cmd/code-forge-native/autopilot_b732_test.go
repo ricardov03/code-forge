@@ -114,8 +114,8 @@ func TestB732ApprovePairEscapeKeepsHandOver(t *testing.T) {
 	asked := false
 	autopilotConfirm = func(string) (humanask.Result, error) { asked = true; return humanask.Confirmed, nil }
 	code, out, _ := b536Approve(t, "project.name", `"😀"`, "2026-11-11T11:00:00.000Z")
-	if code != 127 || out != "" || asked {
-		t.Fatalf("= %d %q asked %v, want a hand-over before the prompt", code, out, asked)
+	if code != 1 || out != "" || asked {
+		t.Fatalf("= %d %q asked %v, want the Go refusal before the prompt", code, out, asked)
 	}
 	if f.state(t) != before {
 		t.Fatal("wrote before handing over")

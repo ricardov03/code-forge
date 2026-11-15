@@ -28,7 +28,7 @@ then 5a. Going away while a run goes on? Read 5b. One small task, no plan? Read 
 | Page | What it is |
 |---|---|
 | [reference/commands.md](reference/commands.md) | the generated command reference; CLI usage is the source of truth |
-| [native-engine.md](native-engine.md) | how the Go engine starts commands and falls back to Node |
+| [native-engine.md](native-engine.md) | how the Go engine starts commands and refuses cases it does not serve yet |
 | [../CHANGELOG.md](../CHANGELOG.md) | what changed in each version; `## [Unreleased]` is the next one |
 | [reference/config.md](reference/config.md) | every `.code-forge.yml` key, its type and default. Generated from `schema/code-forge.schema.json` |
 | [outcomes.md](outcomes.md) | specialist result fields, approval statuses, and the outcome seal and check commands |

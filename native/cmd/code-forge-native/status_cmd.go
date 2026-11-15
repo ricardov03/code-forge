@@ -4,8 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
-	"os"
 
 	"github.com/ricardov03/code-forge/native/canon"
 	"github.com/ricardov03/code-forge/native/config"
@@ -23,12 +21,8 @@ func statusCommand(args []string) int {
 		return code
 	}
 	// Only the cases Go cannot match byte for byte (a block id outside
-	// printable ASCII, a ledger number Go cannot read) reach Node.
-	code, err := handover(append([]string{"status"}, args...))
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
-	}
-	return code
+	// printable ASCII, a ledger number Go cannot read) are refused (B690a).
+	return refuseUnported(append([]string{"status"}, args...))
 }
 
 // Shared with the review-wait routes: honor and verify pinned config snapshots.

@@ -78,11 +78,7 @@ func (v smallVerb) run(args []string) int {
 var smallVerbBefore = []any{}
 
 func smallVerbHandover(verb string, args []string, reason handoverReason) int {
-	code, err := handover(append([]string{verb}, args...), reason)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
-	}
-	return code
+	return refuseUnported(append([]string{verb}, args...), reason)
 }
 
 // nodeLog is src/util/log.mjs: every line of the message carries the prefix.

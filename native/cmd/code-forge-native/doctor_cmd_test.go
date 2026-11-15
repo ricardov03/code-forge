@@ -192,7 +192,7 @@ func TestB474DoctorWithoutHomeHandsOver(t *testing.T) {
 	b474Project(t, "provider: anthropic\n"+b474Levels, 0)
 	t.Setenv("HOME", "")
 	code, out, errText := runCaptured(t, "doctor", "--quick")
-	if code != 127 || out != "" || !strings.HasPrefix(errText, "code-forge-native: node executable") {
-		t.Fatalf("want a Node handover, got code=%d stdout=%q stderr=%q", code, out, errText)
+	if code != 1 || out != "" || !b690aIsRefusal(errText) {
+		t.Fatalf("want the Go refusal, got code=%d stdout=%q stderr=%q", code, out, errText)
 	}
 }

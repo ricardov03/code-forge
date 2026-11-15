@@ -570,11 +570,11 @@ func TestBlockHumanVerbsNonASCIILogGo(t *testing.T) {
 		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "no", "block|accept-hit|Bñ'é😀|--run|r-test|--line|2|--transcript|"+transcript+"|--reason|ok").want(t, 1, "", "block Bñ'é😀 accept-hit: cancelled — nothing was recorded\n")
 		check(t, entry(t, f), nil, 1, "error", "block Bñ'é😀 accept-hit: cancelled — nothing was recorded", "1dda577516ad")
 	})
-	t.Run("a no-break space still goes to Node", func(t *testing.T) {
+	t.Run("a no-break space gets the B690a refusal", func(t *testing.T) {
 		f := newHVFixture(t, nil, nil)
 		r := f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--x\u00a0y=1")
-		if !strings.Contains(r.stderr, "code-forge-native:") {
-			t.Fatalf("NBSP text did not hand over: exit %d stderr %q", r.code, r.stderr)
+		if r.code != 1 || !b690aIsRefusal(r.stderr) {
+			t.Fatalf("NBSP text was not refused: exit %d stderr %q", r.code, r.stderr)
 		}
 	})
 }

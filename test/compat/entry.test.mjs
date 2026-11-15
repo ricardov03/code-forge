@@ -69,12 +69,19 @@ test('npm entry selects Go or Node and preserves all process inputs and outputs'
   const args = ['unported', 'two words', 'single\'quote', 'double"quote', '', '$HOME; *'];
   const input = 'stdin with spaces, quotes "\' and unicode é\n';
   // B569: a missing binary stops with the install fix; only CODE_FORGE_NATIVE=0 reaches Node.
+  // B690a: Go never starts Node; it answers the unknown verb itself with Node's own text.
+  const nodeUnknown = output(run(process.execPath, [path.join(root, 'bin/code-forge.mjs'), ...args], { cwd: f.dir, input }));
+  assert.equal(nodeUnknown.code, 1, 'Node refuses the unknown verb with exit 1');
   for (const mode of ['native', 'disabled', 'missing', 'disabled-missing']) {
     if (mode === 'missing') rmSync(f.binary);
     for (const code of [0, 1, 2, 3]) {
       const result = run(f.launcher, args, { cwd: f.dir, input, env: { ...env, ENTRY_TOKEN: 'kept "verbatim"', ENTRY_EXIT: String(code), CODE_FORGE_NATIVE: mode.startsWith('disabled') ? '0' : '1' } });
       if (mode === 'missing') {
         assert.deepEqual(output(result), { stdout: '', code: 69, stderr: missingEngine(f, 'missing') }, mode + ': no Node, one fix message, exit 69');
+        continue;
+      }
+      if (mode === 'native') {
+        assert.deepEqual(output(result), nodeUnknown, mode + ': Go answers like Node and never starts the Node probe');
         continue;
       }
       assert.equal(result.code, code, mode + ': exit ' + code + ' passes through');
@@ -121,7 +128,7 @@ test('internal namespace preserves native callers including doctor and daemon st
   assert.match(JSON.parse(version.stdout).goVersion, /^go\d+\./, 'internal version reports Go runtime');
   assert.deepEqual(output(run(f.binary, ['--version'], { env: { ...env, CODE_FORGE_NODE: '' } })), output(run(process.execPath, [f.script, '--version'])), 'unset Node override resolves node from PATH');
   for (const verb of ['version', 'verify-ledger', 'serve', 'state-golden', 'block-rebase-landed']) {
-    assert.deepEqual(output(run(f.binary, [verb])), output(run(process.execPath, [f.script, verb])), verb + ' without internal goes to Node');
+    assert.deepEqual(output(run(f.binary, [verb])), output(run(process.execPath, [f.script, verb])), verb + ' without internal matches Node');
     if (verb !== 'version') {
       const invalid = run(f.binary, ['internal', verb]);
       assert.equal(invalid.code, 2, verb + ': internal flags retain usage exit 2');
@@ -190,7 +197,8 @@ async function fullCpuLoad(t) {
 }
 
 // B541: --version runs in Go since B458, so timing it measured Go against Node, not a
-// hand-over. An unknown verb has no Go route and always hands over to Node.
+// hand-over. An unknown verb has no Go route; since B690a Go answers it itself with
+// Node's unknown-verb text, so this times the Go entry against the Node entry.
 const handoverVerb = ['unknown-timing-verb'];
 
 function handoverOverhead(t, f, slow = false) {
@@ -215,11 +223,10 @@ function handoverOverhead(t, f, slow = false) {
     assert.deepEqual(output(result), expected, 'timed command gives exactly Node\'s stdout, stderr and exit');
     return elapsed;
   };
-  // Assert Go actually hands over before measuring the public linked entry:
-  // without a Node executable the Go binary cannot answer this verb itself.
+  // B690a: Go never starts Node; with no Node executable it still gives Node's answer.
   const noNode = run(f.binary, handoverVerb, { env: { ...env, CODE_FORGE_HANDOVER_LOG: '0', CODE_FORGE_NODE: 'entry-node-does-not-exist' } });
-  assert.equal(noNode.code, 127, 'Go hands the timing verb to Node (exit 127 when Node is missing)');
-  assert.deepEqual(output(run(f.binary, handoverVerb)), expected, 'timing measures a working Go handover');
+  assert.deepEqual(output(noNode), expected, 'Go answers the timing verb itself, with no Node');
+  assert.deepEqual(output(run(f.binary, handoverVerb)), expected, 'timing measures the Go answer');
   measure(npmLink, handoverVerb, '0');
   measure(entry, entryArgs);
   const median = (values) => { values.sort((a, b) => a - b); return (values[4] + values[5]) / 2; };
@@ -300,12 +307,14 @@ test('Go handover budget rejects a 40 ms delay under full CPU load', { skip: pro
 
 test('entry boundaries handle nonexecutable native files and missing Node with one error', (t) => {
   const f = fixture(t, true);
+  // B690a: Go never starts Node, so a missing Node changes nothing: the unknown verb
+  // gets Node's text from Go, exit 1, and the Node probe never runs.
+  const nodeUnknown = output(run(process.execPath, [path.join(root, 'bin/code-forge.mjs'), 'unported']));
+  assert.equal(nodeUnknown.code, 1, 'Node refuses the unknown verb with exit 1');
   for (const node of ['', 'entry-node-does-not-exist']) {
     const missing = run(f.binary, ['unported'], { env: { ...env, CODE_FORGE_NODE: node, PATH: '' } });
-    assert.equal(missing.code, 127, 'missing Node exits exactly 127');
+    assert.deepEqual(output(missing), nodeUnknown, 'missing Node: Go gives Node\'s unknown-verb answer');
     assert.equal(missing.stdout, '', 'missing Node emits zero stdout bytes');
-    assert.equal(missing.stderr.trim().split('\n').length, 1, 'missing Node emits exactly one diagnostic');
-    assert.match(missing.stderr, /node.*not found/i, 'missing Node diagnostic explains the missing executable');
   }
   const unknown = run(f.binary, ['internal', 'unknown']);
   assert.equal(unknown.code, 2, 'unknown internal verb exits 2');

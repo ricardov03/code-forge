@@ -162,8 +162,8 @@ type reviewFileRun struct {
 	code           int
 }
 
-// reviewFileExec runs review-file in dir. A handover would exit 127: Node is
-// never reachable here.
+// reviewFileExec runs review-file in dir. A case Go does not serve gets the
+// B690a refusal (exit 1); Node is never reachable here.
 func reviewFileExec(t *testing.T, dir, home string, logging bool, args ...string) reviewFileRun {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestReviewFileChild$", "--"}, args...)...)
@@ -413,8 +413,8 @@ func TestReviewFileWaitBlockStoppedReviewHandsOver(t *testing.T) {
 				}
 				return
 			}
-			if got.code != 127 || got.stdout != "" {
-				t.Fatalf("got %+v, want the hand-over to the missing Node (127)", got)
+			if got.code != 1 || got.stdout != "" {
+				t.Fatalf("got %+v, want the Go refusal (exit 1)", got)
 			}
 			var row map[string]any
 			if err := json.Unmarshal(rows, &row); err != nil || row["reason"] != "wait-block-local" {

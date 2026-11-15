@@ -36,11 +36,7 @@ var spawnUsage = "usage: code-forge spawn --level L0|L1|L2|L3 --role " + strings
 var spawnRunID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 func spawnHandover(args []string, reason handoverReason) int {
-	code, err := handover(append([]string{"spawn"}, args...), reason)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
-	}
-	return code
+	return refuseUnported(append([]string{"spawn"}, args...), reason)
 }
 
 func spawnPlan(args []string) (func(o *runOut) int, handoverReason) {

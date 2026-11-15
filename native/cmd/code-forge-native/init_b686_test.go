@@ -127,7 +127,7 @@ func TestB686InitYAMLConfigsMatchNode(t *testing.T) {
 			if goSide != nodeSide {
 				t.Fatalf("go:   %#v\nnode: %#v", goSide, nodeSide)
 			}
-			if goSide.code == 127 || goSide.log == "" {
+			if b690aIsRefusal(goSide.stderr) || goSide.log == "" {
 				t.Fatalf("not served in Go: %#v", goSide)
 			}
 			for _, want := range c.want {
@@ -201,8 +201,8 @@ func TestB686InitYAMLHandOvers(t *testing.T) {
 			_ = os.Chdir(cwd)
 			code, _ := run([]string{"init", "--no-interaction", "--skip-doctor", "--no-jev"})
 			_ = os.Chdir(here)
-			if code != 127 {
-				t.Fatalf("code=%d; want the Node hand-over", code)
+			if code != 1 {
+				t.Fatalf("code=%d; want the Go refusal", code)
 			}
 			data, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
 			var row handoverRow

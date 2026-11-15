@@ -128,11 +128,7 @@ func runSweepCmd(args []string) int {
 }
 
 func sweepHandover(args []string, reason handoverReason) int {
-	code, err := handover(append([]string{"sweep"}, args...), reason)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
-	}
-	return code
+	return refuseUnported(append([]string{"sweep"}, args...), reason)
 }
 
 // sweepParseFlags is parseFlags(args, {booleans: ['apply', 'json', 'help']})

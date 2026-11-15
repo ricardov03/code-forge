@@ -36,7 +36,7 @@ func TestBlockReadySecretLikeWorkspacePathRunsInGo(t *testing.T) {
 }
 
 // The one text Node masks in ready output is the run's signer key in hex; a
-// blocker that would print it still goes to Node (here unavailable: exit 127).
+// blocker that would print it gets the B690a refusal (exit 1).
 func TestBlockReadySignerKeyTextHandsOver(t *testing.T) {
 	f := newReadyFixture(t)
 	keyHex := strings.Repeat("29", 32)
@@ -47,7 +47,7 @@ func TestBlockReadySignerKeyTextHandsOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, stdout, stderr := f.call("block", "ready", "B1", "--run", f.run, "--json")
-	if code != 127 || stdout != "" || !strings.Contains(stderr, "node") {
-		t.Fatalf("code=%d stdout=%q stderr=%q; want the Node hand-over", code, stdout, stderr)
+	if code != 1 || stdout != "" || !b690aIsRefusal(stderr) {
+		t.Fatalf("code=%d stdout=%q stderr=%q; want the Go refusal", code, stdout, stderr)
 	}
 }

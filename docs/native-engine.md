@@ -19,10 +19,16 @@ The command works in three steps:
    fix (`sh <package>/scripts/install.sh`, then `npm i -g @codedology/code-forge`
    if that fails), and exits 69. No verb exits 69.
 3. Go runs a command if its public route table lists that command.
-   Otherwise, Go hands the arguments to `bin/code-forge.mjs` in Node.
-   This hand-over happens by itself. It keeps the same standard output,
-   error output and exit code. The exit code is the number that tells the
-   shell whether a command succeeded.
+   Since B690a Go never starts Node. A verb Go does not know prints Node's
+   text, `code-forge: unknown verb "<verb>"` followed by `Verbs:` and one
+   line per verb, and exits 1. A case that used to hand over to Node (the
+   "Refused in Go" column below and every "goes to Node" or "hands over" case
+   on this page) is refused instead: Go prints one line on stderr,
+   `code-forge: <command> is not supported in this case yet (<reason>). Please report it: code-forge logs report`,
+   writes nothing on stdout, changes no state, ledger or queue file, and
+   exits 1. The exit code is the number that tells the shell whether a
+   command succeeded. Go still records the case in the hand-over log (see
+   [See hand-overs](#see-hand-overs)).
 
 The skill's `forge <verb>` shim (`skill/scripts/forge`) starts this same shell
 entry, `bin/code-forge`, so skill verbs run in Go too (B547). With
@@ -66,7 +72,7 @@ The public route table currently serves these read commands:
 Since 0.19.0, it also serves these write commands. Go writes the same files,
 locks and signed ledger rows as Node.
 
-| Command | Runs in Go | Hands over to Node |
+| Command | Runs in Go | Refused in Go (not supported yet; handed over to Node before B690a) |
 |---|---|---|
 | `review-file <file> --block <id>` | Enqueue, with `--fresh`, `--answers`, `--of` and `--rebase-check`, and a cached result that needs a fresh ticket. Since B452, enqueue in a block worktree also prints Node's refusals in Go (`worktree-malformed`, `worktree-missing`, `worktree-not-dir`, `worktree-branch-mismatch`, `worktree-foreign`, `worktree-workspace-missing`), and a private run record that is not JSON gives `run-record-unreadable`. Since B645 a file whose review was reopened (a ticket with `reopened_at`) enqueues in Go like Node's `reviewIdentity`: it reuses the latest reopened attempt, retires each earlier matching ticket enqueued at or before the reopen with a `superseded` marker, stamps the new ticket after the reopen and prints `reopened_at`; `reopened_at` is read like Node's `Date.parse` (a date-only form too). | A git that cannot run in the worktree, and other state that Go cannot read or does not expect. |
 | `block claim`, `block stop` | Plain claim and stop, active autopilot grants, pending approvals and `hooks.on_block_end`. Errors print and go to the error log in Go; `--auto` and `--auto-claim` are unknown flags (exit 2), as in Node. | State that Go cannot read or does not expect. `block stop` with a daemon socket runs in Go and the done file takes the serving daemon's rows (B470). Go writes nothing before it hands over. |
@@ -126,10 +132,10 @@ on `PATH`, 10 s limit). With no node that answers, and no Node version built
 into the binary, Go writes no stamp, so no full run is reused.
 See [how it works](how-it-works.md) for the scope rules and reuse checks.
 
-A hand-over always passes the original arguments. Node then runs the command
-exactly as before. When Go is not sure it gives the same answer, it hands over.
-Commands such as the full `code-forge doctor` also go through
-Go to Node. Go additionally runs private helpers and the optional background
+When Go is not sure it gives the same answer as Node, it refuses the case
+(B690a): one `is not supported in this case yet (<reason>)` line, exit 1,
+nothing written. Before B690a such a case went to Node with the original
+arguments. Go additionally runs private helpers and the optional background
 daemon.
 
 ### See what is available
@@ -167,7 +173,9 @@ Use `code-forge status` to check run progress.
 
 ### See hand-overs
 
-Go records one row before it hands a command to Node.
+Go records one row for each case it refuses as not supported yet (B690a;
+before B690a, for each case it handed to Node). The rows keep the same fields
+and reason codes, so `logs handovers` and doctor count them as before.
 Each row has a UTC time, the command, a known subcommand, a reason and the version.
 It does not save argument values, paths or IDs. Unknown subcommands are empty.
 The file is `$HOME/.code-forge/native/handovers.jsonl`.
@@ -222,9 +230,8 @@ If Go itself fails with an internal error (a Go panic) on the main goroutine, it
 exits with the usage-error code 2 or prints a stack trace (B508). A command that writes no
 state in Go (`setup`, `status`, `run status`, `queue` and `queue status`, `heal list`,
 `heal show`, `decisions list`, `docs path`, `logs`, `logs summary`, `logs path`,
-`logs handovers` and `ledger tail`) goes to Node with its original arguments and a
-`go-panic` row. Any other command may already have changed state, so Node never runs it a
-second time: Go prints one line that names the command and the code site, never the panic
+`logs handovers` and `ledger tail`) gets the B690a refusal with the reason `go-panic`
+(exit 1) and a `go-panic` row. Any other command may already have changed state: Go prints one line that names the command and the code site, never the panic
 text or an argument, writes a `go-panic-stopped` row and exits 1. Check `code-forge status`
 before you retry. A panic in a goroutine a command starts (for example the gates that
 `block land` runs next to its review wait) gets the same answer, rows and exit codes (B509).
@@ -233,6 +240,8 @@ or for `review-file` with no `--run` the run of a registered worker) holds a liv
 autopilot grant (`until: null`, from `autopilot start --until-done`): Node reads `until: null`
 as a date it cannot parse, so it would treat the grant wrongly. Go prints one line that names
 the command, the run and the grant, writes an `until-done-grant` row, runs nothing and exits 1.
+Since B690a no case goes to Node at all; a case under such a grant keeps this grant line,
+every other case gets the B690a refusal.
 Run the command again after the grant ends (`code-forge autopilot status --run <id>`), or stop
 the grant first. A timed grant, a stopped or ended grant, and a command that names no run hand
 over as before. The gate check also counts an autopilot waiver or acceptance under an until-done
@@ -368,22 +377,23 @@ native:
 The daemon is enabled by default. This setting disables only the daemon.
 The Go entry and other native helpers can still run. Workers read this setting
 at startup. Clients use the run's current config snapshot, which is the stored
-copy of its settings. Block waits then run in Go without the daemon: Go reads the queue and ledger files and hands over to Node only in the cases listed above. Status in Go does not use the daemon.
+copy of its settings. Block waits then run in Go without the daemon: Go reads the queue and ledger files and refuses (B690a) only the cases listed above. Status in Go does not use the daemon.
 
-### Choose Node for the hand-over
+### Choose the Node that Go asks for its version
 
-`CODE_FORGE_NODE` selects the Node executable that Go starts. For example,
-in a shell where `node` already works:
+Since B690a Go never starts Node for a command, so `CODE_FORGE_NODE` no longer
+picks a hand-over Node. It still names the Node whose version Go reports. For
+example, in a shell where `node` already works:
 
 ```sh
 CODE_FORGE_NODE="$(command -v node)" code-forge version
 ```
 
 Use an executable path or a command name found on `PATH`. If the setting is
-empty or absent, Go looks for `node` on `PATH`. This setting applies only to
-the Go hand-over. When the shell skips Go, it uses `node` on `PATH` instead.
+empty or absent, Go looks for `node` on `PATH`. When the shell skips Go, it
+uses `node` on `PATH` instead.
 
-The same node gives Go the Node version it writes, like Node's `process.version`
+This node gives Go the Node version it writes, like Node's `process.version`
 (B585): the `node` field of error-log rows, the gate reuse stamp and the
 `logs report` Node line. Go asks it once per process with `node --version` and
 takes only a `vX.Y.Z` answer. With no such answer it uses the version built
@@ -562,7 +572,7 @@ clients use the run's current snapshot.
 | Not sure the binary works. | Run `code-forge setup`. It prints `OK`, or the problem and the `fix:` command to run. |
 | `code-forge` stops with exit 69 (`the Go engine for <platform>-<arch> is missing` or `is not executable`). | Run `sh <package>/scripts/install.sh`: it restores mode 755 and checks the version. If it still fails, reinstall the npm package. For a source checkout, rebuild the host binary. |
 | The binary is for the wrong platform or processor. | Install the package for this machine, or rebuild for this host. A platform or arch with no build stops with exit 69 (`no Go engine is built for <platform>-<arch>`). If a wrong binary was put at the matching path, it can fail to start; set `CODE_FORGE_NATIVE=0` while you replace it. |
-| The Go hand-over says `node executable … not found`. | Put Node on `PATH`, or set `CODE_FORGE_NODE` to its real executable path. This failure exits 127. If Go is disabled with `CODE_FORGE_NATIVE=0`, fix `PATH`: the shell does not use `CODE_FORGE_NODE`. |
+| A command prints `is not supported in this case yet (<reason>)` and exits 1. | Go does not serve this case yet and no longer hands it to Node (B690a). Nothing was changed. Run `code-forge logs report` to report it, with the reason code. |
 | The doctor shows daemon `fallback`. | Check that a review worker is active and that the package versions match. With no active worker, `fallback` can be normal. Block waits and status still run in Go from the files on disk. To keep the daemon off, set `native.daemon: false` before the next worker starts. |
 
 Contributors can rebuild from the repository root with Go installed:

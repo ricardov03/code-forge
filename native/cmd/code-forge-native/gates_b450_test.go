@@ -14,7 +14,7 @@ import (
 
 // B450: every gates run form runs in Go. Each former Node handover case runs
 // the public router in a child process (TestGatesProcess) with no Node at all
-// (CODE_FORGE_NODE points nowhere, so a handover would exit 127).
+// (CODE_FORGE_NODE points nowhere; a refusal exits 1).
 
 type b450Fixture struct {
 	t                *testing.T
@@ -423,8 +423,8 @@ func TestB450LandBatchGateScope(t *testing.T) {
 }
 
 // Node completes a run record whose run_id differs from --run or that has no
-// workspace string; Go does not port these yet, so they keep the Node
-// hand-over (exit 127 here: the fixture's Node does not exist).
+// workspace string; Go does not port these yet, so they keep the hand-over
+// reason and now get the B690a refusal (exit 1).
 func TestB450GatesRunKeepsRecordHandover(t *testing.T) {
 	for name, record := range map[string]map[string]any{
 		"run_id mismatch": {"run_id": "other", "workspace": "", "status": "active", "project": "fixture", "blocks": map[string]any{"B1": map[string]any{"status": "open"}}},
@@ -439,8 +439,8 @@ func TestB450GatesRunKeepsRecordHandover(t *testing.T) {
 			f.must(err)
 			f.must(os.WriteFile(filepath.Join(f.home, ".code-forge", "runs", "fixture.json"), data, 0600))
 			code, out, errOut := f.call(nil, "gates", "run", "--run", "fixture", "--block", "B1")
-			if code != 127 || out != "" || !strings.Contains(errOut, "/nonexistent-code-forge-node") {
-				t.Fatalf("exit=%d stdout=%q stderr=%q, want the Node hand-over (exit 127 naming the missing Node)", code, out, errOut)
+			if code != 1 || out != "" || !b690aIsRefusal(errOut) {
+				t.Fatalf("exit=%d stdout=%q stderr=%q, want the Go refusal (exit 1)", code, out, errOut)
 			}
 		})
 	}

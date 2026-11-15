@@ -194,8 +194,8 @@ func TestAutopilotWaiveHandsOver(t *testing.T) {
 	ledgerPath := filepath.Join(f.home, ".code-forge", "ledger", "unit.jsonl")
 	before, _ := os.ReadFile(ledgerPath)
 	for _, args := range cases {
-		if code, out, _ := autopilotCall(t, append(append([]string{"waive"}, args...), rest...)...); code != 127 || out != "" {
-			t.Fatalf("%v: hand-over exit = %d stdout %q, want 127", args, code, out)
+		if code, out, _ := autopilotCall(t, append(append([]string{"waive"}, args...), rest...)...); code != 1 || out != "" {
+			t.Fatalf("%v: refusal exit = %d stdout %q, want 1", args, code, out)
 		}
 	}
 	data, err := os.ReadFile(filepath.Join(f.home, ".code-forge", "native", "handovers.jsonl"))

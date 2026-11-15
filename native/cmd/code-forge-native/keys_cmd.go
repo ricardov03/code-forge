@@ -483,13 +483,11 @@ func runKeys(args []string) int {
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		code, _ := handover(append([]string{"keys"}, args...))
-		return code
+		return refuseUnported(append([]string{"keys"}, args...))
 	}
 	plan := keysDecide(args, cwd)
 	if plan == nil {
-		code, _ := handover(append([]string{"keys"}, args...))
-		return code
+		return refuseUnported(append([]string{"keys"}, args...))
 	}
 	contextApplyTmpRoot()
 	// B678: the lazy run root an `op` child made goes at exit (releaseLazyRoot)

@@ -132,8 +132,8 @@ func TestAutopilotLevelHandsOver(t *testing.T) {
 		{"--run", "ra", "--block", "B7", "--plan", plan, "--decision", "e-1"},
 	}
 	for _, args := range cases {
-		if code, out, _ := autopilotCall(t, append([]string{"level"}, args...)...); code != 127 || out != "" {
-			t.Fatalf("%v: hand-over exit = %d stdout %q, want 127", args, code, out)
+		if code, out, _ := autopilotCall(t, append([]string{"level"}, args...)...); code != 1 || out != "" {
+			t.Fatalf("%v: refusal exit = %d stdout %q, want 1", args, code, out)
 		}
 	}
 	logged, err := os.ReadFile(filepath.Join(f.home, ".code-forge", "native", "handovers.jsonl"))
