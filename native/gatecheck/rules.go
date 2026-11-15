@@ -130,6 +130,14 @@ func jsString(v jv) string {
 			}
 		}
 		return strings.Join(parts, ",")
+	case float64:
+		// B687: String(Infinity) (JSON.parse reads 1e400 as Infinity).
+		if math.IsInf(x, 1) {
+			return "Infinity"
+		}
+		if math.IsInf(x, -1) {
+			return "-Infinity"
+		}
 	}
 	data, _ := ledger.Stringify(v.v, false)
 	return string(data)

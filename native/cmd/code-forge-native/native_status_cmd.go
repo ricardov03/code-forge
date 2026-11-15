@@ -3,36 +3,39 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
-	"unicode/utf8"
+	"sort"
+	"strconv"
+	"strings"
 
-	"github.com/ricardov03/code-forge/native/humanask"
+	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/pkgroot"
 	"github.com/ricardov03/code-forge/native/runstatus"
 )
 
-// B501: `code-forge native-status` serves src/cli/native-status.mjs in Go: one
-// status JSON line per stdin line (statusOf with gateDetails false), then the
-// router's "no default export" line, exit 1, breadcrumb and error log. A line
-// Go cannot answer as Node does hands the rest of stdin to Node's companion.
+// B501, B687: `code-forge native-status` serves src/cli/native-status.mjs in
+// Go: one status JSON line per stdin line (statusOf with gateDetails false),
+// then the router's "no default export" line, exit 1, breadcrumb, error log
+// and (on a terminal) the router's hint. Lines are read as Node reads them
+// (WHATWG UTF-8, JSON.parse with lone surrogates and Infinity) and written as
+// JSON.stringify writes them. Without HOME, Node's os.homedir() is the
+// password file's home. Only a line whose listed block ids need ICU's
+// localeCompare (an id outside printable ASCII among two or more) still hands
+// the rest of stdin to Node's companion.
 func init() { routes["native-status"] = runNativeStatus }
 
 const nativeStatusUsageText = "usage: code-forge native-status\n  Internal daemon companion: reads JSON records and rows from standard input.\n"
 
 // nativeStatusUnreadable is serve()'s catch line.
 const nativeStatusUnreadable = `{"ok":false,"error":"status-unreadable"}`
-
-// A \u escape of a UTF-16 surrogate: JSON.parse keeps a lone one, Go cannot.
-var nativeStatusSurrogate = regexp.MustCompile(`\\u[dD][89a-fA-F]`)
 
 // nativeStatusAgentVars is AGENT_ENV_VARS in src/util/error-hint.mjs.
 var nativeStatusAgentVars = []string{"CLAUDECODE", "CLAUDE_CODE", "CURSOR_AGENT", "AI_AGENT"}
@@ -41,6 +44,28 @@ var nativeStatusAgentVars = []string{"CLAUDECODE", "CLAUDE_CODE", "CURSOR_AGENT"
 // rest of stdin; a test seam.
 var nativeStatusCompanion = nativeStatusNode
 
+// nsUserHome is the password file's home of this user, the one Node's
+// os.homedir() returns when HOME is unset (a test seam).
+var nsUserHome = func() (string, error) {
+	u, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	if u.HomeDir == "" {
+		return "", errors.New("no home directory")
+	}
+	return u.HomeDir, nil
+}
+
+// nsSlug is SLUG_PATTERN in src/ledger/paths.mjs.
+var nsSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// nsHome is os.homedir() for the serve loop. ok is false when it throws.
+type nsHome struct {
+	dir string
+	ok  bool
+}
+
 func runNativeStatus(args []string) int {
 	// The router prints USAGE for `native-status --help` before anything else;
 	// native-status has no SUB_USAGE, so `native-status x --help` serves.
@@ -48,46 +73,43 @@ func runNativeStatus(args []string) int {
 		fmt.Fprint(os.Stdout, nativeStatusUsageText)
 		return 0
 	}
-	home := os.Getenv("HOME")
-	if home == "" {
-		// Node's os.homedir() falls back to the password file.
-		return nativeStatusHandover(args, hNativeStatusNoHome)
-	}
-	if reviewWaitLogging() && humanask.IsTTY(os.Stderr) && !nativeStatusAgent() {
-		// The router's maybeHint may print a hint line on a terminal.
-		return nativeStatusHandover(args, hNativeStatusTTY)
+	if !routerHintReadable() {
+		// The router's maybeHint would judge a time only Date.parse reads.
+		code, err := handover(append([]string{"native-status"}, args...), hRouterHintState)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		}
+		return code
 	}
 	before := gatesBreadcrumbName("native-status")
+	home := nsHome{dir: os.Getenv("HOME"), ok: true}
+	_, homeSet := os.LookupEnv("HOME")
+	if !homeSet {
+		// Node's os.homedir() reads the password file; the router's logs,
+		// keyed on process.env.HOME, stay off.
+		home.dir, _ = nsUserHome()
+		home.ok = home.dir != ""
+		if home.ok {
+			_ = os.Setenv("HOME", home.dir) // config.Load's home, while serving
+		}
+	}
 	in := bufio.NewReaderSize(os.Stdin, 64*1024)
-	if code, done := nativeStatusServe(in, os.Stdout, home, args); done {
+	code, done := nativeStatusServe(in, os.Stdout, home, args)
+	if !homeSet {
+		_ = os.Unsetenv("HOME")
+	}
+	if done {
 		return code
 	}
 	stderr := &contextErrWriter{}
 	fmt.Fprint(stderr, "code-forge: verb \"native-status\" has no default export function\n")
-	nativeVerbFailure("native-status", "", args, 1, stderr.last, before)
+	routerHint(nativeVerbFailure("native-status", "", args, 1, stderr.last, before), 1)
 	return 1
-}
-
-func nativeStatusAgent() bool {
-	for _, name := range nativeStatusAgentVars {
-		if os.Getenv(name) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func nativeStatusHandover(args []string, reason handoverReason) int {
-	code, err := handover(append([]string{"native-status"}, args...), reason)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
-	}
-	return code
 }
 
 // nativeStatusServe answers every line until EOF. done is true only when the
 // Node companion could not finish (its code is then the exit code).
-func nativeStatusServe(in *bufio.Reader, out io.Writer, home string, args []string) (int, bool) {
+func nativeStatusServe(in *bufio.Reader, out io.Writer, home nsHome, args []string) (int, bool) {
 	skipLF := false
 	for {
 		content, raw, ok := nativeStatusLine(in, &skipLF)
@@ -116,11 +138,18 @@ func nativeStatusServe(in *bufio.Reader, out io.Writer, home string, args []stri
 }
 
 // nativeStatusLine is node:readline with crlfDelay Infinity: a line ends at
-// \n, \r\n or a lone \r (a \n right after that \r is skipped); a last line
-// without an ending is emitted when it is not empty. raw holds the bytes read
-// for this line (a skipped leading \n excluded): handed to Node, they split
-// into the same lines.
+// \n, \r\n, a lone \r (a \n right after that \r is skipped), U+2028 or
+// U+2029; a last line without an ending is emitted when it is not empty. raw
+// holds the bytes read for this line (a skipped leading \n excluded): handed
+// to Node, they split into the same lines. The bytes E2 80 A8/A9 always decode
+// to U+2028/U+2029, whatever comes before them.
 func nativeStatusLine(in *bufio.Reader, skipLF *bool) (content, raw []byte, ok bool) {
+	ended := func() ([]byte, []byte, bool) {
+		if content == nil {
+			content = []byte{}
+		}
+		return content, raw, true
+	}
 	for {
 		b, err := in.ReadByte()
 		if err != nil {
@@ -139,34 +168,29 @@ func nativeStatusLine(in *bufio.Reader, skipLF *bool) (content, raw []byte, ok b
 		raw = append(raw, b)
 		switch b {
 		case '\n':
-			if content == nil {
-				content = []byte{}
-			}
-			return content, raw, true
+			return ended()
 		case '\r':
 			*skipLF = true
-			if content == nil {
-				content = []byte{}
+			return ended()
+		case 0xE2:
+			if next, _ := in.Peek(2); len(next) == 2 && next[0] == 0x80 && (next[1] == 0xA8 || next[1] == 0xA9) {
+				_, _ = in.Discard(2)
+				raw = append(raw, next[0], next[1])
+				return ended()
 			}
-			return content, raw, true
 		}
 		content = append(content, b)
 	}
 }
 
-// nativeStatusAnswer is serve()'s body for one line. served is false where Go
-// cannot give Node's answer.
-func nativeStatusAnswer(line []byte, home string) (string, bool) {
-	if !utf8.Valid(line) || nativeStatusSurrogate.Match(line) {
-		return "", false
-	}
-	if !json.Valid(line) {
+// nativeStatusAnswer is serve()'s body for one line. served is false only
+// where the block order needs ICU (see runstatus.ErrUnorderedBlockID).
+func nativeStatusAnswer(line []byte, home nsHome) (string, bool) {
+	// readline decodes stdin as WHATWG UTF-8; an ASCII line break always ends
+	// a byte sequence, so decoding each line alone gives the same text.
+	parsed, err := jsonx.Parse(jsonx.DecodeUTF8(line))
+	if err != nil {
 		return nativeStatusUnreadable, true
-	}
-	var parsed any
-	if err := json.Unmarshal(line, &parsed); err != nil {
-		// A number JSON.parse reads as Infinity.
-		return "", false
 	}
 	// const { record, rows } = JSON.parse(line): anything but an object has no
 	// record, and statusOf(undefined) throws.
@@ -178,26 +202,27 @@ func nativeStatusAnswer(line []byte, home string) (string, bool) {
 	if !present || rawRecord == nil {
 		return nativeStatusUnreadable, true
 	}
-	record, isMap := rawRecord.(map[string]any)
-	if !isMap {
+	source, isMap := rawRecord.(map[string]any)
+	record := map[string]any{}
+	if isMap {
 		// A list or a primitive record: every field statusOf reads is undefined.
-		record = map[string]any{}
+		for k, v := range source {
+			record[k] = v
+		}
+	}
+	if ws, ok := record["workspace"].(string); ok {
+		// Node encodes a path's lone surrogate as U+FFFD.
+		record["workspace"] = jsonx.WellFormed(ws)
 	}
 	var rows []ledger.Row
 	rawRows, given := top["rows"]
 	switch value := rawRows.(type) {
 	case nil:
-		if !given {
-			// rows undefined: statusOf reads readAllRows(record.project).
+		if !given && home.ok {
+			// rows undefined: statusOf reads readAllRows(record.project); a throw
+			// leaves rows null.
 			if slug, ok := record["project"].(string); ok {
-				read, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), slug)
-				var numeric *json.UnmarshalTypeError
-				if errors.As(err, &numeric) {
-					return "", false
-				}
-				if err == nil {
-					rows = read
-				}
+				rows = nsReadAllRows(filepath.Join(home.dir, ".code-forge", "ledger"), slug)
 			}
 		}
 	case []any:
@@ -207,22 +232,106 @@ func nativeStatusAnswer(line []byte, home string) (string, bool) {
 		// for (const r of rows) throws on any other value.
 		return nativeStatusUnreadable, true
 	}
-	summary, err := runstatus.ComputeBriefErr(record, rows, home)
+	keyHome := home.dir
+	if !home.ok {
+		keyHome = "\x00" // findingsKey's loadKey throws: the zero key
+	}
+	summary, err := runstatus.ComputeBriefErr(record, rows, keyHome)
 	if errors.Is(err, runstatus.ErrUnorderedBlockID) {
 		return "", false
 	}
 	if err != nil {
 		return nativeStatusUnreadable, true
 	}
-	// JSON.stringify writes a non-finite number as null.
-	if n, ok := summary.Get("spent_usd").(float64); ok && (math.IsInf(n, 0) || math.IsNaN(n)) {
-		summary.Set("spent_usd", nil)
+	if !home.ok {
+		summary.Set("budget_usd", nil) // loadProjectConfig threw
 	}
-	data, err := ledger.Stringify(ledger.Object{{Key: "runs", Value: []any{summary}}}, false)
+	if awaiting, ok := summary.Get("awaiting_human_check").([]string); ok {
+		// Array#sort compares UTF-16 code units, lone surrogates included.
+		sort.SliceStable(awaiting, func(i, j int) bool { return jsonx.CompareUTF16(awaiting[i], awaiting[j]) < 0 })
+	}
+	data, err := jsonx.Stringify(jsonx.Object{{Key: "runs", Value: []any{nsJSON(summary)}}})
 	if err != nil {
-		return "", false
+		return nativeStatusUnreadable, true
 	}
-	return string(data), true
+	return data, true
+}
+
+// nsJSON turns a summary built with ledger.Object into jsonx values.
+func nsJSON(v any) any {
+	switch x := v.(type) {
+	case ledger.Object:
+		out := make(jsonx.Object, len(x))
+		for i, f := range x {
+			out[i] = jsonx.Member{Key: f.Key, Value: nsJSON(f.Value)}
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, item := range x {
+			out[i] = nsJSON(item)
+		}
+		return out
+	}
+	return v
+}
+
+// nsReadAllRows is readAllRows in src/ledger/write.mjs; nil is a throw (the
+// caller's rows are then null): a bad slug, an unreadable directory or file,
+// or a broken line that is not a file's last.
+func nsReadAllRows(dir, slug string) []ledger.Row {
+	if !nsSlug.MatchString(slug) {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return []ledger.Row{}
+	}
+	if err != nil {
+		return nil
+	}
+	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(slug) + `\.(\d+)\.jsonl$`)
+	type rotation struct {
+		name string
+		n    float64
+	}
+	rotated := []rotation{}
+	for _, entry := range entries {
+		if m := pattern.FindStringSubmatch(entry.Name()); m != nil {
+			// Number() of the suffix; a huge one is Infinity.
+			n, _ := strconv.ParseFloat(m[1], 64)
+			rotated = append(rotated, rotation{entry.Name(), n})
+		}
+	}
+	sort.SliceStable(rotated, func(i, j int) bool { return rotated[i].n < rotated[j].n })
+	rotated = append(rotated, rotation{name: slug + ".jsonl"})
+	rows := []ledger.Row{}
+	for _, file := range rotated {
+		data, err := os.ReadFile(filepath.Join(dir, file.name))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil
+		}
+		lines := []string{}
+		for _, line := range strings.Split(jsonx.DecodeUTF8(data), "\n") {
+			if line != "" {
+				lines = append(lines, line)
+			}
+		}
+		for i, line := range lines {
+			row, err := jsonx.Parse(line)
+			if err != nil {
+				if i == len(lines)-1 {
+					continue // a torn final line
+				}
+				return nil
+			}
+			rows = append(rows, row)
+		}
+	}
+	return rows
 }
 
 // nativeStatusNode runs `node <package>/src/cli/native-status.mjs` (the

@@ -4,11 +4,15 @@
 package gatecheck
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 
+	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/sign"
 )
@@ -43,8 +47,38 @@ type Result struct {
 func Text(v any) string { s, _ := v.(string); return s }
 func array(v any) []any { a, _ := v.([]any); return a }
 func Verified(row Row, key []byte) bool {
+	if jsonx.OutsideEncodingJSON(row) {
+		return verifiedLikeNode(row, key)
+	}
 	result, err := sign.VerifyRow(row, key)
 	return err == nil && result.OK
+}
+
+var rowMAC = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// verifiedLikeNode is Node's verifyRow for a row read by jsonx (B687): its
+// MAC covers canonicalJSON(JSON.parse(JSON.stringify(row))), where a lone
+// surrogate is written as \udXXX and a non-finite number as null, which
+// canon (encoding/json) cannot reproduce.
+func verifiedLikeNode(row Row, key []byte) bool {
+	mac, ok := row["mac"].(string)
+	if !ok || !rowMAC.MatchString(mac) {
+		return false
+	}
+	covered := make(map[string]any, len(row))
+	for k, v := range row {
+		covered[k] = v
+	}
+	for _, field := range sign.UnsignedFields() {
+		delete(covered, field)
+	}
+	text, err := jsonx.Canonical(covered)
+	if err != nil {
+		return false
+	}
+	h := hmac.New(sha256.New, key)
+	h.Write([]byte(text))
+	return hmac.Equal([]byte(mac), []byte(hex.EncodeToString(h.Sum(nil))))
 }
 func NeverReviewed(r Row) bool {
 	return slices.Contains([]string{"stale", "unavailable", "answers"}, Text(r["status"])) || r["status"] == "refused" && r["reason"] == "other-run"

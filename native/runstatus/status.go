@@ -180,7 +180,7 @@ func compute(record Object, rows []ledger.Row, home string, gateDetails bool) (l
 			status = s
 		}
 		state := status
-		if n, ok := entry["attempt"].(float64); status == "open" && ok && math.Trunc(n) == n && n > 1 {
+		if n, ok := entry["attempt"].(float64); status == "open" && ok && !math.IsInf(n, 0) && math.Trunc(n) == n && n > 1 {
 			encoded, _ := ledger.Stringify(n, false)
 			state = "attempt-" + string(encoded)
 		}
