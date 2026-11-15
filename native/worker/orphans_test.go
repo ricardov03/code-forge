@@ -64,13 +64,13 @@ func itoa(n int) string {
 
 func TestB489EnvMarker(t *testing.T) {
 	text := "HOME=/Users/x CODE_FORGE_OWNER_PID=42 CODE_FORGE_OWNER_START_TIME=Wed Nov 11 08:00:00 2026 PATH=/bin"
-	if v, ok := envMarker(text, "CODE_FORGE_OWNER_START_TIME"); !ok || v != "Wed Nov 11 08:00:00 2026" {
+	if v, ok := EnvMarker(text, "CODE_FORGE_OWNER_START_TIME"); !ok || v != "Wed Nov 11 08:00:00 2026" {
 		t.Fatalf("start %q %v", v, ok)
 	}
-	if v, ok := envMarker(text, "CODE_FORGE_OWNER_PID"); !ok || v != "42" {
+	if v, ok := EnvMarker(text, "CODE_FORGE_OWNER_PID"); !ok || v != "42" {
 		t.Fatalf("pid %q", v)
 	}
-	if _, ok := envMarker(text, "CODE_FORGE_RUN_ID"); ok {
+	if _, ok := EnvMarker(text, "CODE_FORGE_RUN_ID"); ok {
 		t.Fatal("found a missing marker")
 	}
 }

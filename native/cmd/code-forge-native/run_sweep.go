@@ -20,6 +20,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/procguard"
 	"github.com/ricardov03/code-forge/native/state"
+	"github.com/ricardov03/code-forge/native/worker"
 )
 
 // B468: the process sweep a plain `run start` runs first (src/util/reaper.mjs
@@ -124,10 +125,8 @@ func runProtected(rows []runProc) map[int]bool {
 	return blocked
 }
 
-var (
-	runPsEnvHead  = regexp.MustCompile(`^\s*(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d+:\d+:\d+\s+\d{4})\s+`)
-	runEnvMarkers = []string{"HOME", "CODE_FORGE_OWNER_PID", "CODE_FORGE_RUN_ID", "CODE_FORGE_OWNER_START_TIME"}
-)
+// runPsEnvHead is the head of one `ps -E` row (B757: worker.PsEnvHead).
+var runPsEnvHead = worker.PsEnvHead
 
 // runProcessEnv is readProcessEnv: only the ownership markers, nil when unreadable.
 func runProcessEnv(p runProc) map[string]string {
@@ -137,16 +136,7 @@ func runProcessEnv(p runProc) map[string]string {
 		if err != nil {
 			return nil
 		}
-		markers := map[string]string{}
-		for _, name := range runEnvMarkers {
-			for _, entry := range strings.Split(string(data), "\x00") {
-				if strings.HasPrefix(entry, name+"=") {
-					markers[name] = entry[len(name)+1:]
-					break
-				}
-			}
-		}
-		return markers
+		return worker.EnvFromEnviron(string(data))
 	case "darwin":
 		out, ok := runPsOutput("-E", "-ww", "-o", "pid=,ppid=,lstart=,command=", "-p", strconv.Itoa(p.pid))
 		if !ok {
@@ -160,26 +150,9 @@ func runProcessEnv(p runProc) map[string]string {
 
 // runEnvFromPs reads the markers from `ps -E` output for p alone: the row
 // must still be p (pid, ppid, start time, command) as in readProcessEnv.
+// B757: the worker's reader (one parser for both).
 func runEnvFromPs(p runProc, out string) map[string]string {
-	m := runPsEnvHead.FindStringSubmatch(out)
-	if m == nil || m[1] != strconv.Itoa(p.pid) || m[2] != strconv.Itoa(p.ppid) || strings.Join(strings.Fields(m[3]), " ") != p.start {
-		return nil
-	}
-	text := out[len(m[0]):]
-	if !strings.HasPrefix(text, p.command+" ") {
-		return nil
-	}
-	// B747: ps ends the row with "\n"; that is the end of the last variable
-	// (the value of a marker stops at a line end, so with the "\n" kept the
-	// process's last variable was never read).
-	text = strings.TrimSuffix(text[len(p.command)+1:], "\n")
-	markers := map[string]string{}
-	for _, name := range runEnvMarkers {
-		if value, ok := runEnvMarker(text, name); ok {
-			markers[name] = value
-		}
-	}
-	return markers
+	return worker.EnvFromPs(p.pid, p.ppid, p.start, p.command, out)
 }
 
 // runPsEnvCall is the batched `ps -E` call (a seam for tests).
@@ -286,49 +259,6 @@ func runJSSpace(r rune) bool {
 		return true
 	}
 	return r >= 0x2000 && r <= 0x200a
-}
-
-func runLineTerminator(r rune) bool { return r == '\n' || r == '\r' || r == 0x2028 || r == 0x2029 }
-
-// runEnvMarker is /(?:^|\s)NAME=(.*?)(?=\s+[A-Za-z_][A-Za-z0-9_]*=|$)/ (no
-// lookahead in Go's regexp): the first start that reaches a terminator wins.
-func runEnvMarker(text, name string) (string, bool) {
-	runes := []rune(text)
-	key := []rune(name + "=")
-	identStart := func(r rune) bool { return r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') }
-	ident := func(r rune) bool { return identStart(r) || (r >= '0' && r <= '9') }
-	// next variable: \s+ then an identifier then '='
-	nextVar := func(j int) bool {
-		k := j
-		for k < len(runes) && runJSSpace(runes[k]) {
-			k++
-		}
-		if k == j || k >= len(runes) || !identStart(runes[k]) {
-			return false
-		}
-		for k < len(runes) && ident(runes[k]) {
-			k++
-		}
-		return k < len(runes) && runes[k] == '='
-	}
-	for i := 0; i+len(key) <= len(runes); i++ {
-		if i > 0 && !runJSSpace(runes[i-1]) {
-			continue
-		}
-		if string(runes[i:i+len(key)]) != string(key) {
-			continue
-		}
-		start := i + len(key)
-		for j := start; ; j++ {
-			if j == len(runes) || nextVar(j) {
-				return string(runes[start:j]), true
-			}
-			if runLineTerminator(runes[j]) {
-				break
-			}
-		}
-	}
-	return "", false
 }
 
 func runAlive(pid float64) bool {

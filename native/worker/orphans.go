@@ -77,71 +77,32 @@ func outputWithin(cmd *exec.Cmd, limit time.Duration) (string, error) {
 	return string(out), err
 }
 
-var psEnvHead = regexp.MustCompile(`^\s*(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d+:\d+:\d+\s+\d{4})\s+`)
+// psEnvOutput is the `ps -E` call for one process (a seam for tests).
+var psEnvOutput = func(pid int) (string, error) {
+	cmd := exec.Command("/bin/ps", "-E", "-ww", "-o", "pid=,ppid=,lstart=,command=", "-p", strconv.Itoa(pid))
+	cmd.Env = cLocaleEnv()
+	return outputWithin(cmd, 5*time.Second)
+}
 
-// ReadProcessEnv is readProcessEnv: the ownership markers only.
+// ReadProcessEnv is readProcessEnv: the ownership markers only (B757: read
+// by EnvFromEnviron / EnvFromPs, the run sweep's reader too).
 func ReadProcessEnv(p ProcInfo) map[string]string {
-	var text string
 	switch runtime.GOOS {
 	case "linux":
 		data, err := os.ReadFile("/proc/" + strconv.Itoa(p.PID) + "/environ")
 		if err != nil {
 			return nil
 		}
-		text = string(data)
+		return EnvFromEnviron(string(data))
 	case "darwin":
-		cmd := exec.Command("/bin/ps", "-E", "-ww", "-o", "pid=,ppid=,lstart=,command=", "-p", strconv.Itoa(p.PID))
-		cmd.Env = cLocaleEnv()
-		out, err := outputWithin(cmd, 5*time.Second)
+		out, err := psEnvOutput(p.PID)
 		if err != nil {
 			return nil
 		}
-		m := psEnvHead.FindStringSubmatch(out)
-		if m == nil || m[1] != strconv.Itoa(p.PID) || m[2] != strconv.Itoa(p.PPID) || spaces.ReplaceAllString(m[3], " ") != p.Start {
-			return nil
-		}
-		text = out[len(m[0]):]
-		if !strings.HasPrefix(text, p.Command+" ") {
-			return nil
-		}
-		// B747: ps ends the row with "\n", the end of the last variable
-		// (kept, the last variable's value carried it and never matched).
-		text = strings.TrimSuffix(text[len(p.Command)+1:], "\n")
+		return EnvFromPs(p.PID, p.PPID, p.Start, p.Command, out)
 	default:
 		return nil
 	}
-	markers := map[string]string{}
-	for _, name := range []string{"HOME", "CODE_FORGE_OWNER_PID", "CODE_FORGE_RUN_ID", "CODE_FORGE_OWNER_START_TIME"} {
-		if runtime.GOOS == "linux" {
-			for _, entry := range strings.Split(text, "\x00") {
-				if strings.HasPrefix(entry, name+"=") {
-					markers[name] = entry[len(name)+1:]
-					break
-				}
-			}
-			continue
-		}
-		if v, ok := envMarker(text, name); ok {
-			markers[name] = v
-		}
-	}
-	return markers
-}
-
-// envMarker is /(?:^|\s)NAME=(.*?)(?=\s+[A-Za-z_][A-Za-z0-9_]*=|$)/ (RE2 has
-// no lookahead: the value ends before the next whitespace-led NAME=).
-func envMarker(text, name string) (string, bool) {
-	re := regexp.MustCompile(`(?:^|\s)` + regexp.QuoteMeta(name) + `=`)
-	loc := re.FindStringIndex(text)
-	if loc == nil {
-		return "", false
-	}
-	rest := text[loc[1]:]
-	next := regexp.MustCompile(`\s+[A-Za-z_][A-Za-z0-9_]*=`).FindStringIndex(rest)
-	if next == nil {
-		return rest, true
-	}
-	return rest[:next[0]], true
 }
 
 // OrphanSweep holds the seams of SweepOrphans.
