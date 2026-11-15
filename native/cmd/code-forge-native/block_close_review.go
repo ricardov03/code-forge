@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -48,6 +49,11 @@ func closeWaitReviews(run, id, top, qdir string, files []gatecheck.File, changed
 		// Node's enqueue identity: the latest reopened attempt is reused, and
 		// Publish retires the attempts that reopen replaced.
 		p, identity, err := queue.Resolve(qdir, p, nil)
+		if errors.Is(err, queue.ErrScript) {
+			// Node's close never queues a review: where its reviewIdentity
+			// would throw (B730), the file keeps the gate's own blocker.
+			continue
+		}
 		if err == nil {
 			err = queue.Publish(qdir, p, identity, time.Now())
 		}

@@ -230,7 +230,11 @@ func (o reviewRequeue) pass(dry bool) (map[string]string, error) {
 		if revision, isText := blockObject(blockObject(identity.Get("blocks")).Get(o.block)).Get("acceptance_revision").(string); isText {
 			parts.AcceptanceRevision = &revision
 		}
-		if _, err := queue.Identity(dir, parts); err != nil {
+		if _, err := queue.Identity(dir, parts); errors.Is(err, queue.ErrScript) {
+			// B730: clearDone's reviewIdentity throws this TypeError before
+			// the file's reopen row is written.
+			return nil, err
+		} else if err != nil {
 			return nil, errRequeueUnsupported
 		}
 		if _, ok := reviewEnqueueExclusion(o.home, realRepo, o.run, file); !ok {

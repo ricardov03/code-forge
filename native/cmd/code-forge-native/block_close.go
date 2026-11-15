@@ -2299,6 +2299,9 @@ func closeRequeue(step *landStep, home, run, id, mainTop, top, cwd string, rows 
 		switch {
 		case errors.As(err, &se):
 			return false, 0, false, err
+		case errors.Is(err, queue.ErrScript):
+			// B730: the real run fails with Node's TypeError, before any write.
+			return false, 0, false, nil
 		case err != nil:
 			return false, 0, true, err
 		case step.dry != nil && len(restarted) > 0:

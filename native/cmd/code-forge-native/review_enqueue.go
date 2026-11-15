@@ -435,6 +435,11 @@ func reviewEnqueueWith(args []string, step *landStep, pre *reviewFileScope) int 
 	dir := filepath.Join(root, ".code-forge", "queue")
 	// reviewIdentity: ordinary enqueues reuse the latest reopened attempt.
 	p, id, err := queue.Resolve(dir, p, nil)
+	if errors.Is(err, queue.ErrScript) {
+		// B730: Node's catch prints the TypeError reviewIdentity throws
+		// (enqueue and --fresh both resolve first); nothing is queued.
+		return reviewEnqueueSay(args, reviewEnqueueRefusal("error", err.Error()), 1)
+	}
 	if err != nil {
 		return reviewWaitHandover(args, hEnqueueIdentity)
 	}

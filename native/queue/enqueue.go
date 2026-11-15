@@ -161,9 +161,10 @@ func identityCompare(a, b string) (int, error) {
 // argument is read with String().
 func identityOrder(a, b Object) (int, error) {
 	for _, key := range []string{"enqueued_at", "ticket"} {
-		receiver, ok := a[key].(string)
+		value, has := a[key]
+		receiver, ok := value.(string)
 		if !ok {
-			return 0, scriptError("localeCompare is not a function")
+			return 0, identityReceiverError(key, value, has)
 		}
 		argument, err := identityString(b, key)
 		if err != nil {
@@ -175,6 +176,18 @@ func identityOrder(a, b Object) (int, error) {
 		}
 	}
 	return 0, nil
+}
+
+// identityReceiverError is V8's TypeError message for a.<key>.localeCompare
+// on a receiver that is not a string (B730: recorded from Node v24).
+func identityReceiverError(key string, value any, has bool) error {
+	switch {
+	case !has:
+		return scriptError("Cannot read properties of undefined (reading 'localeCompare')")
+	case value == nil:
+		return scriptError("Cannot read properties of null (reading 'localeCompare')")
+	}
+	return scriptError("a." + key + ".localeCompare is not a function")
 }
 
 // scan returns the valid tickets of p's scope (reopen attempts included) in

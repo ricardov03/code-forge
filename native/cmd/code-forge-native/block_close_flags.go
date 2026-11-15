@@ -381,6 +381,16 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 func closeLocalJoin(home, run, id, main, top string, predicted ledger.Object, preflight bool) (ledger.Object, int, error) {
 	deadline := time.Now().Add(90 * time.Second)
 	down := 0
+	// B730: waitBlock's TypeError (blockTickets' or reviewIdentity's sort,
+	// requeueStoppedFiles' enqueue) is runReviewFile's refusal "error"; a
+	// preflight serves it, since the real join fails the same way.
+	thrown := func(err error, printed string) (ledger.Object, int, error) {
+		if preflight {
+			return nil, 0, nil
+		}
+		line, _ := ledger.Stringify(reviewEnqueueRefusal("error", err.Error()), false)
+		return nil, 1, fmt.Errorf("%s", landFirst(printed, string(line)+"\n", "auto-claim review failed"))
+	}
 	for {
 		record := predicted
 		if !preflight {
@@ -426,7 +436,12 @@ func closeLocalJoin(home, run, id, main, top string, predicted ledger.Object, pr
 		if top != main {
 			namedTree = &top
 		}
-		tickets := idx.Block(run, id, namedTree, nil)
+		tickets, err := idx.BlockChecked(run, id, namedTree, nil)
+		if errors.Is(err, queue.ErrScript) {
+			return thrown(err, "")
+		} else if err != nil {
+			return nil, 1, err
+		}
 		// B717: waitBlock restarts a changed stopped review (requeueStoppedFiles:
 		// a signed automatic reopen and a new ticket) before it joins. Its
 		// auto-requeue lines go to the join's stderr, which autoClaimChanges
@@ -444,6 +459,9 @@ func closeLocalJoin(home, run, id, main, top string, predicted ledger.Object, pr
 				if preflight {
 					restarted, err = o.pass(true)
 					var se *state.Error
+					if errors.Is(err, queue.ErrScript) {
+						return thrown(err, printed.String())
+					}
 					if err != nil && !errors.As(err, &se) {
 						return nil, 1, fmt.Errorf("stopped review requires Node")
 					}
@@ -457,12 +475,17 @@ func closeLocalJoin(home, run, id, main, top string, predicted ledger.Object, pr
 							line, _ := ledger.Stringify(reviewEnqueueRefusal(se.Code, se.Message), false)
 							return nil, 1, fmt.Errorf("%s", landFirst(printed.String(), string(line)+"\n", "auto-claim review failed"))
 						}
+						if errors.Is(err, queue.ErrScript) {
+							return thrown(err, printed.String())
+						}
 						return nil, 1, err
 					}
 					if err := idx.Refresh(); err != nil {
 						return nil, 1, err
 					}
-					tickets = idx.Block(run, id, namedTree, nil)
+					if tickets, err = idx.BlockChecked(run, id, namedTree, nil); err != nil {
+						return nil, 1, err
+					}
 				}
 				for file, ts := range restarted {
 					restartable[file] = true
@@ -499,7 +522,9 @@ func closeLocalJoin(home, run, id, main, top string, predicted ledger.Object, pr
 				after = &at
 			}
 			parts, identity, err := queue.Resolve(idx.Dir, parts, after)
-			if err != nil {
+			if errors.Is(err, queue.ErrScript) {
+				return thrown(err, "")
+			} else if err != nil {
 				return nil, 1, err
 			}
 			previousTickets, err := closeJoinPrevious(tickets, file, after)

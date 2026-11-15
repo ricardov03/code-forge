@@ -233,6 +233,23 @@ func ServeContext(ctx context.Context, home, run, version string, idle time.Dura
 	}
 }
 
+// ScriptFailure prefixes a local join's failure that is the TypeError
+// Node's waitBlock throws (B730); the rest is its message.
+const ScriptFailure = "script: "
+
+// plainTickets: every ticket's enqueued_at and ticket are strings, so Node's
+// comparator cannot throw for them.
+func plainTickets(tickets []object) bool {
+	for _, t := range tickets {
+		_, stamp := t["enqueued_at"].(string)
+		_, id := t["ticket"].(string)
+		if !stamp || !id {
+			return false
+		}
+	}
+	return true
+}
+
 func failure(code string) object { return object{"ok": false, "error": code} }
 
 func (s *server) refresh() error {
@@ -354,6 +371,17 @@ func (s *server) step(req request, deadline time.Time, down *int, delivered map[
 	}
 	revision := optional(entry, "acceptance_revision")
 	tickets := s.queue.Block(s.run, req.Block, namedTree, revision)
+	if s.local {
+		// B730: Node's local waitBlock sorts blockTickets with a comparator
+		// that throws for an enqueued_at or ticket that is not a string.
+		checked, err := s.queue.BlockChecked(s.run, req.Block, namedTree, revision)
+		if errors.Is(err, queue.ErrScript) {
+			return failure(ScriptFailure + err.Error()), true
+		}
+		if err == nil {
+			tickets = checked
+		}
+	}
 	if req.Method == "block-tickets" {
 		return object{"block": req.Block, "tickets": tickets}, true
 	}
@@ -423,6 +451,17 @@ func (s *server) step(req request, deadline time.Time, down *int, delivered map[
 		}
 		p := ticket.Parts{Run: s.run, Block: req.Block, File: file, ContentHash: hash, Tree: namedTree, AcceptanceRevision: revision}
 		after := s.reopened(req.Block, file)
+		if s.local && !plainTickets(byFile[file]) {
+			// B730: resolveHashTicket's reviewIdentity sorts this file's
+			// attempts with the same comparator; its TypeError ends the join.
+			var bound *string
+			if after != "" {
+				bound = &after
+			}
+			if _, _, err := queue.Resolve(s.queue.Dir, p, bound); errors.Is(err, queue.ErrScript) {
+				return failure(ScriptFailure + err.Error()), true
+			}
+		}
 		matching := []object{}
 		previous := []object{}
 		for _, t := range byFile[file] {

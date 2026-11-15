@@ -14,6 +14,7 @@ import (
 	"github.com/ricardov03/code-forge/native/daemon"
 	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/queue"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -214,6 +215,10 @@ func reviewWaitBlockJoin(cwd, root, run, block string, maxWait time.Duration, pr
 					requeueErr = err
 					return restarted, err
 				}})
+			if message, thrown := strings.CutPrefix(failure, daemon.ScriptFailure); thrown {
+				// B730: blockTickets' or reviewIdentity's TypeError.
+				return reviewBlockJoined{refusal: reviewEnqueueRefusal("error", message), code: 1}
+			}
 			switch failure {
 			case "":
 			case "block-scope-unreadable":
@@ -227,6 +232,11 @@ func reviewWaitBlockJoin(cwd, root, run, block string, maxWait time.Duration, pr
 				var se *state.Error
 				if errors.As(requeueErr, &se) {
 					return reviewBlockJoined{refusal: reviewEnqueueRefusal(se.Code, se.Message), code: 1}
+				}
+				// B730: the TypeError requeueStoppedFiles' enqueue throws reaches
+				// runReviewFile's catch as reason "error".
+				if errors.Is(requeueErr, queue.ErrScript) {
+					return reviewBlockJoined{refusal: reviewEnqueueRefusal("error", requeueErr.Error()), code: 1}
 				}
 				return reviewBlockJoined{handed: true, handover: hWaitBlockLocal}
 			default:

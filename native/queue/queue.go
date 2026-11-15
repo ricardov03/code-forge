@@ -239,6 +239,43 @@ func (idx *Index) Block(run, block string, tree, revision *string) []Object {
 	return out
 }
 
+// BlockChecked is Block with blockTickets' sort run as Node runs it (B730):
+// when a ticket's enqueued_at or ticket field is not a string, V8 sorts the
+// tickets in readdir order with (a, b) => a.enqueued_at.localeCompare(...)
+// || a.ticket.localeCompare(...), and the TypeError the comparator throws is
+// returned as an ErrScript error. Text fields keep Block's order.
+func (idx *Index) BlockChecked(run, block string, tree, revision *string) ([]Object, error) {
+	out := idx.Block(run, block, tree, revision)
+	plain := true
+	for _, t := range out {
+		_, stamp := t["enqueued_at"].(string)
+		_, id := t["ticket"].(string)
+		plain = plain && stamp && id
+	}
+	if plain || len(out) < 2 {
+		return out, nil
+	}
+	names := make([]string, 0, len(idx.entries))
+	for name := range idx.entries {
+		if ticketName.MatchString(name) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	ordered := make([]Object, 0, len(out))
+	for _, name := range names {
+		t := idx.entries[name].value
+		if t == nil || t["kind"] != nil || t["run"] != run || t["block"] != block || !same(t, "tree", tree, true) || !same(t, "acceptance_revision", revision, false) {
+			continue
+		}
+		ordered = append(ordered, t)
+	}
+	if err := v8Sort(ordered, identityOrder); err != nil {
+		return nil, err
+	}
+	return ordered, nil
+}
+
 func same(t Object, key string, expected *string, nullAbsent bool) bool {
 	v, exists := t[key]
 	if expected == nil {

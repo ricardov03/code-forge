@@ -593,7 +593,9 @@ func (p *blockPreview) bjReopenQueue(c bjReopenCase) (mainTop, dir string, parts
 		return "", "", parts, false
 	}
 	parts.ContentHash = hash
-	if _, err := queue.Identity(dir, parts); err != nil {
+	// B730: clearDone's reviewIdentity TypeError is Node's own failure after
+	// the judge (or the question): bjReopenWrite says it, before any write.
+	if _, err := queue.Identity(dir, parts); err != nil && !errors.Is(err, queue.ErrScript) {
 		return "", "", parts, false
 	}
 	if err := (&queue.Index{Dir: dir}).Refresh(); err != nil {
