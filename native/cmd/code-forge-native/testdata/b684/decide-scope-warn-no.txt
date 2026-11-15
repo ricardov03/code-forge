@@ -1,0 +1,43 @@
+asked=Apply these decisions and close block B1 of run r-b684? Only the owner may say yes.
+exit=1
+--- stdout
+1. sample.mjs F1 warning: the name is unclear
+--- stderr
+WARN block B1: other.mjs changed and is owned by open block B2; not checked here (its own gate reviews it)
+WARN block B1: other.mjs changed and is owned by open block B2; not checked here (its own gate reviews it)
+block B1 close: cancelled — nothing was recorded
+--- new rows
+--- status open
+--- ws/runs/r-b684.json
+{
+  "run_id": "r-b684",
+  "project": "fixture",
+  "workspace": "<WS>",
+  "status": "active",
+  "blocks": {
+    "B1": {
+      "status": "open",
+      "owned_files": [
+        "sample.mjs"
+      ],
+      "base_sha": "<SHA>",
+      "base_branch": "main",
+      "tree_at_open": {},
+      "kind": "code",
+      "test_files": []
+    },
+    "B2": {
+      "status": "open",
+      "owned_files": [
+        "other.mjs"
+      ],
+      "base_sha": "<SHA>",
+      "base_branch": "main",
+      "tree_at_open": {},
+      "kind": "code",
+      "test_files": []
+    }
+  },
+  "orphans": []
+}
+

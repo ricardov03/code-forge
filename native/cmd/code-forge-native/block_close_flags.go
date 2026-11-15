@@ -159,6 +159,14 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 		return closeStep(step)
 	}
 	fallback := func(why handoverReason) int { *reason = why; return landHandover }
+	// B684: the owner's waived close claims after the question; Node keeps
+	// that combination. Without a terminal the close refuses it in Go.
+	if flags["no-require-reviews"] == true {
+		if closeMayHaveTerminal() {
+			return fallback(hCloseNoRequireReviews)
+		}
+		return closeStep(step)
+	}
 	// Run the entire close's read-only boundary first, including unsupported
 	// flag/config combinations. Even a refused enqueue must not precede it.
 	dry := &landStep{preflight: true}
@@ -168,7 +176,7 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 	}
 	// B498: a refusal Node reaches only after its claims (transcript read,
 	// --worker-pid, ...) still claims first, as Node does.
-	if (preflight != 0 && !dry.pastClaim) || flags["no-require-reviews"] == true {
+	if preflight != 0 && !dry.pastClaim {
 		return closeStep(step)
 	}
 	home, err := os.UserHomeDir()

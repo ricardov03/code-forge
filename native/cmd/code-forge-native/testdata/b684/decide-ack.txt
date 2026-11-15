@@ -1,0 +1,77 @@
+asked=Apply these decisions and close block B1 of run r-b684? Only the owner may say yes.
+exit=0
+--- stdout
+1. sample.mjs F1 warning: agent-waivers-not-acked the name is unclear; reason: naming only; verdict: agree
+reviewed sample.mjs ticket <ID>
+block B1: agent waiver sample.mjs F1 reason: naming only; verdict: agree
+block B1 closed
+--- stderr
+--- new rows
+{"run":"r-b684","event":"agent_waivers.acked","block":"B1","digest":"<DIGEST>","count":1,"by":"human","tokens_source":null,"cost_source":null}
+{"run":"r-b684","event":"block.close","block":"B1","status":"complete","tokens_source":null,"cost_source":null}
+--- status closed
+--- ws/runs/r-b684.json
+{
+  "run_id": "r-b684",
+  "project": "fixture",
+  "workspace": "<WS>",
+  "status": "active",
+  "blocks": {
+    "B1": {
+      "status": "closed",
+      "owned_files": [
+        "sample.mjs"
+      ],
+      "base_sha": "<SHA>",
+      "base_branch": "main",
+      "tree_at_open": {},
+      "kind": "code",
+      "test_files": [],
+      "worktree": {
+        "path": "<WS>/.code-forge/worktrees/B1",
+        "branch": "block-B1",
+        "base_sha": "<SHA>"
+      }
+    }
+  },
+  "orphans": [],
+  "config": {
+    "hash": "b15942d66320ad3c438a9b285196d32b03a9e576b1c93febf9e5ceb86f299c2e",
+    "snapshots": {
+      "b15942d66320ad3c438a9b285196d32b03a9e576b1c93febf9e5ceb86f299c2e": {
+        "engine": "harness",
+        "gates": {
+          "format": null,
+          "lint": null,
+          "test": null,
+          "types": null
+        },
+        "levels": {
+          "L0": {
+            "model": "claude-haiku-4-5-20251001"
+          },
+          "L1": {
+            "model": "claude-sonnet-5"
+          },
+          "L2": {
+            "model": "claude-opus-5-5"
+          },
+          "L3": {
+            "model": "claude-fable-5-1"
+          }
+        },
+        "project": {
+          "slug": "fixture"
+        },
+        "provider": "anthropic",
+        "review": {
+          "agent_waivers": {
+            "require_ack": true
+          }
+        },
+        "version": 1
+      }
+    }
+  }
+}
+

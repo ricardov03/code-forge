@@ -44,10 +44,6 @@ func runBlockClose(args []string) int {
 	return closeWithFlags(args)
 }
 
-func blockCloseStep(args []string, step *landStep) int {
-	return blockCloseStepWithReason(args, step, nil)
-}
-
 // Preflight returns its reason to the caller, which records only the final
 // whole-command handover. Shared land preflights keep their existing sentinel.
 func blockCloseStepWithReason(args []string, step *landStep, handover *handoverReason, endHook ...*func()) int {
@@ -135,20 +131,25 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		if flags["no-require-reviews"] == true {
 			return usage("--decide cannot skip reviews")
 		}
-		active := false
+		active, nodeActive := false, false
 		if grant := blockObject(record.Get("autopilot")); grant != nil {
 			s, err := autopilot.GrantState(grant, time.Now())
 			if err != nil {
-				return fallback(hCloseDecide)
-			}
-			if active = s == "active" && record.Get("status") == "active"; active {
+				// B684: a grant Go cannot read is judged as Node's grantState
+				// judges it (status, then until); it never stands in for the owner.
+				known := false
+				if s, known = closeNodeGrantState(grant, time.Now()); !known {
+					return fallback(hCloseDecide)
+				}
+				nodeActive = s == "active"
+			} else if active = s == "active" && record.Get("status") == "active"; active {
 				decideGrant = grant
 			}
 		}
 		if !humanTTY() && !active {
 			return humanNoTTY(stderr, "close")
 		}
-		if active && humanTTY() {
+		if (active || nodeActive) && humanTTY() {
 			// The owner at a terminal is not the autopilot; keep their decide
 			// apart from the grant as before.
 			return fail(&state.Error{Code: "autopilot-active", Message: "block close --decide is refused while an autopilot grant is active"})
@@ -164,11 +165,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	}
 	// This is the hand-over boundary. Everything through preflight is read-only;
 	// it must finish before a transcript warning or a stopped-block row is signed.
-	safeGrant := blockGrantEndSafe(record)
-	if step != nil && handover == nil {
-		safeGrant = blockEndSafe(record)
-	}
-	if !safeGrant || !blockStorageSafe(home, run, record) {
+	if !blockGrantEndSafe(record) || !blockStorageSafe(home, run, record) {
 		return fallback(blockStateHandoverReason(record, "close", hCloseStateStorage))
 	}
 	cfg, ok := blockSnapshot(record)
@@ -182,18 +179,17 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			return refuseAuto("close.require_human is set and the grant does not allow close:routine (" + why + ")")
 		}
 	}
-	if requireHuman && step != nil && handover == nil {
-		return fallback(hCloseHuman)
-	}
-	if !deciding && !requireHuman && flags["no-require-reviews"] != true && (step == nil || !step.preflight) {
+	// B684: Node's expiry check runs before every close, --no-require-reviews too.
+	if !deciding && !requireHuman && (step == nil || !step.preflight) {
 		expiryOnFailure = func() { blockGrantExpiry(home, run, stderr) }
 	}
 	var routineGrant ledger.Object
-	external := closeExternalReviewer(cfg)
-	// Land's composed close has no reason receiver. Keep its existing whole-
-	// command handover; only the direct close and close-flags caller opt in.
-	if external != "" && step != nil && handover == nil {
-		return fallback(hCloseExternalReview)
+	// B684: the owner's --no-require-reviews lifts the per-file review checks
+	// and wins over review.external (Node: external = reviewsWaived ? null : ...).
+	waived := flags["no-require-reviews"] == true
+	external := ""
+	if !waived {
+		external = closeExternalReviewer(cfg)
 	}
 	entry := blockObject(blockObject(record.Get("blocks")).Get(id))
 	if entry == nil {
@@ -307,13 +303,8 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			}
 		}
 	}
-	if flags["no-require-reviews"] == true {
-		// A terminal confirmation remains a human close, owned by Node. Pipes
-		// refuse before confirmation, expiry, claims, or any signed writes.
-		if closeMayHaveTerminal() {
-			return fallback(hCloseNoRequireReviews)
-		}
-		return usage("--no-require-reviews needs the human at a terminal to confirm; the block stays open (there is no --yes)")
+	if waived && !confirmed && (step == nil || !step.preflight) {
+		return closeNoReviews(args, step, handover, requireHuman, home, run, id, stderr, fallback, fail, usage, endHook...)
 	}
 	// Node reads the ledger before any run-ended write refusal (B470).
 	ledgerDir := filepath.Join(home, ".code-forge/ledger")
@@ -378,7 +369,8 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		return fallback(hCloseFileSet)
 	}
 	// A durable or legacy stopped state can requeue even without a cap row.
-	if !closeNoRequeue(home, run, id, top, rows, cfg) {
+	// Node skips the stopped-file requeue when the owner waived the reviews.
+	if !waived && !closeNoRequeue(home, run, id, top, rows, cfg) {
 		return fallback(hCloseRequeue)
 	}
 	qdir := filepath.Join(mainTop, ".code-forge/queue")
@@ -442,6 +434,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 	}
 	// Node's acknowledgement check runs after coder-tests and before the test gate.
+	var ackDecision *humanDecision
 	acked, ackKnown := gatecheck.AgentWaiversAcked(blockMap(blockMap(cfg["review"])["agent_waivers"])["require_ack"] == true, run, id, rows, key)
 	if !ackKnown {
 		// B493: only a signed digest that matches an order Go cannot prove is left.
@@ -452,16 +445,29 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			return refuseAuto("agent waivers are not acknowledged; the owner acknowledges them")
 		}
 		if deciding && !confirmed {
-			return fallback(hCloseDecide)
+			// B684: the owner's --decide acknowledges them (Node's ack action).
+			decision, ok := closeAckDecision(run, id, rows, key)
+			if !ok {
+				return fallback(hCloseDecide)
+			}
+			ackDecision = &decision
+		} else {
+			checks = append(checks, closeCheck{"agent-waivers-not-acked", []gatecheck.Blocker{{Code: "agent-waivers-not-acked", Detail: "agent-waivers-not-acked"}}})
 		}
-		checks = append(checks, closeCheck{"agent-waivers-not-acked", []gatecheck.Blocker{{Code: "agent-waivers-not-acked", Detail: "agent-waivers-not-acked"}}})
 	}
+	// Node keeps a waived close's diagnostics ahead of its test gate: the test
+	// gate then runs after the reviews and the report.
+	var testCheck *closeCheck
 	if blockMap(cfg["gates"])["test"] != nil {
 		check, supported := closeTestGate(top, base, run, id, entry, rows)
 		if !supported {
 			return fallback(hCloseTestGate)
 		}
-		checks = append(checks, check)
+		if waived {
+			testCheck = &check
+		} else {
+			checks = append(checks, check)
+		}
 	}
 	// B451: Node checks a light block's size after the test gate, before reviews.
 	if entry.Get("kind") == "light" {
@@ -482,17 +488,14 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		return fallback(hCloseLockfileFormat)
 	}
 	unowned, scopeWarnings, scopeChecked := gatecheck.Scope(top, prefix, id, run, blockObject(record.Get("blocks")), changed, rows, key, inTree)
-	noChanges := len(files) == 0 && !slices.ContainsFunc(gatecheck.ReviewedWork(top, rows, id), func(file string) bool { return gatecheck.Owns(prefix, entry, file) })
+	noChanges := !waived && len(files) == 0 && !slices.ContainsFunc(gatecheck.ReviewedWork(top, rows, id), func(file string) bool { return gatecheck.Owns(prefix, entry, file) })
 	if autoDecide && !confirmed && (!scopeChecked || len(scopeWarnings) > 0 || len(reviewed) > 0 && !slices.ContainsFunc(changed, func(file string) bool { return gatecheck.Owns(prefix, entry, file) })) {
 		return refuseAuto("the block's scope has warnings or reviewed work without changes; the owner decides it")
 	}
-	if deciding && !confirmed && (!scopeChecked || len(scopeWarnings) > 0 || len(reviewed) > 0 && !slices.ContainsFunc(changed, func(file string) bool { return gatecheck.Owns(prefix, entry, file) })) {
-		return fallback(hCloseDecide)
-	}
 	gateInput := gatecheck.Input{Run: run, Block: id, Files: kept, ProofFiles: files, Rows: rows, Key: key, HighPaths: highPaths, Unowned: unowned, NoChanges: noChanges, Hits: hits, Transcript: transcript, ResultFiles: gatecheck.LoadResultFiles(mainTop, run, id, rows, key), Ordered: closeOrderedRows(ledgerDir, blockString(record.Get("project")), all)}
-	if external != "" {
-		// Node judges an external reviewer's close with no review files; the
-		// files still prove the block changed something.
+	if external != "" || waived {
+		// Node judges an external reviewer's or a waived close with no review
+		// files; the files still prove the block changed something.
 		gateInput.Files, gateInput.ProofFiles = []gatecheck.File{}, files
 	}
 	gate := gatecheck.Evaluate(gateInput)
@@ -510,6 +513,9 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			}
 		} else {
 			decisions, rows, supported = humanDecisions(run, id, blockString(flags["reason"]), gate, rows, key)
+			if supported && ackDecision != nil {
+				decisions = append(decisions, *ackDecision)
+			}
 		}
 		if !supported {
 			return fallback(hCloseDecide)
@@ -526,14 +532,14 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	gateReason := closeLockReason(lockBlockers, gatecheck.Reason(gate.Blockers))
 	gateIndex := len(checks)
 	checks = append(checks, closeCheck{gateReason, append(append([]gatecheck.Blocker{}, lockBlockers...), gate.Blockers...)})
-	if external == "" {
+	if external == "" && !waived {
 		// B630: a file approved only by a substitute review
 		if check := substCloseCheck(record, run, id, rows, key, kept, gate, time.Now()); check.Reason != "" {
 			checks = append(checks, check)
 		}
 	}
-	lines, lineWarnings := closeReviewedLines(run, id, top, qdir, entry, kept, gate.Waived, inTree, external == "" && len(gate.Blockers) == 0 && len(lockBlockers) == 0)
-	if _, has := flags["report"].(string); has && external == "" {
+	lines, lineWarnings := closeReviewedLines(run, id, top, qdir, entry, kept, gate.Waived, inTree, external == "" && !waived && len(gate.Blockers) == 0 && len(lockBlockers) == 0)
+	if _, has := flags["report"].(string); has && external == "" && !waived {
 		if reportErr != nil {
 			reason := "coder report FAILED: --report cannot be read"
 			checks = append(checks, closeCheck{reason, []gatecheck.Blocker{{Code: "coder_report_failed", Detail: reason}}})
@@ -542,6 +548,9 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			checks = append(checks, check)
 			lineWarnings = append(lineWarnings, warnings...)
 		}
+	}
+	if testCheck != nil {
+		checks = append(checks, *testCheck)
 	}
 	excludedRows := closeExcludedRows(id, excluded)
 	closeRows = append(closeRows, excludedRows...)
@@ -590,6 +599,18 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		// Decision dialects not yet understood must hand over before asking or
 		// signing. The existing B282 code describes that boundary.
 		if step == nil || !step.preflight {
+			if !autoDecide {
+				// B684: Node's decide loads the gate (its warnings), then its
+				// preview loads it again unless an earlier check failed.
+				loadWarnings()
+				failed := event != ""
+				for _, check := range checks[:gateIndex] {
+					failed = failed || check.Reason != ""
+				}
+				if !failed {
+					loadWarnings()
+				}
+			}
 			print := io.Writer(os.Stdout)
 			if flags["json"] == true {
 				print = os.Stderr
@@ -664,7 +685,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 		return 0
 	}
-	if waited == nil && external == "" && event == "" {
+	if waited == nil && external == "" && !waived && event == "" {
 		prerequisites := true
 		for _, check := range checks[:gateIndex] {
 			prerequisites = prerequisites && check.Reason == ""
@@ -785,6 +806,13 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 				return publishError(err)
 			}
 			fmt.Fprintf(stderr, "WARN block %s: no coder transcript found (--transcript, run record, .code-forge/runs/%s/%s.log); the transcript grep did not run\n", id, run, id)
+		}
+		if waived && !collectOnly {
+			// B684: Node's loadGate signs the owner's waiver before the close,
+			// so a later refused check leaves it behind.
+			if _, err := state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "gate.reviews_waived"}, {Key: "block", Value: id}, {Key: "by", Value: "human"}}); err != nil {
+				return publishError(err)
+			}
 		}
 		if !collectOnly {
 			loadWarnings()
