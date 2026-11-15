@@ -18,8 +18,8 @@ func TestB469GatesRunShellScriptHandsOver(t *testing.T) {
 	before, err := os.ReadFile(filepath.Join(f.home, ".code-forge", "runs", "fixture.json"))
 	f.must(err)
 	code, out, errOut := f.call([]string{"CODE_FORGE_TEST_QUEUE=off"}, "gates", "run", "--run", "fixture", "--block", "B1")
-	if code != 127 || out != "" || !strings.Contains(errOut, "/nonexistent-code-forge-node") {
-		t.Fatalf("exit=%d stdout=%q stderr=%q, want the Node hand-over (127)", code, out, errOut)
+	if code != 1 || out != "" || !b690aIsRefusal(errOut) {
+		t.Fatalf("exit=%d stdout=%q stderr=%q, want the Go refusal (exit 1)", code, out, errOut)
 	}
 	after, err := os.ReadFile(filepath.Join(f.home, ".code-forge", "runs", "fixture.json"))
 	f.must(err)

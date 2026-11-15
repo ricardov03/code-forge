@@ -71,6 +71,11 @@ async function parity(f, args = ARGS, fallback = false, env = {}) {
   assert.deepEqual(result.diffs, [], `${args.join(' ')}: zero stream, exit and state differences`);
 }
 const normalizeRows = (bytes) => bytes.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, '<time>').replace(/("(?:total_)?duration_ms":)\d+/g, '$1<duration>');
+// B690a: the ledger and run file bytes (null when missing), to prove a refusal writes nothing.
+async function b690aLedgerBytes(f) {
+  const read = (file) => readFile(path.join(f.home, file), 'utf8').catch(() => null);
+  return [await read('.code-forge/ledger/fixture.jsonl'), await read('.code-forge/runs/fixture.json')];
+}
 async function rowBytes(f, args) {
   const file = path.join(f.home, '.code-forge/ledger/fixture.jsonl');
   const node = await launch(f, args, {}, process.execPath, [path.join(ROOT, 'bin/code-forge.mjs')]).ended;
@@ -101,7 +106,7 @@ test('review F1 signals: native termination diagnostics match Node signal names'
   }
 });
 
-test('review spawn/PATH: B450 Go runs missing and non-executable child commands with Node parity; B469 a script with no #! hands over', async () => {
+test('review spawn/PATH: B450 Go runs missing and non-executable child commands with Node parity; B469 a script with no #! gets the Go refusal', async () => {
   const missing = await fixture({ test: { argv: ['sh', '-c', 'echo wrong-parent-path'], env: { PATH: '/nonexistent-child-path' } } });
   const denied = await fixture({ test: ['./no-execute'] });
   await writeFile(path.join(denied.repo, 'no-execute'), '#!/bin/sh\nexit 0\n', { mode: 0o600 });
@@ -112,8 +117,13 @@ test('review spawn/PATH: B450 Go runs missing and non-executable child commands 
     await parity(f, ARGS);
   }
   // Node starts it through /bin/sh on Linux and throws spawn ENOEXEC on macOS.
-  assert.equal((await launch(shell).ended).code, 127, 'B469: a script with no #! still requires Node');
-  await parity(shell, ARGS, true);
+  // B690a: Go refuses this case (exit 1, one stderr line) and never starts Node.
+  const before = await b690aLedgerBytes(shell);
+  const refused = await launch(shell, ARGS, { CODE_FORGE_NODE: process.execPath }).ended;
+  assert.equal(refused.code, 1, 'B469: a script with no #! gets the Go refusal');
+  assert.equal(refused.stdout, '');
+  assert.match(refused.stderr, /^code-forge: gates run is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/);
+  assert.deepEqual(await b690aLedgerBytes(shell), before, 'B469: the refusal leaves the ledger as it was');
 });
 
 test('review F1 scope: changed Swift and Python test pairs (Go also pairs *_test.py since B394)', async () => {

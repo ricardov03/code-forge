@@ -38,11 +38,7 @@ const reviewWaitUsage = "usage: code-forge review-file [--cwd <dir>] <path> --bl
 	"       --cwd <dir> applies to queueing and both wait modes\n"
 
 func reviewWaitHandover(args []string, reason handoverReason) int {
-	code, err := handover(append([]string{"review-file"}, args...), reason)
-	if err != nil {
-		fmt.Fprintln(safeStderr, "code-forge-native:", err)
-	}
-	return code
+	return refuseUnported(append([]string{"review-file"}, args...), reason)
 }
 
 func runReviewFileWait(args []string) int {

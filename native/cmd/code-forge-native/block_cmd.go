@@ -40,9 +40,5 @@ const blockUsage = "usage: code-forge block open <id> --run <r> [--level L<n>] -
 	"       every block verb takes --json: one JSON line on stdout ({\"block\",\"event\",…}) instead of the text\n"
 
 func blockHandover(args []string, reason handoverReason) int {
-	code, err := handover(append([]string{"block"}, args...), reason)
-	if err != nil {
-		fmt.Fprintln(safeStderr, "code-forge-native:", err)
-	}
-	return code
+	return refuseUnported(append([]string{"block"}, args...), reason)
 }

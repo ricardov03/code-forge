@@ -34,11 +34,7 @@ func gatesHandover(args []string, reason handoverReason) int {
 	}
 	// B392: the preflight flags are Go only; Node never sees them.
 	args = slices.DeleteFunc(slices.Clone(args), func(s string) bool { return s == "--preflight" || s == "--no-preflight" })
-	code, e := handover(append([]string{"gates"}, args...), reason)
-	if e != nil {
-		fmt.Fprintln(safeStderr, "code-forge-native:", e)
-	}
-	return code
+	return refuseUnported(append([]string{"gates"}, args...), reason)
 }
 func gatesFlag(args []string, key string) (string, bool, bool) {
 	for i, s := range args {

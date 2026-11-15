@@ -298,8 +298,8 @@ func TestB549SpawnNarrowHandovers(t *testing.T) {
 				}
 			}
 			code, out, _ := b460Call(t, append([]string{"spawn"}, tc.args...)...)
-			if code != 127 || out != "" {
-				t.Fatalf("%v = %d %q, want the Node hand-over (127)", tc.args, code, out)
+			if code != 1 || out != "" {
+				t.Fatalf("%v = %d %q, want the Go refusal (exit 1)", tc.args, code, out)
 			}
 			if got := strings.Join(b460Handovers(t, filepath.Join(w, "home")), ","); got != "spawn "+tc.reason {
 				t.Fatalf("hand-overs = %s", got)

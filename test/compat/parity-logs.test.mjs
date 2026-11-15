@@ -60,6 +60,20 @@ function invoke(args, { node = false, logging = false, home = fixture.home, node
   return { code: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
+// B690a: a case Go does not run yet gets the Go refusal, with or without a
+// working Node: exit 1, no stdout, one stderr line, and the error log unchanged.
+async function b690aRefused(args, label, opts = {}) {
+  const log = path.join(fixture.home, '.code-forge/logs/errors.jsonl');
+  const before = await readFile(log, 'utf8').catch(() => null);
+  for (const nodePath of ['/nonexistent/code-forge-node', process.execPath]) {
+    const result = invoke(args, { ...opts, nodePath });
+    assert.equal(result.code, 1, `${label}: the Go refusal exits 1`);
+    assert.equal(result.stdout, '', `${label}: no partial output`);
+    assert.match(result.stderr, /^code-forge: logs( summary)? is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/, `${label}: one refusal line`);
+    assert.equal(await readFile(log, 'utf8').catch(() => null), before, `${label}: the error log is unchanged`);
+  }
+}
+
 async function parity(args, logging = false, native = binary, page) {
   // The harness deliberately disables error logging. A preload enables it in
   // both its Node reference and a transparent launcher for the native command.
@@ -112,7 +126,7 @@ test('B247 clause: logs read verbs run without Node with byte parity; clear and 
   }
 });
 
-test('B247 boundary: empty/missing logs match; unsupported arguments and legacy data hand over intact', async () => {
+test('B247 boundary: empty/missing logs match; unsupported arguments and legacy data get the Go refusal', async () => {
   for (const text of [null, '', 'null\n{}\nnot-json\n', JSON.stringify({ ...entries[0], ts: '2000-01-01T00:00:00Z' })]) {
     await seed(text);
     for (const args of [[], ['path'], ['--json'], ['summary'], ['summary', '--json']]) {
@@ -143,8 +157,7 @@ test('B247 boundary: empty/missing logs match; unsupported arguments and legacy 
   }
   await seed(JSON.stringify({ ...entries[1], fp: undefined }) + '\n');
   for (const args of [[], ['summary']]) {
-    await parity(['logs', ...args]);
-    assert.equal(invoke(['logs', ...args]).code, 127, `${args}: legacy fingerprint computation hands over`);
+    await b690aRefused(['logs', ...args], `${args}: legacy fingerprint computation`);
   }
   await parity(['logs', '--json']); // raw JSON needs no fingerprint computation.
   assert.equal(invoke(['logs', '--json']).code, 0, 'legacy JSON listing runs in Go');
@@ -160,8 +173,7 @@ test('B247 boundary: empty/missing logs match; unsupported arguments and legacy 
     '{"ts":"2099-01-02T03:04:05Z","verb":"run","exit":1e999}',
   ]) {
     await seed(text);
-    await parity(['logs', 'summary'], true);
-    assert.equal(invoke(['logs', 'summary']).code, 127, 'nonportable dates, collation, or JSON hand over without partial output');
+    await b690aRefused(['logs', 'summary'], 'nonportable dates, collation, or JSON');
   }
   // B688: Go uses the known-fix table built into it; a table under the
   // package's src/util no longer sends the text listing to Node.

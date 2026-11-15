@@ -115,8 +115,17 @@ test('plain enqueue runs without Node and has byte parity across queue states, t
     assert.equal(JSON.parse(retried.stdout).retry, true, 'native retry drops the stale cache');
   }
   await done(f, queued.ticket, { status: 'stopped', stopped: 'split_required', lens: 'full', budget: 1 });
-  assert.equal((await execute(f)).code, 127, 'budget-sensitive split still hands over');
-  await parity(f, ARGS, { CODE_FORGE_NODE: process.execPath });
+  // B690a: Go refuses the budget-sensitive split, with or without a working Node, and writes nothing.
+  const queueDir = path.join(f.repo, '.code-forge/queue');
+  const queueBefore = await Promise.all((await readdir(queueDir)).sort().map(async (n) => [n, await readFile(path.join(queueDir, n), 'utf8')]));
+  for (const node of [NO_NODE, process.execPath]) {
+    const refused = await execute(f, ARGS, false, { CODE_FORGE_NODE: node });
+    assert.equal(refused.code, 1, 'budget-sensitive split gets the Go refusal');
+    assert.equal(refused.stdout, '');
+    assert.match(refused.stderr, /^code-forge: review-file is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/);
+    const queueAfter = await Promise.all((await readdir(queueDir)).sort().map(async (n) => [n, await readFile(path.join(queueDir, n), 'utf8')]));
+    assert.deepEqual(queueAfter, queueBefore, 'the refusal changes zero queue bytes');
+  }
   await done(f, queued.ticket, { status: 'reviewed', approved: true });
   for (const { args, code } of [
     { args: [...ARGS, '--fresh'], code: 1 },

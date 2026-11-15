@@ -24,8 +24,11 @@ process.stderr.write('probe stderr\\n'); process.exitCode=Number(process.env.PRO
 });
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-// B541/B689: these tests need a command with no Go route. land runs in Go since B689 (it
-// refuses like Node), so they use an unknown verb, which Go hands over as unrouted.
+// B690a: Go never starts Node. A case Go does not serve gets one refusal line, exit 1,
+// and still writes its hand-over row; an unknown verb gets Node's unknown-verb text and
+// writes nothing. These tests use a block subcommand Go does not serve.
+const unported = ['block', 'unported-telemetry'];
+const refusal = 'code-forge: block is not supported in this case yet (block-unported-subcommand). Please report it: code-forge logs report\n';
 function fixture() {
   const home = mkdtempSync(path.join(scratch, 'home-'));
   return { home, repo: home, file: path.join(home, '.code-forge/native/handovers.jsonl') };
@@ -43,39 +46,38 @@ function rows(f) {
   return existsSync(f.file) ? readFileSync(f.file, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
 }
 
-test('B282 clause: hand-overs record private-safe reasons before exec and Go reports counts', async () => {
+test('B282 clause: refusals record private-safe reasons and Go reports counts', async () => {
   const f = fixture();
-  const args = ['unported-telemetry', '--private', '/private/customer', 'secret-id'];
+  const args = [...unported, '--private', '/private/customer', 'secret-id'];
   const input = 'private stdin\n';
   const expected = run(f, args, { CODE_FORGE_HANDOVER_LOG: '0', PROBE_TOKEN: 'unchanged', PROBE_EXIT: '3' }, binary, input);
-  assert.equal(JSON.parse(expected.stdout).input, input, 'hand-over forwards every stdin byte');
-  assert.deepEqual(run(f, args, { PROBE_TOKEN: 'unchanged', PROBE_EXIT: '3' }, binary, input), expected, 'telemetry preserves every output byte and exit 3');
-  assert.equal(rows(f).length, 1, 'one exec writes exactly one row');
+  assert.deepEqual(expected, { code: 1, stdout: '', stderr: refusal }, 'B690a: one refusal line, exit 1, the Node probe never runs');
+  assert.equal(rows(f).length, 0, 'opt-out writes zero rows');
+  assert.deepEqual(run(f, args, { PROBE_TOKEN: 'unchanged', PROBE_EXIT: '3' }, binary, input), expected, 'telemetry preserves every output byte and exit 1');
+  assert.equal(rows(f).length, 1, 'one refusal writes exactly one row');
   const row = rows(f)[0];
   assert.deepEqual(Object.keys(row).sort(), ['at', 'reason', 'sub', 'verb', 'version'], 'row has only five safe fields');
-  assert.deepEqual({ ...row, at: 'time' }, { at: 'time', verb: 'unknown', sub: 'unknown', reason: 'unrouted', version: pkg.version }, 'unknown command tokens are replaced without flag values, paths or ids');
+  assert.deepEqual({ ...row, at: 'time' }, { at: 'time', verb: 'block', sub: 'unknown', reason: 'block-unported-subcommand', version: pkg.version }, 'unknown command tokens are replaced without flag values, paths or ids');
   assert.match(row.at, /^\d{4}-\d\d-\d\dT.*Z$/, 'timestamp is UTC ISO');
   assert.equal(Number.isNaN(Date.parse(row.at)), false, 'timestamp is valid');
-  // B451 runs close --help in Go; a token-like close argument still hands the whole close to Node.
+  // B451 runs close --help in Go; a token-like close argument still refuses the whole close.
   const closeArgs = ['block', 'close', 'private-id', '--reason=sk-private'];
-  assert.deepEqual(run(f, closeArgs, {}, binary, input), run(f, closeArgs, { CODE_FORGE_HANDOVER_LOG: '0' }, binary, input), 'close hand-over preserves Node bytes');
+  assert.deepEqual(run(f, closeArgs, {}, binary, input), { code: 1, stdout: '', stderr: 'code-forge: block close is not supported in this case yet (close-unsupported-flag). Please report it: code-forge logs report\n' }, 'close refusal names the subcommand, never the token');
   assert.equal(rows(f).length, 2, 'close adds exactly one row');
   assert.equal(rows(f)[1].reason, 'close-unsupported-flag', 'close has its own stable reason');
   assert.equal(rows(f)[1].sub, 'close', 'subcommand is recorded without the block id');
   run(f, args);
-  assert.equal(rows(f).length, 3, 'repeat hand-over adds exactly one row');
-  const beforeExec = fixture();
-  assert.equal(JSON.parse(run(beforeExec, ['unported-telemetry'], { PROBE_FILE: beforeExec.file }).stdout).recorded, true, 'row exists before Node starts');
+  assert.equal(rows(f).length, 3, 'repeat refusal adds exactly one row');
   assert.equal(statSync(f.file).mode & 0o777, 0o600, 'log mode is 0600');
   assert.equal(statSync(path.dirname(f.file)).mode & 0o777, 0o700, 'directory mode is 0700');
   const report = run(f, ['logs', 'handovers', '--json'], { CODE_FORGE_NODE: '/nonexistent' });
   assert.equal(report.code, 0, 'report runs without Node');
   assert.equal(report.stderr, '', 'report has no stderr');
   assert.deepEqual(JSON.parse(report.stdout), { total: 3, rows: [
-    { verb: 'unknown', sub: 'unknown', reason: 'unrouted', count: 2, last_at: rows(f)[2].at },
+    { verb: 'block', sub: 'unknown', reason: 'block-unported-subcommand', count: 2, last_at: rows(f)[2].at },
     { verb: 'block', sub: 'close', reason: 'close-unsupported-flag', count: 1, last_at: rows(f)[1].at },
   ] }, 'JSON sorts by count and reports the latest timestamp');
-  assert.equal(run(f, ['logs', 'handovers']).stdout, 'count  verb  sub  reason\n2  unknown  unknown  unrouted\n1  block  close  close-unsupported-flag\ntotal  3\n', 'text table sorts by count and includes total');
+  assert.equal(run(f, ['logs', 'handovers']).stdout, 'count  verb  sub  reason\n2  block  unknown  block-unported-subcommand\n1  block  close  close-unsupported-flag\ntotal  3\n', 'text table sorts by count and includes total');
   assert.deepEqual(JSON.parse(run(f, ['logs', 'handovers', '--json', '--since', '2999-01-01']).stdout), { total: 0, rows: [] }, 'since excludes older rows');
   assert.equal(rows(f).length, 3, 'Go reports do not record rows');
   const empty = fixture();
@@ -97,46 +99,46 @@ test('B282 clause: hand-overs record private-safe reasons before exec and Go rep
 test('B282 privacy: only known verbs and their own subcommands reach the log', () => {
   const f = fixture();
   for (const args of [['my-secret-project-name'], ['block', 'my-secret-project-name'], ['my-secret-project-name', 'close']]) {
-    assert.equal(run(f, args).code, 0, 'hand-over succeeds');
+    assert.equal(run(f, args).code, 1, 'B690a: refused or unknown, exit 1');
   }
+  // B690a: an unknown verb gets Node's unknown-verb text and writes no row
   assert.deepEqual(rows(f).map(({ verb, sub }) => ({ verb, sub })), [
-    { verb: 'unknown', sub: '' },
     { verb: 'block', sub: 'unknown' },
-    { verb: 'unknown', sub: 'unknown' },
   ], 'known verbs are preserved and subcommands are scoped to their verb');
   assert.equal(readFileSync(f.file, 'utf8').includes('my-secret-project-name'), false, 'private command tokens are absent from the entire log');
 });
 
 test('B282 boundary: disabled and failed recording preserve behavior; cap and parallel execs keep complete rows', async () => {
   const f = fixture();
-  const expected = run(f, ['unported-telemetry'], { CODE_FORGE_HANDOVER_LOG: '0' });
+  const expected = run(f, unported, { CODE_FORGE_HANDOVER_LOG: '0' });
+  assert.deepEqual(expected, { code: 1, stdout: '', stderr: refusal }, 'opt-out keeps the refusal');
   assert.equal(rows(f).length, 0, 'opt-out writes zero rows');
-  assert.deepEqual(run(f, ['unported-telemetry'], { CODE_FORGE_NATIVE: '0' }, path.join(scratch, 'bin/code-forge')), expected, 'Node-only entry preserves bytes');
+  assert.equal(run(f, unported, { CODE_FORGE_NATIVE: '0' }, path.join(scratch, 'bin/code-forge')).code, 0, 'Node-only entry runs the Node probe');
   assert.equal(rows(f).length, 0, 'Node-only entry writes zero rows');
   assert.equal(run(f, ['internal', 'version'], { CODE_FORGE_NODE: '/nonexistent' }).code, 0, 'Go command does not start Node');
   assert.equal(rows(f).length, 0, 'Go command writes zero rows');
   chmodSync(f.home, 0o500);
-  try { assert.deepEqual(run(f, ['unported-telemetry']), expected, 'read-only home preserves output and exit'); }
+  try { assert.deepEqual(run(f, unported), expected, 'read-only home preserves output and exit'); }
   finally { chmodSync(f.home, 0o700); }
   assert.equal(rows(f).length, 0, 'read-only home writes zero rows');
   mkdirSync(path.dirname(f.file), { recursive: true });
   const old = Array.from({ length: 5000 }, (_, i) => ({ at: new Date(Date.UTC(2020, 0, 1, 0, 0, i)).toISOString(), verb: 'unknown', sub: '', reason: 'unrouted', version: pkg.version }));
   writeFileSync(f.file, old.map((r) => JSON.stringify(r)).join('\n') + '\n');
-  assert.deepEqual(run(f, ['unported-telemetry']), expected, 'trim preserves Node output and exit');
+  assert.deepEqual(run(f, unported), expected, 'trim preserves the refusal output and exit');
   assert.equal(rows(f).length, 4000, '5001 rows trim to exactly 4000');
   assert.deepEqual(rows(f)[0], old[1001], 'trim keeps the newest 3999 prior rows');
-  assert.equal(rows(f).at(-1).reason, 'unrouted', 'trim includes this hand-over');
+  assert.equal(rows(f).at(-1).reason, 'block-unported-subcommand', 'trim includes this refusal');
   assert.equal(statSync(f.file).mode & 0o777, 0o600, 'trim restores private file mode');
   const filtered = JSON.parse(run(f, ['logs', 'handovers', '--json', '--since', old[4999].at]).stdout);
   assert.equal(filtered.total, 2, 'since includes the boundary timestamp and the new row');
-  assert.equal(filtered.rows[0].count, 2, 'since counts exactly two matching rows');
+  assert.deepEqual(filtered.rows.map((r) => r.count), [1, 1], 'since counts exactly two matching rows, one per reason');
   const parallel = fixture();
   const child = () => new Promise((resolve, reject) => {
-    const p = spawn(binary, ['unported-telemetry'], { cwd: parallel.home, env: env(parallel), stdio: ['ignore', 'ignore', 'pipe'] });
+    const p = spawn(binary, unported, { cwd: parallel.home, env: env(parallel), stdio: ['ignore', 'ignore', 'pipe'] });
     p.on('error', reject); p.on('close', resolve);
   });
-  assert.deepEqual(await Promise.all([child(), child()]), [0, 0], 'both parallel hand-overs succeed');
+  assert.deepEqual(await Promise.all([child(), child()]), [1, 1], 'both parallel refusals exit 1');
   assert.equal(rows(parallel).length, 2, 'two parallel execs produce exactly two valid JSON lines');
-  assert.deepEqual(rows(parallel).map((r) => r.reason), ['unrouted', 'unrouted'], 'both complete rows have the right reason');
-  assert.equal(run(parallel, ['unported-telemetry'], { CODE_FORGE_NODE: '/nonexistent' }).code, 127, 'hand-over requires Node');
+  assert.deepEqual(rows(parallel).map((r) => r.reason), ['block-unported-subcommand', 'block-unported-subcommand'], 'both complete rows have the right reason');
+  assert.deepEqual(run(parallel, unported, { CODE_FORGE_NODE: '/nonexistent' }), expected, 'B690a: the refusal needs no Node');
 });

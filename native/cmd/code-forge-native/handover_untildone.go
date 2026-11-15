@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,14 +14,11 @@ import (
 // B649: Node cannot read an until-done autopilot grant. Its grantState does
 // Date.parse(until), and Date.parse(null) is NaN, so Node reads the grant as
 // active forever (and agent-waiver.mjs reads it as never active). Every Go
-// hand-over goes through handover(); before it starts Node, the guard looks
+// hand-over goes through refuseUnported(); before the refusal, the guard looks
 // at each run the command names (--run <id> or --run=<id>; review-file with
 // no --run reads the queue's worker run as Node does) and refuses, exit 1,
 // while one of them holds a live until-done grant. Nothing is written and
 // Node never starts.
-
-// hudStderr is where the refusal goes; a test seam.
-var hudStderr io.Writer = os.Stderr
 
 // hudWorkerRuns lists the runs of the workers registered for the repository
 // at cwd (review-file with no --run uses its live worker's run); a test seam.

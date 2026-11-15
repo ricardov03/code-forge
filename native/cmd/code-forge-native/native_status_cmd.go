@@ -75,11 +75,7 @@ func runNativeStatus(args []string) int {
 	}
 	if !routerHintReadable() {
 		// The router's maybeHint would judge a time only Date.parse reads.
-		code, err := handover(append([]string{"native-status"}, args...), hRouterHintState)
-		if err != nil {
-			fmt.Fprintln(safeStderr, "code-forge-native:", err)
-		}
-		return code
+		return refuseUnported(append([]string{"native-status"}, args...), hRouterHintState)
 	}
 	before := gatesBreadcrumbName("native-status")
 	home := nsHome{dir: os.Getenv("HOME"), ok: true}

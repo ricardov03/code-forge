@@ -68,8 +68,8 @@ func b581HandedOver(t *testing.T, f *closeReviewFixture, reason string, args ...
 	t.Helper()
 	before, _ := os.ReadFile(b581RunFile(f))
 	res := b451RunWith(t, f.home, true, append([]string{"open"}, args...)...)
-	if res.code != 127 {
-		t.Fatalf("exit=%d stderr=%q; want the hand-over to a Node that cannot start (127)", res.code, res.stderr)
+	if res.code != 1 {
+		t.Fatalf("exit=%d stderr=%q; want the Go refusal (exit 1)", res.code, res.stderr)
 	}
 	file, err := os.Open(filepath.Join(f.home, ".code-forge/native/handovers.jsonl"))
 	if err != nil {
@@ -457,8 +457,8 @@ func TestB581OpenHomeUnset(t *testing.T) {
 		t.Fatal("block B2 is not in the run record")
 	}
 	boUserHome = func() (string, error) { return "", errors.New("no user") }
-	if code, _, _ := b581RunBlockNoHome(t, append([]string{"open"}, b581Open(acceptance, "--attempt", "2")...)...); code != 127 {
-		t.Fatalf("exit=%d; want the hand-over to a Node that cannot start (127)", code)
+	if code, _, _ := b581RunBlockNoHome(t, append([]string{"open"}, b581Open(acceptance, "--attempt", "2")...)...); code != 1 {
+		t.Fatalf("exit=%d; want the Go refusal (exit 1)", code)
 	}
 }
 

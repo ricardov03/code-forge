@@ -25,11 +25,7 @@ func init() { routes["logs"] = runLogs }
 // Keep fallbacks before both output and breadcrumbs: Node must observe the
 // original state and argv, especially when a usage error itself gets logged.
 func logsHandover(args []string, reason handoverReason) int {
-	code, err := handover(append([]string{"logs"}, args...), reason)
-	if err != nil {
-		fmt.Fprintln(safeStderr, "code-forge-native:", err)
-	}
-	return code
+	return refuseUnported(append([]string{"logs"}, args...), reason)
 }
 
 var logsPositive = regexp.MustCompile(`^[1-9][0-9]*$`)

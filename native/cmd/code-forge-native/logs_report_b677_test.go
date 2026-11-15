@@ -209,7 +209,7 @@ func TestB677LogsReportPromptHandsOverWhenItCannotDraw(t *testing.T) {
 			logsAskTTY = func() bool { return tc.both }
 			logsPromptFits = func() bool { return tc.fits }
 			code, out, _ := b500Run(t, append([]string{"logs", "report"}, tc.args...)...)
-			if code != 127 || out != "" || b500HandedOver(t, c.home) != "logs-report-prompt" || len(got) != 0 || c.fakeLog(t) != "" {
+			if code != 1 || out != "" || b500HandedOver(t, c.home) != "logs-report-prompt" || len(got) != 0 || c.fakeLog(t) != "" {
 				t.Errorf("got (%d, %q) reason %q asked %v children %q", code, out, b500HandedOver(t, c.home), got, c.fakeLog(t))
 			}
 		})

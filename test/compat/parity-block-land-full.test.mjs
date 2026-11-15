@@ -282,9 +282,11 @@ test('land records the specific close preflight hand-over reason without private
     });
     assert.deepEqual(daemon.requests.map((req) => req.method).filter((method) => method !== 'ping'),
       [], 'close preflight must hand over before executing child steps');
-    assert.equal(out.code, 127, out.stderr);
+    // B690a: Go never starts Node; the case gets the Go refusal
+    assert.equal(out.code, 1, out.stderr);
     assert.equal(out.signal, null);
-    assert.equal(out.stdout, '', 'failed hand-over emits no refusal JSON');
+    assert.equal(out.stdout, '', 'the refusal emits no JSON');
+    assert.equal(out.stderr, 'code-forge: block land is not supported in this case yet (close-report-redaction). Please report it: code-forge logs report\n');
     const data = await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8');
     const rows = data.trim().split('\n').map((line) => JSON.parse(line));
     assert.equal(rows.length, 1, 'only the whole land command records a hand-over');

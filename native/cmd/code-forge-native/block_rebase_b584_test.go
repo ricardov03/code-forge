@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -15,10 +14,9 @@ import (
 )
 
 // B584: `block rebase` runs Node's expiry checks (grant expiry, due
-// approvals) and only later may hand a narrow state to Node, whose own
-// checks run again. The lines of a check Node repeats (a failed grant
-// expiry, an approval not restored yet) must reach the user once, as Node
-// alone prints them. Node goldens: testdata/b584_rebase (parity.py.txt,
+// approvals) and only later may refuse a narrow state it does not serve
+// (B690a). The lines of a check (a failed grant expiry, an approval not
+// restored yet) must reach the user once, as Node alone prints them. Node goldens: testdata/b584_rebase (parity.py.txt,
 // CODE_FORGE_NATIVE=0 ./bin/code-forge block rebase … in a temp HOME).
 
 type b584Golden struct {
@@ -88,7 +86,7 @@ func b584QueueFile(f *rebaseCmdFixture) {
 }
 
 // TestB584RebaseChild runs `block rebase A --run r-rebase-unit` in a child
-// process, so a hand-over can exec the fake node.
+// process, as the command runs on its own.
 func TestB584RebaseChild(t *testing.T) {
 	if os.Getenv("B584_REBASE_CHILD") != "1" {
 		return
@@ -96,44 +94,31 @@ func TestB584RebaseChild(t *testing.T) {
 	os.Exit(runBlockRebase([]string{"A", "--run", "r-rebase-unit"}))
 }
 
-// Each case prints an expiry check line in Go, then hands over. The fake
-// node prints what the real Node printed after the Go part in the end-to-end
-// parity run (Go binary handing over to real Node): its own check fails
-// again, so it prints the whole Node-alone stderr; an approval Go already
-// skipped is not due for Node, so it prints only its refusal.
+// Each case prints its expiry check lines in Go, then the B690a refusal
+// (no Node runs again). The lines are Node alone's (the golden stderr
+// without Node's last error line), each once, then the refusal line.
 func TestB584RebaseHandoverPrintsExpiryLinesOnce(t *testing.T) {
 	for _, tc := range []struct {
-		golden, reason, nodeAfter string
-		change                    func(t *testing.T) func(record *ledger.Object)
-		setup                     func(f *rebaseCmdFixture)
+		golden, reason string
+		change         func(t *testing.T) func(record *ledger.Object)
+		setup          func(f *rebaseCmdFixture)
 	}{
-		{"expired-grant-then-key-unreadable", "rebase-key-unreadable", "", b584ExpiredGrant, b584KeyDir},
-		{"due-approval-then-key-unreadable", "rebase-key-unreadable", "", b584DueApproval, b584KeyDir},
-		{"due-approval-changed-by-hand-then-queue-unreadable", "rebase-queue-unreadable", "block rebase: the review queue cannot be read\n", b584DueApproval, b584QueueFile},
-		{"expired-grant-then-queue-unreadable", "rebase-queue-unreadable", "", b584ExpiredGrant, b584QueueFile},
+		{"expired-grant-then-key-unreadable", "rebase-key-unreadable", b584ExpiredGrant, b584KeyDir},
+		{"due-approval-then-key-unreadable", "rebase-key-unreadable", b584DueApproval, b584KeyDir},
+		{"due-approval-changed-by-hand-then-queue-unreadable", "rebase-queue-unreadable", b584DueApproval, b584QueueFile},
+		{"expired-grant-then-queue-unreadable", "rebase-queue-unreadable", b584ExpiredGrant, b584QueueFile},
 	} {
 		t.Run(tc.golden, func(t *testing.T) {
 			golden := b584ReadGolden(t, tc.golden)
-			nodeAfter := tc.nodeAfter
-			if nodeAfter == "" {
-				nodeAfter = golden.Node.Stderr
-			}
+			lines := strings.SplitAfter(golden.Node.Stderr, "\n")
+			// SplitAfter leaves "" after the last newline: drop it and Node's error line
+			want := strings.Join(lines[:len(lines)-2], "") + "code-forge: block rebase is not supported in this case yet (" + tc.reason + "). Please report it: code-forge logs report\n"
 			f := b584Fixture(t)
 			rebaseB578Record(f, tc.change(t))
 			tc.setup(f)
-			bin := t.TempDir()
-			nodeErr := filepath.Join(bin, "node-stderr.txt")
-			if err := os.WriteFile(nodeErr, []byte(nodeAfter), 0600); err != nil {
-				t.Fatal(err)
-			}
-			fakeNode := filepath.Join(bin, "fake-node")
-			script := "#!/bin/sh\ncat \"" + nodeErr + "\" >&2\nexit " + strconv.Itoa(golden.Node.Exit) + "\n"
-			if err := os.WriteFile(fakeNode, []byte(script), 0700); err != nil {
-				t.Fatal(err)
-			}
 			cmd := exec.Command(os.Args[0], "-test.run=^TestB584RebaseChild$")
 			cmd.Dir = f.repo
-			cmd.Env = append(os.Environ(), "B584_REBASE_CHILD=1", "CODE_FORGE_NODE="+fakeNode, "CODE_FORGE_HANDOVER_LOG=1")
+			cmd.Env = append(os.Environ(), "B584_REBASE_CHILD=1", "CODE_FORGE_NODE=/nonexistent-b584-node", "CODE_FORGE_HANDOVER_LOG=1")
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			code := 0
@@ -144,8 +129,8 @@ func TestB584RebaseHandoverPrintsExpiryLinesOnce(t *testing.T) {
 				}
 				code = exit.ExitCode()
 			}
-			if code != golden.Node.Exit || stdout.String() != golden.Node.Stdout || stderr.String() != golden.Node.Stderr {
-				t.Fatalf("code=%d stdout=%q stderr=%q\nnode alone: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String(), golden.Node.Exit, golden.Node.Stdout, golden.Node.Stderr)
+			if code != 1 || stdout.String() != "" || stderr.String() != want {
+				t.Fatalf("code=%d stdout=%q stderr=%q\nwant code=1 stderr=%q", code, stdout.String(), stderr.String(), want)
 			}
 			data, err := os.ReadFile(filepath.Join(f.home, ".code-forge", "native", "handovers.jsonl"))
 			if err != nil {

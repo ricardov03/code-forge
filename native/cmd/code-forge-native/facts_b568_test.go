@@ -244,8 +244,8 @@ func TestB568FactsGateDateParseHandsOverFirst(t *testing.T) {
 			if c.ledger != "" {
 				fcWrite(t, ledgerFile, c.ledger, 0o600)
 			}
-			if code, _ := run([]string{"facts", "--brief", "brief.md", "--run", "r9"}); code != 127 {
-				t.Fatalf("code=%d; want the Node hand-over", code)
+			if code, _ := run([]string{"facts", "--brief", "brief.md", "--run", "r9"}); code != 1 {
+				t.Fatalf("code=%d; want the Go refusal", code)
 			}
 			data, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
 			var row handoverRow

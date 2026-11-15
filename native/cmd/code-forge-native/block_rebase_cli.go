@@ -148,10 +148,9 @@ func rebaseRecordShape(record ledger.Object, id string) bool {
 	return true
 }
 
-// rebaseHeldStderr holds the expiry check lines Node's own check prints
-// again after a hand-over (B584): a failed grant expiry and the approvals
-// that could not be restored yet stay as they were, so the Node process
-// retries them and reports them itself. Any later write prints them first.
+// rebaseHeldStderr holds the expiry check lines (B584): a failed grant
+// expiry and the approvals that could not be restored yet. Any later write
+// prints them first; rebaseStep prints what is left at the end (B690a).
 type rebaseHeldStderr struct {
 	out  io.Writer
 	held string
@@ -172,16 +171,14 @@ func (w *rebaseHeldStderr) Write(data []byte) (int, error) {
 }
 
 // rebaseStep runs one `block rebase` call, or returns the reason a guarded
-// run state stays with Node before anything was changed. B584: on a
-// hand-over the held expiry lines are dropped (Node prints its own), so the
-// user sees each line once, as Node alone prints it.
+// run state Go does not serve yet was refused before the rebase changed
+// anything. B690a: no Node runs after a refusal to print the held expiry
+// lines again, so they print here, before the refusal line, each once.
 func rebaseStep(args []string, stdout, stderr io.Writer) (int, handoverReason) {
 	var reason handoverReason
 	held := &rebaseHeldStderr{out: stderr}
 	code := rebaseStepBody(args, stdout, held, &reason)
-	if reason == 0 {
-		held.flush()
-	}
+	held.flush()
 	return code, reason
 }
 
@@ -253,7 +250,7 @@ func rebaseStepBody(args []string, stdout io.Writer, stderr *rebaseHeldStderr, h
 	if _, reason := autopilotRestorePlan(home, run, record, now); reason != 0 {
 		return handOver(reason)
 	}
-	// B584: the lines of a check Node runs again after a hand-over are held.
+	// B584: the lines of a check that fails are held until the next write.
 	if _, err := autopilot.CheckGrantExpiry(home, run, now); err != nil {
 		stderr.hold(fmt.Sprintf("autopilot: WARN the expiry check failed (%s)\n", blockIOMessage(err)))
 	} else if fresh, err := state.ReadRun(home, run); err == nil && errors.Is(autopilot.Approvals(fresh, now), autopilot.ErrApprovalDue) {

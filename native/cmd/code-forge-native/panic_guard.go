@@ -16,10 +16,10 @@ var panicSeam func(args []string)
 // runGuarded is run with a guard for a panic on the main goroutine (B508).
 // An unrecovered Go panic exits 2, the usage-error code, with a stack trace
 // that can show argument text. Instead:
-//   - a command that writes no state in Go (panicRerunSafe) goes to Node with
-//     its original arguments and one go-panic hand-over row;
-//   - any other command may already have changed state, so Node never runs it
-//     a second time: one error line names the command and the panic site
+//   - a command that writes no state in Go (panicRerunSafe) gets the B690a
+//     refusal (reason go-panic, exit 1) and one go-panic hand-over row;
+//   - any other command may already have changed state: one error line
+//     names the command and the panic site
 //     (never the panic value or an argument), a go-panic-stopped row, exit 1.
 func runGuarded(args []string) (code int, err error) {
 	guardStderr = os.Stderr
@@ -59,8 +59,8 @@ var goroutineExit = os.Exit
 
 // goroutinePanic handles a panic in a goroutine a command started (B509)
 // with the B508 rules, then ends the process the way main does: a read-only
-// command is handed to Node (exec replaces this process), any other command
-// prints one error line, writes a go-panic-stopped row and exits 1.
+// command gets the B690a refusal, any other command prints one error line,
+// writes a go-panic-stopped row and exits 1.
 func goroutinePanic(args []string, site string) {
 	if !panicClaimed.CompareAndSwap(false, true) {
 		select {}
@@ -75,7 +75,7 @@ func goroutinePanic(args []string, site string) {
 // panicOutcome is the B508 answer to a panic at site.
 func panicOutcome(args []string, site string) (int, error) {
 	if panicRerunSafe(args) {
-		return handover(args, hGoPanic)
+		return refuseUnportedTo(guardStderr, args, hGoPanic), nil
 	}
 	recordHandover(args, handoverReasons[hGoPanicStopped])
 	name, sub := handoverCommand(args)

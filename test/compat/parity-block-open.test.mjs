@@ -55,6 +55,18 @@ function launch(f, args, { node = false, nodePath = '/nonexistent' } = {}) {
   });
 }
 const open = (extra = [], id = 'B1') => ['block', 'open', id, '--run', RUN, '--level', 'L0', '--owned', 'sample.mjs', '--acceptance', 'acceptance.yml', ...extra];
+// B690a: Go refuses a case it does not run yet, even with a working Node:
+// exit 1, no stdout, one stderr line, and no run, ledger or repo state written.
+async function b690aOpenRefused(f, args, label) {
+  const files = [path.join(f.home, '.code-forge/runs', `${RUN}.json`), path.join(f.home, '.code-forge/ledger/open-fixture.jsonl'), path.join(f.repo, '.code-forge/runs', `${RUN}.json`)];
+  const read = () => Promise.all(files.map((file) => readFile(file, 'utf8').catch(() => null)));
+  const before = await read();
+  const result = await launch(f, args, { nodePath: process.execPath });
+  assert.equal(result.code, 1, `${label}: the Go refusal exits 1`);
+  assert.equal(result.stdout, '', `${label}: no stdout`);
+  assert.match(result.stderr, /^code-forge: block open is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/, `${label}: one refusal line`);
+  assert.deepEqual(await read(), before, `${label}: run, ledger and repo bytes unchanged`);
+}
 async function parity(f, args, fallback = false) {
   const r = await runParity(args, { fixture: f, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: fallback ? process.execPath : '/nonexistent' } });
   assert.deepEqual(r.diffs, [], `${args.join(' ')}: zero exit, stream, record and signed row diffs`);
@@ -161,10 +173,6 @@ test('block open refusals and usage match Node; --head runs in Go; unsupported l
     await parity(f, args);
   }
   for (const change of [(r) => { r.autopilot = { status: 'active', until: '2099-01-01T00:00:00.000Z' }; }, (r) => { r.autopilot_approvals = [{ status: 'active', until: '2000-01-01T00:00:00.000Z', approval_id: 'apr-test', key: 'budget.usd' }]; }]) {
-    const delegated = await fixture({ change });
-    const file = path.join(delegated.home, '.code-forge/runs', `${RUN}.json`), before = await readFile(file);
-    assert.equal((await launch(delegated, open())).code, 127, 'grant or pending approval delegates before mutation');
-    assert.deepEqual(await readFile(file), before, 'fallback preserves run bytes');
-    await parity(delegated, open(), true);
+    await b690aOpenRefused(await fixture({ change }), open(), 'grant or pending approval');
   }
 });

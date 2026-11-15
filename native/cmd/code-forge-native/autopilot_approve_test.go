@@ -95,8 +95,8 @@ func TestAutopilotVerbApprovalRestoreHandsOver(t *testing.T) {
 	f.record(t, "r-odd", "active", `,"autopilot_approvals":[{"approval_id":"x","status":"active","until":"2026-11-11 12:00"}]`)
 	cases := [][]string{{"status", "--run", "r-due"}, {"stop", "--run", "r-due"}, {"status", "--run", "r-null"}, {"status", "--run", "r-odd"}}
 	for _, args := range cases {
-		if code, out, _ := autopilotCall(t, args...); code != 127 || out != "" {
-			t.Fatalf("%v = %d %q, want hand-over", args, code, out)
+		if code, out, _ := autopilotCall(t, args...); code != 1 || out != "" {
+			t.Fatalf("%v = %d %q, want the Go refusal", args, code, out)
 		}
 	}
 	want := []string{"autopilot-restore-reload-shape", "autopilot-restore-reload-shape", "autopilot-shape", "autopilot-shape"}
@@ -167,12 +167,12 @@ func TestAutopilotVerbApprove(t *testing.T) {
 	}
 	// an active approval Node reads differently: Node runs it
 	f.record(t, "r-oddkey", "active", `,"autopilot_approvals":[{"approval_id":"apr-1","status":"active","until":"2026-11-11T12:00:00.000Z"}]`)
-	if code, out, _ := autopilotCall(t, "approve", "--run", "r-oddkey", "--key", "review.max_rounds_per_file", "--value", "4", "--until", until); code != 127 || out != "" {
-		t.Fatalf("odd approval key = %d %q, want hand-over", code, out)
+	if code, out, _ := autopilotCall(t, "approve", "--run", "r-oddkey", "--key", "review.max_rounds_per_file", "--value", "4", "--until", until); code != 1 || out != "" {
+		t.Fatalf("odd approval key = %d %q, want the Go refusal", code, out)
 	}
 	autopilotIsTTY = func() bool { return true }
-	if code, out, _ := autopilotCall(t, "approve", "--run", "r-a", "--key", "review.max_rounds_per_file", "--value", "4", "--until", until); code != 127 || out != "" {
-		t.Fatalf("terminal approve = %d %q, want hand-over", code, out)
+	if code, out, _ := autopilotCall(t, "approve", "--run", "r-a", "--key", "review.max_rounds_per_file", "--value", "4", "--until", until); code != 1 || out != "" {
+		t.Fatalf("terminal approve = %d %q, want the Go refusal", code, out)
 	}
 	// a terminal does not skip the checks before the prompt
 	if code, _, errText := autopilotCall(t, "approve", "--run", "r-end", "--key", "x.y", "--value", "4", "--until", until); code != 1 || errText != "autopilot approve: run r-end has ended\n" {
@@ -245,19 +245,19 @@ func TestAutopilotVerbAsk(t *testing.T) {
 		{ask("r-act", "--scope", "model:choose"), refused("r-act", "denied")},
 		{ask("r-act", "--scope", "waive:warning", "--context-file", ctx, "--block", "B1", "--file", "a/../", "--finding", "F1:x"), refused("r-act", "not-allowed")},
 		{ask("r-pause", "--scope", "round:extra"), refused("r-pause", "paused")},
-		{ask("r-pause", "--scope", " waive:nit "), [3]any{127, "", ""}},
+		{ask("r-pause", "--scope", " waive:nit "), [3]any{-1, "", ""}},
 		{ask("r-stop", "--scope", "waive:nit"), refused("r-stop", "stopped")},
 		{ask("r-end", "--scope", "waive:nit"), refused("r-end", "run-ended")},
 		{ask("r-old", "--scope", "waive:nit"), refused("r-old", "expired")},
 		{ask("r-old", "--scope", "waive:nit", "--json"), [3]any{1, `{"run":"r-old","scope":"waive:nit","grant_id":"ap-0000abcd","decision_id":null,"answered":false,"acted":false,"to_owner":true,"reason":"expired","decision":null,"confidence":null,"within_scope":null,"escalate":null,"answer_reason":null}` + "\n", ""}},
 		{ask("r-none", "--scope", " waive:nit", "--json"), [3]any{1, `{"run":"r-none","scope":" waive:nit","grant_id":null,"decision_id":null,"answered":false,"acted":false,"to_owner":true,"reason":"no-grant","decision":null,"confidence":null,"within_scope":null,"escalate":null,"answer_reason":null}` + "\n", ""}},
-		{ask("r-act", "--scope", "round:extra", "--options", "waive,fix"), [3]any{127, "", ""}},
+		{ask("r-act", "--scope", "round:extra", "--options", "waive,fix"), [3]any{-1, "", ""}},
 	}
 	for _, tc := range cases {
 		code, out, errText := autopilotCall(t, tc.args...)
-		if tc.want[0] == 127 {
-			if code != 127 || out != "" {
-				t.Fatalf("%v = %d %q, want hand-over", tc.args, code, out)
+		if tc.want[0] == -1 { // B690a refusal
+			if code != 1 || out != "" || !b690aIsRefusal(errText) {
+				t.Fatalf("%v = %d %q, want the Go refusal", tc.args, code, out)
 			}
 			continue
 		}

@@ -175,7 +175,7 @@ func TestLogsGoReportNothingToFile(t *testing.T) {
 		}
 	}
 	// A report that would file still runs in Node; with no Node it fails.
-	if code, _, errText := logsCall(t, "report", "--verb", "block"); code != 127 || !strings.Contains(errText, "nonexistent-b457-node") {
-		t.Errorf("report with a pick = %d %q; want the Node hand-over", code, errText)
+	if code, _, errText := logsCall(t, "report", "--verb", "block"); code != 1 || !b690aIsRefusal(errText) {
+		t.Errorf("report with a pick = %d %q; want the Go refusal", code, errText)
 	}
 }

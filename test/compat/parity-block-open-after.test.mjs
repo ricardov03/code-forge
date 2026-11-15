@@ -63,6 +63,18 @@ function launch(f, args, { node = false, fallback = false, handoverLog = false }
   });
 }
 const open = (extra = [], level = true) => ['block', 'open', 'B1', '--run', RUN, ...(level ? ['--level', 'L0'] : []), '--owned', 'sample.mjs', '--acceptance', 'acceptance.yml', ...extra];
+// B690a: Go refuses a case it does not run yet, even with a working Node:
+// exit 1, no stdout, one stderr line, and no run, ledger or repo state written.
+async function b690aOpenRefused(f, args, label) {
+  const files = [path.join(f.home, '.code-forge/runs', `${RUN}.json`), path.join(f.home, '.code-forge/ledger/after-fixture.jsonl'), path.join(f.repo, '.code-forge/runs', `${RUN}.json`)];
+  const read = () => Promise.all(files.map((file) => readFile(file, 'utf8').catch(() => null)));
+  const before = await read();
+  const result = await launch(f, args, { fallback: true });
+  assert.equal(result.code, 1, `${label}: the Go refusal exits 1`);
+  assert.equal(result.stdout, '', `${label}: no stdout`);
+  assert.match(result.stderr, /^code-forge: block open is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/, `${label}: one refusal line`);
+  assert.deepEqual(await read(), before, `${label}: run, ledger and repo bytes unchanged`);
+}
 async function parity(f, args, fallback = false) {
   const r = await runParity(args, { fixture: f, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: fallback ? process.execPath : '/nonexistent' } });
   assert.deepEqual(r.diffs, [], `${args.join(' ')}: zero process, run, signed ledger, queue, lock and worktree diffs`);
@@ -147,7 +159,7 @@ test('open dependencies and recorded default levels run natively with byte parit
   }
 });
 
-test('dependency refusals preserve exact errors and JSON; grant and schema cases match Node', async () => {
+test('dependency refusals preserve exact errors and JSON; grant and outcome schema cases get the Go refusal', async () => {
   const refused = await launch(await fixture(), open(['--after', 'Pending', '--json']));
   assert.equal(refused.code, 1, 'unmet dependency refuses natively without Node');
   assert.equal(refused.stderr, 'block open: block B1: --after dependencies not closed: Pending (open)\n');
@@ -176,10 +188,10 @@ test('dependency refusals preserve exact errors and JSON; grant and schema cases
   ];
   for (const change of grants) {
     const f = await fixture({ change });
-    await parity(f, open(['--after', 'Done']), true);
+    await b690aOpenRefused(f, open(['--after', 'Done']), 'grant or approval');
   }
-  for (const options of [{ pipeline: 'steps: [broken\n' }, { outcome: { status: 'approved' } }]) {
-    const f = await fixture(options);
-    await parity(f, open(['--after-outcome', 'design']), true);
-  }
+  // Go runs the broken pipeline YAML case with Node's bytes; an outcome that fails
+  // the schema (no skill) gets the Go refusal (open-outcome-form, B690a).
+  await parity(await fixture({ pipeline: 'steps: [broken\n' }), open(['--after-outcome', 'design']));
+  await b690aOpenRefused(await fixture({ outcome: { status: 'approved' } }), open(['--after-outcome', 'design']), 'outcome schema case');
 });

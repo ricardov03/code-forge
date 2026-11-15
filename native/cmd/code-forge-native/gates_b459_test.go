@@ -10,8 +10,8 @@ import (
 
 // B459: the gates subcommands other than run answer in Go. Every expected
 // stdout/stderr below was taken from Node (CODE_FORGE_NATIVE=0) on the same
-// input. A Node hand-over shows as exit 127 here (the fixture's Node does not
-// exist) with its reason in the hand-over log.
+// input. A case Go does not serve gets the B690a refusal (exit 1) with its
+// reason in the hand-over log.
 
 func b459Setup(t *testing.T) b450Fixture {
 	t.Helper()
@@ -32,11 +32,11 @@ func b459Native(t *testing.T, f b450Fixture, code int, stdout, stderr string, wa
 	}
 }
 
-// b459Handover checks a kept Node hand-over: exit 127 naming the missing Node, no stdout, and the reason logged.
+// b459Handover checks a B690a refusal: exit 1, the refusal line, no stdout, and the reason logged.
 func b459Handover(t *testing.T, f b450Fixture, code int, stdout, stderr, reason string) {
 	t.Helper()
-	if code != 127 || stdout != "" || !strings.Contains(stderr, "/nonexistent-code-forge-node") {
-		t.Fatalf("exit=%d stdout=%q stderr=%q, want the Node hand-over", code, stdout, stderr)
+	if code != 1 || stdout != "" || !b690aIsRefusal(stderr) {
+		t.Fatalf("exit=%d stdout=%q stderr=%q, want the Go refusal", code, stdout, stderr)
 	}
 	data, err := os.ReadFile(filepath.Join(f.home, ".code-forge", "native", "handovers.jsonl"))
 	f.must(err)

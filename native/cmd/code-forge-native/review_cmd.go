@@ -38,11 +38,7 @@ var (
 )
 
 func reviewHandover(args []string, reason handoverReason) int {
-	code, err := handover(append([]string{"review"}, args...), reason)
-	if err != nil {
-		fmt.Fprintln(safeStderr, "code-forge-native:", err)
-	}
-	return code
+	return refuseUnported(append([]string{"review"}, args...), reason)
 }
 
 func reviewQuote(s string) string {

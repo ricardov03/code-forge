@@ -236,8 +236,8 @@ func startNativeDaemon(run string, cfg map[string]any) (func(), error) {
 	}, nil
 }
 
-// workerHandOverUndo withdraws the hand-over announcement a worker left for
-// Node (B561); runWorkerVerb runs it when the exec into Node failed.
+// workerHandOverUndo withdraws the hand-over announcement a worker left
+// (B561); runWorkerVerb runs it after the B690a refusal.
 var workerHandOverUndo func()
 
 // workerSetRunRoot is tmp.mjs setRunRoot (loop.mjs, right after runRoot):

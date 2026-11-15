@@ -18,7 +18,7 @@ import (
 )
 
 // runVerbCall runs `code-forge run <args>` in process and returns its exit
-// code and the bytes it wrote. A missing Node makes any hand-over exit 127.
+// code and the bytes it wrote. A B690a refusal exits 1.
 func runVerbCall(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -500,8 +500,8 @@ func TestRunVerbHandsOver(t *testing.T) {
 	}
 	for _, tc := range cases {
 		code, out, _ := runVerbCall(t, tc.args...)
-		if code != 127 || out != "" {
-			t.Fatalf("%v: hand-over exit = %d stdout %q, want 127", tc.args, code, out)
+		if code != 1 || out != "" {
+			t.Fatalf("%v: refusal exit = %d stdout %q, want 1", tc.args, code, out)
 		}
 	}
 	data, err := os.ReadFile(filepath.Join(f.home, ".code-forge", "native", "handovers.jsonl"))

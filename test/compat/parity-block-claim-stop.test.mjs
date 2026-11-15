@@ -91,10 +91,13 @@ async function assertHandoverWithoutMutation(f, args, message, env = {}) {
     readFile(record), ...trees.map(handoverState),
   ]);
   const result = await launch(f, args, { env });
-  assert.equal(result.code, 127, message);
+  // B690a: Go never starts Node; the case gets one refusal line, exit 1.
+  assert.equal(result.code, 1, message);
+  assert.equal(result.stdout, '', `${message}: no stdout`);
+  assert.match(result.stderr, /^code-forge: block (claim|stop) is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/, `${message}: one refusal line`);
   assert.deepEqual(await readFile(record), recordBefore, `${message}: run record bytes unchanged`);
   await assert.rejects(readFile(path.join(f.home, '.code-forge/ledger/claim-stop.jsonl')),
-    { code: 'ENOENT' }, `${message}: no ledger row before handover`);
+    { code: 'ENOENT' }, `${message}: no ledger row on the refusal`);
   assert.deepEqual(await Promise.all(trees.map(handoverState)), stateBefore,
     `${message}: ledger, queue, lock and mirror state unchanged`);
 }
@@ -192,8 +195,8 @@ test('claim and stop run natively with byte parity, signed concurrent writes and
   ]) {
     const delegated = await fixture(mutate);
     for (const args of [claim(), stop]) {
-      await assertHandoverWithoutMutation(delegated, args, 'grant or pending approval delegates without mutation');
-      await parity(delegated, args, { CODE_FORGE_NODE: process.execPath });
+      await assertHandoverWithoutMutation(delegated, args, 'grant or pending approval is refused without mutation');
+      await assertHandoverWithoutMutation(delegated, args, 'a working Node changes nothing', { CODE_FORGE_NODE: process.execPath });
     }
   }
   const hooked = await fixture((r) => snapshot(r, { hooks: { on_block_end: { argv: ['/usr/bin/true'] } } }));
@@ -268,6 +271,6 @@ test('claim and stop refusals and usage boundaries match Node without starting N
   const blocked = await fixture();
   await mkdir(path.join(blocked.repo, '.code-forge'));
   await writeFile(path.join(blocked.repo, '.code-forge/runs'), 'mirror obstruction');
-  await assertHandoverWithoutMutation(blocked, claim(), 'an unsupported mirror layout delegates before signing');
-  await parity(blocked, claim(), { CODE_FORGE_NODE: process.execPath });
+  await assertHandoverWithoutMutation(blocked, claim(), 'an unsupported mirror layout is refused before signing');
+  await assertHandoverWithoutMutation(blocked, claim(), 'a working Node changes nothing', { CODE_FORGE_NODE: process.execPath });
 });

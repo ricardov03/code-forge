@@ -67,8 +67,8 @@ func TestB534WorkerWatchRunsInGo(t *testing.T) {
 func TestB534WorkerWatchShapeHandsOver(t *testing.T) {
 	f, _, _ := b534Fix(t, `,"owned_kinds":["a.txt"]`)
 	code, out, _ := b460Call(t, "worker", "--run", "r1", "--once")
-	if code != 127 || out != "" {
-		t.Fatalf("worker = %d %q, want the Node hand-over (127)", code, out)
+	if code != 1 || out != "" {
+		t.Fatalf("worker = %d %q, want the Go refusal (exit 1)", code, out)
 	}
 	if got := strings.Join(b460Handovers(t, f.home), ","); got != "worker worker-watch-shape" {
 		t.Fatalf("hand-overs %s", got)

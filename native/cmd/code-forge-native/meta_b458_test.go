@@ -205,9 +205,9 @@ func TestB458HandOvers(t *testing.T) {
 		t.Setenv("CODE_FORGE_NODE", "/nonexistent-b458-node")
 		t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
 		t.Setenv("CODE_FORGE_NATIVE", "1")
-		// A route that hands over prints the exec error and returns 127.
-		if code, _ := run(c.args); code != 127 {
-			t.Fatalf("%q: code=%d; want the Node hand-over", c.args, code)
+		// A route Go does not serve prints the B690a refusal and returns 1.
+		if code, _ := run(c.args); code != 1 {
+			t.Fatalf("%q: code=%d; want the Go refusal", c.args, code)
 		}
 		data, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
 		var row handoverRow

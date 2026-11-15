@@ -154,11 +154,7 @@ func (o *runOut) err(s string) {
 }
 
 func runHandover(args []string, reason handoverReason) int {
-	code, err := handover(append([]string{"run"}, args...), reason)
-	if err != nil {
-		fmt.Fprintln(safeStderr, "code-forge-native:", err)
-	}
-	return code
+	return refuseUnported(append([]string{"run"}, args...), reason)
 }
 
 func runRun(args []string) int {
