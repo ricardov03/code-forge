@@ -103,6 +103,9 @@ func gatesFailure(args []string, code int, message any, before []any) {
 // fingerprint for maybeHint (routerHint), "" when nothing was logged or the
 // entry is a warning.
 func nativeVerbFailure(verbName, subName string, args []string, code int, message any, before []any) string {
+	// takeErrorKind runs on every exit, logged or not (B738): a kind left set
+	// while the log is off would reach the next verb's entry.
+	reported, crashStack := nativeTakeErrorKind()
 	if !reviewWaitLogging() || os.Getenv("HOME") == "" {
 		return ""
 	}
@@ -147,19 +150,17 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 	}
 	verb := clean(verbName)
 	var stack any
-	if text, ok := nativeCrashStack.(string); ok {
+	if text, ok := crashStack.(string); ok {
 		stack = clean(text) // B568: a crash's stack, scrubbed like the message
 	}
-	nativeCrashStack = nil
 	cleaned = counts()
 	kind := "error"
 	if code == 2 {
 		kind = "usage"
 	}
-	if nativeReportedKind != "" {
-		kind = nativeReportedKind // takeErrorKind: a verb-reported kind wins (B27)
+	if reported != "" {
+		kind = reported // takeErrorKind: a verb-reported kind wins (B27)
 	}
-	nativeReportedKind = ""
 	normalized, _ := message.(string)
 	normalized = errorLogNormalize(normalized)
 	fp := sha256.Sum256([]byte(verb + "\n" + subName + "\n" + kind + "\n" + normalized))
@@ -193,6 +194,15 @@ var nativeReportedKind string
 
 // nativeCrashStack is the stack a crash row keeps (B568); nil for no crash.
 var nativeCrashStack any
+
+// nativeTakeErrorKind is takeErrorKind in src/util/error-kind.mjs (and
+// clearErrorKind, which the router calls before a verb runs): it returns the
+// reported kind and crash stack and clears both (B738).
+func nativeTakeErrorKind() (string, any) {
+	kind, stack := nativeReportedKind, nativeCrashStack
+	nativeReportedKind, nativeCrashStack = "", nil
+	return kind, stack
+}
 
 // appendErrorLogLine is appendLine in src/util/error-log.mjs: one line on
 // ~/.code-forge/logs/errors.jsonl, cut to its newer half past 1 MB.

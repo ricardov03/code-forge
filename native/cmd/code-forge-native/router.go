@@ -31,6 +31,14 @@ func run(args []string) (int, error) {
 			args = append([]string{"version"}, args[1:]...)
 		}
 		if route, ok := routes[args[0]]; ok {
+			// B738: bin/code-forge.mjs clears the reported error kind before a verb
+			// runs (clearErrorKind) and takes it when the verb ends (takeErrorKind),
+			// so one verb's kind or crash stack never reaches the next verb's
+			// errors.jsonl entry when several run in one process. The warning
+			// state starts as a new process's too (noteVerb, per process).
+			nativeTakeErrorKind()
+			defer nativeTakeErrorKind()
+			spawnWarnReset()
 			// B613: `<command> --help` adds the Description and Options around the usage.
 			if name, ok := helpTarget(args); ok {
 				return helpWrap(name, args[1:], route), nil

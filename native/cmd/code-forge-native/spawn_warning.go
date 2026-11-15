@@ -29,6 +29,17 @@ var (
 	spawnWarnVerb = "spawn"
 )
 
+// spawnWarnReset puts the warning state back to a new process's (B738):
+// Node names a warning after the verb its router noted for this command
+// (currentCommand) and keeps the once-per-process set per process, so a verb
+// run after another in one process (the test binary) never inherits the
+// other's "worker" name, breadcrumbs or already-warned fingerprints.
+func spawnWarnReset() {
+	spawnWarnMu.Lock()
+	defer spawnWarnMu.Unlock()
+	spawnWarned, spawnWarnBefore, spawnWarnVerb = map[string]bool{}, []any{}, "spawn"
+}
+
 func spawnLogWarning(warning, message string) {
 	if !reviewWaitLogging() || os.Getenv("HOME") == "" {
 		return
