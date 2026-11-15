@@ -47,12 +47,18 @@ func normalize(value any) (any, error) {
 	case string:
 		return canonText(v), nil
 	case []string:
+		if v == nil {
+			return nil, nil
+		}
 		out := make([]any, len(v))
 		for i, item := range v {
 			out[i] = canonText(item)
 		}
 		return out, nil
 	case []any:
+		if v == nil {
+			return nil, nil
+		}
 		out := make([]any, len(v))
 		for i, item := range v {
 			n, err := normalize(item)
@@ -63,6 +69,9 @@ func normalize(value any) (any, error) {
 		}
 		return out, nil
 	case map[string]any:
+		if v == nil {
+			return nil, nil
+		}
 		out := make(map[string]any, len(v))
 		for key, item := range v {
 			n, err := normalize(item)

@@ -6,6 +6,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+- A config file that is `null` (or a nil map or list inside a signed value) is written as `null` in Go's canonical form again, as Node writes it; since B696 Go wrote `{}` or `[]`. (B722)
 - Tests: the native-install, entry and config-golden Node tests give their private package copies a node_modules without the `@codedology` platform packages, so CI (which installs the published `@codedology/code-forge-<target>` binary) no longer finds the release binary in place of the test's own. B701
 - `tools install` and `logs clear` with stdin at a terminal and stdout piped (for example `| tee`) ask their question in Go: clack's frames on the pipe at 80 columns, colored only by `FORCE_COLOR`, with the same answers, output, exit codes and error-log row as Node; they no longer hand over to Node (`tools-confirm`, `logs-clear-prompt`). B698
 - `tools install` at a terminal asks its one question in Go (`Run <n> install command(s)?`, default no): yes runs the installs, any other answer prints "cancelled — nothing installed" and exits 1, as in Node; it no longer hands over to Node. B682
