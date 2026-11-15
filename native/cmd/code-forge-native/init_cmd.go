@@ -581,7 +581,7 @@ func runInitVerb(args []string) int {
 		serve, reason := initWizardServe(parsed, home, physicalCwd(), plan.existing)
 		if serve != nil && !routerHintReadable() {
 			// Go cannot judge the hint state Node would print after a cancel
-			serve, reason = nil, hInitWizardShape
+			serve, reason = nil, hRouterHintState
 		}
 		if serve == nil {
 			return metaHandover("init", args, reason)
