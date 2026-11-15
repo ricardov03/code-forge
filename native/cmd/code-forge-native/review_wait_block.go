@@ -248,7 +248,7 @@ func reviewBlockConfig(ctx context.Context, root, cwd, run, block string) (map[s
 		if _, err := os.Stat(file); os.IsNotExist(err) {
 			continue
 		}
-		record, ok := reviewWaitJSON(file)
+		record, ok := reviewWaitJSONPlain(file)
 		if !ok {
 			return nil, "", reviewScopeUnsupported
 		}

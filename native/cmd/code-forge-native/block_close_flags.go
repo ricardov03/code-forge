@@ -384,7 +384,7 @@ func closeLocalJoin(home, run, id, main, top string, predicted ledger.Object, pr
 		record := predicted
 		if !preflight {
 			var ok bool
-			record, ok = reviewWaitJSON(filepath.Join(main, ".code-forge/runs", run+".json"))
+			record, ok = reviewWaitJSONPlain(filepath.Join(main, ".code-forge/runs", run+".json"))
 			if !ok || record == nil || record.Get("run_id") != run {
 				return nil, 1, fmt.Errorf("the block scope cannot be read")
 			}
