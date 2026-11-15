@@ -40,7 +40,7 @@ var (
 func reviewHandover(args []string, reason handoverReason) int {
 	code, err := handover(append([]string{"review"}, args...), reason)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	return code
 }
@@ -331,7 +331,7 @@ func reviewPlan(args []string) (func(o *runOut) int, handoverReason) {
 func runReviewVerb(args []string) int {
 	// The Node router answers help before breadcrumbs and handlers.
 	if len(args) > 0 && cliHelp(args[0]) {
-		fmt.Fprint(os.Stdout, reviewUsage)
+		fmt.Fprint(safeStdout, reviewUsage)
 		return 0
 	}
 	home := os.Getenv("HOME")

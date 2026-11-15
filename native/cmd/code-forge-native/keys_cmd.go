@@ -472,12 +472,12 @@ func keysHome() string {
 
 func runKeys(args []string) int {
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprint(os.Stdout, keysUsage)
+		fmt.Fprint(safeStdout, keysUsage)
 		return 0
 	}
 	if len(args) > 1 && (args[1] == "--help" || args[1] == "-h") {
 		if usage, ok := keysSubUsage[args[0]]; ok {
-			fmt.Fprint(os.Stdout, usage)
+			fmt.Fprint(safeStdout, usage)
 			return 0
 		}
 	}
@@ -507,7 +507,7 @@ func runKeys(args []string) int {
 	before := gatesBreadcrumbName(name)
 	stderr := &contextErrWriter{}
 	keysEnded = false
-	code := plan(os.Stdout, stderr)
+	code := plan(safeStdout, stderr)
 	if code != 0 && !keysEnded {
 		var message any
 		if stderr.last != "" {

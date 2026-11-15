@@ -86,7 +86,7 @@ func (h *humanVerb) text(code int, text string) int {
 		return h.fallback()
 	}
 	h.mark()
-	fmt.Fprint(os.Stderr, text)
+	fmt.Fprint(safeStderr, text)
 	// B685: writeVerbFailure logs clean(stderrText.trim()) with JavaScript's
 	// trim, so accents, emoji and quotes are logged as Node logs them.
 	nativeVerbFailure("block", h.crumbSub, h.original(), code, humanTrim(text), h.before)
@@ -137,11 +137,11 @@ func (h *humanVerb) ask(id, message string, before func() int) int {
 
 func (h *humanVerb) emit(value ledger.Object) {
 	data, _ := ledger.Stringify(value, false)
-	fmt.Fprintln(os.Stdout, string(data))
+	fmt.Fprintln(safeStdout, string(data))
 }
 func (h *humanVerb) say(text string) {
 	if !h.json {
-		fmt.Fprint(os.Stdout, text)
+		fmt.Fprint(safeStdout, text)
 	}
 }
 
@@ -150,7 +150,7 @@ func (h *humanVerb) say(text string) {
 func (h *humanVerb) start(form, help string) (flags map[string]any, pos []string, run, id string, code int) {
 	for _, arg := range h.args {
 		if arg == "--help" || arg == "-h" {
-			fmt.Fprint(os.Stdout, blockVerbUsage(h.sub, form)+help)
+			fmt.Fprint(safeStdout, blockVerbUsage(h.sub, form)+help)
 			return nil, nil, "", "", 0
 		}
 	}
@@ -702,9 +702,9 @@ func runBlockAgentWaiver(sub string, args []string) int {
 	}
 	list := func() int {
 		h.mark()
-		out := os.Stdout
+		out := safeStdout
 		if h.json {
-			out = os.Stderr
+			out = safeStderr
 		}
 		for _, w := range counted {
 			fmt.Fprintf(out, "block %s: agent waiver %s %s reason: %s; verdict: %s\n", id, w["file"], w["finding"], w["reason"], w["verdict"])
@@ -775,7 +775,7 @@ func runBlockAttempt(args []string) int {
 		return h.fallback()
 	}
 	h.mark()
-	blockGrantExpiry(home, run, os.Stderr)
+	blockGrantExpiry(home, run, safeStderr)
 	var attempt float64
 	kept := 0
 	err = state.UpdateBlock(home, run, id, func(current, block *ledger.Object) ([]ledger.Object, error) {
@@ -887,7 +887,7 @@ func (p *blockPreview) waiveHuman() int {
 	if code := h.ask(p.id, fmt.Sprintf("Waive finding %s in %s of block %s (run %s)? Only the owner may say yes.", finding, file, p.id, p.run), precheck); code >= 0 {
 		return code
 	}
-	blockGrantExpiry(p.home, p.run, os.Stderr)
+	blockGrantExpiry(p.home, p.run, safeStderr)
 	reason := humanTrim(blockString(p.flags["reason"]))
 	if reason == "" {
 		return h.usage("block waive needs --reason")

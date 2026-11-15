@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/ricardov03/code-forge/native/config"
@@ -26,7 +25,7 @@ type smallVerb struct {
 
 func (v smallVerb) run(args []string) int {
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprint(os.Stdout, v.usage)
+		fmt.Fprint(safeStdout, v.usage)
 		return 0
 	}
 	sub := ""
@@ -42,7 +41,7 @@ func (v smallVerb) run(args []string) int {
 			if !strings.HasSuffix(usage, "\n") {
 				usage += "\n"
 			}
-			fmt.Fprint(os.Stdout, usage)
+			fmt.Fprint(safeStdout, usage)
 			return 0
 		}
 	}
@@ -62,7 +61,7 @@ func (v smallVerb) run(args []string) int {
 	before := gatesBreadcrumbName(name)
 	smallVerbBefore = before
 	stderr := &contextErrWriter{}
-	code := body(os.Stdout, stderr)
+	code := body(safeStdout, stderr)
 	if code != 0 {
 		var message any
 		if stderr.last != "" {
@@ -80,7 +79,7 @@ var smallVerbBefore = []any{}
 func smallVerbHandover(verb string, args []string, reason handoverReason) int {
 	code, err := handover(append([]string{verb}, args...), reason)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	return code
 }

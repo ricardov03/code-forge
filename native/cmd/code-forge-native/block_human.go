@@ -53,7 +53,7 @@ type humanDecision struct {
 func runBlockHumanPass(args []string) int {
 	// B622: --dry-run previews the human-pass checks; nothing is asked or written.
 	if rest, dry, message := dryRunArgs(args); message != "" {
-		fmt.Fprintln(os.Stderr, "block human-pass:", message)
+		fmt.Fprintln(safeStderr, "block human-pass:", message)
 		return 2
 	} else if dry {
 		return humanPassDryRun(rest)
@@ -67,8 +67,8 @@ func runBlockHumanPass(args []string) int {
 		return code
 	}
 	before := gatesBreadcrumbName("block")
-	fmt.Fprint(os.Stdout, stdout.String())
-	fmt.Fprint(os.Stderr, stderr.String())
+	fmt.Fprint(safeStdout, stdout.String())
+	fmt.Fprint(safeStderr, stderr.String())
 	if endHook != nil {
 		endHook()
 	}
@@ -199,7 +199,7 @@ func blockHumanPass(args []string, stdout, stderr io.Writer, delegated *bool, en
 	}
 	key, _ := blockclose.ReadKey(home, run)
 	done := closeWriteDone(home, run, id, record, blockclose.Result{OK: true, Status: "closed", Event: "block.human_pass"}, nil, nil, key, stderr)
-	*endHook = func() { blockRunEndHook(home, run, id, "closed", done, record, os.Stderr) }
+	*endHook = func() { blockRunEndHook(home, run, id, "closed", done, record, safeStderr) }
 	if flags["json"] == true {
 		row.Set("status", "closed")
 		blockDoneJSON(&row, record, done)

@@ -94,7 +94,7 @@ func closeWithFlags(args []string) int {
 		return blockHandover(append([]string{"close"}, args...), reason)
 	}
 	before := gatesBreadcrumbName("block close")
-	held.flush(os.Stdout, os.Stderr)
+	held.flush(safeStdout, safeStderr)
 	if endHook != nil {
 		endHook()
 	}
@@ -273,9 +273,9 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 	// Decide renders its terminal prompt directly. Publish claim progress before
 	// that prompt too, matching Node's claim-before-confirmation ordering.
 	if flags["decide"] == true {
-		print = os.Stdout
+		print = safeStdout
 		if flags["json"] == true {
-			print = os.Stderr
+			print = safeStderr
 		}
 	}
 	// B493: under close.require_human with no active grant, Node asks the owner

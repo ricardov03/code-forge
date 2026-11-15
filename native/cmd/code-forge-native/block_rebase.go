@@ -40,7 +40,7 @@ func runBlockRebase(args []string) int {
 	full := append([]string{"rebase"}, args...)
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
-			fmt.Fprint(os.Stdout, blockVerbUsage("rebase", rebaseForm))
+			fmt.Fprint(safeStdout, blockVerbUsage("rebase", rebaseForm))
 			return 0
 		}
 	}
@@ -59,12 +59,12 @@ func runBlockRebase(args []string) int {
 		// rebase was kept, and Node runs the whole command. B584: stderr holds
 		// only the expiry lines Node does not print again (approvals restored
 		// or skipped); the failed checks Node retries and reports itself.
-		fmt.Fprint(os.Stderr, stderr.String())
+		fmt.Fprint(safeStderr, stderr.String())
 		return blockHandover(full, reason)
 	}
 	crumb := gatesBreadcrumbName("block rebase")
-	fmt.Fprint(os.Stdout, stdout.String())
-	fmt.Fprint(os.Stderr, stderr.String())
+	fmt.Fprint(safeStdout, stdout.String())
+	fmt.Fprint(safeStderr, stderr.String())
 	if code != 0 {
 		var message any
 		if stderr.last != "" {
@@ -88,11 +88,11 @@ func blockRebaseRebuild(id, tree, before string) int {
 	}
 	rebuilt, err := nativeRebuildAfterMove(tree, before, strings.TrimSpace(after))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "block rebase: block %s: %s; the rebase stands; rebuild by hand: node scripts/build-native.mjs --host in %s\n", id, strings.ReplaceAll(err.Error(), "\n", " "), tree)
+		fmt.Fprintf(safeStderr, "block rebase: block %s: %s; the rebase stands; rebuild by hand: node scripts/build-native.mjs --host in %s\n", id, strings.ReplaceAll(err.Error(), "\n", " "), tree)
 		return 1
 	}
 	if rebuilt {
-		fmt.Fprintf(os.Stderr, "block rebase: block %s: rebuilt the native binary in %s (the rebase changed native sources)\n", id, tree)
+		fmt.Fprintf(safeStderr, "block rebase: block %s: rebuilt the native binary in %s (the rebase changed native sources)\n", id, tree)
 	}
 	return 0
 }

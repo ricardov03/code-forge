@@ -34,11 +34,11 @@ func runSetupCommand(args []string) int {
 		exe, err = filepath.EvalSymlinks(exe)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "code-forge setup: cannot locate the Go binary: %v\nfix: npm install -g @codedology/code-forge\n", err)
+		fmt.Fprintf(safeStderr, "code-forge setup: cannot locate the Go binary: %v\nfix: npm install -g @codedology/code-forge\n", err)
 		return 1
 	}
 	pkg := pkgroot.FromExecutable(exe)
-	return setupCheck(args, pkg, setupHost(runtime.GOOS, runtime.GOARCH), version, os.Stdout, os.Stderr)
+	return setupCheck(args, pkg, setupHost(runtime.GOOS, runtime.GOARCH), version, safeStdout, safeStderr)
 }
 
 // setupCheck is scripts/setup.mjs in Go for a binary that runs: the binary is

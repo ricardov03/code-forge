@@ -1,14 +1,12 @@
 package main
 
 import (
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/ricardov03/code-forge/native/autopilot"
@@ -239,15 +237,11 @@ func runBlockReady(args []string) int {
 		}
 		blockers = append(blockers, gatecheck.Blocker{Code: "unowned_change", File: file, Detail: "orphan in run registry: " + file})
 	}
-	// B565: Node's ready writes stdout and stderr through writeSafe, which masks
-	// only registered secrets; in this command that is the run's signer key in
-	// hex. Text that holds it stays with Node. A secret-like prefix in a path
-	// (a random temp dir with "eyJ") is printed by Node as it is.
-	encoded, _ := ledger.Stringify(closeBlockersJSON(blockers, p.id, p.run, p.flags, entry), false)
-	printed := p.id + workspace + string(encoded) + strings.Join(scopeWarnings, "") + blockString(blockObject(entry.Get("worktree")).Get("path"))
-	if strings.Contains(printed, hex.EncodeToString(key)) {
-		return p.fallback()
-	}
+	// B565, B713: Node's ready writes stdout and stderr through writeSafe,
+	// which masks registered secrets (here the run's signer key in hex, which
+	// ReadKey registered); Go's safeStdout and safeStderr do the same. A
+	// secret-like prefix in a path (a random temp dir with "eyJ") is printed
+	// as it is.
 	// Preserve Node's error-log capture for unusual warning diagnostics.
 	if reviewWaitLogging() && len(blockers) > 0 && !collectOnly && (warnReviewed || !scopeChecked || len(scopeWarnings) > 0) {
 		return p.fallback()
@@ -261,13 +255,13 @@ func runBlockReady(args []string) int {
 				where = "the worktree " + blockString(blockObject(entry.Get("worktree")).Get("path"))
 				likely = "done outside the block's worktree (in the main checkout or another tree)"
 			}
-			fmt.Fprintf(os.Stderr, "WARN block %s: no owned file differs from the block base in %s, but %d owned file(s) have review rows — the work was likely %s; they are checked at their content in %s\n", p.id, where, len(reviewed), likely, where)
+			fmt.Fprintf(safeStderr, "WARN block %s: no owned file differs from the block base in %s, but %d owned file(s) have review rows — the work was likely %s; they are checked at their content in %s\n", p.id, where, len(reviewed), likely, where)
 		}
 		if !scopeChecked {
-			fmt.Fprintf(os.Stderr, "WARN block %s: opened before code-forge recorded the tree at block open; unowned changes were not checked\n", p.id)
+			fmt.Fprintf(safeStderr, "WARN block %s: opened before code-forge recorded the tree at block open; unowned changes were not checked\n", p.id)
 		}
 		for _, w := range scopeWarnings {
-			fmt.Fprint(os.Stderr, w)
+			fmt.Fprint(safeStderr, w)
 		}
 	}
 	formatted := closeBlockersRows(blockers, p.id, p.run, p.flags, entry, true)
@@ -278,16 +272,16 @@ func runBlockReady(args []string) int {
 	if p.flags["json"] == true {
 		out := ledger.Object{{Key: "block", Value: p.id}, {Key: "ready", Value: ready}, {Key: "blockers", Value: formatted}}
 		data, _ := ledger.Stringify(pendingReviewJSON(out, pending), false)
-		fmt.Println(string(data))
+		fmt.Fprintln(safeStdout, string(data))
 	} else {
 		for _, b := range formatted {
 			o := b.(ledger.Object)
-			fmt.Printf("%s %s %s\n  fix: %s\n", o.Get("code"), closeDash(o.Get("file")), o.Get("detail"), o.Get("fix"))
+			fmt.Fprintf(safeStdout, "%s %s %s\n  fix: %s\n", o.Get("code"), closeDash(o.Get("file")), o.Get("detail"), o.Get("fix"))
 		}
 		if ready {
-			fmt.Printf("block %s ready\n", p.id)
+			fmt.Fprintf(safeStdout, "block %s ready\n", p.id)
 		} else {
-			fmt.Printf("block %s not ready: %d blockers\n", p.id, len(formatted))
+			fmt.Fprintf(safeStdout, "block %s not ready: %d blockers\n", p.id, len(formatted))
 		}
 		pendingReviewLine(p.id, pending)
 	}

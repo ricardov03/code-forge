@@ -45,7 +45,7 @@ func main() {
 	code, err := runGuarded(os.Args[1:])
 	childregRelease()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	os.Exit(code)
 }
@@ -140,7 +140,7 @@ func runInternal(args []string) (int, error) {
 func stateGolden(home, runID, op string) error {
 	if op == "lock" {
 		return state.WithRunLock(home, runID, func() error {
-			if _, err := fmt.Fprintln(os.Stdout, "locked"); err != nil {
+			if _, err := fmt.Fprintln(safeStdout, "locked"); err != nil {
 				return err
 			}
 			_, err := io.Copy(io.Discard, os.Stdin)

@@ -114,13 +114,13 @@ func runBlockLand(args []string) int {
 	fail := func(message string, code int) int {
 		before := gatesBreadcrumbName("block")
 		text := "block land: " + message + "\n"
-		fmt.Fprint(os.Stderr, text)
+		fmt.Fprint(safeStderr, text)
 		nativeVerbFailure("block", "", append([]string{"land"}, args...), code, jsTrim(text), before)
 		return code
 	}
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
-			fmt.Fprint(os.Stdout, blockLandUsage())
+			fmt.Fprint(safeStdout, blockLandUsage())
 			return 0
 		}
 	}
