@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -81,20 +82,20 @@ var initWizOpen = func() (initWizEnv, bool) {
 	}}, true
 }
 
-// initWizTerminalOK: the colours, symbols and size Go draws are the ones
-// Node draws (picocolors, util.styleText and clack read these).
-func initWizTerminalOK(env initWizEnv) bool {
-	for _, name := range []string{"NO_COLOR", "FORCE_COLOR", "NODE_DISABLE_COLORS", "CI", "TEAMCITY_VERSION", "ACCESSIBLE", "NO_UNICODE"} {
-		if _, set := os.LookupEnv(name); set {
-			return false
-		}
+// initWizTerminalLook is how Node draws on this terminal (B703): the
+// colors of util.styleText (shouldColorize(process.stdout), stdout is a
+// terminal here) and clack's unicode symbols (TERM !== 'linux'). ok is
+// false for what Go does not draw like Node: FORCE_COLOR with NO_COLOR or
+// NODE_DISABLE_COLORS (Node's warning carries its pid), clack's
+// accessible mode, and a terminal under 60x24.
+func initWizTerminalLook(env initWizEnv) (colors, unicode, ok bool) {
+	if colors, ok = keysColors(true); !ok {
+		return false, false, false
 	}
-	switch os.Getenv("TERM") {
-	case "xterm", "xterm-256color", "screen", "screen-256color", "tmux", "tmux-256color", "rxvt-unicode", "rxvt-unicode-256color":
-	default:
-		return false
+	if a, set := os.LookupEnv("ACCESSIBLE"); set && a != "" && a != "0" && a != "false" {
+		return false, false, false
 	}
-	return env.cols >= 60 && env.rows >= 24
+	return colors, os.Getenv("TERM") != "linux", env.cols >= 60 && env.rows >= 24
 }
 
 // initWizEOFFile is the launcher line Node names when the input ends at a
@@ -105,7 +106,7 @@ func initWizEOFFile() string {
 		return ""
 	}
 	file, err := filepath.EvalSymlinks(filepath.Join(root, "bin", "code-forge.mjs"))
-	if err != nil || !regexp.MustCompile(`^/[A-Za-z0-9/._~-]+$`).MatchString(file) {
+	if err != nil || !strings.HasPrefix(file, "/") || !utf8.ValidString(file) {
 		return ""
 	}
 	data, err := os.ReadFile(file)
@@ -128,8 +129,24 @@ func initWizEOFFile() string {
 	if found == 0 {
 		return ""
 	}
-	return "Warning: Detected unsettled top-level await at file://" + file + ":" + strconv.Itoa(found) + "\n" +
+	return "Warning: Detected unsettled top-level await at " + initWizFileURL(file) + ":" + strconv.Itoa(found) + "\n" +
 		initWizEOFLine + "\n" + strings.Repeat(" ", strings.Index(initWizEOFLine, "await")) + "^\n\n\n\n"
+}
+
+// initWizFileURL is Node's url.pathToFileURL(file).href for a clean
+// absolute path: each byte outside the kept ASCII set is %XX (upper hex).
+func initWizFileURL(file string) string {
+	var b strings.Builder
+	b.WriteString("file://")
+	for i := 0; i < len(file); i++ {
+		c := file[i]
+		if c > 0x20 && c < 0x7f && !strings.ContainsRune("\"#%<>?[\\]^`{|}~", rune(c)) {
+			b.WriteByte(c)
+			continue
+		}
+		b.WriteString("%" + strings.ToUpper(strconv.FormatUint(uint64(c)>>4, 16)) + strings.ToUpper(strconv.FormatUint(uint64(c)&15, 16)))
+	}
+	return b.String()
 }
 
 // initWizLevelText is levelText in steps.mjs; ok is false for a level shape
@@ -616,7 +633,7 @@ func initWizCloneValues(v initValues) initValues {
 // shapes it does not draw like Node. It returns the EOF warning text.
 func initWizardPrecheck(st initSetupState, parsed initParsed, env initWizEnv, envOK bool) (string, initJevAuto, handoverReason) {
 	var auto initJevAuto
-	if !envOK || !initWizTerminalOK(env) {
+	if _, _, ok := initWizTerminalLook(env); !envOK || !ok {
 		return "", auto, hInitInteractive
 	}
 	v := st.v
@@ -644,17 +661,11 @@ func initWizardPrecheck(st initSetupState, parsed initParsed, env initWizEnv, en
 			return "", auto, hInitJevOp
 		}
 	}
-	if _, yes := parsed.initLast("--yes-tool"); yes {
-		return "", auto, hInitWizardTools
-	}
 	if v.refreshModels || func() bool { _, f := initLastFor(parsed, "refresh_models"); return !f }() {
+		// a cache Node cannot write fails its refresh after the prompts
+		// (B703: a cache file that is not JSON is skipped, as in Node)
 		if !modelsCacheWritable(st.home) {
-			return "", auto, hInitWizardModels
-		}
-		for _, source := range []string{".codex", ".grok"} {
-			if data, err := os.ReadFile(filepath.Join(st.home, source, "models_cache.json")); err == nil && !json.Valid(data) {
-				return "", auto, hInitWizardModels
-			}
+			return "", auto, hInitModels
 		}
 	}
 	// what the prompts and the summary show must be plain text Go measures
@@ -733,7 +744,8 @@ func initWizardPrecheck(st initSetupState, parsed initParsed, env initWizEnv, en
 // prompt (Node exits 13 without its error log).
 func initWizardServe(parsed initParsed, home, cwd string, existingFile bool) (func(stdout, stderr io.Writer, eof *bool) int, handoverReason) {
 	env, envOK := initWizOpen()
-	if !envOK || !initWizTerminalOK(env) {
+	colors, unicode, lookOK := initWizTerminalLook(env)
+	if !envOK || !lookOK {
 		return nil, hInitInteractive
 	}
 	st, reason := initSetupLoad(parsed, home, cwd, existingFile)
@@ -745,6 +757,7 @@ func initWizardServe(parsed initParsed, home, cwd string, existingFile bool) (fu
 		return nil, reason
 	}
 	return func(_, stderr io.Writer, eof *bool) int {
+		defer initWizSetLook(colors, unicode)()
 		u := &initWizUI{env: env, term: &initWizTerm{in: env.in, out: env.out, cols: env.cols, rows: env.rows}}
 		ended := func() int {
 			if u.end == initWizEOF {
@@ -867,23 +880,4 @@ func initWizFail(u *initWizUI, ended func() int, home string, summary []string, 
 	}
 	return initSetupRun(initSetupResult{home: home, lines: lines, shown: len(summary), printed: wiz.printed, code: 1, err: initWizCancelText,
 		settings: wiz.settings, blank: wiz.blank, secrets: secrets})(u.env.out, stderr)
-}
-
-// initWizToolLines is step 1 of runInit for `tools: recommended` without
-// --yes-tool: each tool present, or its install hint.
-func initWizToolLines(ctx initCtx) []string {
-	out := []string{}
-	for _, tool := range toolRows {
-		if tool.id == "solo" && ctx.solo || detectTool(tool) {
-			out = append(out, "tool "+tool.id+": present")
-			continue
-		}
-		argv, hint := toolInstallPlan(tool)
-		how := hint
-		if argv != nil {
-			how = "install with: " + strings.Join(argv, " ")
-		}
-		out = append(out, "tool "+tool.id+": missing — "+how+" (or: code-forge tools install)")
-	}
-	return out
 }

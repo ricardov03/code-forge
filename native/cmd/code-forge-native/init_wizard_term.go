@@ -29,6 +29,9 @@ func initWizSGR(code int) string { return "\x1b[" + strconv.Itoa(code) + "m" }
 
 // initWizStyle is util.styleText(formats, text) on a stream with colors.
 func initWizStyle(text string, formats ...string) string {
+	if !initWizColors {
+		return text
+	}
 	left, right := "", ""
 	for _, f := range formats {
 		codes := initWizStyles[f]
@@ -261,21 +264,48 @@ func initWizPrefixWrap(cols int, text, prefix, start, end string) string {
 
 // --- symbols ----------------------------------------------------------------
 
-const (
+// initWizBar and initWizBarEnd are clack's S_BAR and S_BAR_END; the wizard
+// sets them, with initWizColors and initWizUnicode, for the terminal it
+// draws on (initWizSetLook).
+var (
 	initWizBar    = "│"
 	initWizBarEnd = "└"
+	// initWizColors is util.styleText's shouldColorize(process.stdout)
+	initWizColors = true
+	// initWizUnicode is clack's isUnicodeSupported() (TERM !== 'linux')
+	initWizUnicode = true
 )
+
+// initWizSetLook draws with or without colors and with clack's unicode or
+// ASCII symbols; it returns the undo.
+func initWizSetLook(colors, unicode bool) func() {
+	saved := [4]any{initWizBar, initWizBarEnd, initWizColors, initWizUnicode}
+	initWizColors, initWizUnicode = colors, unicode
+	initWizBar, initWizBarEnd = initWizU("│", "|"), initWizU("└", "—")
+	return func() {
+		initWizBar, initWizBarEnd = saved[0].(string), saved[1].(string)
+		initWizColors, initWizUnicode = saved[2].(bool), saved[3].(bool)
+	}
+}
+
+// initWizU is clack's unicodeOr.
+func initWizU(unicode, ascii string) string {
+	if initWizUnicode {
+		return unicode
+	}
+	return ascii
+}
 
 func initWizSymbol(state string) string {
 	switch state {
 	case "cancel":
-		return initWizStyle("■", "red")
+		return initWizStyle(initWizU("■", "x"), "red")
 	case "error":
-		return initWizStyle("▲", "yellow")
+		return initWizStyle(initWizU("▲", "x"), "yellow")
 	case "submit":
-		return initWizStyle("◇", "green")
+		return initWizStyle(initWizU("◇", "o"), "green")
 	}
-	return initWizStyle("◆", "cyan")
+	return initWizStyle(initWizU("◆", "*"), "cyan")
 }
 
 func initWizSymbolBar(state string) string {
@@ -667,11 +697,11 @@ func (p *initWizPrompt) frame(cols int) string {
 		case "cancel":
 			return head + gray + "  " + initWizStyle(c, "strikethrough", "dim") + "\n" + gray
 		}
-		yes := initWizStyle("○", "dim") + " " + dim("Yes")
-		no := initWizStyle("●", "green") + " No"
+		yes := initWizStyle(initWizU("○", " "), "dim") + " " + dim("Yes")
+		no := initWizStyle(initWizU("●", ">"), "green") + " No"
 		if p.value {
-			yes = initWizStyle("●", "green") + " Yes"
-			no = initWizStyle("○", "dim") + " " + dim("No")
+			yes = initWizStyle(initWizU("●", ">"), "green") + " Yes"
+			no = initWizStyle(initWizU("○", " "), "dim") + " " + dim("No")
 		}
 		return head + cyan + "  " + yes + " " + dim("/") + " " + no + "\n" + initWizStyle(initWizBarEnd, "cyan") + "\n"
 	case "select":
@@ -687,12 +717,12 @@ func (p *initWizPrompt) frame(cols int) string {
 		for i, o := range p.options {
 			var s string
 			if i == p.cursor {
-				s = initWizStyle("●", "green") + " " + p.optionLabel(o)
+				s = initWizStyle(initWizU("●", ">"), "green") + " " + p.optionLabel(o)
 				if o.hint != "" {
 					s += " " + dim("("+o.hint+")")
 				}
 			} else {
-				s = initWizStyle("○", "dim") + " " + initWizEachLine(p.optionLabel(o), dim)
+				s = initWizStyle(initWizU("○", " "), "dim") + " " + initWizEachLine(p.optionLabel(o), dim)
 			}
 			lines = append(lines, strings.Split(initWizWrap(s, cols-initWizU16(cyan+"  ")), "\n")...)
 		}
@@ -735,13 +765,13 @@ func (p *initWizPrompt) frame(cols int) string {
 		var s string
 		switch {
 		case i == p.cursor && sel:
-			s = initWizStyle("◼", "green") + " " + o.label
+			s = initWizStyle(initWizU("◼", "[+]"), "green") + " " + o.label
 		case sel:
-			s = initWizStyle("◼", "green") + " " + initWizEachLine(o.label, dim)
+			s = initWizStyle(initWizU("◼", "[+]"), "green") + " " + initWizEachLine(o.label, dim)
 		case i == p.cursor:
-			s = initWizStyle("◻", "cyan") + " " + o.label
+			s = initWizStyle(initWizU("◻", "[•]"), "cyan") + " " + o.label
 		default:
-			s = initWizStyle("◻", "dim") + " " + initWizEachLine(o.label, dim)
+			s = initWizStyle(initWizU("◻", "[ ]"), "dim") + " " + initWizEachLine(o.label, dim)
 		}
 		lines = append(lines, strings.Split(initWizWrap(s, cols-initWizU16(cyan+"  ")), "\n")...)
 	}
@@ -758,9 +788,9 @@ func initWizMask(input string) string {
 		case r == '\n' || r == '\r' || r == 0x2028 || r == 0x2029:
 			b.WriteRune(r)
 		case r > 0xFFFF:
-			b.WriteString("▪▪")
+			b.WriteString(initWizU("▪▪", "••"))
 		default:
-			b.WriteString("▪")
+			b.WriteString(initWizU("▪", "•"))
 		}
 	}
 	return b.String()
