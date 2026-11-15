@@ -36,6 +36,12 @@ import (
 
 type object = map[string]any
 
+// Request patterns are compiled once, not on every poll step (B749).
+var (
+	blockIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	baseSHAPattern = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
+)
+
 type server struct {
 	mu                                           sync.Mutex
 	home, run, version, workspace, repo, project string
@@ -122,13 +128,9 @@ func ServeContext(ctx context.Context, home, run, version string, idle time.Dura
 		return fmt.Errorf("a live daemon already owns this run")
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	if err := s.refresh(); err != nil {
-		return err
-	}
 	if ctx.Err() != nil {
 		return nil
 	}
-	s.sweep(time.Now())
 	socket := filepath.Join(dir, "native.sock")
 	if info, err := os.Lstat(socket); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
@@ -162,6 +164,30 @@ func ServeContext(ctx context.Context, home, run, version string, idle time.Dura
 	last := time.Now()
 	active := 0
 	touch := func(delta int) { activity.Lock(); active += delta; last = time.Now(); activity.Unlock() }
+	// B750: the socket listens before the first full ledger read and sweep,
+	// so a large ledger no longer delays the socket. s.mu is held from here
+	// until that read and sweep end; every request takes s.mu and refreshes
+	// again before it answers, so none is answered from unread data. The
+	// first read counts as activity (no idle exit while it runs), and a
+	// failed read ends the daemon with its error, as before.
+	s.mu.Lock()
+	touch(1)
+	var firstErr error
+	first := make(chan struct{})
+	defer func() { <-first }()
+	gosafe.Go("daemon-first-refresh", func() {
+		defer close(first)
+		defer touch(-1)
+		defer s.mu.Unlock()
+		if err := s.refresh(); err != nil {
+			firstErr = err
+			cancel()
+			return
+		}
+		if ctx.Err() == nil {
+			s.sweep(time.Now())
+		}
+	})
 	connections := make(map[net.Conn]bool)
 	var connectionsMu sync.Mutex
 	var clients sync.WaitGroup
@@ -193,7 +219,8 @@ func ServeContext(ctx context.Context, home, run, version string, idle time.Dura
 		conn, err := listener.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil
+				<-first
+				return firstErr
 			}
 			cancel()
 			return err
@@ -325,7 +352,7 @@ func (s *server) step(req request, deadline time.Time, down *int, delivered map[
 		s.sweep(time.Now())
 	}
 	if req.Method == "rows" {
-		if req.Block != "" && !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`).MatchString(req.Block) {
+		if req.Block != "" && !blockIDPattern.MatchString(req.Block) {
 			return failure("bad-request"), true
 		}
 		rows := []ledger.Row{}
@@ -346,7 +373,7 @@ func (s *server) step(req request, deadline time.Time, down *int, delivered map[
 	if req.Method != "block-tickets" && req.Method != "wait-block" && req.Method != "prune" {
 		return failure("unknown-method"), true
 	}
-	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`).MatchString(req.Block) {
+	if !blockIDPattern.MatchString(req.Block) {
 		return failure("bad-request"), true
 	}
 	if req.Method == "prune" {
@@ -717,7 +744,7 @@ func timings(state, marker object) {
 }
 
 func (s *server) changed(tree, base string, owned []any) ([]string, error) {
-	if !regexp.MustCompile(`^[0-9a-f]{7,64}$`).MatchString(base) {
+	if !baseSHAPattern.MatchString(base) {
 		return nil, fmt.Errorf("bad-ref")
 	}
 	state := s.trees[tree]

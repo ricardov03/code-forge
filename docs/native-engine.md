@@ -578,6 +578,10 @@ Cached data is a copy kept ready in memory. It avoids repeated reads in Node
 clients. A missing, crashed or incompatible daemon causes clients to use Node
 by themselves, with the same answers. Both text and JSON status output have
 the same bytes on the daemon and Node paths.
+A new daemon opens its socket first and then reads the whole ledger and
+sweeps old review tickets (B749). A request that arrives during that first
+read waits for it, so no answer comes from a partly read ledger. A first
+read that fails still stops the daemon with its error.
 
 The full doctor shows `native daemon` as `live`, `off` or `fallback`.
 Use the switches above to turn off all native code or just the daemon.
