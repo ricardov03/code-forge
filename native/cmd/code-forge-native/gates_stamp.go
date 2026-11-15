@@ -85,12 +85,9 @@ func gatesFullStamp(tree string, p gates.Plan, configured map[string]any, block 
 	if tree == "" {
 		return ""
 	}
-	// B585: the running node; with none known no stamp (a gate run by node
-	// cannot be reused safely).
-	node := nodeRunVersion()
-	if node == "" || node == "unknown" {
-		return ""
-	}
+	// B585 put the running node's version here; B690d: Go runs every gate
+	// and never starts Node, so the slot is always "none".
+	node := errorLogNode
 	path := blockString(blockObject(block.Get("worktree")).Get("path"))
 	exactTree := ""
 	if path != "" {

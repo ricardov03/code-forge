@@ -53,11 +53,9 @@ exit 0
 }
 
 // b575BuildLine is the fake go log line the script's build call makes.
-func b575BuildLine(cwd, binary, version, node string) string {
+// B690d: no Node version is stamped, with or without a node.
+func b575BuildLine(cwd, binary, version string) string {
 	ldflags := "-s -w -X main.version=" + version
-	if node != "" {
-		ldflags += " -X main.reviewWaitNodeVersion=" + node
-	}
 	return "build " + cwd + " build -trimpath -ldflags " + ldflags + " -o " + binary + ".PID.tmp ./cmd/code-forge-native" +
 		" | CGO_ENABLED=0 GOOS=" + runtime.GOOS + " GOARCH=" + runtime.GOARCH + " GOTOOLCHAIN=local GOPROXY=off\n"
 }
@@ -78,7 +76,7 @@ func newB575Root(t *testing.T) b575Root {
 	if err := os.WriteFile(filepath.Join(r.root, "package.json"), []byte(`{"name":"x","version":"9.8.7"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(r.node, []byte("#!/bin/sh\n[ \"$1\" = --version ] && echo v24.22.1\n"), 0o755); err != nil {
+	if err := os.WriteFile(r.node, []byte("#!/bin/sh\necho \"node $*\" >> '"+r.log+"'\n[ \"$1\" = --version ] && echo v24.22.1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	b575WriteFakeGo(t, r.goDir)
@@ -125,9 +123,11 @@ func (r b575Root) leftovers(t *testing.T) []string {
 
 func TestB575NativeBuildRunsGoBuild(t *testing.T) {
 	for _, tc := range []struct {
-		name, nodeEnv, node string
+		name, nodeEnv string
 	}{
-		{name: "node on CODE_FORGE_NODE", node: "v24.22.1"},
+		// B690d: a node on CODE_FORGE_NODE is never asked (its log
+		// line would show in the calls).
+		{name: "node on CODE_FORGE_NODE"},
 		{name: "no node anywhere", nodeEnv: "/nonexistent"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -148,7 +148,7 @@ func TestB575NativeBuildRunsGoBuild(t *testing.T) {
 			if err != nil {
 				t.Fatalf("nativeBuildHost: %v", err)
 			}
-			if want := b575BuildLine(filepath.Join(r.real, "native"), r.binary, "9.8.7", tc.node); r.calls(t) != want {
+			if want := b575BuildLine(filepath.Join(r.real, "native"), r.binary, "9.8.7"); r.calls(t) != want {
 				t.Fatalf("go argv/env:\n got %q\nwant %q", r.calls(t), want)
 			}
 			data, err := os.ReadFile(r.binary)
@@ -235,7 +235,7 @@ func TestB575GatesNativeRebuildWithoutNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, stdout, stderr := f.call([]string{"PATH=" + f.goDir, "CODE_FORGE_NODE=/nonexistent"}, "gates", "run", "--run", "fixture", "--block", "B1")
-	want := b575BuildLine(filepath.Join(f.realTree(), "native"), f.bin, "9.8.7", "") + "test\n"
+	want := b575BuildLine(filepath.Join(f.realTree(), "native"), f.bin, "9.8.7") + "test\n"
 	if code != 0 || f.calls() != want {
 		t.Fatalf("want exit 0, one go build with no node version, then the test command (%q); got exit %d calls %q stderr %s", want, code, f.calls(), stderr)
 	}

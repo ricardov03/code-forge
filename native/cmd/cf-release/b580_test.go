@@ -53,10 +53,9 @@ func b580NoNodeSuite(t *testing.T, f *fixture, marker string) {
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
-		if line != "" && line != "--version" {
-			t.Fatalf("the release ran node %q; only node --version is allowed", line)
-		}
+	// B690d: not even node --version.
+	if text := strings.TrimSpace(string(calls)); text != "" {
+		t.Fatalf("the release ran node: %q", text)
 	}
 }
 
@@ -76,7 +75,7 @@ func TestB580NativeBuildRunsGoForFourTargets(t *testing.T) {
 	var lines, rawNames []string
 	for _, tg := range targets {
 		binary := filepath.Join(native, "bin", tg.name, "code-forge-native")
-		want = append(want, native+" go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o "+
+		want = append(want, native+" go build -trimpath -ldflags -s -w -X main.version=0.22.0 -o "+
 			binary+".<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS="+tg.goos+" GOARCH="+tg.goarch+" GOTOOLCHAIN=local GOPROXY=off")
 		body := "binary " + tg.goos + "/" + tg.goarch + "\n"
 		lines = append(lines, "native "+tg.name+": "+strconv.Itoa(len(body))+" bytes (v0.22.0)")

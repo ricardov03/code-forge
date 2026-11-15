@@ -13,7 +13,7 @@ it keeps its newest half.
 |---|---|
 | `ts` | the time (UTC) |
 | `version` | the code-forge version |
-| `node` | the Node version |
+| `node` | always `none`: the commands run in Go and do not ask Node for its version (B690d) |
 | `platform`, `arch` | the OS name and CPU type (for example `darwin`, `arm64`) |
 | `verb` | the command (`keys`, `init`…) |
 | `sub` | the subcommand, only when it is one of the verb's own words (`set`, `install`…); anything else could be your value and is left out |

@@ -29,9 +29,6 @@ func newLandBatchFixture(t *testing.T, bad int) *landBatchFixture {
 	t.Setenv("HOME", f.home)
 	t.Setenv("CODE_FORGE_NODE", "/nonexistent")
 	t.Setenv("CODE_FORGE_NO_ERROR_LOG", "1")
-	oldVersion := reviewWaitNodeVersion
-	reviewWaitNodeVersion = "v24.22.1"
-	t.Cleanup(func() { reviewWaitNodeVersion = oldVersion })
 	f.git(f.repo, "init", "-qb", "main")
 	f.git(f.repo, "config", "user.name", "Fixture")
 	f.git(f.repo, "config", "user.email", "f@example.invalid")

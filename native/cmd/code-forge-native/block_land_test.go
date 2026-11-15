@@ -102,9 +102,6 @@ func blockLandChain(t *testing.T, shape string) {
 	t.Setenv("CODE_FORGE_NATIVE", "1")
 	t.Setenv("CODE_FORGE_NODE", "/nonexistent")
 	t.Setenv("CODE_FORGE_NO_ERROR_LOG", "1")
-	nodeVersion := reviewWaitNodeVersion
-	reviewWaitNodeVersion = "v24.22.1"
-	t.Cleanup(func() { reviewWaitNodeVersion = nodeVersion })
 	repo, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

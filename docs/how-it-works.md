@@ -625,7 +625,7 @@ base branch HEAD under the run's worktree root. It merges the block branch there
 The block worktree must be clean too.
 
 The Go engine can reuse a green full gate run for this exact merged Git tree. The saved evidence
-must match the resolved gate configuration, environment and Node version. The full run must
+must match the resolved gate configuration and environment (its Node slot is `none` since B690d). The full run must
 include a test gate that ran and passed. Partial, skipped, cancelled, timed-out or flaky results
 cannot authorize reuse. Old stamps that do not bind the exact tree cannot authorize it either.
 Reuse prints `merge gate: reused green full suite on tree <tree-id>` with a 12-character tree id.
