@@ -1,0 +1,4 @@
+exit 1
+-- stdout
+-- stderr
+report: EACCES: permission denied, scandir '<H>/.code-forge/ledger'

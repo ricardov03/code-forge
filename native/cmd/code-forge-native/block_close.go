@@ -45,6 +45,15 @@ func runBlockClose(args []string) int {
 		fmt.Fprintln(safeStderr, "block close:", message)
 		return 2
 	} else if dry {
+		// B744: Node's close has no --dry-run; with --decide (a Node close
+		// flag) Go prints Node's parse error and logs it as Node does.
+		if flags, _, message := closeFlags(rest); message == "" && flags["decide"] == true {
+			before := gatesBreadcrumbName("block close")
+			text := `block close: unknown flag "--dry-run"`
+			fmt.Fprintln(safeStderr, text)
+			nativeVerbFailure("block", "close", args, 2, text, before)
+			return 2
+		}
 		return closeDryRun(rest)
 	}
 	return closeWithFlags(args)
@@ -449,10 +458,9 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	if report, has := flags["report"].(string); has {
 		reportData, reportErr = os.ReadFile(report)
 	}
+	// B744: a report that holds secret-shaped text or the run key closes here
+	// as in Node: the coder.tests command row is masked like Node's redact().
 	reportText := string(reportData)
-	if !closeTextSafe(reportText) || strings.Contains(reportText, hex.EncodeToString(key)) {
-		return fallback(hCloseReportRedaction)
-	}
 	checks, closeRows := []closeCheck{}, []ledger.Object{}
 	// B493: Node's B64b hook check runs first: a coder transcript that runs the
 	// on_block_end hook's command refuses the close and leaves no row.
@@ -472,7 +480,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		if reason != "" {
 			checks = append(checks, closeCheck{reason, []gatecheck.Blocker{{Code: "coder_report_failed", Detail: reason}}})
 		} else {
-			closeRows = append(closeRows, ledger.Object{{Key: "event", Value: "coder.tests"}, {Key: "block", Value: id}, {Key: "command", Value: command}, {Key: "exit", Value: 0}})
+			closeRows = append(closeRows, ledger.Object{{Key: "event", Value: "coder.tests"}, {Key: "block", Value: id}, {Key: "command", Value: autopilotRedact(command)}, {Key: "exit", Value: 0}})
 		}
 	}
 	// Node's acknowledgement check runs after coder-tests and before the test gate.

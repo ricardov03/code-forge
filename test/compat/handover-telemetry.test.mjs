@@ -26,17 +26,22 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 
 // B690a: Go never starts Node. A case Go does not serve gets one refusal line, exit 1,
 // and still writes its hand-over row; an unknown verb gets Node's unknown-verb text and
-// writes nothing. These tests use a block attempt case Go does not serve: a secret-like
-// --run value (B690a fix1: an unknown block subcommand is now Node's usage error, exit 2).
-const fakeToken = 'sk-ant-api03-' + 'x'.repeat(40);
-const unported = ['block', 'attempt', 'B1', '--run', fakeToken];
+// writes nothing. These tests use a block attempt case Go does not serve: a run file that is
+// a directory (B690a fix1: an unknown block subcommand is now Node's usage error, exit 2;
+// B744: a secret-like --run value now runs in Go with Node's "no run record" text).
+const runId = 'private-run';
+const unported = ['block', 'attempt', 'B1', '--run', runId];
+// B744: keys list with a store index that is a directory is a second case Go does not serve.
+const keysUnported = ['keys', 'list'];
 const refusal = 'code-forge: block attempt is not supported in this case yet (block-unported-subcommand). Please report it: code-forge logs report\n';
 function fixture() {
   const home = mkdtempSync(path.join(scratch, 'home-'));
+  mkdirSync(path.join(home, '.code-forge/runs', runId + '.json'), { recursive: true });
+  mkdirSync(path.join(home, '.code-forge/store/index.json'), { recursive: true });
   return { home, repo: home, file: path.join(home, '.code-forge/native/handovers.jsonl') };
 }
 function env(f, extra = {}) {
-  return { ...process.env, HOME: f.home, CODE_FORGE_NODE: process.execPath, CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1', CODE_FORGE_NO_ERROR_LOG: '1', PATH: path.dirname(process.execPath) + path.delimiter + process.env.PATH, ...extra };
+  return { ...process.env, HOME: f.home, CODE_FORGE_NODE: process.execPath, CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1', CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_KEY_BACKEND: 'file', PATH: path.dirname(process.execPath) + path.delimiter + process.env.PATH, ...extra };
 }
 function run(f, args, extra = {}, entry = binary, input = '') {
   const r = spawnSync(entry, args, { cwd: f.home, env: env(f, extra), input, encoding: 'utf8' });
@@ -50,7 +55,7 @@ function rows(f) {
 
 test('B282 clause: refusals record private-safe reasons and Go reports counts', async () => {
   const f = fixture();
-  const args = ['block', 'attempt', 'secret-id', '--run', fakeToken];
+  const args = ['block', 'attempt', 'secret-id', '--run', runId];
   const input = 'private stdin\n';
   const expected = run(f, args, { CODE_FORGE_HANDOVER_LOG: '0', PROBE_TOKEN: 'unchanged', PROBE_EXIT: '3' }, binary, input);
   assert.deepEqual(expected, { code: 1, stdout: '', stderr: refusal }, 'B690a: one refusal line, exit 1, the Node probe never runs');
@@ -60,15 +65,17 @@ test('B282 clause: refusals record private-safe reasons and Go reports counts', 
   const row = rows(f)[0];
   assert.deepEqual(Object.keys(row).sort(), ['at', 'reason', 'sub', 'verb', 'version'], 'row has only five safe fields');
   assert.deepEqual({ ...row, at: 'time' }, { at: 'time', verb: 'block', sub: 'attempt', reason: 'block-unported-subcommand', version: pkg.version }, 'the row keeps no flag values, tokens or ids');
-  assert.equal(readFileSync(f.file, 'utf8').includes(fakeToken) || readFileSync(f.file, 'utf8').includes('secret-id'), false, 'the token and the id are absent from the log');
+  assert.equal(readFileSync(f.file, 'utf8').includes(runId) || readFileSync(f.file, 'utf8').includes('secret-id'), false, 'the token and the id are absent from the log');
   assert.match(row.at, /^\d{4}-\d\d-\d\dT.*Z$/, 'timestamp is UTC ISO');
   assert.equal(Number.isNaN(Date.parse(row.at)), false, 'timestamp is valid');
-  // B451 runs close --help in Go; a token-like close argument still refuses the whole close.
+  // B744: a token-like close argument now runs in Go with Node's text and writes no row.
   const closeArgs = ['block', 'close', 'private-id', '--run', 'r1', '--reason=sk-private'];
-  assert.deepEqual(run(f, closeArgs, {}, binary, input), { code: 1, stdout: '', stderr: 'code-forge: block close is not supported in this case yet (close-unsupported-flag). Please report it: code-forge logs report\n' }, 'close refusal names the subcommand, never the token');
-  assert.equal(rows(f).length, 2, 'close adds exactly one row');
-  assert.equal(rows(f)[1].reason, 'close-unsupported-flag', 'close has its own stable reason');
-  assert.equal(rows(f)[1].sub, 'close', 'subcommand is recorded without the block id');
+  assert.deepEqual(run(f, closeArgs, {}, binary, input), { code: 1, stdout: '', stderr: 'block close: no run record for r1\n' }, 'B744: close prints Node\'s text');
+  assert.equal(rows(f).length, 1, 'B744: a close Go serves writes no row');
+  assert.deepEqual(run(f, keysUnported, {}, binary, input), { code: 1, stdout: '', stderr: 'code-forge: keys list is not supported in this case yet (unrouted). Please report it: code-forge logs report\n' }, 'keys refusal names the subcommand');
+  assert.equal(rows(f).length, 2, 'keys adds exactly one row');
+  assert.equal(rows(f)[1].reason, 'unrouted', 'keys has its own stable reason');
+  assert.equal(rows(f)[1].sub, 'list', 'the keys subcommand is recorded');
   run(f, args);
   assert.equal(rows(f).length, 3, 'repeat refusal adds exactly one row');
   assert.equal(statSync(f.file).mode & 0o777, 0o600, 'log mode is 0600');
@@ -78,9 +85,9 @@ test('B282 clause: refusals record private-safe reasons and Go reports counts', 
   assert.equal(report.stderr, '', 'report has no stderr');
   assert.deepEqual(JSON.parse(report.stdout), { total: 3, rows: [
     { verb: 'block', sub: 'attempt', reason: 'block-unported-subcommand', count: 2, last_at: rows(f)[2].at },
-    { verb: 'block', sub: 'close', reason: 'close-unsupported-flag', count: 1, last_at: rows(f)[1].at },
+    { verb: 'keys', sub: 'list', reason: 'unrouted', count: 1, last_at: rows(f)[1].at },
   ] }, 'JSON sorts by count and reports the latest timestamp');
-  assert.equal(run(f, ['logs', 'handovers']).stdout, 'count  verb  sub  reason\n2  block  attempt  block-unported-subcommand\n1  block  close  close-unsupported-flag\ntotal  3\n', 'text table sorts by count and includes total');
+  assert.equal(run(f, ['logs', 'handovers']).stdout, 'count  verb  sub  reason\n2  block  attempt  block-unported-subcommand\n1  keys  list  unrouted\ntotal  3\n', 'text table sorts by count and includes total');
   assert.deepEqual(JSON.parse(run(f, ['logs', 'handovers', '--json', '--since', '2999-01-01']).stdout), { total: 0, rows: [] }, 'since excludes older rows');
   assert.equal(rows(f).length, 3, 'Go reports do not record rows');
   const empty = fixture();
@@ -101,7 +108,7 @@ test('B282 clause: refusals record private-safe reasons and Go reports counts', 
 
 test('B282 privacy: only known verbs and their own subcommands reach the log', () => {
   const f = fixture();
-  for (const [args, code] of [[['my-secret-project-name'], 1], [['block', 'my-secret-project-name'], 2], [['my-secret-project-name', 'close'], 1], [['block', 'attempt', 'my-secret-project-name', '--run', fakeToken], 1]]) {
+  for (const [args, code] of [[['my-secret-project-name'], 1], [['block', 'my-secret-project-name'], 2], [['my-secret-project-name', 'close'], 1], [['block', 'attempt', 'my-secret-project-name', '--run', runId], 1]]) {
     assert.equal(run(f, args).code, code, `${args[0]} ${args[1] || ''}: B690a unknown verb or refusal exit 1, B690a fix1 unknown block subcommand usage exit 2`);
   }
   // B690a: an unknown verb gets Node's unknown-verb text and writes no row; fix1: so does a usage error
@@ -120,9 +127,11 @@ test('B282 boundary: disabled and failed recording preserve behavior; cap and pa
   assert.equal(rows(f).length, 0, 'Node-only entry writes zero rows');
   assert.equal(run(f, ['internal', 'version'], { CODE_FORGE_NODE: '/nonexistent' }).code, 0, 'Go command does not start Node');
   assert.equal(rows(f).length, 0, 'Go command writes zero rows');
-  chmodSync(f.home, 0o500);
+  // B744: the fixture made ~/.code-forge (the run file case), so that is the read-only directory
+  const state = path.join(f.home, '.code-forge');
+  chmodSync(state, 0o500);
   try { assert.deepEqual(run(f, unported), expected, 'read-only home preserves output and exit'); }
-  finally { chmodSync(f.home, 0o700); }
+  finally { chmodSync(state, 0o700); }
   assert.equal(rows(f).length, 0, 'read-only home writes zero rows');
   mkdirSync(path.dirname(f.file), { recursive: true });
   const old = Array.from({ length: 5000 }, (_, i) => ({ at: new Date(Date.UTC(2020, 0, 1, 0, 0, i)).toISOString(), verb: 'unknown', sub: '', reason: 'unrouted', version: pkg.version }));

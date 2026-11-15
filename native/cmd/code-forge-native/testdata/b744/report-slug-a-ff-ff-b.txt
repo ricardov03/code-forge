@@ -1,0 +1,4 @@
+exit 1
+-- stdout
+-- stderr
+report: ledgerPath: slug must match /^[a-z0-9][a-z0-9-]*$/ (got "a��b")

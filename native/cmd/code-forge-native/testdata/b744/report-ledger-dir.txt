@@ -1,0 +1,4 @@
+exit 1
+-- stdout
+-- stderr
+report: EISDIR: illegal operation on a directory, read

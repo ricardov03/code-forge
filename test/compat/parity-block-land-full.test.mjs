@@ -259,15 +259,16 @@ test('land records the specific close preflight hand-over reason without private
   const record = JSON.parse(await readFile(runFile(f), 'utf8'));
   record.blocks.B1.kind = 'light';
   await writeFile(runFile(f), JSON.stringify(record) + '\n');
-  // B541: since B466 Go answers an unreadable --transcript itself (Node's readFile error), so
-  // this case uses a close preflight that still hands over: a report that needs Node's secret
-  // scrubber (close-report-redaction). Both files live in a private customer folder.
+  // B541: since B466 Go answers an unreadable --transcript itself (Node's readFile error).
+  // B744: Go now closes with a secret-shaped report (Node writes it as given), so this case
+  // uses a close preflight that still hands over: a Claude log with a lone surrogate escape
+  // (close-transcript-format, B583). Both files live in a private customer folder.
   const privateDir = path.join(f.home, 'private-customer');
   await mkdir(privateDir);
   const reportPath = path.join(privateDir, 'secret-report');
   const transcriptPath = path.join(privateDir, 'secret-transcript');
   await writeFile(reportPath, 'tests passed; token sk-private-report-value\n');
-  await writeFile(transcriptPath, '');
+  await writeFile(transcriptPath, '{"type":"assistant","sessionId":"s1","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"echo \\ud800"}}]}}\n');
   const daemon = await serveDaemon(f, RUN, async () => null);
   try {
     const args = ['block', 'land', 'B1', '--run', RUN, '--report', reportPath,
@@ -286,14 +287,14 @@ test('land records the specific close preflight hand-over reason without private
     assert.equal(out.code, 1, out.stderr);
     assert.equal(out.signal, null);
     assert.equal(out.stdout, '', 'the refusal emits no JSON');
-    assert.equal(out.stderr, 'code-forge: block land is not supported in this case yet (close-report-redaction). Please report it: code-forge logs report\n');
+    assert.equal(out.stderr, 'code-forge: block land is not supported in this case yet (close-transcript-format). Please report it: code-forge logs report\n');
     const data = await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8');
     const rows = data.trim().split('\n').map((line) => JSON.parse(line));
     assert.equal(rows.length, 1, 'only the whole land command records a hand-over');
     assert.deepEqual(Object.keys(rows[0]).sort(), ['at', 'reason', 'sub', 'verb', 'version']);
     assert.equal(rows[0].verb, 'block');
     assert.equal(rows[0].sub, 'land');
-    assert.equal(rows[0].reason, 'close-report-redaction', 'specific close reason survives the land fallback');
+    assert.equal(rows[0].reason, 'close-transcript-format', 'specific close reason survives the land fallback');
     for (const privateValue of ['B1', RUN, f.repo, f.home, privateDir, 'secret-report', 'secret-transcript', 'sk-private-report-value']) {
       assert.equal(data.includes(privateValue), false, 'hand-over record omits private values');
     }
