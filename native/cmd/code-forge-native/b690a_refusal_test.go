@@ -47,12 +47,35 @@ func b690aInRepo(t *testing.T, args ...string) (b508Result, string) {
 	return b508Run(t, nil, args...), repo
 }
 
-// A case that used to start Node (block close with secret-like text in argv,
-// past Node's usage checks) now gets the Go refusal: one stderr line, exit 1, empty stdout, and the
+// b690aRunDirSeam makes ~/.code-forge/runs/r1.json a directory in the fresh
+// HOME b508Run sets, before dispatch: block attempt then hits a read error
+// Go does not serve yet (B744: Node exits 1 with "block attempt: EISDIR").
+func b690aRunDirSeam([]string) {
+	if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), ".code-forge", "runs", "r1.json"), 0o700); err != nil {
+		panic(err)
+	}
+}
+
+func b690aInRepoSeam(t *testing.T, seam func([]string), args ...string) (b508Result, string) {
+	t.Helper()
+	repo := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(cwd) }()
+	return b508Run(t, seam, args...), repo
+}
+
+// A case that used to start Node (block attempt whose run file cannot be
+// read; B744 ported the secret-like argv case it used before) now gets the Go refusal: one stderr line, exit 1, empty stdout, and the
 // only file written is the handovers.jsonl row (with its lock file).
 func TestB690aFormerHandOverRefuses(t *testing.T) {
-	res, repo := b690aInRepo(t, "block", "close", "B1", "--run", "r1", "--reason=sk-private")
-	want := "code-forge: block close is not supported in this case yet (close-unsupported-flag). Please report it: code-forge logs report\n"
+	res, repo := b690aInRepoSeam(t, b690aRunDirSeam, "block", "attempt", "B1", "--run", "r1")
+	want := "code-forge: block attempt is not supported in this case yet (block-unported-subcommand). Please report it: code-forge logs report\n"
 	if res.code != 1 || res.err != nil || res.stdout != "" || res.stderr != want {
 		t.Fatalf("code=%d err=%v stdout=%q stderr=%q; want exit 1 and %q", res.code, res.err, res.stdout, res.stderr, want)
 	}
@@ -68,13 +91,13 @@ func TestB690aFormerHandOverRefuses(t *testing.T) {
 // The refusal still writes the handovers.jsonl row, with its fields kept:
 // verb, sub, reason and version.
 func TestB690aRefusalWritesHandOverRow(t *testing.T) {
-	res, _ := b690aInRepo(t, "block", "close", "B1", "--run", "r1", "--reason=sk-private")
+	res, _ := b690aInRepoSeam(t, b690aRunDirSeam, "block", "attempt", "B1", "--run", "r1")
 	if res.code != 1 || res.err != nil {
 		t.Fatalf("code=%d err=%v; want the refusal, exit 1", res.code, res.err)
 	}
 	rows := b508Rows(t, res.home)
-	if len(rows) != 1 || rows[0].Verb != "block" || rows[0].Sub != "close" || rows[0].Reason != "close-unsupported-flag" || rows[0].Version != version || rows[0].At == "" {
-		t.Fatalf("rows %+v; want one block close close-unsupported-flag row", rows)
+	if len(rows) != 1 || rows[0].Verb != "block" || rows[0].Sub != "attempt" || rows[0].Reason != "block-unported-subcommand" || rows[0].Version != version || rows[0].At == "" {
+		t.Fatalf("rows %+v; want one block attempt block-unported-subcommand row", rows)
 	}
 }
 

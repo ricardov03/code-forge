@@ -1,0 +1,4 @@
+exit 1
+-- stdout
+-- stderr
+report: EACCES: permission denied, stat '<H>/.code-forge/ledger/t.jsonl'

@@ -169,12 +169,17 @@ func TestB456ReportExportWritesSectionFiles(t *testing.T) {
 	if !strings.Contains(string(data), "\"code_forge_usd\": 0.4,") {
 		t.Fatalf("outside_review.json %s", data)
 	}
-	// an export path Go cannot create goes to Node, which owns the error text
+	// B744: an export path under a file prints Node's error text, exit 1
 	blocker := filepath.Join(home, "blocker")
 	_ = os.WriteFile(blocker, []byte("x"), 0600)
 	plan := reportDecide([]string{"--slug", "t", "--export", filepath.Join(blocker, "sub")})
-	if plan == nil || plan(&bytes.Buffer{}, &bytes.Buffer{}) != -1 {
-		t.Fatal("an unwritable export dir must ask for the Node hand-over")
+	var eo, ee bytes.Buffer
+	if plan == nil {
+		t.Fatal("no plan for an export under a file")
+	}
+	want := "report: ENOTDIR: not a directory, mkdir '" + filepath.Join(blocker, "sub") + "'\n"
+	if code := plan(&eo, &ee); code != 1 || eo.String() != "" || ee.String() != want {
+		t.Fatalf("exit %d stdout %q stderr %q; want 1 and %q", code, eo.String(), ee.String(), want)
 	}
 }
 

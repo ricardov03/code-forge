@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -258,11 +259,12 @@ func rpTimestamp(v any) (ms float64, ok, sure bool) {
 	return float64(total), true, true
 }
 
-// reportRows reads every ledger row like readAllRows + parseLines. ok=false hands over.
-func reportRows(dir, slug string) ([]ledger.Object, bool) {
+// reportRows reads every ledger row like readAllRows + parseLines. ok=false hands over;
+// failed (B744) is Node's thrown I/O error text (a readdir or readFile failure).
+func reportRows(dir, slug string) (rows []ledger.Object, ok bool, failed string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, false
+		return nil, false, rpIOMessage(err, "scandir")
 	}
 	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(slug) + `\.(\d+)\.jsonl$`)
 	type rotation struct {
@@ -276,7 +278,7 @@ func reportRows(dir, slug string) ([]ledger.Object, bool) {
 			continue
 		}
 		if len(match[1]) > 15 {
-			return nil, false
+			return nil, false, ""
 		}
 		n, _ := strconv.ParseFloat(match[1], 64)
 		rotated = append(rotated, rotation{entry.Name(), n})
@@ -287,14 +289,20 @@ func reportRows(dir, slug string) ([]ledger.Object, bool) {
 		names = append(names, r.name)
 	}
 	names = append(names, slug+".jsonl")
-	rows := []ledger.Object{}
+	rows = []ledger.Object{}
 	for _, name := range names {
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
-		if err != nil || !utf8.Valid(data) {
-			return nil, false
+		if err != nil {
+			if failed := rpIOMessage(err, ""); failed != "" {
+				return nil, false, failed
+			}
+			return nil, false, ""
+		}
+		if !utf8.Valid(data) {
+			return nil, false, ""
 		}
 		lines := []string{}
 		for _, line := range strings.Split(string(data), "\n") {
@@ -304,7 +312,7 @@ func reportRows(dir, slug string) ([]ledger.Object, bool) {
 		}
 		for i, line := range lines {
 			if reportLoneSurrogat.MatchString(line) {
-				return nil, false
+				return nil, false, ""
 			}
 			obj, err := ledger.DecodeObject([]byte(line))
 			if err == nil {
@@ -315,17 +323,17 @@ func reportRows(dir, slug string) ([]ledger.Object, bool) {
 				if i == len(lines)-1 {
 					continue
 				}
-				return nil, false
+				return nil, false, ""
 			}
 			var value any
 			if json.Unmarshal([]byte(line), &value) != nil || value == nil {
-				return nil, false
+				return nil, false, ""
 			}
 			// a number, string, boolean or array row has none of the named properties
 			rows = append(rows, ledger.Object{})
 		}
 	}
-	return rows, true
+	return rows, true, ""
 }
 
 // reportSafe holds the row shapes whose JavaScript reading Go reproduces exactly.
@@ -1690,12 +1698,14 @@ func rpFail(message string, code int) reportRun {
 // reportDecide returns the Go run for a case Go serves, or nil to hand over. It reads the
 // ledger but writes nothing.
 func reportDecide(args []string) reportRun {
+	// B744: Node's argv is UTF-8 decoded, a bad byte becoming U+FFFD.
+	args = rpDecodeArgs(args)
 	slug := rpFlagValue(args, "--slug")
 	if slug == "" {
 		return rpFail(reportUsage, 2)
 	}
 	home := os.Getenv("HOME")
-	if !utf8.ValidString(slug) || home == "" {
+	if home == "" {
 		return nil
 	}
 	if !reportSlugPattern.MatchString(slug) {
@@ -1732,10 +1742,20 @@ func reportDecide(args []string) reportRun {
 		}
 		return rpFail(fmt.Sprintf("report: no ledger for slug \"%s\"; known slugs: %s\n", slug, known), 1)
 	}
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil {
+		// B744: Node's stat throws (ENOTDIR, EACCES, ...) and report prints it.
+		if failed := rpIOMessage(err, ""); failed != "" {
+			return rpFail("report: "+failed+"\n", 1)
+		}
 		return nil
 	}
-	rows, ok := reportRows(dir, slug)
+	if !info.Mode().IsRegular() && !info.IsDir() {
+		return nil
+	}
+	rows, ok, failed := reportRows(dir, slug)
+	if failed != "" {
+		return rpFail("report: "+failed+"\n", 1)
+	}
 	if !ok || !reportSafe(rows) {
 		return nil
 	}
@@ -1745,13 +1765,21 @@ func reportDecide(args []string) reportRun {
 		reported = append(reported.Clone(), ledger.Field{Key: "flaky", Value: built.flaky})
 	}
 	if exportDir := rpFlagValue(args, "--export"); exportDir != "" {
-		return func(stdout, _ io.Writer) int {
-			if os.MkdirAll(exportDir, 0777) != nil {
+		return func(stdout, stderr io.Writer) int {
+			if failed, known := rpExportMkdir(exportDir); failed != "" {
+				fmt.Fprint(stderr, "report: "+failed+"\n")
+				return 1
+			} else if !known {
 				return -1
 			}
 			for _, field := range reported {
-				if os.WriteFile(filepath.Join(exportDir, field.Key+".json"), []byte(rpPretty(field.Value)), 0666) != nil {
-					return -1
+				if err := os.WriteFile(filepath.Join(exportDir, field.Key+".json"), []byte(rpPretty(field.Value)), 0666); err != nil {
+					failed := rpIOMessage(err, "")
+					if failed == "" {
+						return -1
+					}
+					fmt.Fprint(stderr, "report: "+failed+"\n")
+					return 1
 				}
 			}
 			fmt.Fprintf(stdout, "exported %d section file(s) to %s\n", len(reported), exportDir)
@@ -1817,7 +1845,56 @@ func runReportVerb(args []string) int {
 		if stderr.last != "" {
 			message = stderr.last
 		}
-		nativeVerbFailure("report", "", args, code, message, before)
+		nativeVerbFailure("report", "", rpDecodeArgs(args), code, message, before)
 	}
 	return code
+}
+
+// rpDecodeArgs decodes each argument as Node decodes process.argv (B744).
+func rpDecodeArgs(args []string) []string {
+	out := make([]string, len(args))
+	for i, arg := range args {
+		out[i] = fcDecodeUTF8([]byte(arg))
+	}
+	return out
+}
+
+// rpIOMessage is Node's fs error text for err ("" when err carries no errno).
+// op, when set, names Node's call for Go's (readdir is "scandir" in Node).
+func rpIOMessage(err error, op string) string {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return ""
+	}
+	var pathErr *os.PathError
+	if op != "" && errors.As(err, &pathErr) {
+		err = &os.PathError{Op: op, Path: pathErr.Path, Err: pathErr.Err}
+	}
+	return blockIOMessage(err)
+}
+
+// rpExportMkdir is Node's mkdir(dir, {recursive: true}) error text, measured
+// against Node (B744): an existing non-directory dir is EEXIST and a file on
+// the way is ENOTDIR, both naming dir as given; EACCES names the directory
+// that could not be made. known=false: an error whose Node text is not
+// measured, which hands over.
+func rpExportMkdir(dir string) (failed string, known bool) {
+	if info, err := os.Stat(dir); err == nil && !info.IsDir() {
+		return blockIOMessage(&os.PathError{Op: "mkdir", Path: dir, Err: syscall.EEXIST}), true
+	}
+	err := os.MkdirAll(dir, 0777)
+	if err == nil {
+		return "", true
+	}
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return "", false
+	}
+	switch errno {
+	case syscall.ENOTDIR:
+		return blockIOMessage(&os.PathError{Op: "mkdir", Path: dir, Err: errno}), true
+	case syscall.EACCES:
+		return blockIOMessage(err), true
+	}
+	return "", false
 }

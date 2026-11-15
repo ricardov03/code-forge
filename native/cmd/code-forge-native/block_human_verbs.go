@@ -82,11 +82,9 @@ func (h *humanVerb) fallback() int {
 	return blockHandover(h.original(), hBlockUnportedSubcommand)
 }
 func (h *humanVerb) text(code int, text string) int {
-	// A usage error (exit 2) prints as Node prints it and its error-log row
-	// goes through gatesScrubber (B690a fix1; was a refusal).
-	if !h.marked && code != 2 && !closeTextSafe(text) {
-		return h.fallback()
-	}
+	// Every error prints as Node prints it (safeStderr masks registered
+	// secrets, as Node's writeSafe does) and its error-log row goes through
+	// gatesScrubber (B690a fix1 for usage, B744 for the rest; was a refusal).
 	h.mark()
 	fmt.Fprint(safeStderr, text)
 	// B685: writeVerbFailure logs clean(stderrText.trim()) with JavaScript's
