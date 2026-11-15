@@ -190,13 +190,21 @@ test('close flags run natively with byte parity for process, signed state and gi
   }
 });
 
-test('still-refused close flags record exactly one row with the boundary reason', async () => {
-  /** @type {[Record<string, any>, string[], string][]} */
-  // B451 runs --help=<value> and -h=<value> in Go; a token-like argument still hands the close to Node.
-  const cases = [
-    [{}, ['--auto-claim', '--reason=sk-private'], 'close-unsupported-flag'],
-    [{}, ['--remove-worktree', '--reason=sk-private'], 'close-unsupported-flag'],
-  ];
+test('close flags with values run in Go, match Node and record no hand-over row', async () => {
+  // B744: a token-like argument no longer refuses the close: Go matches Node's process, state and git.
+  for (const flags of [['--auto-claim', '--reason=sk-private'], ['--remove-worktree', '--reason=sk-private']]) {
+    const parity = await runParity([...args, ...flags, '--json'], { fixture: await fixture('auto-tree'), goCommand: BINARY, samePaths: true, tempRoot: '/tmp', prepare,
+      env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' } });
+    assert.deepEqual(parity.diffs, [], `${flags}: Go matches Node`);
+    const f = await fixture('auto-tree');
+    const cleanup = await prepare(f);
+    try {
+      const result = await launch(f, [...args, ...flags, '--json'], { CODE_FORGE_HANDOVER_LOG: '1' });
+      assert.doesNotMatch(result.stderr, /not supported in this case/, `${flags}: runs in Go with Node unavailable`);
+      await assert.rejects(readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8'), { code: 'ENOENT' }, `${flags}: no hand-over row`);
+    } finally { await cleanup(); }
+  }
+  // B451 runs --help=<value> and -h=<value> in Go.
   for (const flags of [['--auto-claim', '--help=yes'], ['--remove-worktree', '-h=1']]) {
     const f = await fixture('auto-tree');
     const parity = await runParity([...args, ...flags, '--json'], { fixture: f, goCommand: BINARY,
@@ -216,24 +224,6 @@ test('still-refused close flags record exactly one row with the boundary reason'
     assert.equal(result.code, 0, `${flags}: usage exits 0 with Node unavailable: ${result.stderr}`);
     assert.match(result.stdout, /block close <id> --run <r>/, `${flags}: close usage on stdout`);
     await assert.rejects(readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8'), { code: 'ENOENT' }, `${flags}: no hand-over row`);
-  }
-  const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
-  for (const [config, flags, reason] of cases) {
-    const f = await fixture('auto-tree', config);
-    const before = await snapshot(path.join(f.repo, '.code-forge'));
-    const result = await launch(f, [...args, ...flags, '--json'], { CODE_FORGE_HANDOVER_LOG: '1' });
-    // B690a: Go never starts Node; the case gets one refusal line, exit 1.
-    assert.deepEqual({ code: result.code, stdout: result.stdout, stderr: result.stderr }, { code: 1, stdout: '', stderr: `code-forge: block close is not supported in this case yet (${reason}). Please report it: code-forge logs report\n` }, `${flags}: refused in Go`);
-    const log = await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8');
-    assert.equal(log.endsWith('\n'), true, 'one newline-terminated telemetry row');
-    const rows = log.trimEnd().split('\n').map((line) => JSON.parse(line));
-    assert.equal(rows.length, 1, `${flags}: exactly one row, including nested preflight`);
-    assert.deepEqual({ ...rows[0], at: '<time>' }, { at: '<time>', verb: 'block', sub: 'close', reason, version }, 'exact reason and safe telemetry fields');
-    assert.equal(Number.isNaN(Date.parse(rows[0].at)), false, 'valid telemetry timestamp');
-    const report = await launch(f, ['logs', 'handovers', '--json']);
-    assert.equal(report.code, 0, report.stderr);
-    assert.deepEqual(JSON.parse(report.stdout), { total: 1, rows: [{ verb: 'block', sub: 'close', reason, count: 1, last_at: rows[0].at }] }, 'public hand-over report exposes the same single reason');
-    assert.deepEqual(await snapshot(path.join(f.repo, '.code-forge')), before, 'preflight writes no repository state');
   }
   for (const config of [
     { hooks: { on_block_end: { argv: ['/usr/bin/true'] } } },

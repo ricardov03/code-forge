@@ -1,0 +1,4 @@
+exit 1
+-- stdout
+-- stderr
+report: ENOTDIR: not a directory, stat '<H>/.code-forge/ledger/t.jsonl'

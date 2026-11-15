@@ -137,8 +137,16 @@ func TestB649HandoverRefusedUnderUntilDoneGrant(t *testing.T) {
 				args = "block|close|B1|--reason=sk-private"
 			}
 			r := b649Run(t, test, home, t.TempDir(), args)
-			// B690a: Go never starts Node; this case was a hand-over before
-			want, code := "code-forge: block close is not supported in this case yet (close-unsupported-flag). Please report it: code-forge logs report\n", 1
+			// B690a: Go never starts Node. B744: --reason=<text> no longer
+			// refuses on its own; the close runs on to its next step.
+			want, code := "code-forge: block close is not supported in this case yet (close-autopilot-grant). Please report it: code-forge logs report\n", 1
+			switch name {
+			case "no grant":
+				want = "code-forge: block close is not supported in this case yet (close-state-storage). Please report it: code-forge logs report\n"
+			case "other run's grant":
+				// Node's own text (CODE_FORGE_NATIVE=0, same home)
+				want = "block close: no run record for r-other\n"
+			}
 			if name == "until-done, no --run" {
 				// B690a fix1: Node's usage error comes first (Node-recorded).
 				want, code = "block close: a block id and --run are required\n", 2

@@ -1,0 +1,4 @@
+exit 2
+-- stdout
+-- stderr
+block close: unknown flag "--dry-run"

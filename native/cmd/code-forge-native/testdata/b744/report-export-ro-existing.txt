@@ -1,0 +1,4 @@
+exit 1
+-- stdout
+-- stderr
+report: EACCES: permission denied, open 'ro/cost_per_block.json'

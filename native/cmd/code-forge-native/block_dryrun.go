@@ -152,12 +152,7 @@ func closeDryRows(args []string, errOut io.Writer) (id string, rows []any, flags
 	dry := &closeDry{}
 	reason := hCloseAutoClaim
 	code = 0
-	if !closeTextSafe(strings.Join(args, "\n")) {
-		code = landHandover
-		reason = hCloseUnsupportedFlag
-	} else {
-		code = blockCloseStepWithReason(args, &landStep{preflight: true, stdout: io.Discard, stderr: &stderr, dry: dry}, &reason)
-	}
+	code = blockCloseStepWithReason(args, &landStep{preflight: true, stdout: io.Discard, stderr: &stderr, dry: dry}, &reason)
 	if code == 2 {
 		fmt.Fprint(errOut, stderr.String())
 		return "", nil, flags, 2
