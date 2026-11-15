@@ -19,6 +19,13 @@ import (
 // full go test ./... at the end.
 
 const b667FakeGo = `#!/bin/sh
+# B723b: the gate lists the module's import graph with go list; the real go
+# answers it (B667_REAL_GO), unless the test asks for a list failure.
+if [ "$1" = list ]; then
+  [ -f "$B667_GO_LOG.list-fail" ] && { echo "go: fake list failure" >&2; exit 1; }
+  [ -f "$B667_GO_LOG.list-empty" ] && exit 0
+  exec "$B667_REAL_GO" "$@"
+fi
 case "$PWD" in *.merge-gate-*) where=merge ;; *) where=block ;; esac
 printf '%s|%s\n' "$where" "$*" >> "$B667_GO_LOG"
 if [ "$1" = test ] && [ -f "$B667_GO_LOG.red-full" ]; then
@@ -39,6 +46,11 @@ func b667WriteFile(t *testing.T, path, body string) {
 
 func b667FakeGoBin(t *testing.T, root string) (string, string) {
 	t.Helper()
+	real, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("no go toolchain on PATH")
+	}
+	t.Setenv("B667_REAL_GO", real)
 	bin := filepath.Join(root, "fakebin", "go")
 	b667WriteFile(t, bin, b667FakeGo)
 	if err := os.Chmod(bin, 0755); err != nil {
@@ -80,6 +92,13 @@ type b667GateFixture struct {
 // body deletes the file.
 func newB667GateFixture(t *testing.T, gatesExtra map[string]any, changed map[string]*string) b667GateFixture {
 	t.Helper()
+	return newB667GateFixtureOn(t, b667GoBase, gatesExtra, changed)
+}
+
+// newB667GateFixtureOn is newB667GateFixture on the base files given; the
+// block owns every top-level directory of base.
+func newB667GateFixtureOn(t *testing.T, base map[string]string, gatesExtra map[string]any, changed map[string]*string) b667GateFixture {
+	t.Helper()
 	root := t.TempDir()
 	goBin, log := b667FakeGoBin(t, root)
 	f := b667GateFixture{repo: filepath.Join(root, "repo"), home: filepath.Join(root, "home"), log: log}
@@ -98,8 +117,14 @@ func newB667GateFixture(t *testing.T, gatesExtra map[string]any, changed map[str
 	}
 	config, _ := json.Marshal(map[string]any{"gates": g})
 	b667WriteFile(t, filepath.Join(f.repo, ".code-forge.yml"), string(config))
-	for name, body := range b667GoBase {
+	owned := []string{"scripts", "README.md", "go.mod"}
+	seen := map[string]bool{}
+	for name, body := range base {
 		b667WriteFile(t, filepath.Join(f.repo, name), body)
+		if dir, _, ok := strings.Cut(name, "/"); ok && !seen[dir] {
+			seen[dir] = true
+			owned = append(owned, dir)
+		}
 	}
 	git("init", "-q", "-b", "main")
 	git("add", ".")
@@ -114,7 +139,7 @@ func newB667GateFixture(t *testing.T, gatesExtra map[string]any, changed map[str
 		}
 		b667WriteFile(t, filepath.Join(f.repo, name), *body)
 	}
-	block := map[string]any{"status": "open", "kind": "code", "base_branch": "main", "owned_files": []string{"a", "b", "c", "scripts", "README.md", "go.mod"}, "test_files": []string{}}
+	block := map[string]any{"status": "open", "kind": "code", "base_branch": "main", "owned_files": owned, "test_files": []string{}}
 	data, _ := json.Marshal(map[string]any{"run_id": "fixture", "workspace": f.repo, "status": "active", "project": "fixture", "blocks": map[string]any{"B1": block}})
 	b667WriteFile(t, filepath.Join(f.home, ".code-forge", "runs", "fixture.json"), string(data))
 	return f

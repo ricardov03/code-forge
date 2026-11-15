@@ -701,8 +701,12 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 				changed = gatesOwnedListed(b, listed)
 			}
 			if goPackages {
-				// B667: a Go project tests only its changed packages.
-				scope = gpkScope(cwd, changed, base != "")
+				// B667: a Go project tests only its changed packages and
+				// (B723b) the packages that import them.
+				var err error
+				if scope, err = gpkScope(cwd, gpkGo(p), changed, base != ""); err != nil {
+					return err
+				}
 			} else {
 				scope = gatesChangedSelect(cwd, b, listed, changed, goOnly)
 				scope.Files = gatesRunnerFiles(p.Commands["test"].Argv, scope.Files)
@@ -710,8 +714,13 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 			changedScope = &scope
 		}
 		if o.run == "" && o.scope != nil && gatesSelectable(p) {
-			if goPackages && o.goChanged != nil {
-				scope = gpkScope(cwd, o.goChanged, false)
+			if goPackages && o.goScope != nil {
+				scope = *o.goScope
+			} else if goPackages && o.goChanged != nil {
+				var err error
+				if scope, err = gpkScope(cwd, gpkGo(p), o.goChanged, false); err != nil {
+					return err
+				}
 			} else {
 				scope = *o.scope
 				scope.Files = gatesRunnerFiles(p.Commands["test"].Argv, scope.Files)
@@ -784,7 +793,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 				if r.Get("gate") == "test" {
 					gatesAdd(&r, scope.Fields(true))
 					if goScoped {
-						r.Set("packages", scope.Files)
+						gpkFields(&r, scope)
 					}
 					results[i] = r
 				}
@@ -947,7 +956,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		} else if changedScope != nil {
 			gatesAdd(&row, changedScope.Fields(true))
 			if goPackages && gpkScoped(*changedScope) {
-				row.Set("packages", changedScope.Files)
+				gpkFields(&row, *changedScope)
 			} else if gatesSelectedReason(changedScope.Reason) {
 				row.Set("test_files", changedScope.Files)
 			}

@@ -167,8 +167,15 @@ A Go project tests only its changed packages (B667). This applies when the test 
 or the package that holds a changed `testdata/` file. A deleted directory is dropped.
 `go vet ./...` and `gofmt` keep their whole-module argv. With no changed package, the test gate
 is skipped with `reason: no_changes`. A change to `go.mod`, `go.sum` or `go.work` runs the full
-suite with `reason: go_mod`. `gate.done` carries `scope: changed`, `reason: go_packages` and
-`packages` (the list). The block land and close gates use this scope.
+suite with `reason: go_mod`. The importer packages run too (B723b): every package `go test ./...`
+reaches whose build imports a changed package (directly or through other packages, its `Deps`),
+or whose `_test.go` files (`TestImports`) or external test package (`XTestImports`) import one
+of those. code-forge reads this from `go list -json ./...` in the workspace. When `go list` fails
+or lists no package, the gate fails with
+`go changed packages: cannot list the importer packages of <packages> ...` and runs no test;
+it never falls back to nothing or to `.`. `gate.done` carries `scope: changed`,
+`reason: go_packages`, `packages` (the changed packages) and `importer_packages` (the importer
+packages, separately); `test_count` counts both. The block land and close gates use this scope.
 
 A block is Go-only when every owned path is under `native/`, `docs/`, `plans/` or
 `.github/`, is a runnable test file under `test/` (`*.test.*` or `*.spec.*`), is
@@ -668,7 +675,8 @@ no block owns or changes a Node product file (`src/**`, `bin/**`, `scripts/**/*.
 batch whose selection holds `test/compat/go.test.mjs` runs it (B407). The signed `land.batch` row
 records `merge_gate_reason`. A test command without `{test_files}` gets the selection appended
 here too; it never runs unscoped.
-In a Go project with package scope (B667), each block tests only its changed packages. The merge
+In a Go project with package scope (B667), each block tests only its changed packages and their
+importer packages (B723b). The merge
 gate then runs ONE full `go test ./...` on the merged trial tree, before any push. It prints
 `merge gate: full go test suite once for the batch (B667)`; `--json` emits a `merge_gate` event
 with `reason: full_suite`. A red full suite lands nothing and pushes nothing from the failing

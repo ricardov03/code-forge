@@ -147,8 +147,10 @@ also selects `test/compat/config-golden.test.mjs` (B409). A test command without
 `{test_files}` gets the selection appended. It never
 runs the full Node suite and never hands over; an empty selection skips the test gate. The
 merge gates of `block land --merge` and of a batch land use the same selection (B404).
-A Go project whose test gate is `go test ./...` tests only its changed packages instead
-(`reason: go_packages`, `gate.done` field `packages`); a batch land then runs one full
+A Go project whose test gate is `go test ./...` tests only its changed packages and the
+packages that import them (`Deps`, `TestImports`, `XTestImports` from `go list -json ./...`;
+a `go list` failure fails the gate) instead (`reason: go_packages`, `gate.done` fields
+`packages` and `importer_packages`, B723b); a batch land then runs one full
 `go test ./...` merge gate at the end (B667, `gates.go_changed_packages`).
 `gates run --run R --block B --full` is the only local full suite.
 Its merge gate can also reuse a green full run for the exact merged tree.

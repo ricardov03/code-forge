@@ -725,7 +725,11 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 	if goPackages {
 		// B667: a Go project tests only the block's changed packages; the
 		// batch runs one full go test ./... at the end (merge gate).
-		scope = gpkScope(block.tree.Workspace, delta, base != "")
+		// B723b: the importer packages of the changed ones run too; a go
+		// list error fails the block gate.
+		if scope, err = gpkScope(block.tree.Workspace, gpkGo(p), delta, base != ""); err != nil {
+			return err
+		}
 		if gpkScoped(scope) {
 			p = gpkPlan(p, scope)
 		}
@@ -782,7 +786,7 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 	row := ledger.Object{{Key: "event", Value: "gate.done"}, {Key: "block", Value: block.id}, {Key: "worktree", Value: block.tree.Path}, {Key: "all_ok", Value: all && ctx.Err() == nil}, {Key: "results", Value: summaries}, {Key: "test_base", Value: base}}
 	gatesAdd(&row, scope.Fields(true))
 	if goPackages && gpkScoped(scope) {
-		row.Set("packages", scope.Files)
+		gpkFields(&row, scope)
 	} else if gatesSelectedReason(scope.Reason) {
 		row.Set("test_files", scope.Files)
 	}
