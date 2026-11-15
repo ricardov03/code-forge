@@ -32,15 +32,18 @@ When a release fixes an error users report through `code-forge logs report`, rec
 fingerprint (the 12 characters `code-forge logs` shows, and the `<!-- code-forge-fp: … -->` line of
 the issue) before you release:
 
+Add one entry to `native/cmd/code-forge-native/data/known-fixes.json`, the table built into the
+Go binary (the only copy since B690b), then check it:
+
 ```
-npm run known-fix -- add 0123456789ab 0.4.0 "review no longer hangs on an empty diff." --issue 42
-npm run known-fix -- check               # validate the whole table
+cd native && go test -count=1 -run TestB690bKnownFixes ./cmd/code-forge-native
 ```
 
-The version is the release that carries the fix (usually the one you are about to make). This
-appends one entry to `src/util/known-fixes.json`, which ships in the package. The Go binary has
-its own built-in copy (B688): copy the file to `native/cmd/code-forge-native/data/known-fixes.json`
-before the release build; a Go test fails while the two differ.
+The version is the release that carries the fix (usually the one you are about to make). The
+test refuses a table that is not an array, an unknown key, a fingerprint that is not 12
+lowercase hex characters or is listed twice, a `fixed_in` that is not `x.y.z`, a summary that is
+empty, longer than 200 characters or not one plain line, and an `issue` that is not a positive
+number or `null`.
 
 ```json
 [
@@ -73,7 +76,7 @@ that run's job summary; it never changes an issue.
 ## The one-command flow
 
 ```
-npm run known-fix -- check              # if this release fixes reported errors: table is valid
+(cd native && go test -count=1 -run TestB690bKnownFixes ./cmd/code-forge-native)  # if this release fixes reported errors
 npm run release -- minor --dry-run      # see the plan and the diffs; writes nothing
 npm run release -- minor                # bump, CHANGELOG, README, checks, commit, tag
 npm publish dist/npm/darwin-arm64       # the four platform packages first (B606)
@@ -163,7 +166,7 @@ The native code is pure Go and standard library only; builds and compatibility t
 force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller configuration.
 
 1. Every landed block has a CHANGELOG entry under `## [Unreleased]`.
-2. `npm run known-fix -- check` when the release fixes reported errors.
+2. The known-fixes test above when the release fixes reported errors.
 3. Complete [the docs block](#the-docs-block), commit its stamp last, and land it on `main`.
 4. `npm run release -- <bump> --dry-run`, and read the README and CHANGELOG diffs.
 5. `npm run release -- <bump>`.
@@ -205,8 +208,8 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
    Per-version notes live only in CHANGELOG, with no per-block additions to README.
 4. **Checks.** The release runs no Node suite on the laptop (B580). Before it writes any file it
    reads the latest `CI` workflow run for HEAD (`gh run list --commit <HEAD> --workflow CI
-   --limit 1`). CI runs `npm test` (which includes the `gen-config-doc --check` and
-   `gen-commands-doc --check` tests) and `npm run typecheck`, so the run must be `completed` with
+   --limit 1`). CI runs the Go suite, the package check (no Node product file is packed) and the
+   `gen-config-doc --check` and `gen-commands-doc --check` doc checks, so the run must be `completed` with
    conclusion `success` for that exact HEAD. A missing, running or failed run, or a `gh` error,
    refuses with exit 1 and one line that names HEAD and the run state, for example
    `CI for HEAD <sha> is not green: run status in_progress; push HEAD and wait for a green CI run`.

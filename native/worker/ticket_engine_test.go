@@ -72,11 +72,11 @@ func b497Repo(t *testing.T, root string) string {
 
 func b497Schema(t *testing.T) {
 	t.Helper()
-	schema, err := filepath.Abs(filepath.Join("..", "..", "src", "review", "finding.schema.json"))
+	schema, err := filepath.Abs(filepath.Join("..", "session", "finding.schema.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	lenses, err := filepath.Abs(filepath.Join("..", "..", "src", "review", "lenses"))
+	lenses, err := filepath.Abs(filepath.Join("..", "review", "lenses"))
 	if err != nil {
 		t.Fatal(err)
 	}

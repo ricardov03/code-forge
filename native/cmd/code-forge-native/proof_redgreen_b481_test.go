@@ -1,14 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -279,53 +274,6 @@ func TestB481ProofRedGreenHandsOver(t *testing.T) {
 	_ = repo
 }
 
-// TestB481ProofRedGreenMatchesNode runs real node:test files through both
-// engines on twin fixtures (skipped without node on PATH).
-func TestB481ProofRedGreenMatchesNode(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not on PATH; the Go side is checked by TestB481ProofRedGreenGo")
-	}
-	for _, c := range b481Cases {
-		switch c.name {
-		case "revert-proven", "case-pattern", "assertion-deletion", "lock-isolation", "lock-not-held", "journal-present", "setup-failed", "unsupported-test", "test-not-a-file", "revert-no-source", "not-open", "runners-empty":
-		default:
-			continue // the fake test modes only exist for the Go side
-		}
-		t.Run(c.name, func(t *testing.T) {
-			goHome, goRepo := b481Fixture(t, c)
-			// CODE_FORGE_NODE does not resolve (a hand-over fails the test); the
-			// red-green runner finds the real node on PATH
-			goCode, goOut, goErr := b462GoCall(t, goHome, goRepo, c.args)
-			nodeHome, nodeRepo := b481Fixture(t, c)
-			cmd := exec.Command(node, append([]string{filepath.Join(b458Repo(t), "bin", "code-forge.mjs")}, c.args...)...)
-			cmd.Dir = nodeRepo
-			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + nodeHome, "TMPDIR=" + os.TempDir(), "CODE_FORGE_NATIVE=0", "CODE_FORGE_HANDOVER_LOG=0", "CODE_FORGE_NO_ERROR_LOG=1", "NO_COLOR=1"}
-			var stdout, stderr bytes.Buffer
-			cmd.Stdout, cmd.Stderr = &stdout, &stderr
-			nodeCode := 0
-			if err := cmd.Run(); err != nil {
-				var exit *exec.ExitError
-				if !errors.As(err, &exit) {
-					t.Fatal(err)
-				}
-				nodeCode = exit.ExitCode()
-			}
-			norm := func(s, repo string) string {
-				return b462Stamp.ReplaceAllString(strings.ReplaceAll(s, repo, "<REPO>"), "<T>")
-			}
-			if goCode != nodeCode || norm(goOut, goRepo) != norm(stdout.String(), nodeRepo) || norm(goErr, goRepo) != norm(stderr.String(), nodeRepo) {
-				t.Fatalf("go %d %q %q\nnode %d %q %q", goCode, goOut, goErr, nodeCode, stdout.String(), stderr.String())
-			}
-			goState, nodeState := b462Collect(t, goHome, goRepo), b462Collect(t, nodeHome, nodeRepo)
-			goState.record, nodeState.record = b462Stamp.ReplaceAllString(goState.record, "<T>"), b462Stamp.ReplaceAllString(nodeState.record, "<T>")
-			if !reflect.DeepEqual(goState, nodeState) {
-				t.Fatalf("state differs\ngo   %+v\nnode %+v", goState, nodeState)
-			}
-		})
-	}
-}
-
 // b481Lex are assertion-deletion inputs: statements over lines, chains,
 // strings and comments, template literals, and the three refusals.
 var b481Lex = []string{
@@ -357,81 +305,6 @@ var b481Runs = []struct {
 }
 
 func b481Int(n int) *int { return &n }
-
-// TestB481LexAndParseMatchNode: Go's deleteAssertions and parseRed give
-// Node's bytes, verdicts and error messages (skipped without node).
-func TestB481LexAndParseMatchNode(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not on PATH")
-	}
-	repo := b458Repo(t)
-	script := `const { deleteAssertions } = await import(process.argv[1] + '/src/proof/red-green.mjs');
-const { parseRed } = await import(process.argv[1] + '/src/proof/red-parse.mjs');
-const input = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-const lex = input.lex.map((src) => { try { return { out: deleteAssertions('t/x.test.mjs', Buffer.from(src)).bytes.toString('base64') }; } catch (e) { return { code: e.code, message: e.message }; } });
-const red = input.runs.map((r) => { const p = parseRed({ result: 'failed', stdout: r.stdout, stderr: r.stderr, code: r.code, signal: r.signal, timedOut: r.timedOut }); return { verdict: p.verdict, kind: p.red_kind, failed: p.failed ?? null }; });
-console.log(JSON.stringify({ lex, red }));`
-	type run struct {
-		Stdout   string  `json:"stdout"`
-		Stderr   string  `json:"stderr"`
-		Code     *int    `json:"code"`
-		Signal   *string `json:"signal"`
-		TimedOut bool    `json:"timedOut"`
-	}
-	runs := []run{}
-	for _, r := range b481Runs {
-		var signal *string
-		if r.signal != "" {
-			signal = &r.signal
-		}
-		runs = append(runs, run{r.stdout, r.stderr, r.code, signal, r.timedOut})
-	}
-	input, _ := json.Marshal(map[string]any{"lex": b481Lex, "runs": runs})
-	cmd := exec.Command(node, "--input-type=commonjs", "-e", "(async () => {"+script+"})()", repo)
-	cmd.Stdin = bytes.NewReader(input)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("node: %v: %s", err, out)
-	}
-	var want struct {
-		Lex []struct {
-			Out     *string `json:"out"`
-			Code    string  `json:"code"`
-			Message string  `json:"message"`
-		} `json:"lex"`
-		Red []struct {
-			Verdict string `json:"verdict"`
-			Kind    string `json:"kind"`
-			Failed  any    `json:"failed"`
-		} `json:"red"`
-	}
-	if err := json.Unmarshal(out, &want); err != nil {
-		t.Fatalf("node output %s: %v", out, err)
-	}
-	for i, src := range b481Lex {
-		got, err := proofDeleteAssertions("t/x.test.mjs", []byte(src))
-		w := want.Lex[i]
-		if w.Out != nil {
-			if err != nil || base64.StdEncoding.EncodeToString(got) != *w.Out {
-				gotNode, _ := base64.StdEncoding.DecodeString(*w.Out)
-				t.Fatalf("lex %d: go %q %v, node %q", i, got, err, gotNode)
-			}
-			continue
-		}
-		var pe *proofError
-		if !errors.As(err, &pe) || pe.code != w.Code || pe.message != w.Message {
-			t.Fatalf("lex %d: go %v, node %s %s", i, err, w.Code, w.Message)
-		}
-	}
-	for i, r := range b481Runs {
-		got := proofParseRed(&proofExecResult{stdout: r.stdout, stderr: r.stderr, code: r.code, signal: r.signal, timedOut: r.timedOut})
-		w := want.Red[i]
-		if got.verdict != w.Verdict || got.kind != w.Kind || !reflect.DeepEqual(got.failed, w.Failed) {
-			t.Fatalf("parse %d: go %+v, node %+v", i, got, w)
-		}
-	}
-}
 
 // TestB481NoRunRecord: the calls B458 handed over (proof-run) now refuse in
 // Go as Node does (checked with CODE_FORGE_NATIVE=0: same text, exit 1).

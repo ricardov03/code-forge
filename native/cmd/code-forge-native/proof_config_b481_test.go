@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -142,17 +141,6 @@ func TestB481ProofConfigGo(t *testing.T) {
 		if got.code == 127 || strings.Contains(got.stderr, "nonexistent-b458-node") {
 			t.Errorf("%s handed over: %+v", name, got)
 		}
-	}
-}
-
-func TestB481ProofConfigMatchesNode(t *testing.T) {
-	for name, body := range b481ConfigBodies(t) {
-		args := []string{"proof", "tier", "--file", "src/a.go", "--risk", "0", "--cwd", b462TierDir(t, body)}
-		got, want := b458Go(t, args), b458Node(t, args)
-		if got.code != want.code || got.stdout != want.stdout || got.stderr != want.stderr || got.crumbs != want.crumbs || !reflect.DeepEqual(got.errors, want.errors) {
-			t.Errorf("%s:\ngo   %+v\nnode %+v", name, got, want)
-		}
-		t.Logf("%s: exit %d %s%s", name, got.code, got.stdout, got.stderr)
 	}
 }
 

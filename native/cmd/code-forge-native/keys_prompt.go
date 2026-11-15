@@ -185,9 +185,6 @@ func keysPromptDecide(name string, w keysWriter, storeWarning string, r *keysRed
 	}
 	env := tty.initWizEnv
 	eofText := initWizEOFFile()
-	if eofText == "" {
-		return nil
-	}
 	return func(stdout, stderr io.Writer) int {
 		r.write(stderr, storeWarning)
 		term := &initWizTerm{in: env.in, out: env.out, cols: env.cols, rows: env.rows, look: keysLook(colors, os.Getenv("TERM") != "linux")}

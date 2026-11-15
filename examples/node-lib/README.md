@@ -1,8 +1,8 @@
 # node-lib (example)
 
 A three-module ESM library with a `node:test` suite. It ships inside `@codedology/code-forge` as the
-repository the **first real use** runs on (`scripts/first-use.mjs`): the script copies it to a temp
-directory, `git init`s it and runs one block — "add `clamp()` with tests" — end to end.
+practice repository of the rehearsal in `docs/tutorial-first-test.md`: copy it to a temp directory,
+`git init` it and run one block — "add `clamp()` with tests" — end to end.
 
 - `src/math.mjs` — `add`, `sub`, `mean`
 - `src/strings.mjs` — `pad`, `capitalize`, `greet`
@@ -13,5 +13,5 @@ directory, `git init`s it and runs one block — "add `clamp()` with tests" — 
 the export restores them. `.env.example` is copied to `.env` (untracked) before the run; `greet()`
 reads `GREETING` from it.
 
-The ignore rules ship as `gitignore` (npm pack drops a nested `.gitignore`); `first-use.mjs` renames
-it to `.gitignore` in the copy before `git init`.
+The ignore rules ship as `gitignore` (npm pack drops a nested `.gitignore`); rename it to
+`.gitignore` in the copy before `git init`.

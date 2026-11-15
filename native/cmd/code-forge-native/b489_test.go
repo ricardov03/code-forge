@@ -45,8 +45,8 @@ func b489Sha(s string) string { d := sha256.Sum256([]byte(s)); return hex.Encode
 func newB489Fix(t *testing.T) *b489Fix {
 	t.Helper()
 	// Before the chdir below: the package directory holds the paths.
-	schema, _ := filepath.Abs(filepath.Join("..", "..", "..", "src", "review", "finding.schema.json"))
-	lenses, _ := filepath.Abs(filepath.Join("..", "..", "..", "src", "review", "lenses"))
+	schema, _ := filepath.Abs(filepath.Join("..", "..", "session", "finding.schema.json"))
+	lenses, _ := filepath.Abs(filepath.Join("..", "..", "review", "lenses"))
 	f := &b489Fix{runFixture: newRunFixture(t)}
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "file")
 	t.Setenv("CODE_FORGE_KEY_JEV", "")

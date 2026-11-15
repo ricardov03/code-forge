@@ -19,7 +19,7 @@ body:
     id: versions
     attributes:
       label: Versions
-      description: code-forge, Node and OS versions (`code-forge --version`, `node --version`).
+      description: code-forge and OS versions (`code-forge --version`).
     validations:
       required: false
   - type: textarea

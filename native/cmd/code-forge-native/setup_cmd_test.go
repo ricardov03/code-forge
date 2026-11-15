@@ -190,7 +190,8 @@ func TestPackageManifestHasNoInstallScripts(t *testing.T) {
 			t.Errorf("package.json declares %q = %q; want no install-time script", hook, script)
 		}
 	}
-	if manifest.Scripts["setup"] != "node scripts/setup.mjs" {
-		t.Errorf("package.json setup script = %q; want the manual check kept", manifest.Scripts["setup"])
+	// B690b: the manual check is `code-forge setup`; no script runs Node's setup.
+	if script, ok := manifest.Scripts["setup"]; ok {
+		t.Errorf("package.json setup script = %q; want none (code-forge setup is the check)", script)
 	}
 }

@@ -8,7 +8,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -174,7 +173,7 @@ func TestB688UpgradeVerbWithoutSrc(t *testing.T) {
 }
 
 // The lenses and the finding schema load with no src/ folder and equal the
-// Node copies in src/review.
+// files under native/review/lenses and native/session (the only copies since B690b).
 func TestB688LensesAndSchemaWithoutSrc(t *testing.T) {
 	root, binary := b688Package(t, "@codedology/code-forge")
 	b688NoSrc(t, root)
@@ -184,14 +183,14 @@ func TestB688LensesAndSchemaWithoutSrc(t *testing.T) {
 	}
 	var want strings.Builder
 	for _, name := range review.Lenses {
-		data, err := os.ReadFile(filepath.Join("..", "..", "..", "src", "review", "lenses", name+".md"))
+		data, err := os.ReadFile(filepath.Join("..", "..", "review", "lenses", name+".md"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		text := strings.TrimRight(string(data), " \t\r\n")
 		fmt.Fprintf(&want, "lens %s %d\n%s\n", name, len(text), text)
 	}
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "src", "review", "finding.schema.json"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "session", "finding.schema.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +201,7 @@ func TestB688LensesAndSchemaWithoutSrc(t *testing.T) {
 	encoded, _ := schema.MarshalJSON()
 	fmt.Fprintf(&want, "schema %s\n", encoded)
 	if out != want.String() {
-		t.Fatalf("data output differs from src/review:\n got %q\nwant %q", out, want.String())
+		t.Fatalf("data output differs from the native copies:\n got %q\nwant %q", out, want.String())
 	}
 }
 
@@ -249,26 +248,4 @@ func TestB688LogsWithoutSrcKnownFixes(t *testing.T) {
 			t.Fatalf("logs = %d %q %q, want 0 %q", code, out, errText, want)
 		}
 	})
-}
-
-// The built-in known-fixes table equals the shipped Node copy, so Go and
-// Node agree on it until Node is removed (scripts/known-fix.mjs edits the
-// src/util copy; copy it to native/cmd/code-forge-native/data after).
-func TestB688KnownFixesMatchesSrc(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "src", "util", "known-fixes.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var built, shipped any
-	if err := json.Unmarshal(logsKnownFixes, &built); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, &shipped); err != nil {
-		t.Fatal(err)
-	}
-	a, _ := json.Marshal(built)
-	b, _ := json.Marshal(shipped)
-	if !bytes.Equal(a, b) {
-		t.Fatalf("built-in known-fixes table %s differs from src/util/known-fixes.json %s", a, b)
-	}
 }

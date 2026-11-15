@@ -78,22 +78,14 @@ func TestB690aRefusalWritesHandOverRow(t *testing.T) {
 	}
 }
 
-// b690aVerbFile is bin/code-forge.mjs's VERB_FILE_PATTERN.
-var b690aVerbFile = regexp.MustCompile(`^[a-z][a-z0-9-]*\.mjs$`)
+// b690bNodeVerbs is the verb list of the removed Node router (src/cli's verb
+// file names at B690b), which the unknown-verb text keeps.
+var b690bNodeVerbs = []string{"author", "autopilot", "block", "ci", "cloud-coder", "context", "decisions", "docs", "doctor", "facts", "gates", "heal", "help", "init", "jev", "keys", "land", "ledger", "list", "logs", "models", "native-status", "outcome", "pipeline", "plan", "proof", "queue", "remove", "report", "resolve", "review", "review-file", "run", "s2", "setup", "spawn", "status", "sweep", "tools", "upgrade", "validate", "version", "worker"}
 
-// An unknown verb prints Node's text (bin/code-forge.mjs: the verb list is
-// src/cli's verb file names, sorted), exit 1, and writes nothing at all.
+// An unknown verb prints Node's text (the verb list is the old src/cli's
+// verb file names, sorted), exit 1, and writes nothing at all.
 func TestB690aUnknownVerbMatchesNode(t *testing.T) {
-	entries, err := os.ReadDir(filepath.Join("..", "..", "..", "src", "cli"))
-	if err != nil {
-		t.Skipf("no src/cli to compare with: %v", err)
-	}
-	verbs := []string{}
-	for _, e := range entries {
-		if !e.IsDir() && b690aVerbFile.MatchString(e.Name()) {
-			verbs = append(verbs, strings.TrimSuffix(e.Name(), ".mjs"))
-		}
-	}
+	verbs := append([]string(nil), b690bNodeVerbs...)
 	sort.Strings(verbs)
 	want := "code-forge: unknown verb \"private-verb\"\nVerbs:\n  " + strings.Join(verbs, "\n  ") + "\n"
 	res, repo := b690aInRepo(t, "private-verb", "private-value")

@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 )
 
@@ -84,19 +83,6 @@ func TestB462ProofTierConfigGo(t *testing.T) {
 		got := b458Go(t, []string{"proof", "tier", "--file", c.file, "--risk", c.risk, "--cwd", dir})
 		if got.code != c.code || got.stdout != c.stdout || got.stderr != c.stderr {
 			t.Fatalf("%s %s: got %+v", c.config, c.file, got)
-		}
-	}
-}
-
-func TestB462ProofTierConfigMatchesNode(t *testing.T) {
-	for name, body := range b462TierConfigs {
-		for _, file := range []string{"src/a.go", "lib/x.go", ""} {
-			dir := b462TierDir(t, body)
-			args := []string{"proof", "tier", "--file", file, "--risk", "0", "--cwd", dir}
-			got, want := b458Go(t, args), b458Node(t, args)
-			if got.code != want.code || got.stdout != want.stdout || got.stderr != want.stderr || got.crumbs != want.crumbs || !reflect.DeepEqual(got.errors, want.errors) {
-				t.Fatalf("%s %q:\ngo   %+v\nnode %+v", name, file, got, want)
-			}
 		}
 	}
 }

@@ -57,16 +57,20 @@ func TestStatusB576NonASCIIBlockIDsInGo(t *testing.T) {
 	}
 }
 
-// B576: two listed blocks with an id outside printable ASCII need Node's ICU
-// order (Node writes [Bé, Bf]); Go has no collator, so the daemon answers
-// status-unreadable, as it did with no Node, and starts nothing. The status
-// client then computes the run's status itself.
+// B576, B690b: two listed blocks with an id outside printable ASCII are
+// answered in Go: printable ASCII ids first, then the others by UTF-16 code
+// units (Node's ICU order is gone with Node), and nothing is started.
 func TestStatusB576UnorderedBlockNoNode(t *testing.T) {
 	fakeStatusNode(t)
 	record := object{"run_id": "r-test", "project": "p", "blocks": map[string]any{"Bé": map[string]any{"status": "open"}, "Bf": map[string]any{"status": "open"}}}
 	s := statusServer(t, record, []ledger.Row{})
 	got := s.status()
-	if !jsonEqual(t, got, object{"ok": false, "error": "status-unreadable"}) {
-		t.Fatalf("status = %v, want status-unreadable", got)
+	var want object
+	if err := json.Unmarshal([]byte(`{"runs":[{"run_id":"r-test","status":null,"mode":"plan","spent_usd":0,"unknown_usd_sessions":0,"budget_usd":null,"blocks":[{"id":"Bf","state":"open","level":null,"model":null,"gate":{"result":"none","name":null},"findings":0},{"id":"Bé","state":"open","level":null,"model":null,"gate":{"result":"none","name":null},"findings":0}],"more":0,"closed":0,"stopped":0}]}`), &want); err != nil {
+		t.Fatal(err)
+	}
+	if !jsonEqual(t, got, want) {
+		data, _ := json.Marshal(got)
+		t.Fatalf("status = %s", data)
 	}
 }
