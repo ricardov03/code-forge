@@ -5,6 +5,7 @@
 package review
 
 import (
+	"embed"
 	"errors"
 	"fmt"
 	"math"
@@ -16,7 +17,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/canon"
-	"github.com/ricardov03/code-forge/native/docsync"
 	"github.com/ricardov03/code-forge/native/gitx"
 )
 
@@ -39,14 +39,15 @@ const DigestMaxLines = 60
 
 var defaultBudgets = map[string]int{"quick_in": 6000, "full_in": 32000, "judge_in": 8000}
 
-// LensDir names the lens directory; tests point it at a fixture tree.
-var LensDir = func() (string, error) {
-	root, err := docsync.PackageRoot()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(root, "src", "review", "lenses"), nil
-}
+// lensFiles are the lens files built into the binary (B688): copies of
+// src/review/lenses, so Go needs no src/ folder next to it.
+//
+//go:embed lenses/*.md
+var lensFiles embed.FS
+
+// LensDir names a lens directory that replaces the built-in lenses; "" (the
+// default) means the lenses built into the binary. Tests point it at a fixture tree.
+var LensDir = func() (string, error) { return "", nil }
 
 // jsSpace reports the characters String.prototype.trim removes.
 func jsSpace(r rune) bool {
@@ -77,7 +78,12 @@ func LoadLens(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(filepath.Join(dir, name+".md"))
+	var data []byte
+	if dir == "" {
+		data, err = lensFiles.ReadFile("lenses/" + name + ".md")
+	} else {
+		data, err = os.ReadFile(filepath.Join(dir, name+".md"))
+	}
 	if err != nil {
 		return "", err
 	}
