@@ -546,8 +546,8 @@ func TestBlockAcceptHitCodexGo(t *testing.T) {
 }
 
 // B685: accents, emoji and quotes in a human verb's refusal are logged by Go
-// with Node's message and fingerprint (goldens recorded from the Node CLI);
-// a JavaScript-only space (NBSP) still hands over.
+// with Node's message and fingerprint (goldens recorded from the Node CLI),
+// a no-break space too (B706).
 func TestBlockHumanVerbsNonASCIILogGo(t *testing.T) {
 	if os.Getenv("BLOCK_HV_CHILD") == "1" {
 		blockHVChild()

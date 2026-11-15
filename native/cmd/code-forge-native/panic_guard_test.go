@@ -162,7 +162,7 @@ func TestB508PanicInWritingVerbStops(t *testing.T) {
 		if !strings.HasPrefix(res.stderr, want) || strings.Count(res.stderr, "\n") != 1 || !strings.HasSuffix(res.stderr, "\n") {
 			t.Errorf("%v: stderr %q; want one line starting %q", c.args, res.stderr, want)
 		}
-		if !strings.Contains(res.stderr, ", at b508Panic panic_guard_test.go:") || !strings.Contains(res.stderr, "Node did not re-run it") {
+		if !strings.Contains(res.stderr, ", at b508Panic panic_guard_test.go:") || !strings.Contains(res.stderr, "it was not run again") {
 			t.Errorf("%v: stderr %q; want the panic site and the no-rerun note", c.args, res.stderr)
 		}
 		for _, private := range []string{"private-report.md", "private-arg", "private-file.go", "r-1", "B1"} {

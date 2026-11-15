@@ -85,7 +85,7 @@ func panicOutcome(args []string, site string) (int, error) {
 	if name == "" {
 		name = "no command"
 	}
-	fmt.Fprintf(guardStderr, "code-forge: internal error in the Go engine (%s, at %s); Node did not re-run it because it may have changed state; check `code-forge status` before you retry\n", name, site)
+	fmt.Fprintf(guardStderr, "code-forge: internal error in the Go engine (%s, at %s); it was not run again because it may have changed state; check `code-forge status` before you retry\n", name, site)
 	return 1, nil
 }
 

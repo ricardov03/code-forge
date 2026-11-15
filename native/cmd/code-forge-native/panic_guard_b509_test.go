@@ -106,7 +106,7 @@ func TestB509GoroutinePanicStopsWritingVerb(t *testing.T) {
 			for _, line := range strings.Split(stderr.String(), "\n") {
 				if strings.HasPrefix(line, "code-forge: internal error") {
 					lines++
-					if !strings.HasPrefix(line, want) || !strings.Contains(line, "Node did not re-run it") {
+					if !strings.HasPrefix(line, want) || !strings.Contains(line, "it was not run again") {
 						t.Errorf("error line %q; want prefix %q", line, want)
 					}
 					for _, private := range []string{"r-land-unit", "B1", home} {

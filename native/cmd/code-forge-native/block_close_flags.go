@@ -72,12 +72,21 @@ func closeFlags(args []string) (map[string]any, []string, string) {
 	return flags, pos, ""
 }
 
+// closeUsageOnly reports that Node's close stops at its usage error (a bad
+// flag, or no block id or --run) before it reads or writes anything, so
+// secret-like text in argv needs no scrubber beyond the error log's (B690a
+// fix1: Go prints that usage error instead of refusing).
+func closeUsageOnly(args []string) bool {
+	flags, pos, message := closeFlags(args)
+	return message != "" || len(pos) == 0 || pos[0] == "" || blockString(flags["run"]) == ""
+}
+
 func closeMayHaveTerminal() bool {
 	return humanTTY()
 }
 
 func closeWithFlags(args []string) int {
-	if !closeTextSafe(strings.Join(args, "\n")) {
+	if !closeTextSafe(strings.Join(args, "\n")) && !closeUsageOnly(args) {
 		return blockHandover(append([]string{"close"}, args...), hCloseUnsupportedFlag)
 	}
 	// B498: both streams are held in one sequence and written in the order

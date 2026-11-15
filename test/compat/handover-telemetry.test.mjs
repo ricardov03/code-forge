@@ -26,9 +26,11 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 
 // B690a: Go never starts Node. A case Go does not serve gets one refusal line, exit 1,
 // and still writes its hand-over row; an unknown verb gets Node's unknown-verb text and
-// writes nothing. These tests use a block subcommand Go does not serve.
-const unported = ['block', 'unported-telemetry'];
-const refusal = 'code-forge: block is not supported in this case yet (block-unported-subcommand). Please report it: code-forge logs report\n';
+// writes nothing. These tests use a block attempt case Go does not serve: a secret-like
+// --run value (B690a fix1: an unknown block subcommand is now Node's usage error, exit 2).
+const fakeToken = 'sk-ant-api03-' + 'x'.repeat(40);
+const unported = ['block', 'attempt', 'B1', '--run', fakeToken];
+const refusal = 'code-forge: block attempt is not supported in this case yet (block-unported-subcommand). Please report it: code-forge logs report\n';
 function fixture() {
   const home = mkdtempSync(path.join(scratch, 'home-'));
   return { home, repo: home, file: path.join(home, '.code-forge/native/handovers.jsonl') };
@@ -48,7 +50,7 @@ function rows(f) {
 
 test('B282 clause: refusals record private-safe reasons and Go reports counts', async () => {
   const f = fixture();
-  const args = [...unported, '--private', '/private/customer', 'secret-id'];
+  const args = ['block', 'attempt', 'secret-id', '--run', fakeToken];
   const input = 'private stdin\n';
   const expected = run(f, args, { CODE_FORGE_HANDOVER_LOG: '0', PROBE_TOKEN: 'unchanged', PROBE_EXIT: '3' }, binary, input);
   assert.deepEqual(expected, { code: 1, stdout: '', stderr: refusal }, 'B690a: one refusal line, exit 1, the Node probe never runs');
@@ -57,11 +59,12 @@ test('B282 clause: refusals record private-safe reasons and Go reports counts', 
   assert.equal(rows(f).length, 1, 'one refusal writes exactly one row');
   const row = rows(f)[0];
   assert.deepEqual(Object.keys(row).sort(), ['at', 'reason', 'sub', 'verb', 'version'], 'row has only five safe fields');
-  assert.deepEqual({ ...row, at: 'time' }, { at: 'time', verb: 'block', sub: 'unknown', reason: 'block-unported-subcommand', version: pkg.version }, 'unknown command tokens are replaced without flag values, paths or ids');
+  assert.deepEqual({ ...row, at: 'time' }, { at: 'time', verb: 'block', sub: 'attempt', reason: 'block-unported-subcommand', version: pkg.version }, 'the row keeps no flag values, tokens or ids');
+  assert.equal(readFileSync(f.file, 'utf8').includes(fakeToken) || readFileSync(f.file, 'utf8').includes('secret-id'), false, 'the token and the id are absent from the log');
   assert.match(row.at, /^\d{4}-\d\d-\d\dT.*Z$/, 'timestamp is UTC ISO');
   assert.equal(Number.isNaN(Date.parse(row.at)), false, 'timestamp is valid');
   // B451 runs close --help in Go; a token-like close argument still refuses the whole close.
-  const closeArgs = ['block', 'close', 'private-id', '--reason=sk-private'];
+  const closeArgs = ['block', 'close', 'private-id', '--run', 'r1', '--reason=sk-private'];
   assert.deepEqual(run(f, closeArgs, {}, binary, input), { code: 1, stdout: '', stderr: 'code-forge: block close is not supported in this case yet (close-unsupported-flag). Please report it: code-forge logs report\n' }, 'close refusal names the subcommand, never the token');
   assert.equal(rows(f).length, 2, 'close adds exactly one row');
   assert.equal(rows(f)[1].reason, 'close-unsupported-flag', 'close has its own stable reason');
@@ -74,10 +77,10 @@ test('B282 clause: refusals record private-safe reasons and Go reports counts', 
   assert.equal(report.code, 0, 'report runs without Node');
   assert.equal(report.stderr, '', 'report has no stderr');
   assert.deepEqual(JSON.parse(report.stdout), { total: 3, rows: [
-    { verb: 'block', sub: 'unknown', reason: 'block-unported-subcommand', count: 2, last_at: rows(f)[2].at },
+    { verb: 'block', sub: 'attempt', reason: 'block-unported-subcommand', count: 2, last_at: rows(f)[2].at },
     { verb: 'block', sub: 'close', reason: 'close-unsupported-flag', count: 1, last_at: rows(f)[1].at },
   ] }, 'JSON sorts by count and reports the latest timestamp');
-  assert.equal(run(f, ['logs', 'handovers']).stdout, 'count  verb  sub  reason\n2  block  unknown  block-unported-subcommand\n1  block  close  close-unsupported-flag\ntotal  3\n', 'text table sorts by count and includes total');
+  assert.equal(run(f, ['logs', 'handovers']).stdout, 'count  verb  sub  reason\n2  block  attempt  block-unported-subcommand\n1  block  close  close-unsupported-flag\ntotal  3\n', 'text table sorts by count and includes total');
   assert.deepEqual(JSON.parse(run(f, ['logs', 'handovers', '--json', '--since', '2999-01-01']).stdout), { total: 0, rows: [] }, 'since excludes older rows');
   assert.equal(rows(f).length, 3, 'Go reports do not record rows');
   const empty = fixture();
@@ -98,12 +101,12 @@ test('B282 clause: refusals record private-safe reasons and Go reports counts', 
 
 test('B282 privacy: only known verbs and their own subcommands reach the log', () => {
   const f = fixture();
-  for (const args of [['my-secret-project-name'], ['block', 'my-secret-project-name'], ['my-secret-project-name', 'close']]) {
-    assert.equal(run(f, args).code, 1, 'B690a: refused or unknown, exit 1');
+  for (const [args, code] of [[['my-secret-project-name'], 1], [['block', 'my-secret-project-name'], 2], [['my-secret-project-name', 'close'], 1], [['block', 'attempt', 'my-secret-project-name', '--run', fakeToken], 1]]) {
+    assert.equal(run(f, args).code, code, `${args[0]} ${args[1] || ''}: B690a unknown verb or refusal exit 1, B690a fix1 unknown block subcommand usage exit 2`);
   }
-  // B690a: an unknown verb gets Node's unknown-verb text and writes no row
+  // B690a: an unknown verb gets Node's unknown-verb text and writes no row; fix1: so does a usage error
   assert.deepEqual(rows(f).map(({ verb, sub }) => ({ verb, sub })), [
-    { verb: 'block', sub: 'unknown' },
+    { verb: 'block', sub: 'attempt' },
   ], 'known verbs are preserved and subcommands are scoped to their verb');
   assert.equal(readFileSync(f.file, 'utf8').includes('my-secret-project-name'), false, 'private command tokens are absent from the entire log');
 });
