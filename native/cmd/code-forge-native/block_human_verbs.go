@@ -25,6 +25,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/humanask"
+	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/state"
@@ -349,16 +350,18 @@ func runBlockAcceptHit(args []string) int {
 	return 0
 }
 
-// acceptHitLoneSurrogate: a JSON \u escape of a UTF-16 surrogate. Go decodes a
-// lone one to U+FFFD, so two different item ids could compare equal.
-var acceptHitLoneSurrogate = regexp.MustCompile(`(?i)\\ud[89a-f][0-9a-f]{2}`)
+// acceptHitSurrogateEscape finds a \uD800-\uDFFF escape (or text that looks
+// like one).
+var acceptHitSurrogateEscape = regexp.MustCompile(`(?i)\\ud[89a-f]`)
 
 // acceptHitCodexPairs is prepareAcceptHit's Codex pairing: when every
 // nonblank line parses as a JSON object with a string type, the first is
 // thread.started and the named line is an item.* event with a string item.id,
 // the lines of that id's item.completed events. Anything else (a line JSON.parse
 // refuses, plain text) pairs nothing. ok is false where Go could read a line
-// differently from JSON.parse (nesting past Go's depth limit, a surrogate escape).
+// differently from JSON.parse (nesting past Go's depth limit). B728: a line
+// with a surrogate escape is read by jsonx, which keeps a lone surrogate as
+// WTF-8, so item ids compare as JavaScript strings do.
 func acceptHitCodexPairs(lines []string, line int64) (paired []int64, ok bool) {
 	events := make([]map[string]any, len(lines))
 	first := true
@@ -376,6 +379,13 @@ func acceptHitCodexPairs(lines []string, line int64) (paired []int64, ok bool) {
 			}
 			return nil, true // JSON.parse throws: plain text
 		}
+		if acceptHitSurrogateEscape.MatchString(s) {
+			x, err := jsonx.Parse(s)
+			if err != nil {
+				return nil, false
+			}
+			v = x
+		}
 		obj, isObj := v.(map[string]any)
 		if _, isText := obj["type"].(string); !isObj || !isText || first && obj["type"] != "thread.started" {
 			return nil, true
@@ -388,9 +398,6 @@ func acceptHitCodexPairs(lines []string, line int64) (paired []int64, ok bool) {
 	id, isText := item["id"].(string)
 	if !strings.HasPrefix(kind, "item.") || !isText {
 		return nil, true
-	}
-	if acceptHitLoneSurrogate.MatchString(strings.Join(lines, "\n")) {
-		return nil, false
 	}
 	for i, event := range events {
 		if item, _ := event["item"].(map[string]any); event["type"] == "item.completed" && item != nil && item["id"] == id {

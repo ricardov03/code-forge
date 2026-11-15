@@ -11,7 +11,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/config"
+	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/session"
 )
@@ -407,10 +407,13 @@ func b550S2Plan(cwd string, flags map[string]any) (*b550Plan, handoverReason) {
 		p.early = "s2: --packet cannot be read\n"
 		return p, 0
 	}
-	if !utf8.Valid(data) || b550LoneSurrogate.Match(data) {
+	if !utf8.Valid(data) {
 		return nil, hS2Input // Node's string differs from Go's
 	}
-	packet, err := ledger.DecodeValue(data)
+	// B728: a lone surrogate escape stays a lone surrogate (WTF-8), as
+	// JSON.parse keeps it; packet.md gets U+FFFD in its place, as Node's
+	// writeFileSync encodes the prompt.
+	packet, err := ledger.ParseOrdered(data)
 	if err != nil {
 		if json.Valid(data) {
 			return nil, hS2Input // a number JSON.parse reads and Go refuses
@@ -426,8 +429,6 @@ func b550S2Plan(cwd string, flags map[string]any) (*b550Plan, handoverReason) {
 	}
 	return b550S2Build(p, flags, packet)
 }
-
-var b550LoneSurrogate = regexp.MustCompile(`\\u[dD][89abAB][0-9a-fA-F]{2}|\\u[dD][c-fC-F][0-9a-fA-F]{2}`)
 
 func b550S2Build(p *b550Plan, flags map[string]any, packet any) (*b550Plan, handoverReason) {
 	if block, ok := flags["block"].(string); ok {
@@ -609,7 +610,7 @@ func b550Exec(o *runOut, p *b550Plan) (int, handoverReason) {
 	}
 	defer os.RemoveAll(dir)
 	packet := filepath.Join(dir, "packet.md")
-	if err := os.WriteFile(packet, []byte(p.packet), 0o600); err != nil {
+	if err := os.WriteFile(packet, []byte(jsonx.WellFormed(p.packet)), 0o600); err != nil {
 		return b550Crash(o, p.verb, err), 0
 	}
 	opts := p.opts

@@ -140,9 +140,9 @@ func TestB587CloseExcludedRows(t *testing.T) {
 
 // B587: what Go cannot judge byte-equal still hands over, before any write: a
 // review.exclude that is not a list of strings (Node throws a TypeError) and
-// lock shapes outside the proved forms (an escaped surrogate, an array
-// "resolved", lockfile_registries that is not a list of strings, a URL with
-// userinfo).
+// lock shapes outside the proved forms (a problem naming a lone surrogate
+// key, which Node prints as U+FFFD (B728), an array "resolved",
+// lockfile_registries that is not a list of strings, a URL with userinfo).
 func TestB587CloseExcludedHandsOver(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -152,7 +152,7 @@ func TestB587CloseExcludedHandsOver(t *testing.T) {
 	}{
 		{"exclude is a string", b587Config(ledger.Field{Key: "exclude", Value: "**/x"}), b587GoodLock, hCloseExcludedFile},
 		{"exclude holds a number", b587Config(ledger.Field{Key: "exclude", Value: []any{1.0}}), b587GoodLock, hCloseExcludedFile},
-		{"escaped surrogate", nil, "{\"packages\":{\"\\ud800\":{}}}", hCloseLockfileFormat},
+		{"problem names a lone surrogate", nil, "{\"packages\":{\"\\ud800\":1}}", hCloseLockfileFormat},
 		{"array resolved", nil, `{"packages":{"a":{"resolved":["https://registry.npmjs.org/a"]}}}`, hCloseLockfileFormat},
 		{"registries not a list", b587Config(ledger.Field{Key: "lockfile_registries", Value: "registry.npmjs.org"}), b587GoodLock, hCloseLockfileFormat},
 		{"userinfo URL", nil, `{"packages":{"a":{"resolved":"https://u@registry.npmjs.org/a","integrity":"x"}}}`, hCloseLockfileFormat},

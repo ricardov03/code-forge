@@ -1,0 +1,6 @@
+{
+  "decision_id":"ID",
+  "question": "risk",
+  "answer": 0,
+  "source": "rules"
+}

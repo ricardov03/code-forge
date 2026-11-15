@@ -1,0 +1,1 @@
+{"event":"decision","decision_id":"ID","question":"lane","answer":"L1","stage":"act","confidence":0.95,"margin":0.9199999999999999,"source":"jev","block":"B1","tokens_in":50,"tokens_out":4,"tokens_source":"estimated","cost_source":null}

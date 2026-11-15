@@ -9,6 +9,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/reviewq"
 )
@@ -73,13 +74,21 @@ func closeLockReason(lock []gatecheck.Blocker, gateReason string) string {
 	return strings.Join(parts, "; ")
 }
 
-var ceSurrogateEscape = regexp.MustCompile(`\\u[dD][89a-fA-F][0-9a-fA-F]{2}`)
-
 // closeLockfileProblem is gate-check.mjs lockfileProblem: "" for a safe,
 // deleted or non-npm lock. ok is false for a shape Go does not judge
-// byte-equal (an escaped surrogate, an array "resolved", a URL outside the
-// forms closeLockURL proves, registries that are not a list of strings).
+// byte-equal (an array "resolved", a URL outside the forms closeLockURL
+// proves, registries that are not a list of strings, a problem naming a
+// package key with a lone surrogate). B728: a lone surrogate escape stays a
+// lone surrogate (WTF-8), as JSON.parse keeps it.
 func closeLockfileProblem(top, file string, cfg map[string]any) (string, bool) {
+	problem, ok := closeLockfileProblemText(top, file, cfg)
+	if ok && jsonx.HasLoneSurrogate(problem) {
+		return "", false // the close output prints it with U+FFFD; Node runs it
+	}
+	return problem, ok
+}
+
+func closeLockfileProblemText(top, file string, cfg map[string]any) (string, bool) {
 	if base := path.Base(file); base != "package-lock.json" && base != "npm-shrinkwrap.json" {
 		return "", true
 	}
@@ -90,11 +99,7 @@ func closeLockfileProblem(top, file string, cfg map[string]any) (string, bool) {
 	if data == nil {
 		return "", true
 	}
-	text := jsDecode(data)
-	if ceSurrogateEscape.MatchString(text) {
-		return "", false
-	}
-	value, err := ledger.DecodeValue([]byte(text))
+	value, err := ledger.ParseOrdered([]byte(jsDecode(data)))
 	if err != nil {
 		return "cannot read valid lock JSON", true
 	}

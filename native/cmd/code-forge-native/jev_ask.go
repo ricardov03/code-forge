@@ -144,10 +144,12 @@ func b550JevPlan(args []string) (*b550JevCall, handoverReason) {
 		}
 		return nil, hJevAskState
 	}
-	if !utf8.Valid(data) || b550LoneSurrogate.Match(data) {
+	if !utf8.Valid(data) {
 		return nil, hJevAskState
 	}
-	state, err := ledger.DecodeValue(data)
+	// B728: a lone surrogate escape stays a lone surrogate (WTF-8), as
+	// JSON.parse keeps it; the request body writes it back as \udXXX.
+	state, err := ledger.ParseOrdered(data)
 	if err != nil {
 		return nil, hJevAskState // JSON.parse's message is V8's
 	}

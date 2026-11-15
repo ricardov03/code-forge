@@ -1,0 +1,19 @@
+{
+  "decision_id":"ID",
+  "question": "lane",
+  "answer": {
+    "type": "choice",
+    "probabilities": {
+      "L1": 0.95,
+      "L0": 0.03,
+      "L2": 0.02
+    }
+  },
+  "decision": {
+    "decided": true,
+    "stage": "act",
+    "value": "L1",
+    "confidence": 0.95,
+    "margin": 0.9199999999999999
+  }
+}
