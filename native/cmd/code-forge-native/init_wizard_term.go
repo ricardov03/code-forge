@@ -47,72 +47,6 @@ func initWizStyle(text string, formats ...string) string {
 	return left + text + right
 }
 
-// --- string width (fast-string-truncated-width) -----------------------------
-
-var initWizAnsiRe = regexp.MustCompile(`^[\x1b\x{9b}][\[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]`)
-
-var initWizWideRanges = [][2]rune{
-	{0x1100, 0x115F}, {0x231A, 0x231B}, {0x2329, 0x232A}, {0x2E80, 0x303E}, {0x3041, 0x33FF},
-	{0x3400, 0x4DBF}, {0x4E00, 0x9FFF}, {0xA000, 0xA4CF}, {0xA960, 0xA97F}, {0xAC00, 0xD7A3},
-	{0xF900, 0xFAFF}, {0xFE10, 0xFE19}, {0xFE30, 0xFE6F}, {0xFF01, 0xFF60}, {0xFFE0, 0xFFE6},
-	{0x17000, 0x18AFF}, {0x1F200, 0x1F2FF}, {0x20000, 0x3FFFD},
-}
-
-// initWizRuneWidth is the column width of one code point; emoji and other
-// shapes this port does not model are kept out by initWizPlainText.
-func initWizRuneWidth(r rune) int {
-	switch {
-	case r == '\t':
-		return 8
-	case r < 0x20 || r >= 0x7F && r <= 0x9F:
-		return 0
-	case r < 0x7F || r >= 0xA0 && r <= 0xFF:
-		return 1
-	case unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r):
-		return 0
-	}
-	for _, rg := range initWizWideRanges {
-		if r >= rg[0] && r <= rg[1] {
-			return 2
-		}
-	}
-	return 1
-}
-
-// initWizWidth is the visible width of s: ANSI escapes count 0.
-func initWizWidth(s string) int {
-	w := 0
-	for i := 0; i < len(s); {
-		if s[i] == 0x1b || strings.HasPrefix(s[i:], "\u009b") {
-			if m := initWizAnsiRe.FindString(s[i:]); m != "" {
-				i += len(m)
-				continue
-			}
-		}
-		r, size := utf8.DecodeRuneInString(s[i:])
-		w += initWizRuneWidth(r)
-		i += size
-	}
-	return w
-}
-
-// initWizPlainText reports text whose width this port measures exactly as
-// Node does: no emoji, variation selectors, zero-width joiners or
-// unassigned code points.
-func initWizPlainText(s string) bool {
-	for _, r := range s {
-		switch {
-		case r == 0x200D || r >= 0xFE00 && r <= 0xFE0F || r >= 0x1F000:
-			return false
-		case r >= 0x2600 && r <= 0x27BF:
-			return false
-		case !unicode.IsPrint(r) && r != '\t':
-			return false
-		}
-	}
-	return true
-}
-
 func initWizU16(s string) int { return len(utf16.Encode([]rune(s))) }
 
 // --- wrap-ansi (fast-wrap-ansi, hard: true, trim: false) ---------------------
@@ -134,17 +68,20 @@ var initWizCloseCodes = func() map[int]int {
 	return m
 }()
 
-var initWizSGRAt = regexp.MustCompile(`^\[(\d+)m`)
+// initWizGroupAt is fast-wrap-ansi's GROUP_REGEX: an SGR code or an OSC 8
+// link opener.
+var initWizGroupAt = regexp.MustCompile(`^(?:\[(\d+)m|\]8;;([^\n\r\x{2028}\x{2029}]*)\x07)`)
 
+// initWizWrapWord is wrapWord: the word's code points added to the rows,
+// a new row when the next one does not fit; escapes and links are kept
+// whole but their characters still count where they land.
 func initWizWrapWord(rows []string, word string, cols int) []string {
-	chars := []rune(word)
-	inEscape := false
+	inEscape, inLink := false, false
 	visible := initWizWidth(rows[len(rows)-1])
+	chars := []rune(word)
+	raw := 0
 	for i, ch := range chars {
 		l := initWizWidth(string(ch))
-		if ch == 0x1b || ch == 0x9b {
-			l = 0
-		}
 		if visible+l <= cols {
 			rows[len(rows)-1] += string(ch)
 		} else {
@@ -153,18 +90,24 @@ func initWizWrapWord(rows []string, word string, cols int) []string {
 		}
 		if ch == 0x1b || ch == 0x9b {
 			inEscape = true
+			inLink = strings.HasPrefix(word[raw+utf8.RuneLen(ch):], "]8;;")
 		}
 		if inEscape {
-			if ch == 'm' {
+			if inLink {
+				if ch == 0x07 {
+					inEscape, inLink = false, false
+				}
+			} else if ch == 'm' {
 				inEscape = false
 			}
-			continue
+		} else {
+			visible += l
+			if visible == cols && i < len(chars)-1 {
+				rows = append(rows, "")
+				visible = 0
+			}
 		}
-		visible += l
-		if visible == cols && i < len(chars)-1 {
-			rows = append(rows, "")
-			visible = 0
-		}
+		raw += utf8.RuneLen(ch)
 	}
 	if visible == 0 && len(rows[len(rows)-1]) > 0 && len(rows) > 1 {
 		last := rows[len(rows)-1]
@@ -174,6 +117,8 @@ func initWizWrapWord(rows []string, word string, cols int) []string {
 	return rows
 }
 
+// initWizWrapLine is fast-wrap-ansi's exec(str, cols, {hard: true, trim:
+// false}).
 func initWizWrapLine(str string, cols int) string {
 	rows := []string{""}
 	rowLength := 0
@@ -190,11 +135,8 @@ func initWizWrapLine(str string, cols int) string {
 		wl := initWizWidth(word)
 		if wl > cols {
 			remaining := cols - rowLength
-			breaksThis := 1 + (wl-remaining-1)/cols
-			if wl-remaining-1 < 0 {
-				breaksThis = 1 + -((-(wl - remaining - 1) + cols - 1) / cols)
-			}
-			breaksNext := (wl - 1) / cols
+			breaksThis := 1 + initWizFloorDiv(wl-remaining-1, cols)
+			breaksNext := initWizFloorDiv(wl-1, cols)
 			if breaksNext < breaksThis {
 				rows = append(rows, "")
 			}
@@ -211,20 +153,27 @@ func initWizWrapLine(str string, cols int) string {
 	}
 	pre := []rune(strings.Join(rows, "\n"))
 	var out strings.Builder
-	escapeCode := 0
+	escapeCode, escapeURL := 0, ""
 	for i, ch := range pre {
 		out.WriteRune(ch)
 		if ch == 0x1b || ch == 0x9b {
-			if m := initWizSGRAt.FindStringSubmatch(string(pre[i+1:])); m != nil {
-				code, _ := strconv.Atoi(m[1])
-				if code == 39 {
-					code = 0
+			if m := initWizGroupAt.FindStringSubmatch(string(pre[i+1:])); m != nil {
+				if m[1] != "" {
+					code, err := strconv.Atoi(m[1])
+					if err != nil || code == 39 {
+						code = 0
+					}
+					escapeCode = code
+				} else {
+					escapeURL = m[2]
 				}
-				escapeCode = code
 			}
 		}
 		closing, has := initWizCloseCodes[escapeCode]
 		if i+1 < len(pre) && pre[i+1] == '\n' {
+			if escapeURL != "" {
+				out.WriteString("\x1b]8;;\x07")
+			}
 			if escapeCode != 0 && has {
 				out.WriteString(initWizSGR(closing))
 			}
@@ -232,14 +181,26 @@ func initWizWrapLine(str string, cols int) string {
 			if escapeCode != 0 && has {
 				out.WriteString(initWizSGR(escapeCode))
 			}
+			if escapeURL != "" {
+				out.WriteString("\x1b]8;;" + escapeURL + "\x07")
+			}
 		}
 	}
 	return out.String()
 }
 
-// initWizWrap is wrapAnsi(text, cols, {hard: true, trim: false}).
+func initWizFloorDiv(a, b int) int {
+	q := a / b
+	if a%b != 0 && (a < 0) != (b < 0) {
+		q--
+	}
+	return q
+}
+
+// initWizWrap is wrapAnsi(text, cols, {hard: true, trim: false}), which
+// normalizes the text to NFC first (B726).
 func initWizWrap(text string, cols int) string {
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	lines := strings.Split(strings.ReplaceAll(initWizNFC(text), "\r\n", "\n"), "\n")
 	for i, l := range lines {
 		lines[i] = initWizWrapLine(l, cols)
 	}

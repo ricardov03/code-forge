@@ -182,7 +182,7 @@ func initWizLevelText(level any) (string, bool) {
 	if p, _ := obj.Get("provider").(string); p != "" {
 		text += "@" + p
 	}
-	return text, initWizPlainText(text)
+	return text, true
 }
 
 // initWizTuple is the (provider, model, effort) the validator compares.
@@ -482,7 +482,7 @@ func (u *initWizUI) askAnswers(v *initValues, ctx initCtx, parsed initParsed) bo
 }
 
 // initWizSoloText is String(values.solo_project) for the shapes Go prints
-// like Node: none, or a whole number.
+// like Node: none, a whole number or any text (B726: wide text too).
 func initWizSoloText(project any) (string, bool) {
 	switch p := project.(type) {
 	case nil:
@@ -492,7 +492,7 @@ func initWizSoloText(project any) (string, bool) {
 			return strconv.FormatInt(int64(p), 10), true
 		}
 	case string:
-		return p, initWizPlainText(p)
+		return p, true
 	}
 	return "", false
 }
@@ -668,7 +668,8 @@ func initWizardPrecheck(st initSetupState, parsed initParsed, env initWizEnv, en
 			return "", auto, hInitModels
 		}
 	}
-	// what the prompts and the summary show must be plain text Go measures
+	// the level, Solo project and tools shapes Go prints like Node (B726:
+	// any text, measured and normalized like clack)
 	for _, l := range []string{"L0", "L1", "L2", "L3"} {
 		if _, ok := initWizLevelText(v.levels.Get(l)); !ok {
 			return "", auto, hInitWizardShape
@@ -679,22 +680,6 @@ func initWizardPrecheck(st initSetupState, parsed initParsed, env initWizEnv, en
 	}
 	if _, ok := v.tools.(string); !ok {
 		return "", auto, hInitWizardShape
-	}
-	for _, name := range initGateNames {
-		if !initWizPlainText(strings.Join(initWizGateArgv(v.gates[name]), " ")) {
-			return "", auto, hInitWizardShape
-		}
-	}
-	for _, key := range initProofKeys {
-		if list, ok := initStrings(v.proof[key]); ok && !initWizPlainText(strings.Join(list, ",")) {
-			return "", auto, hInitWizardShape
-		}
-	}
-	_, _, lines := initSummary(v, st.ctx)
-	for _, l := range lines {
-		if !initWizPlainText(l) {
-			return "", auto, hInitWizardShape
-		}
 	}
 	for _, p := range initProviders {
 		if p == "" {
