@@ -1,0 +1,21 @@
+exit=1
+--- stdout
+--- stderr
+block close: reopen-already-recorded: src/a.go was already reopened at state seq 3 for other content; run review-file, or the content changed since the reopen; nothing was recorded
+--- new rows
+--- ws/queue/<ID>.done
+{"ticket":"<ID>","status":"stopped","outcome":"stopped","result":".code-forge/reviews/stopped.json"}
+--- ws/queue/<ID>.json
+{"ticket":"<ID>","run":"r-test","block":"B1","file":"src/a.go","content_hash":"01d09d19c2139a46aebfb577780d123d7396e97201bc7ead210a2ebff8239dee","enqueued_at":"<TS>","queued_at":"<TS>","started_at":null,"finished_at":null,"duration_ms":null}
+
+--- ws/reviews/stopped.json
+{"status":"stopped","findings":[{"id":"F2"}]}
+--- ws/runs/r-test.json
+{"blocks":{"B1":{"acceptance":[{"clause":"c1","tests":["t1"]}],"attempt":1,"base_sha":"f86f72623ff9b69991e0ef7a88acdda3e42eda37","owned_files":["src/a.go"],"owned_kinds":{},"status":"open"}},"config":{"hash":"402f98b918d7380ac346c8b451f0119ac564de92afc6c0f37ab3828c5e5bbf4d","snapshots":{"402f98b918d7380ac346c8b451f0119ac564de92afc6c0f37ab3828c5e5bbf4d":{"levels":{"L3":{"effort":"high","model":"claude-x","provider":"anthropic"}},"version":1}}},"orphans":[],"project":"unit","run_id":"r-test","status":"active","worker":<PIN>,"workspace":"<WS>"}
+--- ws/workers/<PID>-unknown.json
+{"pid":<PID>,"start_time":"<START>","run":"r-test","started_at":"<TS>","heartbeat_at":"<TS>"}
+--- runs/r-test.json
+{"blocks":{"B1":{"acceptance":[{"clause":"c1","tests":["t1"]}],"attempt":1,"base_sha":"f86f72623ff9b69991e0ef7a88acdda3e42eda37","owned_files":["src/a.go"],"owned_kinds":{},"status":"open"}},"config":{"hash":"402f98b918d7380ac346c8b451f0119ac564de92afc6c0f37ab3828c5e5bbf4d","snapshots":{"402f98b918d7380ac346c8b451f0119ac564de92afc6c0f37ab3828c5e5bbf4d":{"levels":{"L3":{"effort":"high","model":"claude-x","provider":"anthropic"}},"version":1}}},"orphans":[],"project":"unit","run_id":"r-test","status":"active","worker":<PIN>,"workspace":"<WS>"}
+--- runs/r-test/review-state/B1/<ID>.json
+{"run":"r-test","block":"B1","file":"src/a.go","seq":3,"state":{"file":"src/a.go","status":"stopped","round":2,"next":{"reason":"review_cap"},"stop_content_hash":"01d09d19c2139a46aebfb577780d123d7396e97201bc7ead210a2ebff8239dee","open":[{"id":"F2","severity":"major","claim":"c","line":2}]},"mac":"35fcf7dd7d7f6dd3f0fe9cd8a30527d50cddd672f7d7c5d2be31fa7309250104"}
+--- judge argv

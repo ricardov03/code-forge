@@ -417,8 +417,8 @@ func TestReviewFileWaitBlockStoppedReviewHandsOver(t *testing.T) {
 				t.Fatalf("got %+v, want the hand-over to the missing Node (127)", got)
 			}
 			var row map[string]any
-			if err := json.Unmarshal(rows, &row); err != nil || row["reason"] != "wait-block-stopped" {
-				t.Fatalf("hand-over rows %q, want one wait-block-stopped row", rows)
+			if err := json.Unmarshal(rows, &row); err != nil || row["reason"] != "wait-block-local" {
+				t.Fatalf("hand-over rows %q, want one wait-block-local row (no private run record to requeue from)", rows)
 			}
 			if after := reviewFileQueue(t, repo); !reflect.DeepEqual(after, before) {
 				t.Fatalf("Go changed the queue before the hand-over:\nbefore %v\nafter  %v", before, after)

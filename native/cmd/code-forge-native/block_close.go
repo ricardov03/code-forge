@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -316,28 +317,61 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	}
 	// Node reads the ledger before any run-ended write refusal (B470).
 	ledgerDir := filepath.Join(home, ".code-forge/ledger")
-	all, err := ledger.ReadAllRows(ledgerDir, blockString(record.Get("project")))
-	if err != nil {
-		message, ok := closeLedgerReadMessage(err, ledgerDir)
-		if !ok {
-			return fallback(hCloseLedgerRead)
+	var rows []gatecheck.Row
+	var all []ledger.Row
+	// B717: Node restarts changed stopped findings before closeBlock's run
+	// lock (requeueStoppedFiles, then a --wait-block join), then reads the
+	// rows again.
+	requeue := !waived && external == "" && !deciding && routineGrant == nil && waited == nil
+	for {
+		var err error
+		all, err = ledger.ReadAllRows(ledgerDir, blockString(record.Get("project")))
+		if err != nil {
+			message, ok := closeLedgerReadMessage(err, ledgerDir)
+			if !ok {
+				return fallback(hCloseLedgerRead)
+			}
+			return fail(errors.New(message))
 		}
-		return fail(errors.New(message))
-	}
-	rows := []gatecheck.Row{}
-	for _, v := range all {
-		if v == nil {
-			// Node's rows.filter(row => row.run === runId) on a null row.
-			return fail(errors.New("Cannot read properties of null (reading 'run')"))
+		rows = []gatecheck.Row{}
+		for _, v := range all {
+			if v == nil {
+				// Node's rows.filter(row => row.run === runId) on a null row.
+				return fail(errors.New("Cannot read properties of null (reading 'run')"))
+			}
+			r, ok := v.(map[string]any)
+			if !ok {
+				// A number, string or array row has no run; Node's filter drops it.
+				continue
+			}
+			if r["run"] == run {
+				rows = append(rows, r)
+			}
 		}
-		r, ok := v.(map[string]any)
-		if !ok {
-			// A number, string or array row has no run; Node's filter drops it.
+		if !requeue {
+			break
+		}
+		requeue = false
+		cwd := workspace
+		if inTree {
+			cwd = filepath.Join(top, gatecheck.Prefix(mainTop, workspace))
+		}
+		joined, code, handed, err := closeRequeue(step, home, run, id, mainTop, top, cwd, rows, stderr)
+		switch {
+		case handed && errors.Is(err, errRequeueExclusion):
+			// the gate's own exclusion check would hand this close over too
+			return fallback(hCloseExcludedFile)
+		case handed:
+			return fallback(hCloseRequeue)
+		case err != nil:
+			return fail(err)
+		case code != 0:
+			return code
+		case !joined:
+		default:
 			continue
 		}
-		if r["run"] == run {
-			rows = append(rows, r)
-		}
+		break
 	}
 	if record.Get("status") != "active" {
 		return fail(&state.Error{Code: "run-ended", Message: "run " + run + " has ended"})
@@ -375,11 +409,6 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	files, reviewed, err := gatecheck.FileSet(top, base, prefix, id, entry, rows, changed)
 	if err != nil {
 		return fallback(hCloseFileSet)
-	}
-	// A durable or legacy stopped state can requeue even without a cap row.
-	// Node skips the stopped-file requeue when the owner waived the reviews.
-	if !waived && !closeNoRequeue(home, run, id, top, rows, cfg) {
-		return fallback(hCloseRequeue)
 	}
 	qdir := filepath.Join(mainTop, ".code-forge/queue")
 	for _, f := range files {
@@ -1142,30 +1171,6 @@ func closeTextSafe(text string) bool {
 	// Node redacts commands in coder.tests and done-file reasons. Delegate before
 	// publication if a report can require the secret scrubber's larger vocabulary.
 	return !regexp.MustCompile(`sk-|xai-|xox[baprs]-|gh[opsu]_|github_pat_|AKIA|AIza|eyJ`).MatchString(text)
-}
-
-func closeNoRequeue(home, run, id, top string, rows []gatecheck.Row, cfg map[string]any) bool {
-	paths := []string{filepath.Join(home, ".code-forge/runs", run, "review-state", id)}
-	root := blockString(blockMap(cfg["tmp"])["root"])
-	if root == "" {
-		root = os.Getenv("CODE_FORGE_TMP_ROOT")
-	}
-	if root == "" {
-		root = filepath.Join(os.TempDir(), "code-forge")
-	}
-	paths = append(paths, filepath.Join(root, run, "review-state", id))
-	for _, dir := range paths {
-		entries, err := os.ReadDir(dir)
-		if err != nil && !os.IsNotExist(err) {
-			return false
-		}
-		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".json") {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 func closeHighPaths(workspace, base string) ([]any, bool) {
@@ -2017,4 +2022,47 @@ func closeJSString(v any) string {
 		return strings.Join(parts, ",")
 	}
 	return gatecheck.JSString(v, true)
+}
+
+// closeRequeue is the close's requeueStoppedFiles and --wait-block join
+// (B717). joined: files restarted and the join finished, so the rows are read
+// again; code: the join did not finish (Node's "automatic requeue did not
+// finish", already printed); handed: a value only Node reads (err says which;
+// errRequeueExclusion is the gate's close-excluded-file case), found before
+// any write. A preflight or dry run only checks: a dry run that would restart
+// a review hands over (it never writes).
+func closeRequeue(step *landStep, home, run, id, mainTop, top, cwd string, rows []gatecheck.Row, stderr io.Writer) (joined bool, code int, handed bool, err error) {
+	o := reviewRequeue{home: home, repoRoot: mainTop, run: run, block: id, tree: top, files: gatecheck.ReviewedFiles(rows, id), print: stderr}
+	if step != nil && (step.preflight || step.dry != nil) {
+		restarted, err := o.pass(true)
+		var se *state.Error
+		switch {
+		case errors.As(err, &se):
+			return false, 0, false, err
+		case err != nil:
+			return false, 0, true, err
+		case step.dry != nil && len(restarted) > 0:
+			return false, 0, true, nil
+		}
+		return false, 0, false, nil
+	}
+	restarted, err := reviewRequeueStopped(o)
+	if errors.Is(err, errRequeueUnsupported) {
+		return false, 0, true, err
+	}
+	if err != nil || len(restarted) == 0 {
+		return false, 0, false, err
+	}
+	answer := reviewBlockJoined{handed: true, handover: hCloseRequeue}
+	if root, ok := reviewWaitRoot(context.Background(), cwd); ok {
+		answer = reviewWaitBlockJoin(cwd, root, run, id, 90*time.Second, stderr)
+	}
+	if answer.handed {
+		return false, 0, true, nil
+	}
+	if answer.refusal != nil || answer.code != 0 || answer.answer.Get("done") != true {
+		fmt.Fprintf(stderr, "block %s open: automatic requeue did not finish\n", id)
+		return false, max(answer.code, 1), false, nil
+	}
+	return true, 0, false, nil
 }

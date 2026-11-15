@@ -620,24 +620,9 @@ func (p *blockPreview) bjReopenWrite(c bjReopenCase, mainTop, dir string, parts 
 		return failed(err)
 	}
 	parts.ContentHash = current
-	id, err := queue.Identity(dir, parts)
+	cleared, err := reopenClearDone(dir, parts)
 	if err != nil {
 		return failed(err)
-	}
-	marker := filepath.Join(dir, id+".done")
-	_, statErr := os.Stat(marker)
-	cleared := statErr == nil
-	if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
-		return failed(err)
-	}
-	if entries, err := os.ReadDir(dir); err == nil {
-		for _, e := range entries {
-			if m := bjClaimName.FindStringSubmatch(e.Name()); m != nil && m[1] == id {
-				if err := os.Remove(filepath.Join(dir, e.Name())); err != nil && !os.IsNotExist(err) {
-					return failed(err)
-				}
-			}
-		}
 	}
 	var row ledger.Object
 	if c.earlier != nil {
@@ -688,19 +673,51 @@ func (p *blockPreview) bjReopenWrite(c bjReopenCase, mainTop, dir string, parts 
 // bjEnqueue is queue.mjs enqueue with after = the reopen row's ts: "" for an
 // excluded file.
 func (p *blockPreview) bjEnqueue(mainTop, dir string, parts ticket.Parts, c bjReopenCase, row ledger.Object) (string, error) {
-	rule, ok := reviewEnqueueExclusion(p.home, mainTop, p.run, c.file)
+	after, _ := row.Get("ts").(string)
+	return reopenEnqueue(p.home, mainTop, dir, p.run, parts, c.root, c.file, after)
+}
+
+// reopenClearDone is queue.mjs clearDone for parts (its ContentHash the
+// current content): the done marker and its leftover claims are removed;
+// cleared says a marker was there.
+func reopenClearDone(dir string, parts ticket.Parts) (bool, error) {
+	id, err := queue.Identity(dir, parts)
+	if err != nil {
+		return false, err
+	}
+	marker := filepath.Join(dir, id+".done")
+	_, statErr := os.Stat(marker)
+	cleared := statErr == nil
+	if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if m := bjClaimName.FindStringSubmatch(e.Name()); m != nil && m[1] == id {
+				if err := os.Remove(filepath.Join(dir, e.Name())); err != nil && !os.IsNotExist(err) {
+					return false, err
+				}
+			}
+		}
+	}
+	return cleared, nil
+}
+
+// reopenEnqueue is queue.mjs enqueue with after = a reopen row's ts: "" for
+// an excluded file.
+func reopenEnqueue(home, mainTop, dir, run string, parts ticket.Parts, root, file, after string) (string, error) {
+	rule, ok := reviewEnqueueExclusion(home, mainTop, run, file)
 	if !ok {
-		return "", fmt.Errorf("the run record of %s cannot be read", p.run)
+		return "", fmt.Errorf("the run record of %s cannot be read", run)
 	}
 	if rule != "" {
 		return "", nil
 	}
-	hash, err := gitx.ContentHash(c.root, c.file)
+	hash, err := gitx.ContentHash(root, file)
 	if err != nil {
 		return "", err
 	}
 	parts.ContentHash = hash
-	after, _ := row.Get("ts").(string)
 	idx := &queue.Index{Dir: dir}
 	if err := idx.Refresh(); err != nil {
 		return "", err

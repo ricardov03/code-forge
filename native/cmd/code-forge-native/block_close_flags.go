@@ -12,6 +12,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/autopilot"
 	"github.com/ricardov03/code-forge/native/blockops"
+	"github.com/ricardov03/code-forge/native/daemon"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -426,6 +427,51 @@ func closeLocalJoin(home, run, id, main, top string, predicted ledger.Object, pr
 			namedTree = &top
 		}
 		tickets := idx.Block(run, id, namedTree, nil)
+		// B717: waitBlock restarts a changed stopped review (requeueStoppedFiles:
+		// a signed automatic reopen and a new ticket) before it joins. Its
+		// auto-requeue lines go to the join's stderr, which autoClaimChanges
+		// keeps for a failure message only. A preflight checks without writing.
+		restartable := map[string]bool{}
+		if live {
+			stopped, err := daemon.StoppedFiles(main, &idx, tickets, changed, ownedFiles, blockObject(entry.Get("owned_kinds")).Map())
+			if err != nil {
+				return nil, 1, err
+			}
+			if len(stopped) > 0 {
+				var printed strings.Builder
+				o := reviewRequeue{home: home, repoRoot: main, run: run, block: id, tree: top, files: stopped, print: &printed}
+				var restarted map[string]string
+				if preflight {
+					restarted, err = o.pass(true)
+					var se *state.Error
+					if err != nil && !errors.As(err, &se) {
+						return nil, 1, fmt.Errorf("stopped review requires Node")
+					}
+				} else {
+					restarted, err = reviewRequeueStopped(o)
+					if err != nil {
+						var se *state.Error
+						if errors.As(err, &se) {
+							// runReviewFile says the refusal (exit 1); the
+							// join's stderr, else its stdout, is the message.
+							line, _ := ledger.Stringify(reviewEnqueueRefusal(se.Code, se.Message), false)
+							return nil, 1, fmt.Errorf("%s", landFirst(printed.String(), string(line)+"\n", "auto-claim review failed"))
+						}
+						return nil, 1, err
+					}
+					if err := idx.Refresh(); err != nil {
+						return nil, 1, err
+					}
+					tickets = idx.Block(run, id, namedTree, nil)
+				}
+				for file, ts := range restarted {
+					restartable[file] = true
+					if !preflight {
+						reopens[file] = ts
+					}
+				}
+			}
+		}
 		files := []any{}
 		done := true
 		for _, file := range changed {
@@ -460,14 +506,14 @@ func closeLocalJoin(home, run, id, main, top string, predicted ledger.Object, pr
 			if err != nil {
 				return nil, 1, err
 			}
-			// waitBlock restarts a file whose latest attempt stopped (a signed
-			// automatic reopen); that mutation stays with Node.
+			// A stopped latest attempt waitBlock did not restart still runs in
+			// Node; a restarted one's new ticket is the latest after the restart.
 			for i := len(tickets) - 1; i >= 0; i-- {
 				if tickets[i]["file"] != file {
 					continue
 				}
 				marker, err := idx.Marker(blockString(tickets[i]["ticket"]))
-				if err != nil || marker["status"] == "stopped" {
+				if err != nil || marker["status"] == "stopped" && !restartable[file] {
 					return nil, 1, fmt.Errorf("stopped or superseded review requires Node")
 				}
 				break
