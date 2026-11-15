@@ -199,7 +199,7 @@ func runWorkerRegistry(root string, prune bool) ([]runRegEntry, bool) {
 			continue
 		}
 		file := filepath.Join(dir, name.Name())
-		w, matched := reviewWaitJSON(file)
+		w, matched := reviewWaitWorkerJSON(file)
 		if !matched {
 			return nil, false
 		}
@@ -248,7 +248,7 @@ func runLiveWorker(root string, pid float64, registeredOnly bool) (ledger.Object
 	if registeredOnly {
 		return nil, true
 	}
-	w, matched := reviewWaitJSON(filepath.Join(root, ".code-forge", "queue", "worker.json"))
+	w, matched := reviewWaitWorkerJSON(filepath.Join(root, ".code-forge", "queue", "worker.json"))
 	if !matched {
 		return nil, false
 	}

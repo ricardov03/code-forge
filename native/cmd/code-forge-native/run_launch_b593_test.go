@@ -10,12 +10,13 @@ import (
 )
 
 // b593FakeWorker records its pid, then leaves only a registry entry Go
-// cannot judge (a lone surrogate escape) and stays up: the strict launch
+// cannot judge (a started_at only Date.parse could read: a lone surrogate
+// escape; B727 reads other lone surrogates in Go) and stays up: the strict launch
 // always meets the undecided registry after the pid is on file.
 const b593FakeWorker = `#!/bin/sh
 echo $$ >> "$B524_PIDS"
 mkdir -p .code-forge/workers
-printf '%s' '{"x":"\ud800"}' > .code-forge/workers/bad.json
+printf '%s' '{"started_at":"\ud800"}' > .code-forge/workers/bad.json
 exec sleep 30
 `
 
