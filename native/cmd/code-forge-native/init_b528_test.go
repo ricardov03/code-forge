@@ -52,7 +52,18 @@ var b528Cases = []struct {
 	{"eof", []string{"\r", "\x04", "\r", "\r"}},
 }
 
-var b528Row = regexp.MustCompile(`^(\S+) [-dlrwxLst]{10}`)
+var b528Row = regexp.MustCompile(`^(\S+) (?:[-dlrwxLst]{10}|L ->)`)
+
+// b742LinkMode is a symlink row with its own mode bits, as the goldens
+// recorded on macOS hold them ("<rel> Lrwxr-xr-x -> <target>").
+var b742LinkMode = regexp.MustCompile(`(?m)^(\S+) L[-rwxsStT]{9} -> `)
+
+// b742LinkRows writes each symlink row in the fixed form b527Tree prints,
+// "<rel> L -> <target>": a link's own mode is 0755 on macOS and always
+// 0777 on Linux, so it is not compared; the target still is.
+func b742LinkRows(tree string) string {
+	return b742LinkMode.ReplaceAllString(tree, "${1} L -> ")
+}
 
 var b528MjsLine = regexp.MustCompile(`code-forge\.mjs:\d+`)
 

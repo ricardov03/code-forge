@@ -44,7 +44,8 @@ func b552SkillRows(t *testing.T, tree, root string) string {
 	repo := b458Repo(t)
 	out := []string{}
 	skip := false
-	for _, line := range strings.Split(tree, "\n") {
+	// B742: a golden recorded on macOS holds a link's own mode bits
+	for _, line := range strings.Split(b742LinkRows(tree), "\n") {
 		if m := b528Row.FindStringSubmatch(line); m != nil {
 			skip = false
 			rel := m[1]
