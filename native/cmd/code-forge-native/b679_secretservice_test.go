@@ -165,28 +165,19 @@ func (f *b679SS) item(name string) string {
 	return "<none>"
 }
 
-// b679Linux makes Linux with the package's Linux binding (binding) and a
-// Secret Service that connects to ss (nil: it does not connect).
-func b679Linux(t *testing.T, binding bool, ss *b679SS) {
+// b679Linux makes Linux with a Secret Service that connects to ss (nil: it
+// does not connect).
+func b679Linux(t *testing.T, ss *b679SS) {
 	t.Helper()
-	root := t.TempDir()
-	if binding {
-		pkg := filepath.Join(root, "node_modules", "@napi-rs", "keyring")
-		b460Write(t, filepath.Join(pkg, "package.json"), `{"name":"@napi-rs/keyring","main":"index.js"}`)
-		b460Write(t, filepath.Join(pkg, "index.js"), "")
-		b460Write(t, filepath.Join(pkg, "keyring.linux-arm64-gnu.node"), "")
-		b460Write(t, filepath.Join(pkg, "keyring.linux-x64-gnu.node"), "")
-	}
-	savedOS, savedRoot, savedConnect, savedMusl, savedArch := keysGOOS, kcPackageRoot, ssConnect, kcLinuxMusl, kcArch
-	t.Cleanup(func() {
-		keysGOOS, kcPackageRoot, ssConnect, kcLinuxMusl, kcArch = savedOS, savedRoot, savedConnect, savedMusl, savedArch
-	})
-	keysGOOS, kcArch = "linux", "x64"
-	kcPackageRoot = func() string { return root }
-	kcLinuxMusl = func() bool { return false }
+	savedOS, savedConnect := keysGOOS, ssConnect
+	t.Cleanup(func() { keysGOOS, ssConnect = savedOS, savedConnect })
+	keysGOOS = "linux"
 	if ss != nil {
 		ssConnect = func() (ssAPI, error) { return ss, nil }
+		return
 	}
+	// B690b: nil is a host where no Secret Service connects
+	ssConnect = func() (ssAPI, error) { return nil, errors.New("b690b: no Secret Service") }
 }
 
 // The store finds and writes the items @napi-rs/keyring does: attributes
@@ -282,41 +273,36 @@ func TestB679SecretServiceItems(t *testing.T) {
 }
 
 // doctor --quick on Linux reads the Secret Service, named "keychain" as in
-// Node, then the file store; with no binding the file store alone.
+// Node, then the file store; with no Secret Service the file store alone.
 func TestB679DoctorLinuxSecretService(t *testing.T) {
 	cfg := "provider: anthropic\n" + b474Levels
 
 	b474Project(t, cfg, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
 	ss := newB679SS()
-	b679Linux(t, true, ss)
+	b679Linux(t, ss)
 	ss.put("jev", "sk-b679-plain")
 	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0, b483Rows("OK   keys: jev key from keychain, no expiry"), b474Summary(2, 1, 0)}})
 
 	// the Secret Service misses: the file store answers
 	home, _ := b474Project(t, cfg, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	b679Linux(t, true, newB679SS())
+	b679Linux(t, newB679SS())
 	writeHomeFile(t, home, ".code-forge/store/jev.key", "sk-b679-file\n")
 	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0, b483Rows("OK   keys: jev key from file, no expiry"), b474Summary(2, 1, 0)}})
 
 	// nothing anywhere: not resolved
 	b474Project(t, cfg, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	b679Linux(t, true, newB679SS())
+	b679Linux(t, newB679SS())
 	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0, "OK   config: valid\n" + b474NoLinks + b474NoKey, b474Summary(1, 2, 0)}})
 
-	// no @napi-rs/keyring binding: Node's chain is the file store alone
+	// B690b: no Secret Service connects: the chain is the file store alone
 	home, _ = b474Project(t, cfg, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	ss = newB679SS()
-	ss.put("jev", "sk-b679-unused")
-	b679Linux(t, false, ss)
+	b679Linux(t, nil)
 	writeHomeFile(t, home, ".code-forge/store/jev.key", "sk-b679-file\n")
 	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0, b483Rows("OK   keys: jev key from file, no expiry"), b474Summary(2, 1, 0)}})
-	if len(ss.calls) != 0 {
-		t.Fatalf("the Secret Service was asked: %q", ss.calls)
-	}
 }
 
 // An expired item is deleted with its index row; a 1Password read is cached
@@ -325,7 +311,7 @@ func TestB679DoctorLinuxRefreshAndCache(t *testing.T) {
 	home, _ := b474Project(t, "provider: anthropic\n"+b474Levels, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
 	ss := newB679SS()
-	b679Linux(t, true, ss)
+	b679Linux(t, ss)
 	ss.put("jev", `{"v":"k1","exp":1000}`)
 	writeHomeFile(t, home, ".code-forge/store/index.json", `{"jev":{"source":"op","backend":"keychain","exp":1000}}`)
 	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0, "OK   config: valid\n" + b474NoLinks + b474NoKey, b474Summary(1, 2, 0)}})
@@ -339,7 +325,7 @@ func TestB679DoctorLinuxRefreshAndCache(t *testing.T) {
 	home, _ = b474Project(t, b483OpCfg, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
 	ss = newB679SS()
-	b679Linux(t, true, ss)
+	b679Linux(t, ss)
 	b483FakeOp(t, `[ "$1 $2" = "read op://vault/item/field" ] || exit 9; printf 'sk-fake-value\n'`)
 	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0, b483Rows("OK   keys: jev key from op, expires " + b483Expires), b474Summary(2, 1, 0)}})
 	if got := ss.item("jev"); got != `{"v":"sk-fake-value","exp":29800000}` {
@@ -354,19 +340,19 @@ func TestB679DoctorLinuxRefreshAndCache(t *testing.T) {
 	}
 }
 
-// What Go still does not serve goes to Node: Node's keyutils store (the
-// binding loads, no Secret Service connects) and a Secret Service that
-// fails on read.
+// A Secret Service that fails on read is refused in Go. B690b: with no
+// Secret Service the chain is the file store alone (Node's keyutils store is
+// not served), so doctor answers in Go.
 func TestB679DoctorLinuxHandOvers(t *testing.T) {
 	b474Project(t, "provider: anthropic\n"+b474Levels, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	b679Linux(t, true, nil)
-	expectHandover(t, "doctor-key-store", "doctor", "--quick")
+	b679Linux(t, nil)
+	checkSmallCases(t, []smallCase{{[]string{"doctor", "--quick"}, 0, "OK   config: valid\n" + b474NoLinks + b474NoKey, b474Summary(1, 2, 0)}})
 
 	b474Project(t, "provider: anthropic\n"+b474Levels, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
 	ss := newB679SS()
-	b679Linux(t, true, ss)
+	b679Linux(t, ss)
 	ss.put("jev", "a")
 	ss.put("jev", "b") // ambiguous: Node's read throws
 	expectHandover(t, "doctor-key-store", "doctor", "--quick")
@@ -377,7 +363,7 @@ func TestB679KeysLinuxTestAndRemove(t *testing.T) {
 	dir, project := b456KeysHome(t, `{"jev":{"source":"user","backend":"keychain","exp":null}}`, nil)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
 	ss := newB679SS()
-	b679Linux(t, true, ss)
+	b679Linux(t, ss)
 	ss.put("jev", "sk-b679-plain")
 	code, stdout, stderr := b456Keys(t, project, "test", "jev")
 	if code != 0 || stdout != "jev: ok source=keychain expires=never\n" || stderr != "" {
@@ -396,7 +382,7 @@ func TestB679KeysLinuxTestAndRemove(t *testing.T) {
 func TestB679InitJevFromSecretService(t *testing.T) {
 	side := b548Go(t, b548Case{name: "jev from secret service", args: []string{"--no-interaction", "--skip-doctor"}, home: func(string) {
 		ss := newB679SS()
-		b679Linux(t, true, ss)
+		b679Linux(t, ss)
 		ss.put("jev", "sk-b679-plain")
 	}})
 	all := side.stdout + side.stderr + side.log + side.files
@@ -406,12 +392,12 @@ func TestB679InitJevFromSecretService(t *testing.T) {
 }
 
 // The init wizard's pasted key goes to the Secret Service with a keychain
-// index row; with no binding it goes to the 0600 file.
+// index row; with no Secret Service (B690b) it goes to the 0600 file.
 func TestB679InitWizardStorePut(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
 	ss := newB679SS()
-	b679Linux(t, true, ss)
+	b679Linux(t, ss)
 	if failure := iwjStorePut(home, "sk-b679-typed"); failure != "" {
 		t.Fatal(failure)
 	}
@@ -431,7 +417,7 @@ func TestB679InitWizardStorePut(t *testing.T) {
 	}
 
 	home = t.TempDir()
-	b679Linux(t, false, newB679SS())
+	b679Linux(t, nil)
 	if failure := iwjStorePut(home, "sk-b679-typed"); failure != "" {
 		t.Fatal(failure)
 	}
@@ -446,7 +432,7 @@ func TestB679JevAskSecretService(t *testing.T) {
 	t.Setenv("CODE_FORGE_KEY_JEV", "")
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
 	ss := newB679SS()
-	b679Linux(t, true, ss)
+	b679Linux(t, ss)
 	ss.put("jev", "sk-b679-kc")
 	code, _, errText := b460Call(t, "jev", "ask", "lane", "--state", "state.json")
 	if code != 0 || errText != "" || len(fake.calls) != 1 || !strings.HasPrefix(fake.calls[0], "Bearer sk-b679-kc ") {
@@ -461,7 +447,7 @@ func TestB679WorkerSecretServiceKey(t *testing.T) {
 	f.withConfig(t, strings.Repeat("0", 40), `{"version":1}`)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
 	ss := newB679SS()
-	b679Linux(t, true, ss)
+	b679Linux(t, ss)
 	ss.put("jev", "sk-b679-kc")
 	oldProbe := workerJevProbe
 	t.Cleanup(func() { workerJevProbe = oldProbe })

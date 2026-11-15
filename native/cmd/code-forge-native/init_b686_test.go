@@ -3,9 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -68,33 +66,6 @@ func b686Go(t *testing.T, args []string, config, user string) b527Side {
 	return side
 }
 
-func b686Node(t *testing.T, args []string, config, user string) b527Side {
-	t.Helper()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not on PATH")
-	}
-	project, homeSetup := b686Setup(config, user)
-	home, cwd, bin := t.TempDir(), b527Project(t, project), b527Env(t)
-	homeSetup(home)
-	cmd := exec.Command(node, append([]string{filepath.Join(b458Repo(t), "bin", "code-forge.mjs"), "init"}, args...)...)
-	cmd.Dir = cwd
-	cmd.Env = []string{"PATH=" + bin, "HOME=" + home, "TMPDIR=" + os.TempDir(), "CODE_FORGE_NATIVE=0", "CODE_FORGE_HANDOVER_LOG=0", "NO_COLOR=1"}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	code := 0
-	if err := cmd.Run(); err != nil {
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) {
-			t.Fatal(err)
-		}
-		code = exit.ExitCode()
-	}
-	side := b527Side{code: code, stdout: stdout.String(), stderr: stderr.String()}
-	b527Finish(t, &side, home, cwd)
-	return side
-}
-
 // b686Shapes are the configs B686 serves; each must match Node. want is a
 // line the written files must hold (the anchors yaml writes).
 var b686Shapes = []struct {
@@ -117,28 +88,6 @@ var b686Shapes = []struct {
 	{"user config too many aliases", "", "a: &a {k: v}\nb: &b {a1: *a, a2: *a, a3: *a, a4: *a, a5: *a, a6: *a, a7: *a, a8: *a, a9: *a, a10: *a, a11: *a}\nc: {b1: *b, b2: *b, b3: *b, b4: *b, b5: *b, b6: *b, b7: *b, b8: *b, b9: *b, b10: *b}\n", []string{".code-forge/config.yml -rw-r--r--\ntools: current\n"}},
 }
 
-// The shapes the old code handed over now run in Go and match Node.
-func TestB686InitYAMLConfigsMatchNode(t *testing.T) {
-	args := []string{"--no-interaction", "--skip-doctor", "--no-jev"}
-	for _, c := range b686Shapes {
-		t.Run(c.name, func(t *testing.T) {
-			goSide := b686Go(t, args, c.config, c.user)
-			nodeSide := b686Node(t, args, c.config, c.user)
-			if goSide != nodeSide {
-				t.Fatalf("go:   %#v\nnode: %#v", goSide, nodeSide)
-			}
-			if b690aIsRefusal(goSide.stderr) || goSide.log == "" {
-				t.Fatalf("not served in Go: %#v", goSide)
-			}
-			for _, want := range c.want {
-				if !strings.Contains(goSide.files, want) {
-					t.Fatalf("files lack %q:\n%s", want, goSide.files)
-				}
-			}
-		})
-	}
-}
-
 // A config whose anchors survive and whose values the setup leaves as they
 // are: unchanged, not rewritten (its anchors, comments and tags stay).
 func TestB686InitAnchoredConfigUnchanged(t *testing.T) {
@@ -152,9 +101,8 @@ func TestB686InitAnchoredConfigUnchanged(t *testing.T) {
 	written := strings.TrimPrefix(first.files[start:start+end], ".code-forge.yml -rw-r--r--\n")
 	again := "# reviewed\n" + written + "\n"
 	goSide := b686Go(t, args, again, "")
-	nodeSide := b686Node(t, args, again, "")
-	if goSide != nodeSide {
-		t.Fatalf("go:   %#v\nnode: %#v", goSide, nodeSide)
+	if goSide.code != 0 {
+		t.Fatalf("rerun: %#v", goSide)
 	}
 	if !strings.Contains(goSide.log, ".code-forge.yml: unchanged") || !strings.Contains(goSide.files, "# reviewed\n") || !strings.Contains(goSide.files, "*a1") {
 		t.Fatalf("rerun: %#v", goSide)

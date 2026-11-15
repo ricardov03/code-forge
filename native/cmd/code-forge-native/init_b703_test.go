@@ -84,7 +84,7 @@ func b703Prep(t *testing.T, c b703Case) (home, cwd, repo, root, base string) {
 		if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		for _, name := range []string{"bin/code-forge.mjs", "package.json"} {
+		for _, name := range []string{"package.json"} {
 			data, err := os.ReadFile(filepath.Join(repo, name))
 			if err != nil {
 				t.Fatal(err)

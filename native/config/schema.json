@@ -20,7 +20,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "daemon": { "type": "boolean", "default": true, "description": "Use the optional native daemon for run status and block waits. False uses Node only; CODE_FORGE_NATIVE=0 also disables it." }
+        "daemon": { "type": "boolean", "default": true, "description": "Use the optional native daemon for run status and block waits. False reads the run files directly, without the daemon; CODE_FORGE_NATIVE=0 also disables it." }
       }
     },
     "project": {

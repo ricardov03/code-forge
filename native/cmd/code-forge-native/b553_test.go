@@ -231,18 +231,6 @@ func b553Go(t *testing.T, bin string, mode string, args []string, extra ...strin
 	return f, b553Run(t, f, append([]string{bin, "review"}, args...), env)
 }
 
-func b553Node(t *testing.T, mode string, args []string) (b553Fix, b553Side, bool) {
-	t.Helper()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		return b553Fix{}, b553Side{}, false
-	}
-	f := b553Fixture(t, mode)
-	env := b553Env(f, "CODE_FORGE_NATIVE=0")
-	env[0] += ":" + filepath.Dir(node)
-	return f, b553Run(t, f, append([]string{node, filepath.Join(b458Repo(t), "bin", "code-forge.mjs"), "review"}, args...), env), true
-}
-
 func b553Base(t *testing.T, f b553Fix) string {
 	t.Helper()
 	cmd := exec.Command("git", "rev-parse", "HEAD")
@@ -307,20 +295,6 @@ func TestB553ReviewFlowGo(t *testing.T) {
 			// the review's temp root is gone; the run root of the ended run stays, as with Node
 			if strings.Join(g.tmp, ",") != "<RUN>" {
 				t.Fatalf("temp root entries = %v", g.tmp)
-			}
-			nf, n, ok := b553Node(t, c.mode, c.args)
-			if !ok {
-				t.Log("node is not on PATH: the Node twin is skipped")
-				return
-			}
-			if b553Base(t, nf) != base {
-				t.Fatalf("twin bases differ")
-			}
-			if n.code != g.code || n.out != g.out || n.err != g.err {
-				t.Fatalf("go %d %q %q\nnode %d %q %q", g.code, g.out, g.err, n.code, n.out, n.err)
-			}
-			if strings.Join(n.tmp, ",") != strings.Join(g.tmp, ",") || strings.Join(n.home, "\n") != strings.Join(g.home, "\n") {
-				t.Fatalf("files differ\ngo   %v %v\nnode %v %v", g.tmp, g.home, n.tmp, n.home)
 			}
 		})
 	}

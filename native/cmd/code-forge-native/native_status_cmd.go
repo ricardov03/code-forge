@@ -2,12 +2,10 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/user"
 	"path/filepath"
 	"regexp"
@@ -17,7 +15,6 @@ import (
 
 	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
-	"github.com/ricardov03/code-forge/native/pkgroot"
 	"github.com/ricardov03/code-forge/native/runstatus"
 )
 
@@ -27,9 +24,8 @@ import (
 // and (on a terminal) the router's hint. Lines are read as Node reads them
 // (WHATWG UTF-8, JSON.parse with lone surrogates and Infinity) and written as
 // JSON.stringify writes them. Without HOME, Node's os.homedir() is the
-// password file's home. Only a line whose listed block ids need ICU's
-// localeCompare (an id outside printable ASCII among two or more) still hands
-// the rest of stdin to Node's companion.
+// password file's home. B690b: every line is answered in Go; an id outside
+// printable ASCII sorts after the printable ASCII ids (no Node companion).
 func init() { routes["native-status"] = runNativeStatus }
 
 const nativeStatusUsageText = "usage: code-forge native-status\n  Internal daemon companion: reads JSON records and rows from standard input.\n"
@@ -39,10 +35,6 @@ const nativeStatusUnreadable = `{"ok":false,"error":"status-unreadable"}`
 
 // nativeStatusAgentVars is AGENT_ENV_VARS in src/util/error-hint.mjs.
 var nativeStatusAgentVars = []string{"CLAUDECODE", "CLAUDE_CODE", "CURSOR_AGENT", "AI_AGENT"}
-
-// nativeStatusCompanion runs Node's companion script (no router) over the
-// rest of stdin; a test seam.
-var nativeStatusCompanion = nativeStatusNode
 
 // nsUserHome is the password file's home of this user, the one Node's
 // os.homedir() returns when HOME is unset (a test seam).
@@ -103,28 +95,16 @@ func runNativeStatus(args []string) int {
 	return 1
 }
 
-// nativeStatusServe answers every line until EOF. done is true only when the
-// Node companion could not finish (its code is then the exit code).
+// nativeStatusServe answers every line until EOF. done is never true since
+// B690b removed the Node companion; the pair keeps the caller's shape.
 func nativeStatusServe(in *bufio.Reader, out io.Writer, home nsHome, args []string) (int, bool) {
 	skipLF := false
 	for {
-		content, raw, ok := nativeStatusLine(in, &skipLF)
+		content, _, ok := nativeStatusLine(in, &skipLF)
 		if !ok {
 			return 0, false
 		}
-		answer, served := nativeStatusAnswer(content, home)
-		if !served {
-			recordHandover(append([]string{"native-status"}, args...), handoverReasons[hNativeStatusLine])
-			code, err := nativeStatusCompanion(io.MultiReader(bytes.NewReader(raw), in), out)
-			if err != nil {
-				fmt.Fprintln(safeStderr, "code-forge-native:", err)
-				return code, true
-			}
-			if code != 0 {
-				return code, true
-			}
-			return 0, false
-		}
+		answer := nativeStatusAnswer(content, home)
 		if _, err := io.WriteString(out, answer+"\n"); err != nil {
 			// A closed stdout ends the companion's output, not its exit code.
 			_, _ = io.Copy(io.Discard, in)
@@ -179,24 +159,23 @@ func nativeStatusLine(in *bufio.Reader, skipLF *bool) (content, raw []byte, ok b
 	}
 }
 
-// nativeStatusAnswer is serve()'s body for one line. served is false only
-// where the block order needs ICU (see runstatus.ErrUnorderedBlockID).
-func nativeStatusAnswer(line []byte, home nsHome) (string, bool) {
+// nativeStatusAnswer is serve()'s body for one line.
+func nativeStatusAnswer(line []byte, home nsHome) string {
 	// readline decodes stdin as WHATWG UTF-8; an ASCII line break always ends
 	// a byte sequence, so decoding each line alone gives the same text.
 	parsed, err := jsonx.Parse(jsonx.DecodeUTF8(line))
 	if err != nil {
-		return nativeStatusUnreadable, true
+		return nativeStatusUnreadable
 	}
 	// const { record, rows } = JSON.parse(line): anything but an object has no
 	// record, and statusOf(undefined) throws.
 	top, isObject := parsed.(map[string]any)
 	if !isObject {
-		return nativeStatusUnreadable, true
+		return nativeStatusUnreadable
 	}
 	rawRecord, present := top["record"]
 	if !present || rawRecord == nil {
-		return nativeStatusUnreadable, true
+		return nativeStatusUnreadable
 	}
 	source, isMap := rawRecord.(map[string]any)
 	record := map[string]any{}
@@ -226,18 +205,15 @@ func nativeStatusAnswer(line []byte, home nsHome) (string, bool) {
 		copy(rows, value)
 	default:
 		// for (const r of rows) throws on any other value.
-		return nativeStatusUnreadable, true
+		return nativeStatusUnreadable
 	}
 	keyHome := home.dir
 	if !home.ok {
 		keyHome = "\x00" // findingsKey's loadKey throws: the zero key
 	}
 	summary, err := runstatus.ComputeBriefErr(record, rows, keyHome)
-	if errors.Is(err, runstatus.ErrUnorderedBlockID) {
-		return "", false
-	}
 	if err != nil {
-		return nativeStatusUnreadable, true
+		return nativeStatusUnreadable
 	}
 	if !home.ok {
 		summary.Set("budget_usd", nil) // loadProjectConfig threw
@@ -248,9 +224,9 @@ func nativeStatusAnswer(line []byte, home nsHome) (string, bool) {
 	}
 	data, err := jsonx.Stringify(jsonx.Object{{Key: "runs", Value: []any{nsJSON(summary)}}})
 	if err != nil {
-		return nativeStatusUnreadable, true
+		return nativeStatusUnreadable
 	}
-	return data, true
+	return data
 }
 
 // nsJSON turns a summary built with ledger.Object into jsonx values.
@@ -328,54 +304,4 @@ func nsReadAllRows(dir, slug string) []ledger.Row {
 		}
 	}
 	return rows
-}
-
-// nativeStatusNode runs `node <package>/src/cli/native-status.mjs` (the
-// companion's main path, no router) with the given stdin and this stdout.
-func nativeStatusNode(stdin io.Reader, stdout io.Writer) (int, error) {
-	node := os.Getenv("CODE_FORGE_NODE")
-	if node == "" {
-		node = "node"
-	}
-	nodePath, err := exec.LookPath(node)
-	if err != nil {
-		return 127, fmt.Errorf("node executable %q not found: %w", node, err)
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		return 1, fmt.Errorf("locate package executable: %w", err)
-	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		return 1, fmt.Errorf("resolve package executable: %w", err)
-	}
-	script := filepath.Join(pkgroot.FromExecutable(executable), "src", "cli", "native-status.mjs")
-	cmd := exec.Command(nodePath, script)
-	cmd.Stdout = stdout
-	cmd.Stderr = os.Stderr
-	pipe, err := cmd.StdinPipe()
-	if err != nil {
-		return 1, fmt.Errorf("start node: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		return 126, fmt.Errorf("start node: %w", err)
-	}
-	// The copy ends at stdin's EOF; Wait does not wait for it, so a companion
-	// that exits early never hangs on an open stdin.
-	go func() {
-		_, _ = io.Copy(pipe, stdin)
-		_ = pipe.Close()
-	}()
-	err = cmd.Wait()
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		if code := exit.ExitCode(); code >= 0 {
-			return code, nil
-		}
-		return 1, nil
-	}
-	if err != nil {
-		return 1, fmt.Errorf("node: %w", err)
-	}
-	return 0, nil
 }

@@ -3,7 +3,6 @@
 package ledger_test
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -117,129 +116,6 @@ func TestAppendWaitsForFreshOrLiveLock(t *testing.T) {
 				t.Fatalf("want one append after release, got %v (%v)", rows, err)
 			}
 		})
-	}
-}
-
-func TestNodeAppendDuringGoTornTailRecovery(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Fatal("Node is required for the cross-runtime append regression:", err)
-	}
-	home := t.TempDir()
-	dir := filepath.Join(home, ".code-forge", "ledger")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	// Neither runtime rotates this fixture, so every complete row must remain.
-	// The large torn tail keeps Go's recovery read busy while Node waits on the lock.
-	prefix := "{\"event\":\"before\",\"note\":\"información 🚀\"}\n"
-	if err := os.WriteFile(filepath.Join(dir, "fixture.jsonl"), []byte(prefix+strings.Repeat("x", 64*1024*1024)), 0600); err != nil {
-		t.Fatal(err)
-	}
-	module, err := filepath.Abs("../../src/ledger/write.mjs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// No fixed stopwatch: a busy machine may take far longer than an idle one.
-	// The only bound is go test's own -timeout; stop Node shortly before it so a
-	// real hang still fails here with Node's stderr instead of a bare panic.
-	ctx, cancel := context.Background(), context.CancelFunc(func() {})
-	if deadline, ok := t.Deadline(); ok {
-		ctx, cancel = context.WithDeadline(ctx, deadline.Add(-time.Until(deadline)/10))
-	}
-	defer cancel()
-	// Every step waits on a signal, never on a clock (B624): Go holds its first
-	// recovery lock until Node reports it saw that lock with the torn tail, and
-	// after that the writers alternate, each Go append starting only after Node
-	// reports its previous append. Both still race for the shared lock on every
-	// round, but neither waits longer than one append of the other, so neither
-	// runtime's 5 s lock deadline depends on host load.
-	cmd := exec.CommandContext(ctx, node, "--input-type=module", "-e", `
-import fs from 'node:fs';
-import { existsSync, statSync } from 'node:fs';
-import { syncBuiltinESMExports } from 'node:module';
-import { setTimeout as delay } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';
-// Suppress filesystem notifications: this test must work when FSEvents is stalled.
-fs.watch = () => ({ close() {} });
-fs.watchFile = () => {};
-syncBuiltinESMExports();
-// Keep this import dynamic so the writer receives the patched builtins.
-const { appendRow } = await import(pathToFileURL(process.argv[1]));
-const lock = process.argv[2] + '/fixture.append.lock';
-console.log('ready');
-while (!existsSync(lock)) await delay(1);
-// Go holds its first recovery lock until it reads the next line, so the torn
-// tail is still present here. A smaller file means Go recovered without Node.
-console.log(statSync(process.argv[2] + '/fixture.jsonl').size > 64 * 1024 * 1024 ? 'contending' : 'missed recovery');
-for (let i = 0; i < 100; i++) {
-  await appendRow({ event: 'node', id: i }, { slug: 'fixture', rotateAtBytes: 128 * 1024 * 1024 });
-  console.log('node ' + i);
-}
-`, module, dir)
-	cmd.Env = append(os.Environ(), "HOME="+home)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Kill() })
-	scanner := bufio.NewScanner(stdout)
-	if !scanner.Scan() || scanner.Text() != "ready" {
-		t.Fatalf("Node poller did not start: %s (%v)", &stderr, scanner.Err())
-	}
-	contention := "no recovery hook call"
-	held := false
-	defer ledger.SetBeforeTornTailRecovery(func() {
-		if held {
-			return
-		}
-		held = true
-		if !scanner.Scan() {
-			contention = fmt.Sprintf("Node exited before seeing the lock: %v", scanner.Err())
-			return
-		}
-		contention = scanner.Text()
-	})()
-	for i := 0; i < 100; i++ {
-		if i > 0 {
-			if want := fmt.Sprintf("node %d", i-1); !scanner.Scan() || scanner.Text() != want {
-				t.Fatalf("want %q from Node before Go append %d, got %q: %s (%v)", want, i, scanner.Text(), &stderr, scanner.Err())
-			}
-		}
-		if _, err := ledger.AppendRow(dir, "fixture", map[string]any{"event": "go", "id": i}, 128*1024*1024); err != nil {
-			t.Fatal(err)
-		}
-		if i == 0 && contention != "contending" {
-			t.Fatalf("Node must contend with Go recovery, got %q: %s", contention, &stderr)
-		}
-	}
-	if want := "node 99"; !scanner.Scan() || scanner.Text() != want {
-		t.Fatalf("want %q from Node, got %q: %s (%v)", want, scanner.Text(), &stderr, scanner.Err())
-	}
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("Node append failed: %v; %s", err, &stderr)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "fixture.jsonl"))
-	if err != nil || !bytes.HasPrefix(data, []byte(prefix)) {
-		t.Fatalf("complete prefix changed: %v", err)
-	}
-	rows, err := ledger.ReadRows(dir, "fixture")
-	if err != nil || len(rows) != 201 {
-		t.Fatalf("want original + 100 Go + 100 Node complete rows; got %d (%v)", len(rows), err)
-	}
-	seen := make(map[string]bool)
-	for _, value := range rows[1:] {
-		row := value.(map[string]any)
-		key := fmt.Sprintf("%s:%v", row["event"], row["id"])
-		if seen[key] {
-			t.Fatalf("duplicate row %s", key)
-		}
-		seen[key] = true
 	}
 }
 

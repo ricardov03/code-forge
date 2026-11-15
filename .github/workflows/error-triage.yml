@@ -4,7 +4,7 @@ name: Error triage
 # - triage (an `error-report` issue opened or edited): reads the `<!-- code-forge-fp: … -->`
 #   markers of the body (12 lowercase hex characters each, at most 3, the body capped at 64 KB) and
 #   the `kind:` labels already set, adds one `fp:<first 7 hex>` label per fingerprint, and — when a
-#   fingerprint is in src/util/known-fixes.json of the default branch — comments once with the
+#   fingerprint is in native/cmd/code-forge-native/data/known-fixes.json of the default branch — comments once with the
 #   version that fixed it (its own marker `<!-- code-forge-triage: known-fix -->` makes a second
 #   run a no-op). The issue body is data: it is read from the event payload inside the script, never
 #   pasted into the workflow with an expression.
@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          sparse-checkout: src/util/known-fixes.json
+          sparse-checkout: native/cmd/code-forge-native/data/known-fixes.json
           sparse-checkout-cone-mode: false
 
       - name: Label the fingerprints; comment on a known fix once
@@ -76,9 +76,9 @@ jobs:
 
             let table = [];
             try {
-              table = JSON.parse(require('fs').readFileSync('src/util/known-fixes.json', 'utf8'));
+              table = JSON.parse(require('fs').readFileSync('native/cmd/code-forge-native/data/known-fixes.json', 'utf8'));
             } catch {
-              core.warning('src/util/known-fixes.json could not be read; no known-fix check');
+              core.warning('native/cmd/code-forge-native/data/known-fixes.json could not be read; no known-fix check');
             }
             if (!Array.isArray(table)) table = [];
             const fixes = [];

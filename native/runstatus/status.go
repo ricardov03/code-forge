@@ -3,7 +3,6 @@
 package runstatus
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -62,11 +61,6 @@ func Compute(record Object, rows []ledger.Row, home string) (ledger.Object, bool
 	}
 	return summary, err == nil
 }
-
-// ErrUnorderedBlockID: a block id outside printable ASCII among two or more
-// listed (not closed, not stopped) blocks needs Node's ICU localeCompare to
-// order them; Go has no collator for it (stdlib only, no ICU or UCA tables).
-var ErrUnorderedBlockID = errors.New("block id outside printable ASCII")
 
 // ComputeErr is Node's statusOf (briefStatus plus the gate's open findings and
 // timeout details). The error carries the message Node's status prints after
@@ -166,14 +160,7 @@ func compute(record Object, rows []ledger.Row, home string, gateDetails bool) (l
 			listed = append(listed, bid)
 		}
 	}
-	if len(listed) > 1 {
-		for _, bid := range listed {
-			if _, ok := blockIDCompare(bid, bid); !ok {
-				return nil, fmt.Errorf("%w: %s", ErrUnorderedBlockID, strconv.Quote(bid))
-			}
-		}
-	}
-	sort.SliceStable(listed, func(i, j int) bool { c, _ := blockIDCompare(listed[i], listed[j]); return c < 0 })
+	sort.SliceStable(listed, func(i, j int) bool { return b690bBlockIDLess(listed[i], listed[j]) })
 	blocks := []any{}
 	for _, bid := range listed {
 		entry := obj(entries[bid])

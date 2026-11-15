@@ -111,7 +111,7 @@ func codexTestSchema(t *testing.T) {
 	here, _ := os.Getwd()
 	before := FindingSchemaPath
 	FindingSchemaPath = func() (string, error) {
-		return filepath.Join(here, "..", "..", "src", "review", "finding.schema.json"), nil
+		return filepath.Join(here, "finding.schema.json"), nil
 	}
 	t.Cleanup(func() { FindingSchemaPath = before })
 }
