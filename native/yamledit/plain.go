@@ -6,11 +6,12 @@ import "strings"
 // a JSON value built in Go (a ledger.Object keeps its key order, as a JS
 // object does): what serializeConfig in src/install/wizard/project-file.mjs
 // writes. The served subset is the one createNode serves (plain keys,
-// printable ASCII strings, finite numbers, sequences of scalars); any other
+// strings with no control character (B726: any width, written as is),
+// finite numbers, sequences of scalars); any other
 // value returns an *Unsupported error before anything is written. With
 // lineWidth 0 yaml never folds a line, so no length limit applies.
 func StringifyPlain(value any) (string, error) {
-	n, err := createNode(value)
+	n, err := createNode(value, true)
 	if err != nil {
 		return "", err
 	}

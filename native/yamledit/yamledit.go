@@ -51,7 +51,7 @@ func Set(text string, segs []string, value any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	created, err := createNode(value)
+	created, err := createNode(value, false)
 	if err != nil {
 		return "", err
 	}
@@ -277,8 +277,9 @@ func (d *document) getIn(segs []string) *node {
 }
 
 // createNode is doc.createNode for a JSON value (ledger.Object keeps its
-// key order, as a JS object does).
-func createNode(value any) (*node, error) {
+// key order, as a JS object does). wide also serves strings beyond
+// printable ASCII (wideText), for a writer that never folds (lineWidth 0).
+func createNode(value any, wide bool) (*node, error) {
 	switch v := value.(type) {
 	case nil:
 		return &node{kind: kScalar, out: "null"}, nil
@@ -291,9 +292,9 @@ func createNode(value any) (*node, error) {
 		}
 		return &node{kind: kScalar, out: out, value: v}, nil
 	case int:
-		return createNode(float64(v))
+		return createNode(float64(v), wide)
 	case string:
-		out, err := createdString(v)
+		out, err := createdString(v, wide)
 		if err != nil {
 			return nil, err
 		}
@@ -301,7 +302,7 @@ func createNode(value any) (*node, error) {
 	case []any:
 		seq := &node{kind: kSeq}
 		for _, item := range v {
-			child, err := createNode(item)
+			child, err := createNode(item, wide)
 			if err != nil {
 				return nil, err
 			}
@@ -317,7 +318,7 @@ func createNode(value any) (*node, error) {
 			if !plainKey(field.Key) {
 				return nil, refuse("key " + strconv.Quote(field.Key) + " is not a plain key")
 			}
-			child, err := createNode(field.Value)
+			child, err := createNode(field.Value, wide)
 			if err != nil {
 				return nil, err
 			}
@@ -426,10 +427,28 @@ func quotedString(v string) string {
 
 var reFlowChar = regexp.MustCompile(`[[\]{},]`)
 
+// wideText is a string the yaml package writes, plain or quoted, with each
+// character as it is (B726): valid UTF-8 with no control character
+// (stringifyString double-quotes and escapes those, Go does not write
+// them), no line or paragraph separator and no byte order mark or
+// noncharacter, which Go's reader may read back differently.
+func wideText(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || r >= 0x7f && r <= 0x9f || r == 0x2028 || r == 0x2029 || r == 0xfeff || r == 0xfffe || r == 0xffff {
+			return false
+		}
+	}
+	return true
+}
+
 // createdString is plainString for a string made by createNode (a value
-// position, block context).
-func createdString(v string) (string, error) {
-	if !safeText(v) {
+// position, block context); wide serves wideText strings, else only
+// printable ASCII.
+func createdString(v string, wide bool) (string, error) {
+	if wide && !wideText(v) || !wide && !safeText(v) {
 		if q, ok := surrogateQuoted(v); ok {
 			return q, nil // B732: stringifyString's QUOTE_DOUBLE for a lone surrogate
 		}
