@@ -172,7 +172,7 @@ type Deps struct {
 	// nil = every row of the session's slug ledger under Home.
 	ReadRows func() ([]ledger.Row, error)
 	// Warn is the error log's warning line (logWarning) of the budget.usd 80 %
-	// warning; nil = a session that would warn hands over (IsUnsupported).
+	// warning. Every run-pinned caller sets it (B689); nil = no error-log line.
 	Warn func(warning, message string)
 }
 

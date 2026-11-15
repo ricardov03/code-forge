@@ -414,8 +414,7 @@ func budgetGate(o Opts, deps Deps, writeRow func(ledger.Object) error, s step) (
 }
 
 // checkGate is spawn.mjs checkGate + spend.mjs checkBudget. p is the plan
-// under the lock: a warning that needs the error log with no Deps.Warn is
-// found before anything is written.
+// under the lock.
 func (g gateEnv) checkGate(budget, estimate float64, p *categoryPlan) (ledger.Object, error) {
 	run := *g.o.Run
 	rows, err := g.readRows(g.o.Slug)
@@ -471,9 +470,6 @@ func (g gateEnv) checkGate(budget, estimate float64, p *categoryPlan) (ledger.Ob
 		return out, nil
 	}
 	if spent >= runstatus.RoundUSD(0.8*budget) && !hasWarningRow(rows, run) {
-		if g.deps.Warn == nil {
-			return nil, unsupported("the budget.usd 80% warning (the error log's warning line)")
-		}
 		recorded := false
 		if g.writeRow != nil {
 			row := ledger.Object{{Key: "event", Value: "budget.warning"}}
@@ -488,7 +484,9 @@ func (g gateEnv) checkGate(budget, estimate float64, p *categoryPlan) (ledger.Ob
 		warnedMu.Unlock()
 		if show {
 			g.deps.stderr("code-forge: budget.usd: spent " + toFixed2(spent) + " of " + toFixed2(budget) + " (≥ 80%); new sessions stop at 100%\n")
-			g.deps.Warn(BudgetWarningKind, BudgetWarningMessage)
+			if g.deps.Warn != nil {
+				g.deps.Warn(BudgetWarningKind, BudgetWarningMessage)
+			}
 		}
 	}
 	return nil, nil

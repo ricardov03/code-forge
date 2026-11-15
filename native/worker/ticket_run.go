@@ -68,8 +68,8 @@ type TicketRunner struct {
 	// (<RunRootDir>/packets/<ticket>) and the sessions' process root;
 	// Secrets are the registered redact values; SessionDeps are the
 	// session seams (Home defaults to Home, Environ to SessionEnv of the
-	// process env); Warn is the error log's warning line (nil: none, and a
-	// ticket under budget.usd is left to Node); JevKey is the resolved
+	// process env); Warn is the error log's warning line (worker --run always
+	// sets it; nil: no error-log line); JevKey is the resolved
 	// System 1 key ("" none; B533: the triage asks Jev with it); JevOpts are
 	// askJev's other options (URL, timeout, sleep: test seams).
 	RunRootDir  string

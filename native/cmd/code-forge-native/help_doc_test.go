@@ -178,7 +178,7 @@ func TestB648BlockHelpRunsInGo(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".code-forge", "native", "handovers.jsonl")); err == nil {
 		t.Fatal("block --help handed over to Node")
 	}
-	// help land shows the land usage although land has no Go route.
+	// help land shows the land usage (its own Go help form since B689).
 	if code, stdout, _ := b613Call(t, "help", "land"); code != 0 || !strings.Contains(stdout, "\nUsage:\n  usage: code-forge land\n") {
 		t.Fatalf("help land: code=%d stdout=%q", code, stdout)
 	}

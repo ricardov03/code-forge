@@ -80,7 +80,7 @@ func TestB613EveryCommandHasASummary(t *testing.T) {
 	b613Env(t)
 	for _, entry := range helpCommands {
 		if _, routed := routes[strings.Fields(entry.name)[0]]; !routed {
-			continue // land is not routed (B648: its usage is in the help table)
+			continue // a command Go does not route keeps its usage in the help table (B648)
 		}
 		if usage := helpCommandUsage(entry.name); !helpIsUsage(usage) || !strings.Contains(usage, "code-forge "+strings.Fields(entry.name)[0]) {
 			t.Errorf("%q: help form printed no usage: %q", entry.name, usage)

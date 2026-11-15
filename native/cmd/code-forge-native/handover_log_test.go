@@ -17,7 +17,8 @@ func TestHandoverTelemetry(t *testing.T) {
 	t.Setenv("CODE_FORGE_NODE", filepath.Join(home, "missing-node"))
 	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
 	t.Setenv("CODE_FORGE_NATIVE", "1")
-	code, _ := run([]string{"land", "private-value"})
+	// B689: land runs in Go; an unknown verb is still unrouted
+	code, _ := run([]string{"private-verb", "private-value"})
 	if code != 127 {
 		t.Fatalf("handover exit = %d, want 127", code)
 	}
@@ -29,7 +30,7 @@ func TestHandoverTelemetry(t *testing.T) {
 	if err := json.Unmarshal(data, &row); err != nil {
 		t.Fatal(err)
 	}
-	if len(row) != 5 || row["reason"] != "unrouted" || row["verb"] != "land" || row["sub"] != "unknown" {
+	if len(row) != 5 || row["reason"] != "unrouted" || row["verb"] != "unknown" || row["sub"] != "unknown" {
 		t.Fatalf("unexpected private-safe row: %#v", row)
 	}
 	if _, err := time.Parse(time.RFC3339Nano, row["at"]); err != nil {

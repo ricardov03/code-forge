@@ -30,7 +30,8 @@ type helpEntry struct {
 	// the group heading in the list and is not a row of its own.
 	namespace bool
 	options   []helpOption
-	// usage is the usage text of a command Go does not route (B648: land);
+	// usage is the usage text of a command Go does not route (B648; none since
+	// B689 routes land);
 	// a routed command's usage comes from its own help form.
 	usage string
 }
@@ -113,8 +114,7 @@ var helpCommands = []helpEntry{
 	{name: "keys set", summary: "Store a credential reference"},
 	{name: "keys test", summary: "Check a credential reference works"},
 	{name: "keys remove", summary: "Remove a stored credential reference"},
-	{name: "land", summary: "Landing code that block land uses", hidden: true,
-		usage: "usage: code-forge land\n  Used internally by code-forge block land; this module has no standalone handler.\n"},
+	{name: "land", summary: "Landing code that block land uses", hidden: true},
 	{name: "ledger", summary: "Read the ledger or record outcomes and spend", namespace: true},
 	{name: "ledger calibration", summary: "Show how reliable the recorded answers were"},
 	{name: "ledger outcome", summary: "Record the CI result of a pull request"},
