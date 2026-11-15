@@ -95,16 +95,8 @@ func TestB500LogsClearInGo(t *testing.T) {
 	if reason := b500HandedOver(t, home); reason != "" {
 		t.Errorf("handed over: %s", reason)
 	}
-
-	// stdin a terminal but stdout not: clack would still draw; Node keeps it.
-	b500Write(t, file, b500ErrorLog)
-	b500Terminal(t, true, false, humanask.Confirmed, &asked)
-	if code, _, _ := b500Run(t, "logs", "clear"); code != 127 || b500HandedOver(t, home) != "logs-clear-prompt" {
-		t.Errorf("half terminal: exit %d, reason %q", code, b500HandedOver(t, home))
-	}
-	if b500Read(t, file) != b500ErrorLog {
-		t.Errorf("half terminal touched the log")
-	}
+	// stdin a terminal but stdout not: asked in Go since B698
+	// (TestB698LogsClearPipedStdoutAsksInGo).
 }
 
 func TestB500LogsClearUsageAndHelp(t *testing.T) {

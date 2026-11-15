@@ -508,9 +508,6 @@ func prepareToolsInstall(args []string, usageError func(string) func(_, stderr i
 			manual = append(manual, row{tool.id, hint})
 		}
 	}
-	if toolsNeedsNodePrompt(len(runs), flags["yes"], flags["dry-run"]) {
-		return nil, hToolsConfirm, false
-	}
 	printTable := func(b *strings.Builder) {
 		for _, t := range table {
 			fmt.Fprintf(b, "%s %s\n", padEnd(t.id, 7), t.result)

@@ -197,16 +197,18 @@ func logsReportPicks(newest []ledger.Object, flags map[string]string, last int64
 }
 
 // Seams: Node asks only when stdin is a terminal (process.stdin.isTTY);
-// clack draws on stdout, so the Go prompt needs both ends (humanask).
+// clack draws on stdout: humanask.Confirm when both ends are terminals,
+// humanask.ConfirmPiped (B698) when stdout is a file or a pipe.
 var (
-	logsStdinTTY = func() bool { return humanask.IsTTY(os.Stdin) }
-	logsAskTTY   = humanask.Available
-	logsConfirm  = humanask.Confirm
+	logsStdinTTY     = func() bool { return humanask.IsTTY(os.Stdin) }
+	logsAskTTY       = humanask.Available
+	logsConfirm      = humanask.Confirm
+	logsConfirmPiped = humanask.ConfirmPiped
 )
 
 // logsClear is Node's clear: a missing log is nothing to do, --yes deletes it,
-// no terminal refuses, a terminal asks (clack confirm, No first). A prompt
-// Go cannot draw like clack (stdout not a terminal) stays in Node.
+// no terminal refuses, a terminal stdin asks (clack confirm, No first) on
+// stdout, a terminal or a pipe (B698).
 func logsClear(args []string, file string, flags map[string]string, crumb string, fail func(int, string) int) int {
 	if _, err := os.ReadFile(file); err != nil {
 		gatesBreadcrumbName(crumb)
@@ -218,11 +220,15 @@ func logsClear(args []string, file string, flags map[string]string, crumb string
 			return fail(2, "logs: no terminal to confirm; nothing deleted — pass --yes to delete the error log\n")
 		}
 		entries, safe := logsRead(file)
-		if !logsAskTTY() || !safe || !routerHintReadable() {
+		if !safe || !routerHintReadable() {
 			return logsHandover(args, hLogsClearPrompt)
 		}
+		confirm := logsConfirm
+		if !logsAskTTY() {
+			confirm = logsConfirmPiped // stdout is a file or a pipe: clack writes its frames there
+		}
 		before := gatesBreadcrumbName(crumb)
-		answer, err := logsConfirm(fmt.Sprintf("Delete the error log (%d entries)?", len(entries)))
+		answer, err := confirm(fmt.Sprintf("Delete the error log (%d entries)?", len(entries)))
 		if err != nil || answer == humanask.NoTTY {
 			// Nothing was answered; Node asks again from the start.
 			return logsHandover(args, hLogsClearPrompt)

@@ -104,18 +104,10 @@ func TestB455ToolsInstallMatchesNode(t *testing.T) {
 	checkSmallCases(t, []smallCase{{[]string{"tools", "install", "claude", "--yes"}, 1, "plan:\n  claude: npm install -g @anthropic-ai/claude-code\n\n$ npm install -g @anthropic-ai/claude-code\n\nclaude  failed (did not start)\n", ""}})
 }
 
-// A terminal stdin with a piped stdout (a prompt Go cannot draw like clack,
-// B682) and a --version cut that splits a surrogate pair (a lone surrogate)
-// both stay with Node.
+// A --version cut that splits a surrogate pair (a lone surrogate) stays with
+// Node. (A terminal stdin with a piped stdout asks in Go since B698.)
 func TestB455ToolsHandsOverConfirmAndSplitSurrogate(t *testing.T) {
 	smallProject(t, "")
-	toolsPath(t, map[string]string{"npm": "#!/bin/sh\nexit 0\n"})
-	saved, savedAsk := toolsStdinTTY, toolsAskTTY
-	toolsStdinTTY = func() bool { return true }
-	toolsAskTTY = func() bool { return false }
-	t.Cleanup(func() { toolsStdinTTY, toolsAskTTY = saved, savedAsk })
-	expectHandover(t, "tools-confirm", "tools", "install", "claude")
-	toolsStdinTTY, toolsAskTTY = saved, savedAsk
 	toolsPath(t, map[string]string{"claude": "#!/bin/sh\necho '" + strings.Repeat("a", 119) + "😀'\n"})
 	expectHandover(t, "tools-unsupported", "tools", "--json")
 }
