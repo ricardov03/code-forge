@@ -41,6 +41,46 @@ func Confirm(message string) (Result, error) {
 	if !Available() {
 		return NoTTY, nil
 	}
+	color := os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
+	if v, ok := os.LookupEnv("FORCE_COLOR"); ok {
+		color = v != "0"
+	}
+	return rawAsk(message, func(width int) Options {
+		return Options{Width: width, Color: color, ASCII: os.Getenv("TERM") == "linux"}
+	})
+}
+
+// ConfirmPiped is Confirm when stdin is a terminal and stdout is not (B681):
+// clack still reads the keys from stdin in raw mode and writes its frames to
+// stdout, at getColumns' default width of 80, colored only when FORCE_COLOR
+// makes node:util styleText color a stream that is not a terminal.
+func ConfirmPiped(message string) (Result, error) {
+	if !IsTTY(os.Stdin) {
+		return NoTTY, nil
+	}
+	return rawAsk(message, func(int) Options {
+		return Options{Width: 80, Color: PipedColor(os.LookupEnv), ASCII: os.Getenv("TERM") == "linux"}
+	})
+}
+
+// PipedColor is styleText's colour choice for a stream that is not a
+// terminal: only FORCE_COLOR "", "1", "2", "3" or "true" colors it (measured
+// with Node 24: "0", "false", "yes", "4", "TRUE" do not; NO_COLOR is ignored
+// then, and nothing colors when FORCE_COLOR is unset).
+func PipedColor(lookup func(string) (string, bool)) bool {
+	v, ok := lookup("FORCE_COLOR")
+	if !ok {
+		return false
+	}
+	switch v {
+	case "", "1", "2", "3", "true":
+		return true
+	}
+	return false
+}
+
+// rawAsk puts stdin in raw mode, asks on stdout and restores the terminal.
+func rawAsk(message string, options func(width int) Options) (Result, error) {
 	var saved syscall.Termios
 	if err := ioctl(os.Stdin.Fd(), getTermios, unsafe.Pointer(&saved)); err != nil {
 		return NoTTY, err
@@ -60,11 +100,7 @@ func Confirm(message string) (Result, error) {
 	if width == 0 {
 		width = 80
 	}
-	color := os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
-	if v, ok := os.LookupEnv("FORCE_COLOR"); ok {
-		color = v != "0"
-	}
-	return Ask(os.Stdin, os.Stdout, message, Options{Width: width, Color: color, ASCII: os.Getenv("TERM") == "linux"})
+	return Ask(os.Stdin, os.Stdout, message, options(width))
 }
 
 type Options struct {

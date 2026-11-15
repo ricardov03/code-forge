@@ -74,15 +74,16 @@ func newAutopilotFixture(t *testing.T) runFixture {
 	t.Helper()
 	f := newRunFixture(t)
 	nowBefore, ttyBefore, idBefore := autopilotNow, autopilotIsTTY, autopilotGrantID
-	promptableBefore, confirmBefore := autopilotPromptable, autopilotConfirm
+	promptableBefore, confirmBefore, pipedBefore := autopilotPromptable, autopilotConfirm, autopilotConfirmPiped
 	autopilotNow = func() time.Time { return autopilotTestNow }
 	autopilotIsTTY = func() bool { return false }
 	autopilotGrantID = func() (string, error) { return "ap-1234abcd", nil }
 	autopilotPromptable = func() bool { return false }
 	autopilotConfirm = func(string) (humanask.Result, error) { t.Fatal("unexpected prompt"); return humanask.NoTTY, nil }
+	autopilotConfirmPiped = func(string) (humanask.Result, error) { t.Fatal("unexpected piped prompt"); return humanask.NoTTY, nil }
 	t.Cleanup(func() {
 		autopilotNow, autopilotIsTTY, autopilotGrantID = nowBefore, ttyBefore, idBefore
-		autopilotPromptable, autopilotConfirm = promptableBefore, confirmBefore
+		autopilotPromptable, autopilotConfirm, autopilotConfirmPiped = promptableBefore, confirmBefore, pipedBefore
 	})
 	return f
 }
@@ -362,8 +363,8 @@ func TestAutopilotVerbHandsOver(t *testing.T) {
 		reason string
 	}{
 		{[]string{"ask", "--run", "r-nolink", "--scope", "round:extra", "--question", "q"}, "autopilot-ask"},
-		{[]string{"waive", "--run", "r-a"}, "autopilot-action"},
-		{[]string{"status", "--run", "r-appr"}, "autopilot-restore-reload-shape"}, // B536: a reverted config Go does not validate like Node
+		{[]string{"waive", "--run", "r-a", "--file", "src//a.mjs"}, "autopilot-action"}, // B681: a path Go does not normalise like path.posix
+		{[]string{"status", "--run", "r-appr"}, "autopilot-restore-reload-shape"},       // B536: a reverted config Go does not validate like Node
 		{[]string{"start", "--run", "r-shape", "--yes"}, "autopilot-shape"},
 		{[]string{"stop", "--run", "r-bad"}, "autopilot-record"},
 		{[]string{"status", "--run", "r-ledger"}, "autopilot-ledger"},
@@ -373,14 +374,6 @@ func TestAutopilotVerbHandsOver(t *testing.T) {
 		if code != 127 || out != "" {
 			t.Fatalf("%v: hand-over exit = %d stdout %q, want 127", tc.args, code, out)
 		}
-	}
-	autopilotIsTTY = func() bool { return true }
-	cases = append(cases, struct {
-		args   []string
-		reason string
-	}{[]string{"start", "--run", "r-a"}, "autopilot-prompt"})
-	if code, _, _ := autopilotCall(t, "start", "--run", "r-a"); code != 127 {
-		t.Fatalf("prompt hand-over exit = %d", code)
 	}
 	data, err := os.ReadFile(filepath.Join(f.home, ".code-forge", "native", "handovers.jsonl"))
 	if err != nil {

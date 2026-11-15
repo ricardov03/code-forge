@@ -7,6 +7,9 @@ waits on a second real consumer (plan §10.4, Q17).
 ## [Unreleased]
 
 - `block reopen` at a terminal runs in Go: the owner's question, the answers, the signed human `review.reopened` row, the cleared done marker and the reopened review ticket match Node; it no longer hands over to Node. B680
+### Changed
+
+- `autopilot waive` runs in Go: Node's checks and refusal texts, the signed `review.waived` row and the tracked GitHub issue (deduped comment, or a create with the label and a retry without it, and the signed `autopilot.issue_failed` row when there is no issue), byte-equal to Node; `autopilot start` without `--yes` with stdin at a terminal and stdout piped now asks in Go with Node's prompt; a waive path Go does not normalise like Node still hands over (B681)
 
 ## [0.24.0] — 2026-11-14
 

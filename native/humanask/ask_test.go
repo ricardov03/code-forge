@@ -107,3 +107,23 @@ func TestWrappedFrameMatchesClack(t *testing.T) {
 		}
 	}
 }
+
+// B681: a piped stdout is colored only by the FORCE_COLOR values that make
+// Node 24's styleText color a stream that is not a terminal.
+func TestPipedColorFollowsForceColor(t *testing.T) {
+	cases := map[string]bool{"": true, "1": true, "2": true, "3": true, "true": true, "0": false, "4": false, "false": false, "yes": false, "TRUE": false}
+	for value, want := range cases {
+		lookup := func(name string) (string, bool) {
+			if name == "FORCE_COLOR" {
+				return value, true
+			}
+			return "1", true // NO_COLOR and the rest set: ignored
+		}
+		if got := PipedColor(lookup); got != want {
+			t.Fatalf("FORCE_COLOR=%q: color %v, want %v", value, got, want)
+		}
+	}
+	if PipedColor(func(string) (string, bool) { return "", false }) {
+		t.Fatal("FORCE_COLOR unset colored a pipe")
+	}
+}

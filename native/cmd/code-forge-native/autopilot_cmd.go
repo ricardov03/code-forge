@@ -69,7 +69,10 @@ var (
 	// autopilotPromptable: both descriptors are terminals (humanask renders there).
 	autopilotPromptable = humanask.Available
 	autopilotConfirm    = humanask.Confirm
-	autopilotGrantID    = func() (string, error) {
+	// autopilotConfirmPiped: stdin is a terminal, stdout is not (B681);
+	// clack still asks on stdout and reads the keys from stdin.
+	autopilotConfirmPiped = humanask.ConfirmPiped
+	autopilotGrantID      = func() (string, error) {
 		b := make([]byte, 4)
 		if _, err := rand.Read(b); err != nil {
 			return "", err
@@ -243,12 +246,10 @@ var autopilotSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // autopilotPlan reads the record once, before any write, and either returns
 // the Go step or the reason Node must run the command.
 func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int, handoverReason) {
-	switch sub {
-	case "waive":
-		return nil, hAutopilotAction
-	}
-	if sub == "start" && !flags.bools["yes"] && autopilotIsTTY() && !autopilotPromptable() {
-		return nil, hAutopilotPrompt // stdin is a terminal but stdout is not: clack's output stays with Node
+	if raw, has := flags.values["file"]; has && sub == "waive" {
+		if _, _, known := roundRepoPath(raw); !known {
+			return nil, hAutopilotAction // a path Go does not normalise the way path.posix does
+		}
 	}
 	runID := flags.values["run"]
 	now := autopilotNow().Truncate(time.Millisecond) // a JavaScript Date holds ms
@@ -269,6 +270,16 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 			}
 			if sub == "round" {
 				if _, invalid := roundUsage(flags); invalid != nil {
+					return autopilotReport(o, sub, invalid)
+				}
+			}
+			if sub == "waive" {
+				if _, invalid := awUsage(flags); invalid != nil {
+					var refused *roundRefused
+					if errors.As(invalid, &refused) {
+						o.err("autopilot waive: refused — " + refused.message + "\n")
+						return 1
+					}
 					return autopilotReport(o, sub, invalid)
 				}
 			}
@@ -347,6 +358,17 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 			return nil, hAutopilotAction
 		}
 		return func(o *runOut) int { return autopilotRound(o, home, runID, flags) }, 0
+	}
+	if sub == "waive" {
+		project, _ := record.Get("project").(string)
+		rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), project)
+		if err != nil {
+			return nil, hAutopilotLedger
+		}
+		if !awSupported(home, runID, record, flags, rows) {
+			return nil, hAutopilotAction
+		}
+		return func(o *runOut) int { return autopilotWaive(o, home, runID, flags) }, 0
 	}
 	if sub == "level" {
 		project, _ := record.Get("project").(string)
@@ -1023,7 +1045,11 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 			o.err("autopilot start: no terminal to confirm; the owner starts autopilot — pass --yes to start it without a prompt\n")
 			return 2
 		}
-		answer, err := autopilotConfirm("Start autopilot for run " + runID + " " + autopilotEndText(in.untilValue(), in.untilDone) + "?")
+		confirm := autopilotConfirm
+		if !autopilotPromptable() {
+			confirm = autopilotConfirmPiped // stdout is a file or a pipe: clack writes its frames there
+		}
+		answer, err := confirm("Start autopilot for run " + runID + " " + autopilotEndText(in.untilValue(), in.untilDone) + "?")
 		if err != nil {
 			o.err("autopilot start: " + err.Error() + "\n") // Node's catch: a failed prompt is exit 1
 			return 1
