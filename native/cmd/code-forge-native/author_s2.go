@@ -551,7 +551,7 @@ func b550RunSession(verb string, args []string, plan func(cwd string) (*b550Plan
 	if code != 0 {
 		var message any
 		if o.last != "" {
-			message = strings.TrimSpace(o.last)
+			message = jsTrim(o.last)
 		}
 		nativeVerbFailure(verb, "", args, code, message, before)
 	}

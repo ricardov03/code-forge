@@ -148,7 +148,7 @@ type closeErrorBuffer struct {
 }
 
 func (b *closeErrorBuffer) Write(data []byte) (int, error) {
-	if text := strings.TrimSpace(string(data)); text != "" {
+	if text := jsTrim(string(data)); text != "" {
 		b.last = text
 	}
 	return b.Buffer.Write(data)
