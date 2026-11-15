@@ -58,11 +58,13 @@ func TestB631HumanChecksList(t *testing.T) {
 	b631Run(t, f, "list", "--run", "r-test", "--block", "B1").want(t, 2, "", "run human-checks list: unknown flag --block\n")
 	b631Run(t, f, "bogus").want(t, 2, "", rhcListUsage+rhcClearUsage)
 	b631Run(t, f, "list", "--run", "r-none").want(t, 1, "", "run human-checks list: no run record for r-none\n")
-	// A cleared row without a valid MAC clears nothing.
-	f.rows(map[string]any{"event": "human_check.cleared", "block": "B2", "clause": "C1", "check": "sound plays", "note": "x", "by": "human"})
+	// A cleared row without a valid MAC clears nothing. The ts is pinned:
+	// this row's real MAC starts with "00" (B741: an unpinned ts made that
+	// 1 run in 256, and a tamper that wrote "00" left the MAC valid).
+	f.rows(map[string]any{"event": "human_check.cleared", "block": "B2", "clause": "C1", "check": "sound plays", "note": "x", "by": "human", "ts": "2026-11-13T10:00:00.153Z"})
 	rows := f.ledger()
 	last := rows[len(rows)-1]
-	last["mac"] = "00" + last["mac"].(string)[2:]
+	last["mac"] = b741Tamper(t, last["mac"].(string))
 	var buf bytes.Buffer
 	for _, r := range rows[:len(rows)-1] {
 		data, _ := json.Marshal(r)
@@ -78,6 +80,24 @@ func TestB631HumanChecksList(t *testing.T) {
 	g := newHVFixture(t, nil, nil)
 	b631Run(t, g, "list", "--run", "r-test").want(t, 0, "run r-test: no open human checks\n", "")
 	b631Run(t, g, "list", "--run", "r-test", "--json").want(t, 0, `{"run":"r-test","open":[]}`+"\n", "")
+}
+
+// b741Tamper returns mac with its first hex digit changed, so the result
+// always differs from mac and stays well-formed lowercase hex.
+func b741Tamper(t *testing.T, mac string) string {
+	t.Helper()
+	if len(mac) != 64 {
+		t.Fatalf("mac %q is not 64 hex digits", mac)
+	}
+	first := "0"
+	if mac[0] == '0' {
+		first = "1"
+	}
+	out := first + mac[1:]
+	if out == mac {
+		t.Fatalf("tamper left mac %q unchanged", mac)
+	}
+	return out
 }
 
 func TestB631HumanChecksClear(t *testing.T) {
