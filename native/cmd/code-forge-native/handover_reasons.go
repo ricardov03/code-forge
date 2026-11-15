@@ -73,7 +73,6 @@ const (
 	hWaitBlockConfig
 	hWaitBlockAnswer
 	hWaitBlockEncoding
-	hWaitBlockStopped
 	hWaitBlockLocal
 	hReviewRoot
 	hEnqueueEncoding
@@ -375,7 +374,6 @@ var handoverReasons = [...]string{
 	hWaitBlockConfig:          "wait-block-config",
 	hWaitBlockAnswer:          "wait-block-answer",
 	hWaitBlockEncoding:        "wait-block-encoding",
-	hWaitBlockStopped:         "wait-block-stopped",
 	hWaitBlockLocal:           "wait-block-local",
 	hReviewRoot:               "review-root",
 	hEnqueueEncoding:          "enqueue-encoding",

@@ -336,3 +336,15 @@ func extraRoundsFor(rows []ledger.Object, runID, block, file string, key []byte)
 	}
 	return len(grants), nil
 }
+
+// StopContentHash is reopen.mjs stopContentHash for a caller outside the
+// worker (B717: review-file's automatic requeue); known false is null.
+func StopContentHash(runID, block, file string, key []byte, state ledger.Object, rows []ledger.Object) (string, bool) {
+	return reopenAt{runID: runID, block: block, file: file, key: key}.stopContentHash(state, rows)
+}
+
+// LatestReopenAt is reopen.mjs latestRowAt: the newest verified reopen row
+// (human, agreed agent or automatic) of the file at state seq, or nil.
+func LatestReopenAt(runID, block, file string, key []byte, seq float64, rows []ledger.Object) ledger.Object {
+	return reopenAt{runID: runID, block: block, file: file, key: key, loaded: Loaded{Seq: seq}}.latestRowAt(rows)
+}

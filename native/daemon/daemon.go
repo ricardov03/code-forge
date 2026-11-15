@@ -52,6 +52,11 @@ type server struct {
 	local bool
 	scope string
 	live  func() (bool, bool)
+	// requeue restarts changed stopped files (JoinOptions.Requeue); restarted
+	// holds this poll's reopen ts per restarted file, which wins over the
+	// rows read before the restart, as Node's waitBlock does.
+	requeue   func(tree string, files []string) (map[string]string, error)
+	restarted map[string]string
 }
 
 type treeState struct {
@@ -379,11 +384,23 @@ func (s *server) step(req request, deadline time.Time, down *int, delivered map[
 	} else {
 		*down++
 	}
+	s.restarted = nil
 	if s.local && live {
-		if stopped, err := s.stopped(files, owned, mapping(entry["owned_kinds"]), byFile); err != nil || stopped {
-			// Restarting a changed stopped review writes a signed reopen row;
-			// that mutation stays with Node (requeueStoppedFiles).
-			return failure("stopped"), true
+		stopped, err := s.stopped(files, owned, mapping(entry["owned_kinds"]), byFile)
+		if err != nil {
+			return failure("stopped-marker"), true
+		}
+		if len(stopped) > 0 {
+			// B717: the caller's requeue writes the signed automatic reopen
+			// rows and their tickets (Node's requeueStoppedFiles).
+			if s.requeue == nil {
+				return failure("stopped"), true
+			}
+			restarted, err := s.requeue(tree, stopped)
+			if err != nil {
+				return failure("requeue"), true
+			}
+			s.restarted = restarted
 		}
 	}
 	states := []object{}
@@ -576,6 +593,9 @@ func (s *server) prune(block string) object {
 }
 
 func (s *server) reopened(block, file string) string {
+	if ts, ok := s.restarted[file]; ok {
+		return ts
+	}
 	after := ""
 	for _, value := range s.rows {
 		row := mapping(value)

@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +14,7 @@ import (
 	"github.com/ricardov03/code-forge/native/daemon"
 	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/state"
 )
 
 var reviewBlockID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
@@ -105,7 +108,8 @@ func reviewWaitBlockStep(args []string, step *landStep) int {
 // reviewWaitBlockDirect is runReviewFile's --wait-block mode and waitBlock:
 // the run daemon answers when it can; when it is disabled, unreachable,
 // answers with an invalid envelope or reports a stopped review, the join runs
-// here without it, as Node's local loop does.
+// here without it, as Node's local loop does, restarting changed stopped
+// reviews with a signed automatic reopen (B717).
 func reviewWaitBlockDirect(args []string, flags map[string]string, paths []string, cwd, root string) int {
 	bad := len(paths) > 0 || flags["fresh"] == "true" || !reviewHas(flags, "run")
 	for _, key := range []string{"block", "wait", "answers", "of"} {
@@ -125,25 +129,58 @@ func reviewWaitBlockDirect(args []string, flags map[string]string, paths []strin
 	if !valid {
 		return reviewWaitUsageError(args, "--max must look like 90s or 1500ms")
 	}
+	joined := reviewWaitBlockJoin(cwd, root, run, block, maxWait, os.Stderr)
+	switch {
+	case joined.handed:
+		return reviewWaitHandover(args, joined.handover)
+	case joined.refusal != nil:
+		return reviewEnqueueSay(args, joined.refusal, 1)
+	}
+	// Validate encoding before publishing a breadcrumb or a partial answer.
+	data, err := ledger.Stringify(joined.answer, false)
+	if err != nil {
+		return reviewWaitHandover(args, hWaitBlockEncoding)
+	}
+	before := reviewWaitBreadcrumb()
+	fmt.Fprintln(os.Stdout, string(data))
+	if joined.code == 3 {
+		reviewWaitFailure(args, 3, nil, before)
+	}
+	return joined.code
+}
+
+// reviewBlockJoined is one waitBlock join: its answer and exit code, a
+// refusal Node says (exit 1), or the hand-over Go takes before any write.
+type reviewBlockJoined struct {
+	answer   ledger.Object
+	code     int
+	refusal  ledger.Object
+	handed   bool
+	handover handoverReason
+}
+
+// reviewWaitBlockJoin is waitBlock for a valid block and run. print gets
+// requeueStoppedFiles' auto-requeue lines (Node's stderr).
+func reviewWaitBlockJoin(cwd, root, run, block string, maxWait time.Duration, print io.Writer) reviewBlockJoined {
 	ctx := context.Background()
 	real, err := filepath.EvalSymlinks(cwd)
 	if err != nil {
-		return reviewWaitHandover(args, hWaitBlockConfig)
+		return reviewBlockJoined{handed: true, handover: hWaitBlockConfig}
 	}
-	readScope := func() (map[string]any, string, int) {
+	readScope := func() (map[string]any, string, *reviewBlockJoined) {
 		cfg, file, scope := reviewBlockConfig(ctx, root, real, run, block)
 		switch scope {
 		case reviewScopeUnreadable:
-			return nil, "", reviewEnqueueSay(args, reviewEnqueueRefusal("block-scope-unreadable", "the block scope cannot be read"), 1)
+			return nil, "", &reviewBlockJoined{refusal: reviewEnqueueRefusal("block-scope-unreadable", "the block scope cannot be read"), code: 1}
 		case reviewScopeUnsupported:
-			return nil, "", reviewWaitHandover(args, hWaitBlockConfig)
+			return nil, "", &reviewBlockJoined{handed: true, handover: hWaitBlockConfig}
 		}
-		return cfg, file, -1
+		return cfg, file, nil
 	}
 	// waitBlockScope validates the scope before the deadline starts, then
 	// re-reads the workspace mirror on each join (run reload can change it).
-	if _, _, code := readScope(); code >= 0 {
-		return code
+	if _, _, stop := readScope(); stop != nil {
+		return *stop
 	}
 	home, _ := os.UserHomeDir()
 	live := func() (bool, bool) {
@@ -152,9 +189,9 @@ func reviewWaitBlockDirect(args []string, flags map[string]string, paths []strin
 	}
 	deadline := time.Now().Add(maxWait)
 	for {
-		cfg, scopeFile, code := readScope()
-		if code >= 0 {
-			return code
+		cfg, scopeFile, stop := readScope()
+		if stop != nil {
+			return *stop
 		}
 		var answer map[string]any
 		if daemonclient.Enabled(cfg) {
@@ -169,37 +206,42 @@ func reviewWaitBlockDirect(args []string, flags map[string]string, paths []strin
 		}
 		if answer == nil {
 			var failure string
+			var requeueErr error
 			answer, failure = daemon.Join(daemon.JoinOptions{Home: home, Repo: root, Scope: scopeFile, Run: run, Block: block, Deadline: deadline, Live: live,
-				Sleep: func(pause time.Duration) bool { time.Sleep(pause); return true }})
+				Sleep: func(pause time.Duration) bool { time.Sleep(pause); return true },
+				Requeue: func(tree string, files []string) (map[string]string, error) {
+					restarted, err := reviewRequeueStopped(reviewRequeue{home: home, repoRoot: root, run: run, block: block, tree: tree, files: files, print: print})
+					requeueErr = err
+					return restarted, err
+				}})
 			switch failure {
 			case "":
 			case "block-scope-unreadable":
-				return reviewEnqueueSay(args, reviewEnqueueRefusal("block-scope-unreadable", "the block scope cannot be read"), 1)
+				return reviewBlockJoined{refusal: reviewEnqueueRefusal("block-scope-unreadable", "the block scope cannot be read"), code: 1}
 			case "bad-ref":
 				// changedFiles → treeAtOpen refuses a base that is no commit id.
-				return reviewEnqueueSay(args, reviewEnqueueRefusal("bad-ref", "the block base must be a commit id"), 1)
-			case "stopped":
-				return reviewWaitHandover(args, hWaitBlockStopped)
+				return reviewBlockJoined{refusal: reviewEnqueueRefusal("bad-ref", "the block base must be a commit id"), code: 1}
+			case "requeue":
+				// B717: runReviewFile's catch for requeueStoppedFiles' coded
+				// refusals; values only Node reads still hand over.
+				var se *state.Error
+				if errors.As(requeueErr, &se) {
+					return reviewBlockJoined{refusal: reviewEnqueueRefusal(se.Code, se.Message), code: 1}
+				}
+				return reviewBlockJoined{handed: true, handover: hWaitBlockLocal}
 			default:
-				return reviewWaitHandover(args, hWaitBlockLocal)
+				return reviewBlockJoined{handed: true, handover: hWaitBlockLocal}
 			}
 		}
 		out, ok := reviewBlockAnswer(block, answer)
 		if !ok {
-			return reviewWaitHandover(args, hWaitBlockAnswer)
+			return reviewBlockJoined{handed: true, handover: hWaitBlockAnswer}
 		}
-		// Validate encoding before publishing a breadcrumb or a partial answer.
-		data, err := ledger.Stringify(out, false)
-		if err != nil {
-			return reviewWaitHandover(args, hWaitBlockEncoding)
-		}
-		before := reviewWaitBreadcrumb()
-		fmt.Fprintln(os.Stdout, string(data))
+		code := 0
 		if answer["status"] == "worker_down" {
-			reviewWaitFailure(args, 3, nil, before)
-			return 3
+			code = 3
 		}
-		return 0
+		return reviewBlockJoined{answer: out, code: code}
 	}
 }
 

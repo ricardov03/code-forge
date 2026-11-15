@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/ricardov03/code-forge/native/queue"
 )
 
 // JoinOptions describe one block join without a daemon socket, as Node's
@@ -22,6 +24,11 @@ type JoinOptions struct {
 	Live func() (live, supported bool)
 	// Sleep pauses between polls; false stops the join (an interrupt).
 	Sleep func(time.Duration) bool
+	// Requeue is Node's requeueStoppedFiles for a live worker: it restarts
+	// the changed stopped files of tree (a signed automatic reopen and a new ticket)
+	// and returns each restarted file's reopen ts. nil keeps the stopped
+	// failure; an error ends the join with the failure "requeue" (B717).
+	Requeue func(tree string, files []string) (map[string]string, error)
 }
 
 // Join polls the block like the daemon's wait-block method and returns its
@@ -30,7 +37,7 @@ type JoinOptions struct {
 // worker and a stopped review whose restart needs a signed row),
 // worker-unsupported, interrupted, or a daemon failure code.
 func Join(o JoinOptions) (answer map[string]any, code string) {
-	s := &server{home: o.Home, run: o.Run, repo: o.Repo, scope: o.Scope, local: true, live: o.Live, trees: make(map[string]*treeState)}
+	s := &server{home: o.Home, run: o.Run, repo: o.Repo, scope: o.Scope, local: true, live: o.Live, requeue: o.Requeue, trees: make(map[string]*treeState)}
 	s.queue.Dir = filepath.Join(o.Repo, ".code-forge", "queue")
 	down := 0
 	delivered := make(map[string]bool)
@@ -59,17 +66,34 @@ func Join(o JoinOptions) (answer map[string]any, code string) {
 	}
 }
 
-// stopped reports Node's requeue candidates: an owned changed file whose
-// newest block ticket is marked stopped with findings in its result.
-func (s *server) stopped(files []string, owned []any, kinds object, byFile map[string][]object) (bool, error) {
+// stopped lists Node's requeue candidates in changed-file order: an owned
+// changed file whose newest block ticket is marked stopped with findings in
+// its result.
+func (s *server) stopped(files []string, owned []any, kinds object, byFile map[string][]object) ([]string, error) {
+	return stoppedFiles(s.repo, &s.queue, files, owned, kinds, byFile)
+}
+
+// StoppedFiles is waitBlock's requeue candidate list for a caller's own
+// local join (block close --auto-claim): tickets are the block's queue
+// tickets in queue order (B717).
+func StoppedFiles(repo string, idx *queue.Index, tickets []object, files []string, owned []any, kinds object) ([]string, error) {
+	byFile := make(map[string][]object)
+	for _, t := range tickets {
+		byFile[text(t, "file")] = append(byFile[text(t, "file")], t)
+	}
+	return stoppedFiles(repo, idx, files, owned, kinds, byFile)
+}
+
+func stoppedFiles(repo string, idx *queue.Index, files []string, owned []any, kinds object, byFile map[string][]object) ([]string, error) {
+	out := []string{}
 	for _, file := range files {
 		tickets := byFile[file]
 		if !owns(owned, kinds, file) || len(tickets) == 0 {
 			continue
 		}
-		marker, err := s.queue.Marker(text(tickets[len(tickets)-1], "ticket"))
+		marker, err := idx.Marker(text(tickets[len(tickets)-1], "ticket"))
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		if marker == nil || marker["status"] != "stopped" {
 			continue
@@ -80,12 +104,12 @@ func (s *server) stopped(files []string, owned []any, kinds object, byFile map[s
 		if !strings.HasPrefix(rel, prefix) || slices.Contains(strings.Split(rel, string(filepath.Separator)), "..") {
 			continue
 		}
-		result, err := readObject(filepath.Join(s.repo, rel))
+		result, err := readObject(filepath.Join(repo, rel))
 		if findings, ok := result["findings"].([]any); err == nil && ok && len(findings) > 0 {
-			return true, nil
+			out = append(out, file)
 		}
 	}
-	return false, nil
+	return out, nil
 }
 
 // automaticReopen is isAutomaticReopen in src/review/reopen.mjs.

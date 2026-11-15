@@ -218,3 +218,37 @@ func TestLocalJoinCountsAutomaticReopen(t *testing.T) {
 		t.Fatalf("equal hashes are no automatic reopen: %q", got)
 	}
 }
+
+// B717: a live join hands the changed stopped files and the block tree to
+// Requeue and reports the restart ts it returns as the file's reopen.
+func TestB717JoinRequeueRestartsStoppedFiles(t *testing.T) {
+	o := stoppedFixture(t, []any{object{"id": "F1"}})
+	var gotTree string
+	var gotFiles []string
+	o.Requeue = func(tree string, files []string) (map[string]string, error) {
+		gotTree, gotFiles = tree, files
+		return map[string]string{"a.go": "2100-01-01T00:00:00.000Z"}, nil
+	}
+	answer, code := Join(o)
+	if code != "" {
+		t.Fatalf("Join code %q, want an answer after the requeue", code)
+	}
+	if gotTree != o.Repo || len(gotFiles) != 1 || gotFiles[0] != "a.go" {
+		t.Fatalf("Requeue(%q, %v), want (%q, [a.go])", gotTree, gotFiles, o.Repo)
+	}
+	if answer == nil || answer["block"] != "B1" {
+		t.Fatalf("answer = %v", answer)
+	}
+}
+
+func TestB717JoinRequeueErrorEndsJoin(t *testing.T) {
+	o := stoppedFixture(t, []any{object{"id": "F1"}})
+	before := queueFiles(t, o.Repo)
+	o.Requeue = func(string, []string) (map[string]string, error) { return nil, os.ErrPermission }
+	if answer, code := Join(o); code != "requeue" || answer != nil {
+		t.Fatalf("Join = %v, %q; want the requeue failure", answer, code)
+	}
+	if after := queueFiles(t, o.Repo); len(after) != len(before) {
+		t.Fatalf("queue changed after a failed requeue: %d files, was %d", len(after), len(before))
+	}
+}
