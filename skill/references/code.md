@@ -131,6 +131,10 @@ names hub files where it stops), and for a `native/` change `test/compat/go.test
 tests that build or run the native binary. A test command without `{test_files}` gets the
 selection appended. An empty selection skips the test gate. The reason is `go_only` or
 `import_graph`. `forge gates run --run <r> --block <id> --full` is the only local full suite.
+In a Go project (`go.mod` at the root, `gates.test` is `go test ./...`), `--changed` and the block
+land gates run `go test` on the changed packages plus every package that imports one of them in
+its build or its tests (B667, B723b); a batch land runs one full `go test ./...` at the end.
+`gate.done` lists `packages` and `importer_packages`. A `go list` failure fails the gate.
 
 **Fail fast (B392, B363, B418).** Run `forge block ready <id> --run <r> --preflight [--report <file>]`
 before a gate: in about a second it lists stale base, open findings, rule breaks and report

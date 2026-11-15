@@ -591,11 +591,15 @@ func landMergeGate(home, project, run, id, main, treePath, workspace, branch, ba
 			result.selected = len(scope.Files)
 			// B667: a Go project's merge gate tests the merge's changed
 			// packages, like its block gate.
-			if gpkProject(cwd) {
+			if goBin, ok := gpkProjectGo(cwd); ok {
 				options.goChanged = gpkChanged(cwd, "HEAD^1", "HEAD")
-				if s := gpkScope(cwd, options.goChanged, false); gpkScoped(s) {
+				// B723b: a go list error leaves goScope unset; the gate
+				// plans it again and fails loud.
+				if s, err := gpkScope(cwd, goBin, options.goChanged, false); err == nil && gpkScoped(s) {
+					options.goScope = &s
 					result.selected, result.scopeReason = len(s.Files), s.Reason
-				} else {
+				} else if err == nil {
+					options.goScope = &s
 					result.selected, result.scopeReason = -1, s.Reason
 				}
 			}

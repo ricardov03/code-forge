@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -10,6 +15,7 @@ import (
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/ledger"
 )
 
 // B667 (owner rule 2026-11-14: "We ALWAYS want speed"): in a Go project the
@@ -54,13 +60,30 @@ func gpkMode(cwd string, p gates.Plan, configured map[string]any) bool {
 
 // gpkProject is gpkMode for a directory's own config (the land merge gates).
 func gpkProject(cwd string) bool {
+	_, ok := gpkProjectGo(cwd)
+	return ok
+}
+
+// gpkProjectGo is gpkProject with the test command's go binary.
+func gpkProjectGo(cwd string) (string, bool) {
 	loaded, err := config.Load(cwd)
 	if err != nil {
-		return false
+		return "", false
 	}
 	configured := blockMap(loaded["gates"])
 	p, safe := gates.Resolve(cwd, configured)
-	return safe && gpkMode(cwd, p, configured)
+	if !safe || !gpkMode(cwd, p, configured) {
+		return "", false
+	}
+	return gpkGo(p), true
+}
+
+// gpkGo is the go binary of a gpkMode plan's test command.
+func gpkGo(p gates.Plan) string {
+	if c := p.Commands["test"]; c != nil && len(c.Argv) > 0 {
+		return c.Argv[0]
+	}
+	return "go"
 }
 
 // gpkPackages maps changed paths (relative to cwd) to the Go packages to test:
@@ -141,11 +164,15 @@ func gpkTested(cwd, dir string) bool {
 	return false
 }
 
-// gpkScope is the --changed scope of a Go project: the changed packages, the
-// full suite for a go.mod change, or no_changes (test gate skipped).
-// rootRelative is true for paths from a plain git diff (repository-root
-// relative); the workspace prefix is then taken off.
-func gpkScope(cwd string, changed []string, rootRelative bool) gates.Scope {
+// gpkScope is the --changed scope of a Go project: the changed packages and
+// their importers (B723b), the full suite for a go.mod change, or no_changes
+// (test gate skipped). Scope.Changed holds the changed packages,
+// Scope.Dependents the importer packages and Scope.Files both (the go test
+// argv). rootRelative is true for paths from a plain git diff
+// (repository-root relative); the workspace prefix is then taken off. goBin
+// is the test command's go; a go list error fails the scope (never an empty
+// or whole-module run).
+func gpkScope(cwd, goBin string, changed []string, rootRelative bool) (gates.Scope, error) {
 	prefix, err := "", error(nil)
 	if rootRelative {
 		prefix, err = gitx.Run(cwd, "rev-parse", "--show-prefix")
@@ -163,13 +190,131 @@ func gpkScope(cwd string, changed []string, rootRelative bool) gates.Scope {
 	}
 	pkgs, goMod := gpkPackages(cwd, changed)
 	if goMod {
-		return gates.Scope{Kind: "full", Report: "full", Reason: gpkReasonGoMod, Files: []string{}, Changed: []string{}, Dependents: []string{}}
+		return gates.Scope{Kind: "full", Report: "full", Reason: gpkReasonGoMod, Files: []string{}, Changed: []string{}, Dependents: []string{}}, nil
 	}
-	reason := gpkReasonPackages
 	if len(pkgs) == 0 {
-		reason = gpkReasonNoChanges
+		return gates.Scope{Kind: "changed", Reason: gpkReasonNoChanges, Files: []string{}, Changed: []string{}, Dependents: []string{}}, nil
 	}
-	return gates.Scope{Kind: "changed", Reason: reason, Files: pkgs, Changed: []string{}, Dependents: []string{}}
+	importers, err := gpkImporters(cwd, goBin, pkgs)
+	if err != nil {
+		return gates.Scope{}, err
+	}
+	files := append(append([]string{}, pkgs...), importers...)
+	sort.Strings(files)
+	return gates.Scope{Kind: "changed", Reason: gpkReasonPackages, Files: files, Changed: pkgs, Dependents: importers}, nil
+}
+
+// gpkListed is one package of `go list -json ./...`.
+type gpkListed struct {
+	ImportPath   string
+	Dir          string
+	Module       *struct{ Dir string }
+	Deps         []string
+	TestImports  []string
+	XTestImports []string
+}
+
+// gpkImporters is every package `go test ./...` reaches (other than the
+// changed ones) whose build or tests can see a changed package (B722/B723:
+// B696 changed canon, config imports canon, and a changed-only run never
+// tested config). A package is affected when it is changed or its Deps
+// (transitive) hold a changed package; it is an importer when it is affected
+// or its TestImports or XTestImports hold an affected package. pkgs are
+// cwd-relative package dirs (./a); the result is sorted. A go list error or an
+// empty listing is an error.
+func gpkImporters(cwd, goBin string, pkgs []string) ([]string, error) {
+	cmd := exec.Command(goBin, "list", "-json=ImportPath,Dir,Module,Deps,TestImports,XTestImports", "./...")
+	cmd.Dir = cwd
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, fmt.Errorf("go changed packages: cannot list the importer packages of %s (go list ./... failed): %s", strings.Join(pkgs, " "), msg)
+	}
+	listed := []gpkListed{}
+	dec := json.NewDecoder(&stdout)
+	for {
+		var l gpkListed
+		if err := dec.Decode(&l); err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, fmt.Errorf("go changed packages: cannot list the importer packages of %s (go list ./... output): %v", strings.Join(pkgs, " "), err)
+		}
+		listed = append(listed, l)
+	}
+	if len(listed) == 0 {
+		return nil, fmt.Errorf("go changed packages: cannot list the importer packages of %s: go list ./... listed no packages", strings.Join(pkgs, " "))
+	}
+	want := map[string]bool{}
+	for _, p := range pkgs {
+		want[p] = true
+	}
+	rel := map[string]string{}
+	changed := map[string]bool{}
+	for _, l := range listed {
+		root := cwd
+		if l.Module != nil && l.Module.Dir != "" {
+			root = l.Module.Dir
+		}
+		r, err := filepath.Rel(root, l.Dir)
+		if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+			continue
+		}
+		dir := "."
+		if r = filepath.ToSlash(r); r != "." {
+			dir = "./" + r
+		}
+		rel[l.ImportPath] = dir
+		if want[dir] {
+			changed[l.ImportPath] = true
+		}
+	}
+	hit := func(list []string, set map[string]bool) bool {
+		for _, p := range list {
+			if set[p] {
+				return true
+			}
+		}
+		return false
+	}
+	affected := map[string]bool{}
+	for p := range changed {
+		affected[p] = true
+	}
+	for _, l := range listed {
+		if hit(l.Deps, changed) {
+			affected[l.ImportPath] = true
+		}
+	}
+	out := []string{}
+	for _, l := range listed {
+		dir, ok := rel[l.ImportPath]
+		if !ok || want[dir] {
+			continue
+		}
+		if affected[l.ImportPath] || hit(l.TestImports, affected) || hit(l.XTestImports, affected) {
+			out = append(out, dir)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// gpkFields sets a Go package scope's gate.done / result fields: the changed
+// packages and, separately, their importer packages (B723b).
+func gpkFields(row *ledger.Object, s gates.Scope) {
+	changed, importers := s.Changed, s.Dependents
+	if changed == nil {
+		changed = []string{}
+	}
+	if importers == nil {
+		importers = []string{}
+	}
+	row.Set("packages", changed)
+	row.Set("importer_packages", importers)
 }
 
 // gpkScoped reports a Go package scope from gpkScope that changes the test
