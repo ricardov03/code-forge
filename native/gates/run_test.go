@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -20,6 +21,28 @@ func TestExecuteSignalNames(t *testing.T) {
 			want := "gate terminated: SIG" + signal
 			if r.Get("reason") != "SIG"+signal || r.Get("message") != want || r.Get("stderr") != want+"\n" || r.Get("code") != nil {
 				t.Fatalf("signal %s: %v", signal, r)
+			}
+		})
+	}
+}
+
+// TestExecuteGateGetsDefaultForIgnoredSignals: a gates run whose own process
+// ignores SIGHUP (started under nohup) or SIGINT (a script's background job)
+// must still give its gate the default action, as Node's spawn does. Before
+// B719 the gate shell inherited SIG_IGN, survived `kill -HUP $$` and the gate
+// passed with code 0.
+func TestExecuteGateGetsDefaultForIgnoredSignals(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		sig  syscall.Signal
+	}{{"HUP", syscall.SIGHUP}, {"INT", syscall.SIGINT}} {
+		t.Run(tc.name, func(t *testing.T) {
+			signal.Ignore(tc.sig)
+			defer signal.Reset(tc.sig)
+			r := execute(context.Background(), []string{"/bin/sh", "-c", "kill -" + tc.name + " $$; echo survived"}, nil, t.TempDir(), "", 5000, false)
+			want := "gate terminated: SIG" + tc.name
+			if r.Get("ok") != false || r.Get("reason") != "SIG"+tc.name || r.Get("stdout") != "" || r.Get("stderr") != want+"\n" || r.Get("code") != nil {
+				t.Fatalf("parent ignores SIG%s: %v", tc.name, r)
 			}
 		})
 	}

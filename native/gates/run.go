@@ -15,6 +15,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -529,6 +530,7 @@ func niceExec(program string) {
 			env = append(env, kv)
 		}
 	}
+	resetIgnoredSignals()
 	syscall.CloseOnExec(3)
 	err := syscall.Exec(program, os.Args, env)
 	errno, ok := err.(syscall.Errno)
@@ -539,6 +541,26 @@ func niceExec(program string) {
 	binary.BigEndian.PutUint32(b[:], uint32(errno))
 	_, _ = syscall.Write(3, b[:])
 	os.Exit(127)
+}
+
+// resetIgnoredSignals gives the gate program the default action for every
+// signal this trampoline inherited as ignored, as Node's spawn does (libuv
+// resets signals 1-31 to SIG_DFL in the child). The Go runtime keeps an
+// inherited SIG_IGN for SIGHUP and SIGINT, and exec keeps an ignored signal
+// ignored, so a gates run started under nohup (SIGHUP ignored) or as a
+// background job of a script (SIGINT ignored) gave its gate a shell that
+// survived `kill -HUP $$` and exited 0 (B719). Catching the signal here
+// replaces SIG_IGN with a handler, and exec turns every caught signal back
+// to SIG_DFL. A signal caught before exec is dropped, as it would have been
+// while ignored.
+func resetIgnoredSignals() {
+	caught := make(chan os.Signal, 1)
+	for n := 1; n < 32; n++ {
+		sig := syscall.Signal(n)
+		if sig != syscall.SIGKILL && sig != syscall.SIGSTOP && signal.Ignored(sig) {
+			signal.Notify(caught, sig)
+		}
+	}
 }
 
 // startAtNice starts cmd so that its program begins at gateNice. Through the
