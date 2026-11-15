@@ -1,0 +1,38 @@
+asked=
+exit=1
+--- stdout
+--- stderr
+block B1 stopped (worker.replaced): a counted review result does not name a pinned worker
+--- new rows
+{"run":"r-b684","event":"worker.replaced","block":"B1","reason":"a counted review result does not name a pinned worker","tokens_source":null,"cost_source":null}
+--- status stopped
+--- ws/queue/<ID>.json
+{
+--- ws/runs/r-b684.json
+{
+  "run_id": "r-b684",
+  "project": "fixture",
+  "workspace": "<WS>",
+  "status": "active",
+  "blocks": {
+    "B1": {
+      "status": "stopped",
+      "owned_files": [
+        "sample.mjs"
+      ],
+      "base_sha": "<SHA>",
+      "base_branch": "main",
+      "tree_at_open": {},
+      "kind": "code",
+      "test_files": [],
+      "worktree": {
+        "path": "<WS>/.code-forge/worktrees/B1",
+        "branch": "block-B1",
+        "base_sha": "<SHA>"
+      },
+      "stop_reason": "a counted review result does not name a pinned worker"
+    }
+  },
+  "orphans": []
+}
+

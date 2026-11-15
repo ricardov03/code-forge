@@ -146,7 +146,9 @@ func runBlockReady(args []string) int {
 	}
 	blockers := []gatecheck.Blocker{}
 	event, why := blockclose.Pin(current, live, statusStart)
-	if !closeQueuePins(p.home, p.run, p.id, current, rows, &event, &why, mainTop) {
+	// A ticket Node's readTicket throws on stays with Node here (B718 ported
+	// that message for block close only).
+	if ok, err := closeQueuePins(p.home, p.run, p.id, current, rows, &event, &why, mainTop); !ok || err != nil {
 		return p.fallback()
 	}
 	if event != "" {
