@@ -24,6 +24,15 @@ func b714RawLate(file, finding any) func(f *b684Fixture, hash string) {
 	}
 }
 
+// b714TranscriptAt writes the transcript under a name with a control
+// character in it and points --transcript there.
+func b714TranscriptAt(name, text string) func(f *b684Fixture) {
+	return func(f *b684Fixture) {
+		f.transcript = filepath.Join(filepath.Dir(f.transcript), name)
+		f.must(os.WriteFile(f.transcript, []byte(text), 0600))
+	}
+}
+
 var b714CloseCases = []struct {
 	name, ask, args string
 	setup           b684Setup
@@ -56,6 +65,10 @@ var b714CloseCases = []struct {
 	{"raw-finding-object-json", "yes", "|--decide|--reason|late is fine|--json", b684Setup{review: b714RawLate("sample.mjs", ledger.Object{{Key: "valueOf", Value: "x"}})}, nil},
 	{"raw-file-zero", "yes", "|--decide|--reason|late is fine", b684Setup{review: b714RawLate(float64(0), "L1")}, nil},
 	{"raw-proof", "yes", "|--decide|--reason|late is fine", b684Setup{review: b714RawLate(float64(5), "proof")}, nil},
+	// --decide with a transcript hit read from a path with a control
+	// character: prepareAcceptHit's form refusal.
+	{"hit-path-tab", "yes", "|--decide|--reason|the stash was harmless", b684Setup{review: b684Approved}, b714TranscriptAt("t\tx.log", b697Hit)},
+	{"hit-path-tab-finding", "yes", "|--decide|--reason|both are fine", b684Setup{review: b684Finding("warning")}, b714TranscriptAt("t\x1bx.log", b697Hit)},
 	{"hcl-infinity", "notty", "", b684Setup{review: b684Approved}, b714LengthChecks("Infinity")},
 }
 

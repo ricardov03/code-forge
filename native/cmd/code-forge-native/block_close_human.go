@@ -315,9 +315,14 @@ func closeHumanDecisions(in closeDecideInput) (actions []humanDecision, preview 
 			// A ledger rule_break row: no action; the preview refuses it.
 			continue
 		}
+		if blockControl.MatchString(in.transcriptFile) && !blockControl.MatchString(m[2]) {
+			// B714: prepareAcceptHit checks the forms first (rule, then the
+			// transcript path); built-in and configured rule ids are plain.
+			return actions, in.rows, &state.Error{Code: "usage", Message: "--transcript must not contain control characters"}, true
+		}
 		line, err := strconv.Atoi(m[1])
 		if err != nil || line < 1 || line > len(lines) || hitSeen[b.Detail] || in.transcriptFile == "" ||
-			blockControl.MatchString(in.transcriptFile) || blockControl.MatchString(m[2]) {
+			blockControl.MatchString(m[2]) {
 			// prepareAcceptHit's own refusals and a hit named twice stay with Node.
 			return nil, nil, nil, false
 		}
