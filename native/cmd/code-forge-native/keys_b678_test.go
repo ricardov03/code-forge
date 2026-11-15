@@ -49,8 +49,8 @@ func b678Prompt(t *testing.T, project string, keys []string, args ...string) (in
 		t.Fatal(err)
 	}
 	saved := keysPromptOpen
-	keysPromptOpen = func() (initWizEnv, bool) {
-		return initWizEnv{in: &b528Keys{keys: keys}, out: file, cols: 80, rows: 24}, true
+	keysPromptOpen = func() (keysTTY, bool) {
+		return keysTTY{initWizEnv{in: &b528Keys{keys: keys}, out: file, cols: 80, rows: 24}, true}, true
 	}
 	defer func() { keysPromptOpen = saved }()
 	keysEnded = false
@@ -157,18 +157,20 @@ func TestB678KeysSetPromptHandsOver(t *testing.T) {
 	_, project, _ := b678PromptHome(t)
 	saved := keysPromptOpen
 	t.Cleanup(func() { keysPromptOpen = saved })
-	keysPromptOpen = func() (initWizEnv, bool) { return initWizEnv{}, false }
+	keysPromptOpen = func() (keysTTY, bool) { return keysTTY{}, false }
 	if keysDecide([]string{"set", "foo"}, project) != nil {
-		t.Fatal("no terminal: Go served the prompt")
+		t.Fatal("a terminal of size 0: Go served the prompt")
 	}
-	keysPromptOpen = func() (initWizEnv, bool) {
-		return initWizEnv{in: &b528Keys{}, out: os.Stdout, cols: 80, rows: 24}, true
+	keysPromptOpen = func() (keysTTY, bool) {
+		return keysTTY{initWizEnv{in: &b528Keys{}, out: os.Stdout, cols: 80, rows: 24}, true}, true
 	}
+	// B694: Node warns with its pid that NO_COLOR is ignored
+	t.Setenv("FORCE_COLOR", "1")
 	t.Setenv("NO_COLOR", "1")
 	if keysDecide([]string{"set", "foo"}, project) != nil {
-		t.Fatal("NO_COLOR: Go served the prompt")
+		t.Fatal("FORCE_COLOR with NO_COLOR: Go served the prompt")
 	}
-	b528Unset(t, "NO_COLOR")
+	b528Unset(t, "NO_COLOR", "FORCE_COLOR")
 	upgradePackageRoot = func() (string, bool) { return "", false }
 	if keysDecide([]string{"set", "foo"}, project) != nil {
 		t.Fatal("no launcher to name at EOF: Go served the prompt")

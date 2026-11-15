@@ -565,6 +565,9 @@ type initWizTerm struct {
 	out        io.Writer
 	cols, rows int
 	prevFrame  string
+	// look, when set, turns a drawn frame into what Node draws on this
+	// stream (no colors, ASCII symbols) before it is wrapped (B694).
+	look func(string) string
 }
 
 // initWizOutcome is how a prompt ended.
@@ -781,7 +784,11 @@ func initWizMove(x, y int) string {
 // render is Prompt.render: the first frame hides the cursor, later frames
 // are written as a diff against the previous one.
 func (t *initWizTerm) render(p *initWizPrompt) {
-	frame := initWizWrap(p.frame(t.cols), t.cols)
+	drawn := p.frame(t.cols)
+	if t.look != nil {
+		drawn = t.look(drawn)
+	}
+	frame := initWizWrap(drawn, t.cols)
 	if frame == t.prevFrame {
 		return
 	}

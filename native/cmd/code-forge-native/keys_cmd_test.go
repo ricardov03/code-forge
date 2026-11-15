@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -239,20 +240,24 @@ func TestB456KeysDarwinListProbesSecurity(t *testing.T) {
 	if keysDecide([]string{"list"}, project) != nil {
 		t.Fatal("list with no usable keychain must hand over")
 	}
-	keysGOOS = "linux"
+	// B694: Linux with the binding but no Secret Service is Node's keyutils
+	// store (no binding is the file store alone: TestB694KeysLinuxNoBindingFileChain)
+	b679Linux(t, true, nil)
+	ssConnect = func() (ssAPI, error) { return nil, errors.New("b694: no bus") }
 	if keysDecide([]string{"list"}, project) != nil {
-		t.Fatal("linux default chain must hand over")
+		t.Fatal("linux keyutils chain must hand over")
 	}
 }
 
 func TestB456KeysNodeOnlyCasesHandOver(t *testing.T) {
 	_, project := b456KeysHome(t, "", nil)
 	for _, args := range [][]string{
-		// B678: no terminal for the hidden prompt (go test has none)
+		// B678: no launcher line to name if the input ends at the prompt
+		// (B694 draws it on any stdin and stdout)
 		{"set", "zz"},
-		// B678: a 1Password-like link Go cannot read an item ID from
-		{"set", "zz", "--op", "https://my.1password.com/open/i?v=abc"},
-		{"test", "zz", "--ref", "https://my.1password.com/open/i?v=abc"},
+		// B694: a 1Password-like link only IDNA reads
+		{"set", "zz", "--op", "https://xn--zz.1password.com/open/i?i=abcdefghijklmnopqrstuvwxyz"},
+		{"test", "zz", "--ref", "https://１password.com/open/i?i=abcdefghijklmnopqrstuvwxyz"},
 	} {
 		if keysDecide(args, project) != nil {
 			t.Errorf("%v: Go served a case that needs Node", args)

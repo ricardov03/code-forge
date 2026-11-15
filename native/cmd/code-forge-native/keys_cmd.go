@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -137,39 +136,10 @@ func keysParseCacheHours(text string) (int, bool) {
 	return keysIsCacheHours(float64(n))
 }
 
+// keysOpItemFromInput is opItemIdFromInput where Go is sure (keysOpItem).
 func keysOpItemFromInput(s string) string {
-	text := strings.TrimSpace(s)
-	if keysOpItemID.MatchString(text) {
-		return text
-	}
-	if !keysHTTPS.MatchString(text) {
-		return ""
-	}
-	u, err := url.Parse(text)
-	if err != nil || !strings.EqualFold(u.Scheme, "https") {
-		return ""
-	}
-	host := strings.ToLower(u.Hostname())
-	hostOK := false
-	for _, h := range []string{"1password.com", "1password.ca", "1password.eu"} {
-		hostOK = hostOK || host == h || strings.HasSuffix(host, "."+h)
-	}
-	if !hostOK {
-		return ""
-	}
-	// Node's URLSearchParams.get returns the first `i`; any doubt hands over.
-	id := u.Query().Get("i")
-	if keysOpItemID.MatchString(id) {
-		return id
-	}
-	return ""
-}
-
-// keysOpLike reports a value Node may treat as a 1Password item link even if
-// Go's URL parser disagrees: any https:// text naming a 1Password host.
-func keysOpLike(s string) bool {
-	text := strings.ToLower(strings.TrimSpace(s))
-	return keysHTTPS.MatchString(text) && strings.Contains(text, "1password.")
+	id, _ := keysOpItem(s)
+	return id
 }
 
 type keysCache struct {
@@ -571,13 +541,28 @@ func keysDecide(args []string, cwd string) keysRun {
 	indexFile := filepath.Join(dir, "index.json")
 	now := keysNow()
 	storeWarning := ""
-	if fileOnly {
-		storeWarning = "WARN " + keysFileWarning + "\n"
+	// B694: the default chain's keychain backend (kcChain): nil is the file
+	// store alone (CODE_FORGE_KEY_BACKEND=file, or Linux without the
+	// @napi-rs/keyring binding), where Node's writer is the file and
+	// createKeyStore gives FILE_FALLBACK_WARNING; ok false hands over.
+	chain := func() (*kcStore, bool) {
+		var kc *kcStore
+		if !fileOnly {
+			store, ok := kcChain()
+			if !ok {
+				return nil, false
+			}
+			kc = store
+		}
+		if kc == nil {
+			storeWarning = "WARN " + keysFileWarning + "\n"
+		}
+		return kc, true
 	}
 
 	switch p.sub {
 	case "list":
-		if !fileOnly && !keysSecurityAvailable() {
+		if _, ok := chain(); !ok {
 			return nil
 		}
 		index, err := keysIndex(indexFile)
@@ -623,13 +608,9 @@ func keysDecide(args []string, cwd string) keysRun {
 	case "remove":
 		// B610: the default chain removes from the keychain through
 		// `security` too (Node's second keychain backend then finds nothing)
-		var kc *kcStore
-		if !fileOnly {
-			store, ok := kcOpen()
-			if !ok {
-				return nil
-			}
-			kc = &store
+		kc, ok := chain()
+		if !ok {
+			return nil
 		}
 		if _, err := keysIndex(indexFile); err != nil {
 			return nil
@@ -660,12 +641,8 @@ func keysDecide(args []string, cwd string) keysRun {
 		// B678: the writer is the keychain through `security`, or the file
 		var w keysWriter
 		w.dir, w.indexFile = dir, indexFile
-		if !fileOnly {
-			store, ok := kcOpen()
-			if !ok {
-				return nil
-			}
-			w.kc = &store
+		if w.kc, ok = chain(); !ok {
+			return nil
 		}
 		if _, err := keysIndex(indexFile); err != nil {
 			return nil
@@ -681,15 +658,15 @@ func keysDecide(args []string, cwd string) keysRun {
 			return func(_, stderr io.Writer) int { r.write(stderr, cache.refuse); return 2 }
 		}
 		fullRef := keysOpRef.MatchString(p.flagArg)
-		itemID := ""
+		itemID, sure := "", true
 		if !fullRef {
-			itemID = keysOpItemFromInput(p.flagArg)
+			itemID, sure = keysOpItem(p.flagArg)
+		}
+		if !sure {
+			// B694: a link only IDNA reads: Node runs it
+			return nil
 		}
 		if !fullRef && itemID == "" {
-			if keysOpLike(p.flagArg) {
-				// a link Go's URL parser may read unlike Node's
-				return nil
-			}
 			return func(_, stderr io.Writer) int {
 				r.write(stderr, cache.warning)
 				r.write(stderr, p.name+": --op must be a 1Password item ID, item link or op://vault/item/field reference\n")
@@ -718,13 +695,9 @@ func keysDecide(args []string, cwd string) keysRun {
 			return 0
 		}
 	case "test":
-		var kc *kcStore
-		if !fileOnly {
-			store, ok := kcOpen()
-			if !ok {
-				return nil
-			}
-			kc = &store
+		kc, ok := chain()
+		if !ok {
+			return nil
 		}
 		cache := keysCacheHoursFor(p, cwd, false)
 		if cache.handOff {
@@ -733,8 +706,8 @@ func keysDecide(args []string, cwd string) keysRun {
 		fullRef := p.hasFlag && keysOpRef.MatchString(p.flagArg)
 		itemID := ""
 		if p.hasFlag && !fullRef {
-			itemID = keysOpItemFromInput(p.flagArg)
-			if itemID == "" && keysOpLike(p.flagArg) {
+			var sure bool
+			if itemID, sure = keysOpItem(p.flagArg); !sure {
 				return nil
 			}
 		}

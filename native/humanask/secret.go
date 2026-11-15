@@ -25,6 +25,15 @@ var (
 	termSet = func(fd uintptr, t syscall.Termios) error {
 		return ioctl(fd, setTermios, unsafe.Pointer(&t))
 	}
+	// termPend asks how much input is waiting (FIONREAD), which reads
+	// nothing: on macOS it makes the kernel reprocess the input queue and
+	// drop the PENDIN flag it sets when line mode comes back (B694). Node's
+	// stdin read does the same after setRawMode(false); without it the
+	// shell finds pendin still on.
+	termPend = func(fd uintptr) {
+		var n int32
+		_ = ioctl(fd, pendingInput, unsafe.Pointer(&n))
+	}
 	secretSignals = []os.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT}
 	// resignal ends the process the way the signal would have: default
 	// action restored, then the signal sent again.
@@ -65,7 +74,12 @@ func ReadSecret(in *os.File, read func(io.Reader) (string, Result)) (string, Res
 		return "", NoTTY, nil
 	}
 	var once sync.Once
-	restore := func() { once.Do(func() { _ = termSet(fd, saved) }) }
+	restore := func() {
+		once.Do(func() {
+			_ = termSet(fd, saved)
+			termPend(fd)
+		})
+	}
 	signals := make(chan os.Signal, 1)
 	done := make(chan struct{})
 	finished := make(chan struct{})
