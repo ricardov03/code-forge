@@ -501,7 +501,10 @@ engine itself ignores, as Node's spawn does. A `gates run` started under
 `nohup` (SIGHUP ignored) or as a background job of a script (SIGINT ignored)
 used to pass that ignore on, so a gate killed by SIGHUP or SIGINT could exit
 0 and pass; it now ends as `gate terminated: SIGHUP` (or `SIGINT`) as in Node
-(B719).
+(B719). The same holds for SIGTSTP, SIGTTIN and SIGTTOU, which a job-control
+shell's background job inherits as ignored, and the copy also unblocks every
+signal before the gate starts, so a gate never inherits the engine's
+blocked-signal mask; Node's spawn (libuv) does both in its child (B721).
 
 ## Rebase runs in Go (B431)
 
