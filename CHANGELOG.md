@@ -22,6 +22,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Changed
 
 - On Linux, `doctor`, `keys test`, `keys remove`, `init` (auto step and wizard), `jev ask` and `worker` read and write the Jev key in the Secret Service store that `@napi-rs/keyring` uses (same items, labels and index rows as Node) in Go, and without the package's Linux binding use the file store alone like Node; Linux with the binding but no Secret Service (Node's keyutils store) still hands over. B679
+- A Markdown recheck over the budget runs in Go section by section, one session per heading section, with the same rows, state and packets as Node; a Markdown heading cut inside an emoji's surrogate pair no longer sends a review to Node unless the review names that heading. B683
 
 ## [0.24.0] — 2026-11-14
 

@@ -21,10 +21,12 @@ var (
 const sectionHeadingMax = 120
 
 // markdownHeadings is sections.mjs markdownHeadings: 1-based line → the
-// heading line, trimmed and cut at 120 UTF-16 units. ok false when a cut
-// would split a surrogate pair (Node keeps half of it; Go does not).
-func markdownHeadings(content *string) (map[int]string, bool) {
-	out := map[int]string{}
+// heading line, trimmed and cut at 120 UTF-16 units. B683: split names the
+// lines whose cut falls inside a surrogate pair: Node keeps the lone high
+// half there, the Go text stops before the pair. Line numbers and section
+// bounds never depend on it; only a heading Go would print does.
+func markdownHeadings(content *string) (out map[int]string, split map[int]bool) {
+	out, split = map[int]string{}, map[int]bool{}
 	lines := SplitLines(content)
 	for i, l := range lines {
 		lines[i] = strings.TrimSuffix(l, "\r")
@@ -58,12 +60,12 @@ func markdownHeadings(content *string) (map[int]string, bool) {
 		if sectionHeadingRE.MatchString(line) {
 			text, ok := sliceUTF16(trimJS(line), sectionHeadingMax)
 			if !ok {
-				return nil, false
+				split[i+1] = true
 			}
 			out[i+1] = text
 		}
 	}
-	return out, true
+	return out, split
 }
 
 // sliceUTF16 is JS s.slice(0, n); ok false when the cut splits a pair.
@@ -201,6 +203,7 @@ func headerOf(p *sectionPiece) string {
 type sectionGroup struct {
 	key     int
 	heading string
+	split   bool // the heading's cut split a surrogate pair (markdownHeadings)
 	diff    *FileDiff
 }
 
@@ -210,12 +213,8 @@ func reparsed(d *FileDiff, text string) *FileDiff {
 }
 
 // sectionGroups is sections.mjs sectionGroups; ok false is Node's null.
-// ErrUnsupported when a heading cut Go does not match (see markdownHeadings).
-func sectionGroups(d *FileDiff) ([]sectionGroup, bool, error) {
-	headings, cut := markdownHeadings(d.Content)
-	if !cut {
-		return nil, false, unsupported("a Markdown heading cut inside a surrogate pair is not ported")
-	}
+func sectionGroups(d *FileDiff) ([]sectionGroup, bool) {
+	headings, split := markdownHeadings(d.Content)
 	all := strings.Split(d.DiffText, "\n")
 	if all[len(all)-1] == "" {
 		all = all[:len(all)-1]
@@ -228,7 +227,7 @@ func sectionGroups(d *FileDiff) ([]sectionGroup, bool, error) {
 		}
 	}
 	if first < 0 {
-		return []sectionGroup{}, len(d.Hunks) == 0, nil
+		return []sectionGroup{}, len(d.Hunks) == 0
 	}
 	fileHeader := all[:first]
 	pieces := []*sectionPiece{}
@@ -239,14 +238,14 @@ func sectionGroups(d *FileDiff) ([]sectionGroup, bool, error) {
 			end++
 		}
 		if h >= len(d.Hunks) || !strings.HasPrefix(all[i], d.Hunks[h].Header) {
-			return nil, false, nil
+			return nil, false
 		}
 		pieces = append(pieces, cutHunk(d.Hunks[h], all[i], all[i+1:end], headings)...)
 		h++
 		i = end
 	}
 	if h != len(d.Hunks) {
-		return nil, false, nil
+		return nil, false
 	}
 	type raw struct {
 		key    int
@@ -270,9 +269,9 @@ func sectionGroups(d *FileDiff) ([]sectionGroup, bool, error) {
 		for _, p := range g.pieces {
 			lines = append(append(lines, headerOf(p)), p.lines...)
 		}
-		out = append(out, sectionGroup{g.key, heading, reparsed(d, strings.Join(lines, "\n")+"\n")})
+		out = append(out, sectionGroup{g.key, heading, split[g.key], reparsed(d, strings.Join(lines, "\n")+"\n")})
 	}
-	return out, true, nil
+	return out, true
 }
 
 func mergeGroups(d *FileDiff, groups []sectionGroup) *FileDiff {
@@ -301,27 +300,26 @@ func mergeGroups(d *FileDiff, groups []sectionGroup) *FileDiff {
 type mdSection struct {
 	index    int
 	headings []string
+	split    []bool // per heading: its cut split a surrogate pair
 	keys     []int
 	diff     *FileDiff
 }
 
 // packResult is packSections' answer: sections, or split at tokensIn with
-// the named section ("" = none).
+// the named section ("" = none; sectionSplit: its cut split a pair).
 type packResult struct {
-	ok       bool
-	sections []mdSection
-	tokensIn int
-	section  string
+	ok           bool
+	sections     []mdSection
+	tokensIn     int
+	section      string
+	sectionSplit bool
 }
 
 // measure gets the part and its heading-group keys (nil = the whole file).
-func packSections(d *FileDiff, budget int, measure func(*FileDiff, []int) int) (packResult, error) {
-	groups, ok, err := sectionGroups(d)
-	if err != nil {
-		return packResult{}, err
-	}
+func packSections(d *FileDiff, budget int, measure func(*FileDiff, []int) int) packResult {
+	groups, ok := sectionGroups(d)
 	if !ok || len(groups) == 0 {
-		return packResult{tokensIn: measure(d, nil)}, nil
+		return packResult{tokensIn: measure(d, nil)}
 	}
 	size := func(set []sectionGroup) int {
 		keys := make([]int, 0, len(set))
@@ -339,6 +337,7 @@ func packSections(d *FileDiff, budget int, measure func(*FileDiff, []int) int) (
 		s := mdSection{index: len(sections) + 1, diff: mergeGroups(d, open)}
 		for _, g := range open {
 			s.headings = append(s.headings, g.heading)
+			s.split = append(s.split, g.split)
 			s.keys = append(s.keys, g.key)
 		}
 		sections = append(sections, s)
@@ -347,7 +346,7 @@ func packSections(d *FileDiff, budget int, measure func(*FileDiff, []int) int) (
 	for _, g := range groups {
 		alone := size([]sectionGroup{g})
 		if alone > budget {
-			return packResult{tokensIn: alone, section: g.heading}, nil
+			return packResult{tokensIn: alone, section: g.heading, sectionSplit: g.split}
 		}
 		if len(open) > 0 && size(append(append([]sectionGroup{}, open...), g)) > budget {
 			flush()
@@ -355,7 +354,7 @@ func packSections(d *FileDiff, budget int, measure func(*FileDiff, []int) int) (
 		open = append(open, g)
 	}
 	flush()
-	return packResult{ok: true, sections: sections}, nil
+	return packResult{ok: true, sections: sections}
 }
 
 // sectionPacket is one Markdown section and its packets (one per reviewer).
@@ -394,11 +393,13 @@ func prepareSections(p *prepared, d *FileDiff, split *Packet, in Input, paired s
 		p.early = result(ledger.Object{{Key: "status", Value: "split_required"}, {Key: "approved", Value: false}}, tail...)
 		return p
 	}
-	packed, err := packSections(d, split.Budget, measure)
-	if err != nil {
-		return nil, err
-	}
+	// B683: a heading Node prints with a lone surrogate half stays with Node
+	cutPair := unsupported("a Markdown section heading cut inside a surrogate pair is not ported")
+	packed := packSections(d, split.Budget, measure)
 	if !packed.ok {
+		if packed.sectionSplit {
+			return nil, cutPair
+		}
 		return splitOutcome(packed.tokensIn, split.Budget, packed.section), nil
 	}
 	if len(packed.sections) == 0 {
@@ -413,11 +414,22 @@ func prepareSections(p *prepared, d *FileDiff, split *Packet, in Input, paired s
 		if over != nil {
 			heading := "(before first heading)"
 			if len(sec.headings) > 0 {
+				if sec.split[0] {
+					return nil, cutPair
+				}
 				heading = sec.headings[0]
 			}
 			return splitOutcome(over.TokensIn, over.Budget, heading), nil
 		}
 		out = append(out, sectionPacket{sec, packets})
+	}
+	// the result lists every section's headings
+	for _, sec := range packed.sections {
+		for _, cut := range sec.split {
+			if cut {
+				return nil, cutPair
+			}
+		}
 	}
 	p.sections = out
 	return p, nil

@@ -13,10 +13,12 @@ package review
 // B537 added review.recheck_scope file (the packet against the block base),
 // moved-code hints and cross-file evidence (a base with peers) and the
 // import-header context. Not ported (ErrUnsupported before anything runs):
-// Markdown section rechecks (a Markdown packet over the budget), a
-// recheck_scope file diff that fails to read (Node throws), and every config
-// shape levelGuards refuses. B545: review.second_levels, a levels.L2 ladder
-// and review.routes run like Node's recheckSession.
+// a recheck_scope file diff that fails to read (Node throws), a stop that
+// names a Markdown heading whose 120-unit cut splits a surrogate pair (Node
+// writes the lone half), and every config shape levelGuards refuses. B545:
+// review.second_levels, a levels.L2 ladder and review.routes run like Node's
+// recheckSession. B683: a Markdown packet over the budget is rechecked
+// section by section (recheck_sections.go).
 
 import (
 	"crypto/sha256"
@@ -178,6 +180,9 @@ type recheckPlan struct {
 	pending            []any
 	jevClosed          int     // open findings S1's resolved band closed (B533)
 	whole              *Packet // nil: no session (no hunks or nothing open)
+	parts              []recheckPart
+	built              []*Packet    // one per part, every one ok
+	stop               *recheckStop // the round stops before any session
 }
 
 func idKey(v any) string {
@@ -269,7 +274,7 @@ func planRecheck(state ledger.Object, kind string, deps LoopDeps, dry bool) (*re
 	if scopeFile {
 		mode = "auto"
 	}
-	moved := ""
+	var moves *mvMoves
 	if len(peerDiffs) > 0 {
 		baseDiff := p.diff
 		if !scopeFile {
@@ -278,10 +283,14 @@ func planRecheck(state ledger.Object, kind string, deps LoopDeps, dry bool) (*re
 			}
 		}
 		if err == nil {
-			if m := mvMovedCode(baseDiff.DiffText, peerDiffs); len(m.out)+len(m.into) > 0 {
-				moved = renderMoved(&m)
-			}
+			m := mvMovedCode(baseDiff.DiffText, peerDiffs)
+			moves = &m
 		}
+	}
+	moved := movedText(moves, p.diff.Content, nil)
+	lens, err := LoadLens("recheck")
+	if err != nil {
+		return nil, err
 	}
 	changed := deps.Input.ChangedFiles
 	if changed == nil {
@@ -293,23 +302,66 @@ func planRecheck(state ledger.Object, kind string, deps LoopDeps, dry bool) (*re
 	if err != nil {
 		return nil, err
 	}
-	if whole.Status != "ok" && markdownFile.MatchString(file) {
-		return nil, unsupported("a Markdown recheck section by section is not ported")
+	p.whole = whole
+	all := make([]int, len(p.pending))
+	for i := range all {
+		all[i] = i
 	}
-	if whole.Status == "ok" {
-		// B545: the session's ladder, second level and routes run like
-		// Node's; only a config shape the port does not read stays with Node
-		if err := levelGuards(deps.Cfg, "L2"); err != nil {
-			return nil, err
+	p.parts = []recheckPart{{diff: p.diff, open: all}}
+	if whole.Status != "ok" {
+		// B683: a Markdown split_required is rechecked section by section;
+		// any other status stops as it is
+		if whole.Status != "split_required" || !markdownFile.MatchString(file) {
+			p.stop = rsStopOf(whole)
+		} else {
+			p.parts, p.stop = packRecheck(lens, p.diff, p.pending, whole.Budget, moves)
 		}
 	}
-	p.whole = whole
+	// every packet is built and held to the budget before any session
+	for _, part := range p.parts {
+		if p.stop != nil {
+			break
+		}
+		if part.index == 0 {
+			p.built = append(p.built, whole)
+			continue
+		}
+		open := make([]any, 0, len(part.open))
+		for _, i := range part.open {
+			open = append(open, p.pending[i])
+		}
+		moved := movedText(moves, p.diff.Content, part.keys)
+		packet, err := buildRecheckPacket(part.diff, open, deps, paired, moved, mode, p.extra)
+		if err != nil {
+			return nil, err
+		}
+		if packet.Status != "ok" {
+			p.stop = rsStopOf(packet)
+		} else if size := recheckTokens(lens, part.diff, open, moved); size > whole.Budget {
+			p.stop = &recheckStop{status: "split_required", tokensIn: size, budget: whole.Budget}
+		} else {
+			p.built = append(p.built, packet)
+			continue
+		}
+		p.stop.section, p.stop.hasSection, p.stop.split = part.heading, true, part.split
+	}
+	if p.stop != nil {
+		if p.stop.split {
+			return nil, unsupported("a Markdown recheck stop naming a heading cut inside a surrogate pair is not ported")
+		}
+		return p, nil
+	}
+	// B545: the session's ladder, second level and routes run like Node's;
+	// only a config shape the port does not read stays with Node
+	if err := levelGuards(deps.Cfg, "L2"); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 
 // recheckSpawns is whether a planned recheck runs its session.
 func (p *recheckPlan) spawns() bool {
-	return p != nil && !p.noFixHunks && p.whole != nil && p.whole.Status == "ok"
+	return p != nil && !p.noFixHunks && p.whole != nil && p.stop == nil
 }
 
 type recheckResult struct {
@@ -398,14 +450,18 @@ func recheckSession(packet *Packet, deps LoopDeps, open []any) (recheckResult, e
 }
 
 // stopBeforeRound is fixloop.mjs stopBeforeRound: a non-ok recheck packet is
-// a terminal stop that is not a counted round.
-func stopBeforeRound(state ledger.Object, deps LoopDeps, kind, file, contentHash string, packet *Packet) ledger.Object {
-	reason := packet.Status
+// a terminal stop that is not a counted round (a Markdown section names its
+// heading).
+func stopBeforeRound(state ledger.Object, deps LoopDeps, kind, file, contentHash string, packet *recheckStop) ledger.Object {
+	reason := packet.status
 	open := []any{}
 	for _, f := range state.Get("open").([]any) {
 		open = append(open, asObject(f).Get("id"))
 	}
-	size := ledger.Object{{Key: "tokens_in", Value: float64(packet.TokensIn)}, {Key: "budget", Value: float64(packet.Budget)}}
+	size := ledger.Object{{Key: "tokens_in", Value: float64(packet.tokensIn)}, {Key: "budget", Value: float64(packet.budget)}}
+	if packet.hasSection {
+		size = append(size, ledger.Field{Key: "section", Value: packet.section})
+	}
 	row := ledger.Object{{Key: "event", Value: "review.cap"}, {Key: "file", Value: file}, {Key: "round", Value: state.Get("round")}, {Key: "reason", Value: reason}, {Key: "open", Value: open}}
 	row = append(row, size...)
 	row = append(row, ledger.Field{Key: "lens", Value: kind})
@@ -484,6 +540,8 @@ func runRecheck(state ledger.Object, deps LoopDeps, kind string) (ledger.Object,
 	}
 	var tokensIn, tokensOut any
 	var packetInfo ledger.Object
+	var extraFiles, extraTrimmed orderedSet
+	extraOmitted, hasExtra := 0, false
 
 	if plan.noFixHunks {
 		state.Set("next", nextStep("action", "fix", "level", state.Get("level"), "trigger", nil, "reason", "no-fix-hunks"))
@@ -494,80 +552,104 @@ func runRecheck(state ledger.Object, deps LoopDeps, kind string) (ledger.Object,
 		pending := plan.pending
 		draft.Set("open", []any{})
 		if len(pending) > 0 {
-			if plan.whole.Status != "ok" {
-				return stopBeforeRound(state, deps, kind, plan.rel, plan.hash, plan.whole), nil
+			if plan.stop != nil {
+				return stopBeforeRound(state, deps, kind, plan.rel, plan.hash, plan.stop), nil
 			}
-			packet := plan.whole
-			currentText := normaliseWhitespace(plan.content + "\n" + currentDiffLines(packet.ExtraText))
-			packetInfo = ledger.Object{{Key: "context_mode", Value: packet.ContextMode}, {Key: "context_lines", Value: float64(packet.ContextLine)}}
-			session, err := recheckSession(packet, deps, pending)
-			if err != nil {
-				return state, err
-			}
-			tokensIn = addAny(tokensIn, session.tokensIn)
-			tokensOut = addAny(tokensOut, session.tokensOut)
-			if !session.verdict.OK {
-				note(deps.WriteRow, ledger.Object{{Key: "event", Value: "review.unavailable"}, {Key: "file", Value: plan.rel}, {Key: "lens", Value: "recheck"}, {Key: "reason", Value: session.verdict.Reason}})
-				reason := session.verdict.Reason
-				if reason == "" {
-					reason = "unavailable"
-				}
-				return retry(state, kind, reason), nil
-			}
-			review := session.verdict.Review
-			resolvedAnswers, _ := review.Get("resolved").([]any)
 			resolved, stale := map[int]bool{}, map[int]bool{}
-			nextRound := float64(num(state, "round") + 1)
-			for i, v := range pending {
-				f := asObject(v)
-				var answer ledger.Object
-				for _, r := range resolvedAnswers {
-					if idKey(asObject(r).Get("id")) == idKey(f.Get("id")) {
-						answer = asObject(r)
-						break
-					}
-				}
-				if answer != nil && answer.Get("resolved") == true {
-					resolved[i] = true
-					continue
-				}
-				lines := ""
-				if answer != nil {
-					if l, ok := answer.Get("current_lines").(string); ok {
-						lines = l
-					}
-				}
-				quote := normaliseWhitespace(lines)
-				if quote != "" && !strings.Contains(currentText, quote) {
-					stale[i] = true
-					staleRows = append(staleRows, ledger.Object{{Key: "event", Value: "review.stale_finding"}, {Key: "file", Value: plan.rel}, {Key: "round", Value: nextRound},
-						{Key: "finding", Value: f.Get("id")}, {Key: "reason", Value: "current_lines_not_found"}})
-				}
-			}
-			found, _ := review.Get("findings").([]any)
 			inside, blocking := []any{}, []any{}
-			for _, v := range found {
-				f := asObject(v)
-				key := findingKey(f)
-				add(&roundFindings, key)
-				add(&roundIDs, f.Get("id"))
-				if kind == "recheck" && !knownIDs.seen[idKey(f.Get("id"))] && history.seen[idKey(key)] {
-					f.Set("repeated", true)
-					add(&repeated, f.Get("id"))
+			nextRound := float64(num(state, "round") + 1)
+			for pi, part := range plan.parts {
+				packet := plan.built[pi]
+				currentText := normaliseWhitespace(plan.content + "\n" + currentDiffLines(packet.ExtraText))
+				if packet.HasExtra {
+					hasExtra = true
+					for _, f := range packet.ExtraFiles {
+						add(&extraFiles, f)
+					}
+					for _, f := range packet.ExtraTrimmed {
+						add(&extraTrimmed, f)
+					}
+					extraOmitted = max(extraOmitted, packet.ExtraOmitted)
 				}
-				if insideHunks(f, plan.diff.Hunks) {
-					inside = append(inside, f)
-					continue
+				packetInfo = mergePacketInfo(packetInfo, packet)
+				partOpen := make([]any, 0, len(part.open))
+				for _, i := range part.open {
+					partOpen = append(partOpen, pending[i])
 				}
-				draftLate = append(draftLate, f)
-				row := ledger.Object{{Key: "event", Value: "review.late_finding"}, {Key: "file", Value: plan.rel}, {Key: "round", Value: nextRound}}
-				row = present(row, "finding", renameID(f))
-				row = present(row, "severity", f)
-				row = present(row, "line_start", f)
-				row = present(row, "line_end", f)
-				lateRows = append(lateRows, append(row, ledger.Field{Key: "mode", Value: late}))
-				if late == "block" && f.Get("severity") != "nit" {
-					blocking = append(blocking, f)
+				session, err := recheckSession(packet, deps, partOpen)
+				if err != nil {
+					return state, err
+				}
+				tokensIn = addAny(tokensIn, session.tokensIn)
+				tokensOut = addAny(tokensOut, session.tokensOut)
+				if !session.verdict.OK {
+					row := ledger.Object{{Key: "event", Value: "review.unavailable"}, {Key: "file", Value: plan.rel}, {Key: "lens", Value: "recheck"}, {Key: "reason", Value: session.verdict.Reason}}
+					if part.index != 0 {
+						row = append(row, ledger.Field{Key: "section", Value: float64(part.index)})
+					}
+					note(deps.WriteRow, row)
+					reason := session.verdict.Reason
+					if reason == "" {
+						reason = "unavailable"
+					}
+					return retry(state, kind, reason), nil
+				}
+				review := session.verdict.Review
+				resolvedAnswers, _ := review.Get("resolved").([]any)
+				// only this packet's findings can close here
+				for _, i := range part.open {
+					f := asObject(pending[i])
+					var answer ledger.Object
+					for _, r := range resolvedAnswers {
+						if idKey(asObject(r).Get("id")) == idKey(f.Get("id")) {
+							answer = asObject(r)
+							break
+						}
+					}
+					if answer != nil && answer.Get("resolved") == true {
+						resolved[i] = true
+						continue
+					}
+					lines := ""
+					if answer != nil {
+						if l, ok := answer.Get("current_lines").(string); ok {
+							lines = l
+						}
+					}
+					quote := normaliseWhitespace(lines)
+					if quote != "" && !strings.Contains(currentText, quote) {
+						stale[i] = true
+						staleRows = append(staleRows, ledger.Object{{Key: "event", Value: "review.stale_finding"}, {Key: "file", Value: plan.rel}, {Key: "round", Value: nextRound},
+							{Key: "finding", Value: f.Get("id")}, {Key: "reason", Value: "current_lines_not_found"}})
+					}
+				}
+				found, _ := review.Get("findings").([]any)
+				if part.index != 0 {
+					found = sectionFindings(found, part.index)
+				}
+				for _, v := range found {
+					f := asObject(v)
+					key := findingKey(f)
+					add(&roundFindings, key)
+					add(&roundIDs, f.Get("id"))
+					if kind == "recheck" && !knownIDs.seen[idKey(f.Get("id"))] && history.seen[idKey(key)] {
+						f.Set("repeated", true)
+						add(&repeated, f.Get("id"))
+					}
+					if insideHunks(f, plan.diff.Hunks) {
+						inside = append(inside, f)
+						continue
+					}
+					draftLate = append(draftLate, f)
+					row := ledger.Object{{Key: "event", Value: "review.late_finding"}, {Key: "file", Value: plan.rel}, {Key: "round", Value: nextRound}}
+					row = present(row, "finding", renameID(f))
+					row = present(row, "severity", f)
+					row = present(row, "line_start", f)
+					row = present(row, "line_end", f)
+					lateRows = append(lateRows, append(row, ledger.Field{Key: "mode", Value: late}))
+					if late == "block" && f.Get("severity") != "nit" {
+						blocking = append(blocking, f)
+					}
 				}
 			}
 			stillOpen := []any{}
@@ -634,10 +716,10 @@ func runRecheck(state ledger.Object, deps LoopDeps, kind string) (ledger.Object,
 	if packetInfo != nil {
 		roundRow = append(roundRow, ledger.Field{Key: "context_mode", Value: packetInfo.Get("context_mode")})
 	}
-	if plan.whole != nil && plan.whole.HasExtra && packetInfo != nil {
-		roundRow = append(roundRow, ledger.Field{Key: "extra_files", Value: stringsAny(plan.whole.ExtraFiles)},
-			ledger.Field{Key: "extra_files_omitted", Value: float64(max(0, plan.whole.ExtraOmitted))},
-			ledger.Field{Key: "extra_files_trimmed", Value: stringsAny(plan.whole.ExtraTrimmed)})
+	if hasExtra {
+		roundRow = append(roundRow, ledger.Field{Key: "extra_files", Value: append([]any{}, extraFiles.items...)},
+			ledger.Field{Key: "extra_files_omitted", Value: float64(extraOmitted)},
+			ledger.Field{Key: "extra_files_trimmed", Value: append([]any{}, extraTrimmed.items...)})
 	}
 	if len(repeated.items) > 0 {
 		roundRow = append(roundRow, ledger.Field{Key: "repeated", Value: append([]any{}, repeated.items...)})
@@ -704,13 +786,4 @@ func truthyValue(v any) bool {
 		return x != ""
 	}
 	return true
-}
-
-// stringsAny is a []string as a JSON array value.
-func stringsAny(list []string) []any {
-	out := []any{}
-	for _, s := range list {
-		out = append(out, s)
-	}
-	return out
 }
