@@ -90,7 +90,7 @@ func untilDoneHandoverRefusal(args []string) string {
 	for _, run := range hudRunIDs(args) {
 		record, err := state.ReadRun(home, run)
 		if err != nil {
-			continue // no record, a bad id or an unreadable one: Node refuses it itself
+			continue // no record, a bad id or an unreadable one: the plain refusal follows
 		}
 		grant := autopilot.LiveUntilDone(record)
 		if grant == nil {
@@ -101,7 +101,7 @@ func untilDoneHandoverRefusal(args []string) string {
 			name += " " + sub
 		}
 		id, _ := grant.Get("grant_id").(string)
-		return fmt.Sprintf("code-forge %s: run %s has an until-done autopilot grant (%s); this case still runs in Node, which cannot read an until-done grant, so nothing was run (%s). Run it again after the grant ends (code-forge autopilot status --run %s), or stop the grant first (code-forge autopilot stop --run %s).\n",
+		return fmt.Sprintf("code-forge %s: run %s has an until-done autopilot grant (%s); this case is not supported yet, and an until-done grant is never passed on, so nothing was run (%s). Run it again after the grant ends (code-forge autopilot status --run %s), or stop the grant first (code-forge autopilot stop --run %s).\n",
 			name, run, id, handoverReasons[hUntilDoneGrant], run, run)
 	}
 	return ""

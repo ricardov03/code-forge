@@ -53,7 +53,9 @@ func (p *blockPreview) crumb() (name, sub string) {
 	return "block", ""
 }
 func (p *blockPreview) errorText(code int, text string) int {
-	if !closeTextSafe(text) {
+	// A usage error (exit 2) prints as Node prints it and its error-log row
+	// goes through gatesScrubber (B690a fix1; was a refusal).
+	if code != 2 && !closeTextSafe(text) {
 		return p.fallback()
 	}
 	name, sub := p.crumb()

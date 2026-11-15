@@ -520,8 +520,8 @@ func TestBlockAcceptHitCodexGo(t *testing.T) {
 }
 
 // B685: accents, emoji and quotes in a human verb's refusal are logged by Go
-// with Node's message and fingerprint (goldens recorded from the Node CLI);
-// a JavaScript-only space (NBSP) still hands over.
+// with Node's message and fingerprint (goldens recorded from the Node CLI),
+// a no-break space too (B690a fix1).
 func TestBlockHumanVerbsNonASCIILogGo(t *testing.T) {
 	if os.Getenv("BLOCK_HV_CHILD") == "1" {
 		blockHVChild()
@@ -570,11 +570,11 @@ func TestBlockHumanVerbsNonASCIILogGo(t *testing.T) {
 		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "no", "block|accept-hit|Bñ'é😀|--run|r-test|--line|2|--transcript|"+transcript+"|--reason|ok").want(t, 1, "", "block Bñ'é😀 accept-hit: cancelled — nothing was recorded\n")
 		check(t, entry(t, f), nil, 1, "error", "block Bñ'é😀 accept-hit: cancelled — nothing was recorded", "1dda577516ad")
 	})
-	t.Run("a no-break space gets the B690a refusal", func(t *testing.T) {
+	// B690a fix1: a usage error is no longer refused; Node prints the flag with
+	// its no-break space and logs this row (recorded from the Node CLI).
+	t.Run("a no-break space in an unknown flag is Node's usage error", func(t *testing.T) {
 		f := newHVFixture(t, nil, nil)
-		r := f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--x\u00a0y=1")
-		if r.code != 1 || !b690aIsRefusal(r.stderr) {
-			t.Fatalf("NBSP text was not refused: exit %d stderr %q", r.code, r.stderr)
-		}
+		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--x\u00a0y=1").want(t, 2, "", "block accept-hit: unknown flag \"--x\u00a0y=1\"\n")
+		check(t, entry(t, f), nil, 2, "usage", "block accept-hit: unknown flag \"--x\u00a0y=1\"", "6c9b55a865f6")
 	})
 }

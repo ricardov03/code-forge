@@ -45,6 +45,16 @@ func runReviewFileWait(args []string) int {
 	return runReviewFileWaitWith(args, reviewWaitLive, reviewWaitSleep)
 }
 
+// reviewArgsText decodes each argument with reviewArgText (review-file,
+// logs and init read argv the way Node does).
+func reviewArgsText(args []string) []string {
+	decoded := make([]string, len(args))
+	for i, arg := range args {
+		decoded[i] = reviewArgText(arg)
+	}
+	return decoded
+}
+
 // reviewArgText decodes one argv entry as Node does (WHATWG UTF-8): each
 // maximal subpart of an ill-formed sequence becomes one U+FFFD.
 func reviewArgText(s string) string {
@@ -108,11 +118,7 @@ func reviewParseMax(raw string, exists bool) (time.Duration, bool) {
 // order with Node's usage text, refusals and exit codes. Polling and sleeping
 // stay injectable so tests can check the down-poll count and the delays.
 func runReviewFileWaitWith(args []string, poll func(context.Context, string, time.Time) (bool, bool), sleep func(context.Context, time.Duration) bool) int {
-	decoded := make([]string, len(args))
-	for i, arg := range args {
-		decoded[i] = reviewArgText(arg)
-	}
-	args = decoded
+	args = reviewArgsText(args)
 	// The router prints a verb's help before any breadcrumb or log.
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
 		fmt.Fprint(os.Stdout, reviewWaitUsage)
@@ -120,15 +126,9 @@ func runReviewFileWaitWith(args []string, poll func(context.Context, string, tim
 	}
 	flags, paths, usage := reviewEnqueueFlags(args)
 	if usage != "" {
-		// The wait logger handles fixed usage text and ordinary flag names.
-		// Unknown flags containing arbitrary values need Node's full scrubber.
-		if reviewWaitLogging() && strings.HasPrefix(usage, "unknown flag ") {
-			var arg string
-			_ = json.Unmarshal([]byte(strings.TrimPrefix(usage, "unknown flag ")), &arg)
-			if arg != "--" && !reviewEnqueueSafeUnknown.MatchString(arg) {
-				return reviewWaitHandover(args, hEnqueueFlagRedaction)
-			}
-		}
+		// An unknown flag with any value is Node's usage error; the error-log
+		// message goes through gatesScrubber like Node's (B690a fix1; was a
+		// refusal).
 		return reviewWaitUsageError(args, usage)
 	}
 	cwd, err := os.Getwd()

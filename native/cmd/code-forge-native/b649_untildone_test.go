@@ -93,7 +93,7 @@ func b649HandoverRows(t *testing.T, home string) string {
 	return string(data)
 }
 
-const b649Refusal = "code-forge block: run r-test has an until-done autopilot grant (ap-done); this case still runs in Node, which cannot read an until-done grant, so nothing was run (until-done-grant). Run it again after the grant ends (code-forge autopilot status --run r-test), or stop the grant first (code-forge autopilot stop --run r-test).\n"
+const b649Refusal = "code-forge block close: run r-test has an until-done autopilot grant (ap-done); this case is not supported yet, and an until-done grant is never passed on, so nothing was run (until-done-grant). Run it again after the grant ends (code-forge autopilot status --run r-test), or stop the grant first (code-forge autopilot stop --run r-test).\n"
 
 func TestB649HandoverRefusedUnderUntilDoneGrant(t *testing.T) {
 	if os.Getenv("B649_CHILD") == "1" {
@@ -102,7 +102,7 @@ func TestB649HandoverRefusedUnderUntilDoneGrant(t *testing.T) {
 	const test = "TestB649HandoverRefusedUnderUntilDoneGrant"
 	t.Run("until-done grant: Node never starts", func(t *testing.T) {
 		home := b649Home(t, b649UntilDone)
-		for _, args := range []string{"block|frobnicate|B1|--run|r-test", "block|frobnicate|B1|--run=r-test"} {
+		for _, args := range []string{"block|close|B1|--run|r-test|--reason=sk-private", "block|close|B1|--run=r-test|--reason=sk-private"} {
 			r := b649Run(t, test, home, t.TempDir(), args)
 			if r.nodeArgv != nil || r.code != 1 || r.stdout != "" || r.stderr != b649Refusal {
 				t.Fatalf("%s: exit %d stdout %q stderr %q node %q", args, r.code, r.stdout, r.stderr, r.nodeArgv)
@@ -114,7 +114,7 @@ func TestB649HandoverRefusedUnderUntilDoneGrant(t *testing.T) {
 	})
 	t.Run("until-done grant with a deadline: Node never starts", func(t *testing.T) {
 		home := b649Home(t, strings.Replace(b649UntilDone, `"until":null`, `"until":"2999-01-01T00:00:00.000Z"`, 1))
-		r := b649Run(t, test, home, t.TempDir(), "block|frobnicate|B1|--run|r-test")
+		r := b649Run(t, test, home, t.TempDir(), "block|close|B1|--run|r-test|--reason=sk-private")
 		if r.nodeArgv != nil || r.code != 1 || r.stderr != b649Refusal {
 			t.Fatalf("exit %d stderr %q node %q", r.code, r.stderr, r.nodeArgv)
 		}
@@ -129,17 +129,21 @@ func TestB649HandoverRefusedUnderUntilDoneGrant(t *testing.T) {
 	} {
 		t.Run(name+": the plain B690a refusal", func(t *testing.T) {
 			home := b649Home(t, grant)
-			args := "block|frobnicate|B1|--run|r-test"
+			args := "block|close|B1|--run|r-test|--reason=sk-private"
 			if name == "other run's grant" {
-				args = "block|frobnicate|B1|--run|r-other"
+				args = "block|close|B1|--run|r-other|--reason=sk-private"
 			}
 			if name == "until-done, no --run" {
-				args = "block|frobnicate|B1"
+				args = "block|close|B1|--reason=sk-private"
 			}
 			r := b649Run(t, test, home, t.TempDir(), args)
 			// B690a: Go never starts Node; this case was a hand-over before
-			want := "code-forge: block is not supported in this case yet (block-unported-subcommand). Please report it: code-forge logs report\n"
-			if r.code != 1 || r.stdout != "" || r.stderr != want || r.nodeArgv != nil {
+			want, code := "code-forge: block close is not supported in this case yet (close-unsupported-flag). Please report it: code-forge logs report\n", 1
+			if name == "until-done, no --run" {
+				// B690a fix1: Node's usage error comes first (Node-recorded).
+				want, code = "block close: a block id and --run are required\n", 2
+			}
+			if r.code != code || r.stdout != "" || r.stderr != want || r.nodeArgv != nil {
 				t.Fatalf("exit %d stdout %q stderr %q node %q", r.code, r.stdout, r.stderr, r.nodeArgv)
 			}
 		})

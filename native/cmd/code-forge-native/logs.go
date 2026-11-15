@@ -69,11 +69,9 @@ func runLogs(args []string) int {
 			return 0
 		}
 	}
-	for _, arg := range args {
-		if !utf8.ValidString(arg) {
-			return logsHandover(args, hLogsFlagsOrHome) // Node sees U+FFFD in argv
-		}
-	}
+	// Node reads argv as UTF-8 with U+FFFD for bad bytes; Go decodes the same
+	// way and serves the call (B690a fix1; was a refusal).
+	args = reviewArgsText(args)
 	sub := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		sub = args[0]

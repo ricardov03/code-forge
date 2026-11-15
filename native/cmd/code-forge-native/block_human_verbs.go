@@ -83,7 +83,9 @@ func (h *humanVerb) fallback() int {
 	return blockHandover(h.original(), hBlockUnportedSubcommand)
 }
 func (h *humanVerb) text(code int, text string) int {
-	if !h.marked && (!closeTextSafe(text) || reviewWaitLogging() && strings.ContainsFunc(text, humanLogSpace)) {
+	// A usage error (exit 2) prints as Node prints it and its error-log row
+	// goes through gatesScrubber (B690a fix1; was a refusal).
+	if !h.marked && code != 2 && (!closeTextSafe(text) || reviewWaitLogging() && strings.ContainsFunc(text, humanLogSpace)) {
 		return h.fallback()
 	}
 	h.mark()

@@ -220,7 +220,8 @@ func TestB502InitHandOvers(t *testing.T) {
 		{[]string{"init", "--coder-may-open-draft-pr", "yes", "--coder-may-push", "yes"}, false, "", "init-jev-keychain"},
 		{[]string{"init"}, true, "", "init-interactive"},
 		{[]string{"init", "--jev-ref", "https://my.1password.com/vaults/x/allitems/y"}, false, "", "init-jev-link"},
-		{[]string{"init", "--engine", "\xff"}, false, "", "init-arg-encoding"},
+		// B690a fix1: argv that is not UTF-8 is decoded as Node decodes it
+		// (TestB690aUsageErrorsMatchNode), no longer refused.
 		{[]string{"init"}, false, "a: [1\n", "init-config-syntax"},
 		{[]string{"init", "--coder-may-open-draft-pr", "yes"}, false, "provider: google\n", "init-answers"},
 	}

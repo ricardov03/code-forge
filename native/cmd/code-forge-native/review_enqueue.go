@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -21,8 +20,6 @@ import (
 	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/ticket"
 )
-
-var reviewEnqueueSafeUnknown = regexp.MustCompile(`^--[A-Za-z][A-Za-z0-9-]{0,24}$`)
 
 func reviewEnqueueFlags(args []string) (map[string]string, []string, string) {
 	flags, paths := map[string]string{}, []string{}

@@ -227,7 +227,12 @@ function handoverOverhead(t, f, slow = false) {
   const noNode = run(f.binary, handoverVerb, { env: { ...env, CODE_FORGE_HANDOVER_LOG: '0', CODE_FORGE_NODE: 'entry-node-does-not-exist' } });
   assert.deepEqual(output(noNode), expected, 'Go answers the timing verb itself, with no Node');
   assert.deepEqual(output(run(f.binary, handoverVerb)), expected, 'timing measures the Go answer');
-  measure(npmLink, handoverVerb, '0');
+  // B690a fix1: Go answers the verb itself and is faster than the Node control, so a
+  // delay measured against Node is partly hidden by that gap (CI saw 40 ms read as
+  // 15 ms). The delayed run is paired with the same Go entry without the delay, so
+  // the overhead it reports is the injected regression of the Go path itself.
+  const controlNative = slow ? '1' : '0';
+  measure(npmLink, handoverVerb, controlNative);
   measure(entry, entryArgs);
   const median = (values) => { values.sort((a, b) => a - b); return (values[4] + values[5]) / 2; };
   const attempts = [];
@@ -235,14 +240,14 @@ function handoverOverhead(t, f, slow = false) {
     const direct = [], entries = [], differences = [];
     // Pair samples under the same load, alternating which mode runs first.
     for (let i = 0; i < 10; i++) {
-      const control = () => direct.push(measure(npmLink, handoverVerb, '0'));
+      const control = () => direct.push(measure(npmLink, handoverVerb, controlNative));
       const handover = () => entries.push(measure(entry, entryArgs));
       if (i % 2 === 0) { control(); handover(); } else { handover(); control(); }
       differences.push(entries[i] - direct[i]);
     }
     const nodeMedian = median(direct), entryMedian = median(entries);
     const overhead = median(differences);
-    const summary = `attempt ${attempt}, 10 pairs: Node control median ${nodeMedian.toFixed(2)} ms; Go entry median ${entryMedian.toFixed(2)} ms; paired overhead ${overhead.toFixed(2)} ms`;
+    const summary = `attempt ${attempt}, 10 pairs: ${slow ? 'Go' : 'Node'} control median ${nodeMedian.toFixed(2)} ms; Go entry median ${entryMedian.toFixed(2)} ms; paired overhead ${overhead.toFixed(2)} ms`;
     attempts.push(overhead);
     t.diagnostic(summary);
   }
