@@ -372,18 +372,17 @@ func TestB554LogsReportHandsOverWhatStaysInNode(t *testing.T) {
 		args         []string
 		setup        func(t *testing.T, c lrTestCase)
 	}{
-		{"ai cleaning in a terminal send", "logs-report", []string{"--yes", "--allow-old"}, func(t *testing.T, c lrTestCase) {
-			asked := ""
-			b500Terminal(t, true, true, humanask.Cancelled, &asked)
-		}},
-		{"doctor", "logs-report-doctor", []string{"--no-ai", "--with-doctor", "--dry-run"}, nil},
 		{"known fixes", "logs-report-known-fixes", []string{"--no-ai", "--dry-run"}, func(t *testing.T, c lrTestCase) { lrFixesEmpty = func() bool { return false } }},
 		{"os release unknown", "logs-report-system", []string{"--no-ai", "--dry-run"}, func(t *testing.T, c lrTestCase) {
 			lrHost = func() (string, string, string) { return "darwin", "", "arm64" }
 		}},
-		{"terminal prompt", "logs-report-prompt", []string{"--no-ai", "--yes"}, func(t *testing.T, c lrTestCase) {
+		// B677: the prompts run in Go unless clack would cut or wrap them.
+		{"terminal too small for the prompt", "logs-report-prompt", []string{"--no-ai", "--yes"}, func(t *testing.T, c lrTestCase) {
 			asked := ""
 			b500Terminal(t, true, true, humanask.Cancelled, &asked)
+			old := logsPromptFits
+			logsPromptFits = func() bool { return false }
+			t.Cleanup(func() { logsPromptFits = old })
 		}},
 		{"entry without fingerprint", "logs-format", []string{"--no-ai", "--dry-run"}, func(t *testing.T, c lrTestCase) {
 			text := b500Read(t, c.errorLog())

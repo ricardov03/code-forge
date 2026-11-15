@@ -127,17 +127,29 @@ func TestB615LogsReportAIFailedSendRefusedLikeNode(t *testing.T) {
 	}
 }
 
-// A terminal send whose AI pass does not run asks a question: Node keeps it.
-func TestB615LogsReportAITerminalSendStaysInNode(t *testing.T) {
+// B677: a terminal --yes send runs in Go: after an AI pass it asks nothing
+// and sends; when the AI pass failed it asks Node's question first.
+func TestB615LogsReportAITerminalSendInGo(t *testing.T) {
+	old := logsPromptFits
+	logsPromptFits = func() bool { return true }
+	t.Cleanup(func() { logsPromptFits = old })
 	c := lrAIEnv(t, "ok")
 	asked := ""
 	b500Terminal(t, true, true, humanask.Cancelled, &asked)
-	code, out, _ := b500Run(t, "logs", "report", "--yes", "--allow-old")
-	if code != 127 || out != "" || b500HandedOver(t, c.home) != "logs-report" {
-		t.Errorf("got (%d, %q) reason %q, want handover logs-report", code, out, b500HandedOver(t, c.home))
+	code, out, errText := b500Run(t, "logs", "report", "--yes", "--allow-old")
+	lrTestCheck(t, "terminal send", code, out, errText, 0, c.golden(t, "okyes.stdout"), "")
+	if asked != "" || b500HandedOver(t, c.home) != "" || !strings.Contains(c.fakeLog(t), "gh issue create") {
+		t.Errorf("asked %q, reason %q, children %q", asked, b500HandedOver(t, c.home), c.fakeLog(t))
 	}
-	if c.fakeLog(t) != "" {
-		t.Errorf("side effects before the handover: %q", c.fakeLog(t))
+
+	c = lrAIEnv(t, "fail")
+	b500Terminal(t, true, true, humanask.Cancelled, &asked)
+	code, out, _ = b500Run(t, "logs", "report", "--yes", "--allow-old")
+	if code != 1 || !strings.HasSuffix(out, "not sent\n") || asked != "Send without the AI check?" || b500HandedOver(t, c.home) != "" {
+		t.Errorf("failed AI in a terminal: got (%d, %q) asked %q reason %q", code, out, asked, b500HandedOver(t, c.home))
+	}
+	if strings.Contains(c.fakeLog(t), "gh ") {
+		t.Errorf("a declined report ran gh: %q", c.fakeLog(t))
 	}
 }
 

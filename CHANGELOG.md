@@ -10,6 +10,9 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Changed
 
 - `autopilot waive` runs in Go: Node's checks and refusal texts, the signed `review.waived` row and the tracked GitHub issue (deduped comment, or a create with the label and a retry without it, and the signed `autopilot.issue_failed` row when there is no issue), byte-equal to Node; `autopilot start` without `--yes` with stdin at a terminal and stdout piped now asks in Go with Node's prompt; a waive path Go does not normalise like Node still hands over (B681)
+### Changed
+
+- `logs report` now asks its terminal questions and runs `--with-doctor` in the Go engine instead of handing them to Node: "Report anyway?", the send menu with "Edit in my editor" (`$VISUAL`/`$EDITOR`, secret check of the edited text, fingerprint added back), "Send without the AI check?" and "What now?" are drawn like clack's select and confirm, and the setup check runs `code-forge doctor --json` with Node's 60 s limit, row filter and `### Setup check` table; only a question on a stdout that is not a terminal or a terminal smaller than 40x12 still goes to Node (`logs-report-prompt`), and the `logs-report-doctor` hand-over reason is gone. B677
 
 ## [0.24.0] — 2026-11-14
 

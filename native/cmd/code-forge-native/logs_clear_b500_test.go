@@ -156,8 +156,4 @@ func TestB500LogsClearUsageAndHelp(t *testing.T) {
 	if reason := b500HandedOver(t, home); reason != "" {
 		t.Errorf("handed over: %s", reason)
 	}
-	// logs report --with-doctor stays with Node, under its own reason (B615: the AI pass runs in Go).
-	if code, _, _ := b500Run(t, "logs", "report", "--with-doctor", "--dry-run"); code != 127 || b500HandedOver(t, home) != "logs-report-doctor" {
-		t.Errorf("report: exit %d, reason %q", code, b500HandedOver(t, home))
-	}
 }

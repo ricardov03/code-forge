@@ -609,8 +609,9 @@ func lrFenced(text string) string {
 
 type lrSystem struct{ version, node, os, latest string }
 
-// lrBuildReport is buildReport (no setup check, no fix notes).
-func lrBuildReport(entries []lrEntry, system lrSystem, note string) (string, string, []string) {
+// lrBuildReport is buildReport (no fix notes); setup is nil without
+// --with-doctor.
+func lrBuildReport(entries []lrEntry, system lrSystem, note string, setup *lrSetup) (string, string, []string) {
 	pairs := map[string]bool{}
 	for _, e := range entries {
 		pairs[e.verb+"\x00"+e.kind] = true
@@ -667,6 +668,7 @@ func lrBuildReport(entries []lrEntry, system lrSystem, note string) (string, str
 			out = append(out, "", "stack:", "", lrFenced(e.stack))
 		}
 	}
+	out = append(out, lrSetupLines(setup)...)
 	fps := []string{}
 	seen := map[string]bool{}
 	for _, e := range entries {
@@ -714,11 +716,14 @@ func lrCapReport(title, body string, max int) string {
 	return lrCapBytes(body, room) + note
 }
 
-func lrDisclosure(warnings bool) string {
+func lrDisclosure(warnings, doctor bool) string {
 	shared := []string{"code-forge, Node and OS versions", "command names and flag NAMES", "the names of the last commands you ran (no flags or values)",
 		"exit codes", "error types", "error messages and crash reports after cleaning"}
 	if warnings {
 		shared = append(shared, "warnings (problems code-forge recovered from) after cleaning")
+	}
+	if doctor {
+		shared = append(shared, "the setup check results (each check's name, status and a short detail, after cleaning)")
 	}
 	return "What you will share (public on GitHub): " + strings.Join(shared, "; ") + ".\n" +
 		"Never shared: flag values, file contents, your code, keys or tokens, your home folder, project folder or project name.\n"
@@ -1006,9 +1011,6 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 	_, dryRun := flags["dry-run"]
 	_, yes := flags["yes"]
 	_, allowOld := flags["allow-old"]
-	if withDoctor {
-		return logsHandover(args, hLogsReportDoctor)
-	}
 	all := make([]lrEntry, len(newest))
 	selected := []lrEntry{}
 	for i, obj := range newest {
@@ -1028,11 +1030,10 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 		return logsHandover(args, hLogsReportKnownFixes)
 	case platform == "" || release == "" || arch == "":
 		return logsHandover(args, hLogsReportSystem)
-	case tty && !dryRun && !(yes && allowOld):
+	case tty && !dryRun && !(yes && allowOld && noAI) && !(logsAskTTY() && logsPromptFits()):
+		// B677: a question Go cannot draw like clack (stdout not a terminal,
+		// or one too small for every option on its own row) stays in Node
 		return logsHandover(args, hLogsReportPrompt)
-	case !noAI && tty && !dryRun:
-		// an AI pass that does not run asks "Send without the AI check?" in a terminal
-		return logsHandover(args, hLogsReport)
 	case !noAI && !lrAIServed(physicalCwd()):
 		// a session Go's session layer does not serve stays in Node
 		return logsHandover(args, hLogsReport)
@@ -1057,6 +1058,11 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 		routerHint(nativeVerbFailure("logs", "report", args, code, message, before), code)
 		return code
 	}
+	notSent := func() int {
+		out("not sent\n")
+		routerHint(nativeVerbFailure("logs", "report", args, 1, nil, before), 1)
+		return 1
+	}
 	repo, pkgVersion := lrPackage()
 	if repo == "" {
 		return failed(1, "logs: package.json names no GitHub repository to report to\n")
@@ -1069,8 +1075,12 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 	} else if d, ok := lrCompareVersions(latest, system.version); ok && d > 0 {
 		out("You use " + system.version + ". " + latest + " is out. Many errors are fixed in newer versions: upgrade with npm install -g " + lrPackageName + "@latest and try again first.\n")
 		if !dryRun && !allowOld {
-			// a terminal without --allow-old was handed over above
-			return failed(2, "logs: an older code-forge than the one on npm; not sent — upgrade first, or pass --allow-old to report from this version\n")
+			if !tty {
+				return failed(2, "logs: an older code-forge than the one on npm; not sent — upgrade first, or pass --allow-old to report from this version\n")
+			}
+			if !lrAskYes("Report anyway?") {
+				return notSent()
+			}
 		}
 	}
 
@@ -1082,13 +1092,22 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 		}
 	}
 	scrubber := lrNewScrubber(home, physicalCwd(), slug)
+	// the setup check (B37): a doctor that cannot run is a note, never a stop
+	var setup *lrSetup
+	if withDoctor {
+		check := lrRunSetupCheck(scrubber.scrub)
+		setup = &check
+		if check.rows == nil {
+			out("Could not run the setup check (" + check.why + "); the report goes on without it.\n")
+		}
+	}
 	warnings := false
 	for _, e := range selected {
 		warnings = warnings || e.isWarning
 	}
-	shared := lrDisclosure(warnings)
+	shared := lrDisclosure(warnings, setup != nil && setup.rows != nil)
 	system.latest = latest
-	title, built, fps := lrBuildReport(selected, system, flags["note"])
+	title, built, fps := lrBuildReport(selected, system, flags["note"], setup)
 	title = scrubber.scrub(title)
 	body := lrCapReport(title, scrubber.scrub(built), lrAIReportMaxBytes)
 	blocked := func() bool {
@@ -1128,13 +1147,56 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 		out("dry run: not sent\n")
 		return 0
 	}
-	if !yes {
-		// a terminal without --yes was handed over above
-		return failed(2, "logs: no terminal to confirm; not sent — pass --yes to send the report above\n")
-	}
-	if !aiRan && !noAI {
-		// a terminal was handed over above: without one, the AI check that did not run is refused
-		return failed(1, "logs: the AI check did not run and there is no terminal to confirm; not sent — pass --no-ai with --yes to send with only the built-in cleaning\n")
+	if yes {
+		// --no-ai --yes is the explicit extra yes; otherwise the AI check that
+		// did not run is asked about in a terminal and refused without one
+		if !aiRan && !noAI {
+			if !tty {
+				return failed(1, "logs: the AI check did not run and there is no terminal to confirm; not sent — pass --no-ai with --yes to send with only the built-in cleaning\n")
+			}
+			if !lrAskYes("Send without the AI check?") {
+				return notSent()
+			}
+		}
+	} else {
+		if !tty {
+			return failed(2, "logs: no terminal to confirm; not sent — pass --yes to send the report above\n")
+		}
+		edited := false
+		for {
+			values, labels := []string{"send"}, []string{"Send"}
+			if !edited {
+				values, labels = append(values, "edit"), append(labels, "Edit in my editor")
+			}
+			values, labels = append(values, "cancel"), append(labels, "Cancel")
+			initial := "cancel"
+			if aiRan {
+				initial = "send"
+			}
+			pick := lrChoose(lrConfirmMessage, values, labels, initial)
+			if pick == "edit" {
+				edited = true
+				next, ok := lrEditBody(body, out)
+				if !ok {
+					continue
+				}
+				next = scrubber.scrub(next)
+				if rule, line, hit := lrFindSecret(title + "\n" + next); hit {
+					return failed(1, fmt.Sprintf("Possible secret found in the edited report (%s, report line %d; the title is line 1); not sent.\n", rule, line))
+				}
+				body = next
+				if !strings.Contains(body, "<!-- code-forge-fp: "+fps[0]+" -->") {
+					body = strings.TrimRightFunc(body, errorLogSpace) + "\n" + lrFooterText(fps)
+					out("the fingerprint section was added back\n")
+				}
+				out("Title: " + title + "\n\n" + body + "\n")
+				continue
+			}
+			if pick != "send" || (!aiRan && !lrAskYes("Send without the AI check?")) {
+				return notSent()
+			}
+			break
+		}
 	}
 
 	fp := fps[0]
@@ -1147,8 +1209,17 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 	if why != "" {
 		out("could not search for an existing report (" + why + "); creating a new one\n")
 	}
+	pick := "comment"
 	if dupURL != "" {
 		out("This error was already reported: " + dupURL + " (" + state + ")\n")
+		if !yes {
+			pick = lrChoose("What now?", []string{"comment", "new", "cancel"}, []string{`Add a comment "happened again"`, "Create a new issue anyway", "Cancel"}, "comment")
+		}
+		if pick == "cancel" {
+			return notSent()
+		}
+	}
+	if pick == "comment" && dupURL != "" {
 		times := 0
 		for _, e := range all {
 			if e.fp == fp {

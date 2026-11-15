@@ -270,7 +270,6 @@ const (
 	hGoPanicStopped
 	hFactsConfig
 	// B554: logs report cases that stay in Node
-	hLogsReportDoctor
 	hLogsReportKnownFixes
 	hLogsReportSystem
 	hLogsReportPrompt
@@ -591,7 +590,6 @@ var handoverReasons = [...]string{
 	hFactsConfig: "facts-config",
 
 	// B554
-	hLogsReportDoctor:     "logs-report-doctor",
 	hLogsReportKnownFixes: "logs-report-known-fixes",
 	hLogsReportSystem:     "logs-report-system",
 	hLogsReportPrompt:     "logs-report-prompt",
