@@ -131,15 +131,21 @@ func prepareBlockPreview(sub string, args []string) (*blockPreview, int) {
 	return p, -1
 }
 func (p *blockPreview) rows() ([]gatecheck.Row, []byte, int) {
+	return p.rowsVia(p.fallback, p.fail)
+}
+
+// rowsVia reads this run's ledger rows and its key; an unreadable ledger is
+// fallback, a key error fail.
+func (p *blockPreview) rowsVia(fallback func() int, fail func(error) int) ([]gatecheck.Row, []byte, int) {
 	values, err := ledger.ReadAllRows(filepath.Join(p.home, ".code-forge/ledger"), blockString(p.record.Get("project")))
 	if err != nil {
-		return nil, nil, p.fallback()
+		return nil, nil, fallback()
 	}
 	rows := []gatecheck.Row{}
 	for _, v := range values {
 		r, ok := v.(map[string]any)
 		if !ok {
-			return nil, nil, p.fallback()
+			return nil, nil, fallback()
 		}
 		if r["run"] == p.run {
 			rows = append(rows, r)
@@ -147,19 +153,18 @@ func (p *blockPreview) rows() ([]gatecheck.Row, []byte, int) {
 	}
 	key, err := blockclose.ReadKey(p.home, p.run)
 	if err != nil {
-		return nil, nil, p.fail(err)
+		return nil, nil, fail(err)
 	}
 	return rows, key, -1
 }
 func (p *blockPreview) human() int {
 	// Without a terminal Node refuses before checking even the path form or
-	// block identity. At one, waive asks here (B453); reopen's queue work
-	// stays with Node.
+	// block identity. At one, waive (B453) and reopen (B680) ask here.
 	if blockAskAvailable() {
 		if p.sub == "waive" {
 			return p.waiveHuman()
 		}
-		return p.fallback()
+		return p.reopenHuman()
 	}
 	suffix := "--yes works only with evidence and agreement from a fresh judge"
 	if p.sub == "waive" {

@@ -1,0 +1,11 @@
+asked=Reopen the review of src/a.go in block B1 (run r-test)? Only the owner may say yes.
+exit=1
+--- stdout
+--- stderr
+block reopen: reopen-same-content: src/a.go still has the content its stop (review_cap) reviewed; change the file first, or waive its findings (block waive); nothing was recorded
+--- new rows
+--- runs/r-test.json
+{"blocks":{"B1":{"acceptance":[{"clause":"c1","tests":["t1"]}],"attempt":1,"owned_files":["src/a.go"],"owned_kinds":{},"status":"open"}},"config":{"hash":"402f98b918d7380ac346c8b451f0119ac564de92afc6c0f37ab3828c5e5bbf4d","snapshots":{"402f98b918d7380ac346c8b451f0119ac564de92afc6c0f37ab3828c5e5bbf4d":{"levels":{"L3":{"effort":"high","model":"claude-x","provider":"anthropic"}},"version":1}}},"project":"unit","run_id":"r-test","status":"active","workspace":"<WS>"}
+--- runs/r-test/review-state/B1/<ID>.json
+{"run":"r-test","block":"B1","file":"src/a.go","seq":3,"state":{"file":"src/a.go","status":"stopped","round":2,"next":{"reason":"review_cap"},"stop_content_hash":"bce2aeea9e6fc31f09b164dbaf832b013ee75fbd323262cbee9d42b8b51077b1","open":[{"id":"F2","severity":"major","claim":"c","line":2}]},"mac":"652a3ff3bfc5358e9636105ab645f8206683835e2f22a435d1e7aaddea85f7a6"}
+--- judge argv

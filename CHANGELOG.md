@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+- `block reopen` at a terminal runs in Go: the owner's question, the answers, the signed human `review.reopened` row, the cleared done marker and the reopened review ticket match Node; it no longer hands over to Node. B680
+
 ## [0.24.0] — 2026-11-14
 
 ### Added

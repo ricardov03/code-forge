@@ -1,0 +1,11 @@
+asked=Reopen the review of src/a.go in block B1 (run r-test)? Only the owner may say yes.
+exit=1
+--- stdout
+--- stderr
+block reopen: reopen-not-stopped: src/a.go is open; only a stopped or lost file is reopened; nothing was recorded
+--- new rows
+--- runs/r-test.json
+{"blocks":{"B1":{"acceptance":[{"clause":"c1","tests":["t1"]}],"attempt":1,"owned_files":["src/a.go"],"owned_kinds":{},"status":"open"}},"config":{"hash":"402f98b918d7380ac346c8b451f0119ac564de92afc6c0f37ab3828c5e5bbf4d","snapshots":{"402f98b918d7380ac346c8b451f0119ac564de92afc6c0f37ab3828c5e5bbf4d":{"levels":{"L3":{"effort":"high","model":"claude-x","provider":"anthropic"}},"version":1}}},"project":"unit","run_id":"r-test","status":"active","workspace":"<WS>"}
+--- runs/r-test/review-state/B1/<ID>.json
+{"run":"r-test","block":"B1","file":"src/a.go","seq":3,"state":{"file":"src/a.go","status":"open","round":2,"next":{"reason":"review_cap"},"stop_content_hash":"","open":[{"id":"F2","severity":"major","claim":"c","line":2}]},"mac":"eedaae0b6b505b576ca9ed011fa8b888b39a677698c202f75b0152a916fdce06"}
+--- judge argv

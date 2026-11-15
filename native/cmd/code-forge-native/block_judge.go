@@ -507,6 +507,8 @@ type bjReopenCase struct {
 	loaded                  blockstate.Loaded
 	earlier                 gatecheck.Row
 	cfg                     map[string]any
+	human                   bool // B680: the human's reopen at a terminal (no judge)
+	refuse                  func(code int, text string) int
 }
 
 var bjClaimName = regexp.MustCompile(`^([0-9a-f]{24})\.done\.\d+\.[0-9a-f]{8}\.fresh$`)
@@ -530,16 +532,50 @@ func bjCauseCode(err error) string {
 // bjReopen runs the judge of reopenFile, then clearDone, the signed row and
 // the enqueue of block.mjs reopenBlockFile.
 func (p *blockPreview) bjReopen(c bjReopenCase) int {
-	mainTop, err := filepath.EvalSymlinks(c.top)
-	if err != nil {
+	mainTop, dir, parts, ok := p.bjReopenQueue(c)
+	if !ok {
 		return p.fallback()
 	}
 	content := string(c.content)
-	if !utf8.ValidString(content) {
+	if !c.human && !utf8.ValidString(content) {
 		return p.fallback()
 	}
-	dir := filepath.Join(mainTop, ".code-forge", "queue")
-	parts := ticket.Parts{Run: p.run, Block: p.id, File: c.file}
+	var stopReason any
+	if c.from == "stopped" {
+		stopReason = c.stopReason
+	}
+	verdict, reason := "", ""
+	if !c.human {
+		findings, ok := p.bjOpenFindings(c.loaded)
+		if !ok {
+			return p.fallback()
+		}
+		packet := ledger.Object{{Key: "stop_reason", Value: stopReason}, {Key: "findings", Value: findings}, {Key: "reason", Value: c.reason}, {Key: "file", Value: ledger.Object{{Key: "path", Value: c.file}, {Key: "content", Value: content}}}}
+		if windows := blockstate.CitedWindows(c.reason, c.root); len(windows) > 0 {
+			packet = append(packet, ledger.Field{Key: "evidence", Value: bjWindows(windows)})
+		}
+		verdict, reason, ok = p.bjJudge(c.cfg, packet, bjReopenLens)
+		if !ok {
+			return p.fallback()
+		}
+		if verdict != "agree" {
+			return p.bjRefuse(1, fmt.Sprintf("block reopen: reopen-yes-disagreed: %s; nothing was recorded\n", reason))
+		}
+	}
+	return p.bjReopenWrite(c, mainTop, dir, parts, stopReason, verdict, reason)
+}
+
+// bjReopenQueue is every queue read reopenBlockFile's clearDone and enqueue
+// need, done before the judge (or the human's question): false leaves the
+// verb with Node, a ticket Go cannot place (a reopened attempt, an unreadable
+// ticket) included.
+func (p *blockPreview) bjReopenQueue(c bjReopenCase) (mainTop, dir string, parts ticket.Parts, ok bool) {
+	mainTop, err := filepath.EvalSymlinks(c.top)
+	if err != nil {
+		return "", "", parts, false
+	}
+	dir = filepath.Join(mainTop, ".code-forge", "queue")
+	parts = ticket.Parts{Run: p.run, Block: p.id, File: c.file}
 	// Node: contentRoot is mainTop itself unless the block has its own tree.
 	if real, err := filepath.EvalSymlinks(c.root); err != nil || real != mainTop {
 		tree := c.root
@@ -547,47 +583,37 @@ func (p *blockPreview) bjReopen(c bjReopenCase) int {
 	}
 	identity, ok := reviewEnqueueRecord(p.home, mainTop, p.run)
 	if !ok {
-		return p.fallback()
+		return "", "", parts, false
 	}
 	if revision, isText := blockObject(blockObject(identity.Get("blocks")).Get(p.id)).Get("acceptance_revision").(string); isText {
 		parts.AcceptanceRevision = &revision
 	}
 	hash, err := gitx.ContentHash(c.root, c.file)
 	if err != nil {
-		return p.fallback()
+		return "", "", parts, false
 	}
 	parts.ContentHash = hash
-	// Preflight every queue read before the judge: a ticket Go cannot place
-	// (a reopened attempt, an unreadable ticket) leaves the verb with Node.
 	if _, err := queue.Identity(dir, parts); err != nil {
-		return p.fallback()
+		return "", "", parts, false
 	}
 	if err := (&queue.Index{Dir: dir}).Refresh(); err != nil {
-		return p.fallback()
+		return "", "", parts, false
 	}
 	if _, ok := reviewEnqueueExclusion(p.home, mainTop, p.run, c.file); !ok {
-		return p.fallback()
+		return "", "", parts, false
 	}
-	var stopReason any
-	if c.from == "stopped" {
-		stopReason = c.stopReason
+	return mainTop, dir, parts, true
+}
+
+// bjReopenWrite is reopenFile's effects after its checks: clearDone, the
+// signed row (by: agent with the verdict, or by: human), then the enqueue
+// and block.mjs's output.
+func (p *blockPreview) bjReopenWrite(c bjReopenCase, mainTop, dir string, parts ticket.Parts, stopReason any, verdict, reason string) int {
+	refuse := p.bjRefuse
+	if c.refuse != nil {
+		refuse = c.refuse
 	}
-	findings, ok := p.bjOpenFindings(c.loaded)
-	if !ok {
-		return p.fallback()
-	}
-	packet := ledger.Object{{Key: "stop_reason", Value: stopReason}, {Key: "findings", Value: findings}, {Key: "reason", Value: c.reason}, {Key: "file", Value: ledger.Object{{Key: "path", Value: c.file}, {Key: "content", Value: content}}}}
-	if windows := blockstate.CitedWindows(c.reason, c.root); len(windows) > 0 {
-		packet = append(packet, ledger.Field{Key: "evidence", Value: bjWindows(windows)})
-	}
-	verdict, reason, ok := p.bjJudge(c.cfg, packet, bjReopenLens)
-	if !ok {
-		return p.fallback()
-	}
-	if verdict != "agree" {
-		return p.bjRefuse(1, fmt.Sprintf("block reopen: reopen-yes-disagreed: %s; nothing was recorded\n", reason))
-	}
-	failed := func(err error) int { return p.bjRefuse(1, fmt.Sprintf("block reopen: %s\n", err)) }
+	failed := func(err error) int { return refuse(1, fmt.Sprintf("block reopen: %s\n", err)) }
 	// clearDone: the current content's done marker and its leftover claims.
 	current, err := gitx.ContentHash(c.root, c.file)
 	if err != nil {
@@ -621,11 +647,15 @@ func (p *blockPreview) bjReopen(c bjReopenCase) int {
 		if c.fromHash != "" {
 			fromHash = c.fromHash
 		}
-		fresh := ledger.Object{{Key: "event", Value: "review.reopened"}, {Key: "block", Value: p.id}, {Key: "file", Value: c.file}, {Key: "from", Value: c.from}, {Key: "stop_reason", Value: stopReason}, {Key: "at_seq", Value: c.loaded.Seq}, {Key: "from_hash", Value: fromHash}, {Key: "to_hash", Value: c.current}, {Key: "reason", Value: blockstate.Trim(c.reason)}, {Key: "by", Value: "agent"},
-			{Key: "verdict", Value: ledger.Object{{Key: "verdict", Value: verdict}, {Key: "reason", Value: reason}}}}
+		fresh := ledger.Object{{Key: "event", Value: "review.reopened"}, {Key: "block", Value: p.id}, {Key: "file", Value: c.file}, {Key: "from", Value: c.from}, {Key: "stop_reason", Value: stopReason}, {Key: "at_seq", Value: c.loaded.Seq}, {Key: "from_hash", Value: fromHash}, {Key: "to_hash", Value: c.current}, {Key: "reason", Value: blockstate.Trim(c.reason)}, {Key: "by", Value: "agent"}}
+		if c.human {
+			fresh[len(fresh)-1].Value = "human"
+		} else {
+			fresh = append(fresh, ledger.Field{Key: "verdict", Value: ledger.Object{{Key: "verdict", Value: verdict}, {Key: "reason", Value: reason}}})
+		}
 		written, err := state.WriteSigned(p.home, p.run, fresh)
 		if err != nil {
-			return p.bjRefuse(1, fmt.Sprintf("block reopen: reopen-write-failed: the signed review.reopened row for %s was not written (%s); run block reopen again\n", c.file, bjCauseCode(err)))
+			return refuse(1, fmt.Sprintf("block reopen: reopen-write-failed: the signed review.reopened row for %s was not written (%s); run block reopen again\n", c.file, bjCauseCode(err)))
 		}
 		row = written
 	}
