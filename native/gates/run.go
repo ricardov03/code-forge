@@ -532,6 +532,10 @@ func niceExec(program string) {
 	}
 	resetIgnoredSignals()
 	syscall.CloseOnExec(3)
+	// Unblock every signal, as libuv does in Node's spawn child: the
+	// engine's own mask (a parent that blocked signals) must not reach the
+	// gate (B721). A failure keeps the inherited mask, as before.
+	_ = sigClearMask()
 	err := syscall.Exec(program, os.Args, env)
 	errno, ok := err.(syscall.Errno)
 	if !ok {
@@ -553,11 +557,16 @@ func niceExec(program string) {
 // replaces SIG_IGN with a handler, and exec turns every caught signal back
 // to SIG_DFL. A signal caught before exec is dropped, as it would have been
 // while ignored.
+//
+// signal.Ignored does not see an inherited SIG_IGN for the signals the Go
+// runtime leaves alone at start (SIGTSTP, SIGTTIN, SIGTTOU), so a job-control
+// shell's background job gave its gate those three ignored; the action is
+// also read from the kernel (B721).
 func resetIgnoredSignals() {
 	caught := make(chan os.Signal, 1)
 	for n := 1; n < 32; n++ {
 		sig := syscall.Signal(n)
-		if sig != syscall.SIGKILL && sig != syscall.SIGSTOP && signal.Ignored(sig) {
+		if sig != syscall.SIGKILL && sig != syscall.SIGSTOP && (signal.Ignored(sig) || sigInheritedIgnored(n)) {
 			signal.Notify(caught, sig)
 		}
 	}

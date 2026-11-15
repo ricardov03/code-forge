@@ -48,6 +48,74 @@ func TestExecuteGateGetsDefaultForIgnoredSignals(t *testing.T) {
 	}
 }
 
+// gateSignalStateScript prints, for each signal, its action (DEFAULT, IGNORE)
+// and whether it is blocked, as the gate program sees them at its start.
+const gateSignalStateScript = `use POSIX; my $s = POSIX::SigSet->new; sigprocmask(SIG_BLOCK, undef, $s); for my $n (qw(HUP INT QUIT PIPE TERM USR1 USR2 TSTP TTIN TTOU)) { my $num = eval "SIG$n"; my $o = POSIX::SigAction->new; sigaction($num, undef, $o); print "$n ", $o->handler, " ", ($s->ismember($num) ? "blocked" : "open"), "\n" }`
+
+// TestExecuteGateSignalStateHelper is run only by
+// TestExecuteGateStartsWithDefaultSignalsAndEmptyMask, inside a process that
+// inherited ignored and blocked signals. It prints the gate's report.
+func TestExecuteGateSignalStateHelper(t *testing.T) {
+	if os.Getenv("CODE_FORGE_B721_HELPER") != "1" {
+		t.Skip("helper process only")
+	}
+	r := execute(context.Background(), []string{"perl", "-e", gateSignalStateScript}, nil, t.TempDir(), "", 30000, false)
+	fmt.Printf("B721-STDOUT<<%v>>\nB721-CODE<<%v>>\n", r.Get("stdout"), r.Get("code"))
+}
+
+// runGateSignalStateHelper runs TestExecuteGateSignalStateHelper as the
+// engine process under perl, which first ignores the signals in ignore and
+// blocks the ones in block (both space-separated names), then execs the test
+// binary. It returns the gate's report: one "NAME ACTION open|blocked" line
+// per signal.
+func runGateSignalStateHelper(t *testing.T, ignore, block string) string {
+	t.Helper()
+	if _, err := exec.LookPath("perl"); err != nil {
+		t.Skip("perl not found")
+	}
+	setup := `use POSIX; $SIG{$_} = "IGNORE" for split / /, $ENV{B721_IGNORE}; sigprocmask(SIG_BLOCK, POSIX::SigSet->new(map { eval "SIG$_" } split / /, $ENV{B721_BLOCK})) or die "sigprocmask: $!"; exec @ARGV or die "exec: $!"`
+	cmd := exec.Command("perl", "-e", setup, os.Args[0], "-test.count=1", "-test.run=^TestExecuteGateSignalStateHelper$")
+	cmd.Env = append(os.Environ(), "CODE_FORGE_B721_HELPER=1", "B721_IGNORE="+ignore, "B721_BLOCK="+block)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helper: %v\n%s", err, out)
+	}
+	text := string(out)
+	from := strings.Index(text, "B721-STDOUT<<")
+	to := strings.Index(text, ">>\nB721-CODE<<0>>")
+	if from < 0 || to < from {
+		t.Fatalf("helper gave no gate report with code 0:\n%s", out)
+	}
+	return text[from+len("B721-STDOUT<<") : to]
+}
+
+const gateStateAllDefaultOpen = "HUP DEFAULT open\nINT DEFAULT open\nQUIT DEFAULT open\nPIPE DEFAULT open\nTERM DEFAULT open\nUSR1 DEFAULT open\nUSR2 DEFAULT open\nTSTP DEFAULT open\nTTIN DEFAULT open\nTTOU DEFAULT open\n"
+
+// TestExecuteGateGetsDefaultForInheritedIgnoredJobControlSignals: a gates run
+// started as a job-control shell's background job, or by a parent that set
+// SIG_IGN for SIGTSTP/SIGTTIN/SIGTTOU, must give its gate SIG_DFL for them, as
+// Node's spawn does (libuv resets 1-31 to SIG_DFL). Before B721 the Go runtime
+// left these three alone, signal.Ignored did not report them, and the gate
+// started with them ignored.
+func TestExecuteGateGetsDefaultForInheritedIgnoredJobControlSignals(t *testing.T) {
+	got := runGateSignalStateHelper(t, "HUP INT QUIT PIPE TERM USR1 USR2 TSTP TTIN TTOU", "")
+	if got != gateStateAllDefaultOpen {
+		t.Fatalf("gate signal actions, want every signal DEFAULT:\n%s", got)
+	}
+}
+
+// TestExecuteGateStartsWithEmptySignalMask: a gates run whose own process
+// inherited a blocked-signal mask must start its gate with nothing blocked, as
+// Node's spawn does (libuv clears the mask in the child). Before B721 the gate
+// kept PIPE, USR1, USR2, TSTP, TTIN and TTOU blocked (the Go runtime unblocks
+// only the signals it needs, on its own threads).
+func TestExecuteGateStartsWithEmptySignalMask(t *testing.T) {
+	got := runGateSignalStateHelper(t, "", "HUP INT QUIT PIPE TERM USR1 USR2 TSTP TTIN TTOU")
+	if got != gateStateAllDefaultOpen {
+		t.Fatalf("gate signal mask, want every signal open:\n%s", got)
+	}
+}
+
 func TestExecuteSpawnErrors(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "no-execute")
