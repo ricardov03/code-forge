@@ -229,20 +229,27 @@ func (w *TicketRunner) decideRead(id string) (ledger.Object, ledger.Object, erro
 	if err != nil {
 		return refusal("refused", "bad-ticket"), nil, nil
 	}
-	if !utf8.Valid(data) || loneSurrogate.Match(data) || (len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF) {
+	if !utf8.Valid(data) || (len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF) {
 		return nil, nil, unsupported("ticket bytes Node would decode with replacements")
 	}
-	var parsed any
-	if json.Unmarshal(data, &parsed) != nil {
+	// JSON.parse keeps a lone surrogate escape (WTF-8 here, B704)
+	parsed, err := ledger.ParseOrdered(data)
+	if err != nil || !json.Valid(data) {
 		return refusal("refused", "bad-ticket"), nil, nil
 	}
 	if _, isArray := parsed.([]any); isArray {
 		// typeof [] === 'object': assertRowPath(undefined) refuses it
 		return refusal("refused", "bad-path"), nil, nil
 	}
-	t, err := ledger.DecodeObject(data)
-	if err != nil {
+	t, ok := parsed.(ledger.Object)
+	if !ok {
 		return refusal("refused", "bad-ticket"), nil, nil
+	}
+	for _, key := range []string{"file", "tree", "by_file", "run", "block"} {
+		// Node opens these as paths (a lone surrogate as U+FFFD): kept on Node
+		if ledger.HasLoneSurrogate(t.Get(key)) {
+			return nil, nil, unsupported("a ticket path with a lone surrogate")
+		}
 	}
 	file, ok := t.Get("file").(string)
 	if !ok || rowPathError(file) {
@@ -428,19 +435,16 @@ func (w *TicketRunner) readRecordValue() (rec ledger.Object, syntax, notObject b
 	if err != nil {
 		return nil, false, false, fmt.Errorf("run record read: %w", err)
 	}
-	if !utf8.Valid(data) || loneSurrogate.Match(data) {
+	if !utf8.Valid(data) {
 		return nil, false, false, unsupported("run record bytes Node would decode with replacements")
 	}
-	var v any
-	if json.Unmarshal(data, &v) != nil {
+	// JSON.parse keeps a lone surrogate escape (WTF-8 here, B704)
+	v, err := ledger.ParseOrdered(data)
+	if err != nil || !json.Valid(data) {
 		return nil, true, false, nil
 	}
-	switch v.(type) {
-	case map[string]any:
-		rec, err := ledger.DecodeObject(data)
-		if err != nil {
-			return nil, false, false, unsupported("run record decode")
-		}
+	switch rec := v.(type) {
+	case ledger.Object:
 		return rec, false, false, nil
 	case []any:
 		return ledger.Object{}, false, false, nil
@@ -484,6 +488,10 @@ func (w *TicketRunner) contentRootFor(block string) (string, string, error) {
 	workspace, ok := rec.Get("workspace").(string)
 	if !ok || !filepath.IsAbs(workspace) {
 		return "", "run-record-unreadable", nil
+	}
+	if ledger.HasLoneSurrogate(workspace) || ledger.HasLoneSurrogate(entry.Get("worktree")) {
+		// Node opens these paths with U+FFFD for a lone surrogate (B704)
+		return "", "", unsupported("a worktree path with a lone surrogate")
 	}
 	tree, err := proof.BlockTree(workspace, entry)
 	if err != nil {

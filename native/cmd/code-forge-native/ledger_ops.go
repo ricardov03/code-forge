@@ -19,6 +19,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/canon"
 	"github.com/ricardov03/code-forge/native/childreg"
+	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/runstatus"
 	"github.com/ricardov03/code-forge/native/state"
@@ -42,8 +43,9 @@ func ledgerDir() string {
 }
 
 // ledgerReadRows is Node's readAllRows for a valid slug. Rows Go cannot read
-// the way JSON.parse does (lone surrogates, bad UTF-8, a corrupt line whose
-// SyntaxError text is Node's) report false.
+// the way JSON.parse does (bad UTF-8, a corrupt line whose SyntaxError text is
+// Node's) report false; a lone surrogate escape is kept as WTF-8, as
+// JSON.parse keeps it (ledger.ReadAllRows, B716/B704).
 func ledgerReadRows(dir, slug string) ([]ledger.Row, bool) {
 	entries, err := os.ReadDir(dir)
 	if err != nil && !os.IsNotExist(err) {
@@ -55,7 +57,7 @@ func ledgerReadRows(dir, slug string) ([]ledger.Row, bool) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-		if err != nil || !utf8.Valid(data) || ledgerSurrogatePattern.Match(data) {
+		if err != nil || !utf8.Valid(data) {
 			return nil, false
 		}
 	}
@@ -521,6 +523,10 @@ func ledgerScanGit(args []string, slug string, failed func(string) ledgerResult)
 		ts, tsString := row["ts"].(string)
 		if !isString || !tsString {
 			return ledgerHandedOver(hLedgerJsValue)
+		}
+		if jsonx.HasLoneSurrogate(file) || ledger.HasLoneSurrogate(row["block"]) {
+			// git names and the written rows meet a lone surrogate as U+FFFD on Node (B704)
+			return ledgerHandedOver(hLedgerRowsFormat)
 		}
 		ms, parsed := ledgerParseTime(ts)
 		if !parsed {

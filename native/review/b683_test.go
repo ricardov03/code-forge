@@ -83,105 +83,9 @@ func TestB683MarkdownRecheckBySectionMatchesNode(t *testing.T) {
 	for _, raw := range cases {
 		c := raw.(ledger.Object)
 		name := c.Get("name").(string)
-		if name == "emoji-split-heading-stop" {
-			continue // TestB683SplitHeadingStopHandsOver
-		}
 		ran++
 		t.Run(name, func(t *testing.T) {
-			want := golden.Get(name).(ledger.Object)
-			repo := buildRepo(t, fixture{Commit: b683Files(c.Get("commit")), After: b683Files(c.Get("after"))})
-			cfg := plainCfg(t, c.Get("cfg"))
-			script := c.Get("script").([]any)
-			file := c.Get("file").(string)
-			rows := []ledger.Object{}
-			type seen struct {
-				opts SpawnOpts
-				text string
-			}
-			spawns := []seen{}
-			used := 0
-			spawn := func(o SpawnOpts) (ledger.Object, error) {
-				data, err := os.ReadFile(o.PromptPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				spawns = append(spawns, seen{o, string(data)})
-				used++
-				if used > len(script) {
-					return nil, errors.New("script short")
-				}
-				res, err := ledger.DecodeObject([]byte(mustJSON(t, b683Fill(script[used-1], string(data)))))
-				if err != nil {
-					t.Fatal(err)
-				}
-				return res, nil
-			}
-			work := filepath.Join(t.TempDir(), name)
-			in := Input{RepoRoot: repo, File: file, Cfg: cfg, WorkDir: work,
-				RulesDigest: "rule one\nrule two", FactsExcerpt: "facts here"}
-			if c.Get("base") == true {
-				out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
-				if err != nil {
-					t.Fatal(err)
-				}
-				in.Base = strings.TrimSpace(string(out))
-			}
-			state, err := ledger.DecodeObject([]byte(mustJSON(t, c.Get("state"))))
-			if err != nil {
-				t.Fatal(err)
-			}
-			deps := LoopDeps{RepoRoot: repo, Cfg: cfg,
-				WriteRow: func(r ledger.Object) error { rows = append(rows, r.Clone()); return nil },
-				Review:   func() (ledger.Object, error) { return nil, errors.New("no full review") },
-				Input:    in,
-				Session: Deps{Spawn: spawn, Warn: func(string, string) {},
-					Lock: func(_ string, fn func() error) error { return fn() }}}
-			if _, err := CheckLoop(state.Clone(), "recheck", deps); err != nil {
-				t.Fatalf("CheckLoop refused a round Node runs: %v", err)
-			}
-			got, err := RunRound(state, deps, "recheck")
-			if err != nil {
-				t.Fatalf("RunRound: %v", err)
-			}
-			if g, w := mustJSON(t, got), want.Get("state").(string); g != w {
-				t.Errorf("state\ngot  %s\nNode %s", g, w)
-			}
-			wantRows := want.Get("rows").([]any)
-			if len(rows) != len(wantRows) {
-				t.Fatalf("rows: got %d %v, Node %d %v", len(rows), rows, len(wantRows), wantRows)
-			}
-			for k, r := range rows {
-				if g := mustJSON(t, r); g != wantRows[k].(string) {
-					t.Errorf("row %d\ngot  %s\nNode %s", k, g, wantRows[k])
-				}
-			}
-			if float64(used) != want.Get("used").(float64) {
-				t.Errorf("answers used %d, Node %v", used, want.Get("used"))
-			}
-			wantSpawns := want.Get("spawns").([]any)
-			if len(spawns) != len(wantSpawns) {
-				t.Fatalf("spawns: got %d, Node %d", len(spawns), len(wantSpawns))
-			}
-			for k, s := range spawns {
-				w := wantSpawns[k].(ledger.Object)
-				if s.text != w.Get("text") {
-					t.Errorf("spawn %d packet\ngot  %s\nNode %s", k, s.text, w.Get("text"))
-				}
-				if s.opts.Level != w.Get("level") || s.opts.Role != w.Get("role") {
-					t.Errorf("spawn %d level/role %s/%s, Node %v/%v", k, s.opts.Level, s.opts.Role, w.Get("level"), w.Get("role"))
-				}
-			}
-			var left any
-			if entries, err := os.ReadDir(work); err == nil {
-				names := []any{}
-				for _, e := range entries {
-					names = append(names, e.Name())
-				}
-				left = names
-			}
-			if g, ws := mustJSON(t, left), mustJSON(t, want.Get("left")); g != ws {
-				t.Errorf("work dir left %s, Node %s", g, ws)
-			}
+			b683RunCase(t, c, golden.Get(name).(ledger.Object))
 		})
 	}
 	if ran == 0 {
@@ -189,12 +93,112 @@ func TestB683MarkdownRecheckBySectionMatchesNode(t *testing.T) {
 	}
 }
 
-// TestB683SplitHeadingStopHandsOver: the one case kept on Node. When the
-// section a recheck stop names has a heading cut inside a surrogate pair,
-// Node writes that lone surrogate into the state's next.section (golden);
-// Go's JSON writer cannot, so CheckLoop and RunRound refuse with
-// ErrUnsupported before any row, session or state change.
-func TestB683SplitHeadingStopHandsOver(t *testing.T) {
+// b683RunCase runs one recorded case through CheckLoop and RunRound and
+// checks state, rows, sessions and the work dir against Node's golden.
+func b683RunCase(t *testing.T, c, want ledger.Object) {
+	t.Helper()
+	name := c.Get("name").(string)
+	repo := buildRepo(t, fixture{Commit: b683Files(c.Get("commit")), After: b683Files(c.Get("after"))})
+	cfg := plainCfg(t, c.Get("cfg"))
+	script := c.Get("script").([]any)
+	file := c.Get("file").(string)
+	rows := []ledger.Object{}
+	type seen struct {
+		opts SpawnOpts
+		text string
+	}
+	spawns := []seen{}
+	used := 0
+	spawn := func(o SpawnOpts) (ledger.Object, error) {
+		data, err := os.ReadFile(o.PromptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		spawns = append(spawns, seen{o, string(data)})
+		used++
+		if used > len(script) {
+			return nil, errors.New("script short")
+		}
+		res, err := ledger.DecodeObject([]byte(mustJSON(t, b683Fill(script[used-1], string(data)))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res, nil
+	}
+	work := filepath.Join(t.TempDir(), name)
+	in := Input{RepoRoot: repo, File: file, Cfg: cfg, WorkDir: work,
+		RulesDigest: "rule one\nrule two", FactsExcerpt: "facts here"}
+	if c.Get("base") == true {
+		out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		in.Base = strings.TrimSpace(string(out))
+	}
+	state, err := ledger.DecodeObject([]byte(mustJSON(t, c.Get("state"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := LoopDeps{RepoRoot: repo, Cfg: cfg,
+		WriteRow: func(r ledger.Object) error { rows = append(rows, r.Clone()); return nil },
+		Review:   func() (ledger.Object, error) { return nil, errors.New("no full review") },
+		Input:    in,
+		Session: Deps{Spawn: spawn, Warn: func(string, string) {},
+			Lock: func(_ string, fn func() error) error { return fn() }}}
+	if _, err := CheckLoop(state.Clone(), "recheck", deps); err != nil {
+		t.Fatalf("CheckLoop refused a round Node runs: %v", err)
+	}
+	got, err := RunRound(state, deps, "recheck")
+	if err != nil {
+		t.Fatalf("RunRound: %v", err)
+	}
+	if g, w := mustJSON(t, got), want.Get("state").(string); g != w {
+		t.Errorf("state\ngot  %s\nNode %s", g, w)
+	}
+	wantRows := want.Get("rows").([]any)
+	if len(rows) != len(wantRows) {
+		t.Fatalf("rows: got %d %v, Node %d %v", len(rows), rows, len(wantRows), wantRows)
+	}
+	for k, r := range rows {
+		if g := mustJSON(t, r); g != wantRows[k].(string) {
+			t.Errorf("row %d\ngot  %s\nNode %s", k, g, wantRows[k])
+		}
+	}
+	if float64(used) != want.Get("used").(float64) {
+		t.Errorf("answers used %d, Node %v", used, want.Get("used"))
+	}
+	wantSpawns := want.Get("spawns").([]any)
+	if len(spawns) != len(wantSpawns) {
+		t.Fatalf("spawns: got %d, Node %d", len(spawns), len(wantSpawns))
+	}
+	for k, s := range spawns {
+		w := wantSpawns[k].(ledger.Object)
+		if s.text != w.Get("text") {
+			t.Errorf("spawn %d packet\ngot  %s\nNode %s", k, s.text, w.Get("text"))
+		}
+		if s.opts.Level != w.Get("level") || s.opts.Role != w.Get("role") {
+			t.Errorf("spawn %d level/role %s/%s, Node %v/%v", k, s.opts.Level, s.opts.Role, w.Get("level"), w.Get("role"))
+		}
+	}
+	var left any
+	if entries, err := os.ReadDir(work); err == nil {
+		names := []any{}
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		left = names
+	}
+	if g, ws := mustJSON(t, left), mustJSON(t, want.Get("left")); g != ws {
+		t.Errorf("work dir left %s, Node %s", g, ws)
+	}
+}
+
+// TestB704SplitHeadingStopMatchesNode: a recheck stop that names a section
+// whose heading is cut inside a surrogate pair runs in Go like Node's
+// runRound (B704): the review.cap row and the state's next.section carry the
+// pair's high half as \ud83d, byte-equal to Node's golden. Before B704 Go
+// refused it with ErrUnsupported and the round went to Node.
+func TestB704SplitHeadingStopMatchesNode(t *testing.T) {
 	useRepoLenses(t)
 	t.Setenv("HOME", t.TempDir())
 	fxRaw := readOrdered(t, "b683_md_recheck_fixture.json")
@@ -208,34 +212,11 @@ func TestB683SplitHeadingStopHandsOver(t *testing.T) {
 	if c == nil {
 		t.Fatal("no emoji-split-heading-stop case")
 	}
-	if w := golden.Get("emoji-split-heading-stop").(ledger.Object).Get("state").(string); !strings.Contains(w, `\ud83d"`) {
+	want := golden.Get("emoji-split-heading-stop").(ledger.Object)
+	if w := want.Get("state").(string); !strings.Contains(w, `\ud83d"`) {
 		t.Fatalf("Node's stop should name a heading ending in a lone surrogate: %s", w)
 	}
-	repo := buildRepo(t, fixture{Commit: b683Files(c.Get("commit")), After: b683Files(c.Get("after"))})
-	cfg := plainCfg(t, c.Get("cfg"))
-	rows := 0
-	spawned := 0
-	work := filepath.Join(t.TempDir(), "w")
-	deps := LoopDeps{RepoRoot: repo, Cfg: cfg,
-		WriteRow: func(ledger.Object) error { rows++; return nil },
-		Review:   func() (ledger.Object, error) { return nil, errors.New("no full review") },
-		Input:    Input{RepoRoot: repo, File: c.Get("file").(string), Cfg: cfg, WorkDir: work},
-		Session: Deps{Spawn: func(SpawnOpts) (ledger.Object, error) { spawned++; return nil, errors.New("no") },
-			Warn: func(string, string) {}, Lock: func(_ string, fn func() error) error { return fn() }}}
-	state, err := ledger.DecodeObject([]byte(mustJSON(t, c.Get("state"))))
-	if err != nil {
-		t.Fatal(err)
-	}
-	before := mustJSON(t, state)
-	if _, err := CheckLoop(state.Clone(), "recheck", deps); !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("CheckLoop: %v, want ErrUnsupported", err)
-	}
-	if _, err := RunRound(state, deps, "recheck"); !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("RunRound: %v, want ErrUnsupported", err)
-	}
-	if rows != 0 || spawned != 0 || mustJSON(t, state) != before {
-		t.Fatalf("rows %d, spawns %d, state changed %v", rows, spawned, mustJSON(t, state) != before)
-	}
+	b683RunCase(t, c, want)
 }
 
 // TestB683MarkdownEngineSplitHeadingOutsideChangesMatchesNode: a Markdown

@@ -13,9 +13,10 @@ package review
 // B537 added review.recheck_scope file (the packet against the block base),
 // moved-code hints and cross-file evidence (a base with peers) and the
 // import-header context. Not ported (ErrUnsupported before anything runs):
-// a recheck_scope file diff that fails to read (Node throws), a stop that
-// names a Markdown heading whose 120-unit cut splits a surrogate pair (Node
-// writes the lone half), and every config shape levelGuards refuses. B545:
+// a recheck_scope file diff that fails to read (Node throws) and every config
+// shape levelGuards refuses. B704: a stop that names a Markdown heading whose
+// 120-unit cut splits a surrogate pair runs in Go (the lone half is WTF-8 and
+// is written as \udXXX, as Node's JSON.stringify writes it). B545:
 // review.second_levels, a levels.L2 ladder and review.routes run like Node's
 // recheckSession. B683: a Markdown packet over the budget is rechecked
 // section by section (recheck_sections.go).
@@ -343,12 +344,9 @@ func planRecheck(state ledger.Object, kind string, deps LoopDeps, dry bool) (*re
 			p.built = append(p.built, packet)
 			continue
 		}
-		p.stop.section, p.stop.hasSection, p.stop.split = part.heading, true, part.split
+		p.stop.section, p.stop.hasSection = part.heading, true
 	}
 	if p.stop != nil {
-		if p.stop.split {
-			return nil, unsupported("a Markdown recheck stop naming a heading cut inside a surrogate pair is not ported")
-		}
 		return p, nil
 	}
 	// B545: the session's ladder, second level and routes run like Node's;

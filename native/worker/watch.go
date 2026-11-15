@@ -38,6 +38,7 @@ import (
 	"github.com/ricardov03/code-forge/native/canon"
 	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/filelock"
+	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/queue"
@@ -124,10 +125,11 @@ func (w *Watch) tick(running map[string]bool) error {
 	if err != nil {
 		return err
 	}
-	if !utf8.Valid(data) || loneSurrogate.Match(data) {
+	if !utf8.Valid(data) {
 		return &watchUnported{"run record bytes Node decodes with replacements"}
 	}
-	record, err := ledger.DecodeValue(data)
+	// JSON.parse keeps a lone surrogate escape (WTF-8 here, B704)
+	record, err := ledger.ParseOrdered(data)
 	if err != nil {
 		return &watchThrow{"SyntaxError"}
 	}
@@ -176,6 +178,11 @@ func (w *Watch) tick(running map[string]bool) error {
 // block is the locked body for one open block.
 func (w *Watch) block(record any, block string, entry any, cfg map[string]any, running map[string]bool, env []string) error {
 	r := w.Runner
+	if ledger.HasLoneSurrogate(entry) || ledger.HasLoneSurrogate(watchProp(record, "workspace")) {
+		// its paths and owned files reach git and the file system, which
+		// Node gives a lone surrogate as U+FFFD: kept on Node (B704)
+		return &watchUnported{"a block entry with a lone surrogate"}
+	}
 	stateFile := filepath.Join(QueueDir(r.RepoRoot), "watch", block+".json")
 	st, err := watchReadState(stateFile)
 	if err != nil {
@@ -618,10 +625,11 @@ func watchReadJSON(file string) (any, error) {
 	if err != nil {
 		return nil, nil
 	}
-	if !utf8.Valid(data) || loneSurrogate.Match(data) {
+	if !utf8.Valid(data) {
 		return nil, &watchUnported{"JSON bytes Node decodes with replacements"}
 	}
-	v, err := ledger.DecodeValue(data)
+	// JSON.parse keeps a lone surrogate escape (WTF-8 here, B704)
+	v, err := ledger.ParseOrdered(data)
 	if err != nil {
 		return nil, nil
 	}
@@ -646,7 +654,7 @@ func watchReadState(file string) (ledger.Object, error) {
 		return out, nil
 	case string:
 		out := ledger.Object{}
-		for i, unit := range utf16.Encode([]rune(x)) {
+		for i, unit := range jsonx.Units(x) {
 			if utf16.IsSurrogate(rune(unit)) {
 				return nil, &watchUnported{"a cursor string with surrogate pairs"}
 			}

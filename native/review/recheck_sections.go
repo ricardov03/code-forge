@@ -20,7 +20,6 @@ import (
 type recheckPart struct {
 	index   int // 0: the whole file
 	heading string
-	split   bool // heading's cut split a surrogate pair (markdownHeadings)
 	diff    *FileDiff
 	open    []int
 	keys    []int
@@ -34,7 +33,6 @@ type recheckStop struct {
 	budget     int
 	section    string
 	hasSection bool
-	split      bool // section's cut split a surrogate pair
 }
 
 func rsStopOf(p *Packet) *recheckStop {
@@ -132,7 +130,7 @@ func packRecheck(lens string, d *FileDiff, pending []any, budget int, moves *mvM
 	})
 	if !packed.ok {
 		return nil, &recheckStop{status: "split_required", tokensIn: packed.tokensIn, budget: budget,
-			section: packed.section, hasSection: packed.section != "", split: packed.sectionSplit}
+			section: packed.section, hasSection: packed.section != ""}
 	}
 	if len(packed.sections) == 0 {
 		return nil, whole()
@@ -144,7 +142,7 @@ func packRecheck(lens string, d *FileDiff, pending []any, budget int, moves *mvM
 		for _, i := range open {
 			listed[i] = true
 		}
-		parts = append(parts, recheckPart{index: sec.index, heading: sec.headings[0], split: sec.split[0], diff: sec.diff, open: open, keys: sec.keys})
+		parts = append(parts, recheckPart{index: sec.index, heading: sec.headings[0], diff: sec.diff, open: open, keys: sec.keys})
 	}
 	// a finding no packet holds goes to the last packet
 	last := &parts[len(parts)-1]

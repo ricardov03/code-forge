@@ -874,8 +874,14 @@ func gatesJSValueString(v any) string {
 }
 
 func gatesDecodeJSON(data []byte) (any, bool) {
-	if !utf8.Valid(data) || gatesSurrogate.Match(data) {
+	if !utf8.Valid(data) {
 		return nil, false
+	}
+	if gatesSurrogate.Match(data) {
+		// JSON.parse keeps a lone surrogate escape (WTF-8 here) and the
+		// result's JSON.stringify writes it back as the escape (B704)
+		v, err := ledger.ParseOrdered(data)
+		return v, err == nil && json.Valid(data)
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	var decode func() (any, error)
@@ -976,7 +982,7 @@ func gatesAcceptanceSub(args []string) (ledger.Object, int, error) {
 	}
 	clauses, ok := gatesDecodeJSON(data)
 	if !ok {
-		// JSON.parse's own error text (and U+FFFD or lone-surrogate decoding) stays with Node.
+		// JSON.parse's own error text (and U+FFFD decoding) stays with Node.
 		return nil, 0, &gatesHand{hGatesAcceptanceJSON}
 	}
 	tap, _, err := gatesReadFile(tapPath)

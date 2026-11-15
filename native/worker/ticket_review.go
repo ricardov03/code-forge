@@ -96,29 +96,46 @@ func (w *TicketRunner) configFor(id string, retry bool) (cfg map[string]any, bad
 	if hex.EncodeToString(sum[:]) != hash {
 		return nil, true, nil
 	}
-	m, err := plainMap(snap)
+	m, err := configMap(snap)
 	if err != nil {
 		return nil, false, unsupported("config snapshot form")
 	}
 	return m, false, nil
 }
 
+// plainMap is o as a plain map (JSON.parse's view), a lone surrogate kept
+// as WTF-8 (ledger.ParseRow, B704).
 func plainMap(o ledger.Object) (map[string]any, error) {
 	data, err := ledger.Stringify(o, false)
 	if err != nil {
 		return nil, err
 	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	v, err := ledger.ParseRow(data)
+	if err != nil {
 		return nil, err
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil, errors.New("not an object")
 	}
 	return m, nil
 }
 
+// configMap is plainMap for a config snapshot. A lone surrogate in a config
+// would reach prompt files and session arguments, which Node writes with
+// U+FFFD: that config stays with Node (B704).
+func configMap(snap ledger.Object) (map[string]any, error) {
+	if ledger.HasLoneSurrogate(snap) {
+		return nil, errors.New("a config snapshot with a lone surrogate")
+	}
+	return plainMap(snap)
+}
+
 // readRows is the worker's ledger view (ledger/tail.mjs createTailReader):
 // the rotations in numeric order, then the current file without its
-// unfinished last line. Any line Node's JSON.parse could read differently,
-// or any read error, is ErrUnsupported (Node throws).
+// unfinished last line. A line JSON.parse throws on, or any read error, is
+// ErrUnsupported (Node throws); a lone surrogate escape is kept as JSON.parse
+// keeps it (ledger.ParseRow, B704).
 func (w *TicketRunner) readRows() ([]any, error) {
 	if w.ReadRows != nil {
 		return w.ReadRows()
@@ -130,8 +147,8 @@ func (w *TicketRunner) readRows() ([]any, error) {
 	}
 	rows := []any{}
 	for _, l := range lines {
-		var v any
-		if err := json.Unmarshal(l, &v); err != nil {
+		v, err := ledger.ParseRow(l)
+		if err != nil {
 			return nil, unsupported("ledger line JSON.parse throws on")
 		}
 		rows = append(rows, v)
@@ -150,11 +167,11 @@ func (w *TicketRunner) readObjects() ([]ledger.Object, error) {
 		}
 		for _, r := range rows {
 			if m, ok := r.(map[string]any); ok {
-				data, err := json.Marshal(m)
+				data, err := ledger.Stringify(m, false)
 				if err != nil {
 					return nil, unsupported("ledger row encode")
 				}
-				o, err := ledger.DecodeObject(data)
+				o, err := ledger.ParseObject(data)
 				if err != nil {
 					return nil, unsupported("ledger row decode")
 				}
@@ -168,18 +185,16 @@ func (w *TicketRunner) readObjects() ([]ledger.Object, error) {
 		return nil, keepHandover(err)
 	}
 	for _, l := range lines {
-		var v any
-		if err := json.Unmarshal(l, &v); err != nil {
+		if !json.Valid(l) {
 			return nil, unsupported("ledger line JSON.parse throws on")
 		}
-		if _, ok := v.(map[string]any); !ok {
-			continue
-		}
-		o, err := ledger.DecodeObject(l)
+		v, err := ledger.ParseOrdered(l)
 		if err != nil {
 			return nil, unsupported("ledger row decode")
 		}
-		out = append(out, o)
+		if o, ok := v.(ledger.Object); ok {
+			out = append(out, o)
+		}
 	}
 	return out, nil
 }
@@ -228,7 +243,7 @@ func (w *TicketRunner) ledgerLines() ([][]byte, error) {
 			return nil, unsupported("ledger read: " + err.Error())
 		}
 		data = data[:bytes.LastIndexByte(data, '\n')+1]
-		if !utf8.Valid(data) || loneSurrogate.Match(data) {
+		if !utf8.Valid(data) {
 			return nil, unsupported("ledger bytes Node would decode with replacements")
 		}
 		for _, l := range bytes.Split(data, []byte("\n")) {
@@ -398,6 +413,11 @@ func (w *TicketRunner) engineRefusal(t ledger.Object, cfg map[string]any, conten
 		}
 		// entry?.base_sha of a value that is not an object is undefined
 		entry, _ := blocks.Get(block).(ledger.Object)
+		if ledger.HasLoneSurrogate(entry) {
+			// its paths, acceptance text and owned files reach files and
+			// hashes, which Node writes with U+FFFD: kept on Node (B704)
+			return nil, nil, unsupported("a block entry with a lone surrogate")
+		}
 		if sha, ok := entry.Get("base_sha").(string); !ok || sha == "" {
 			return out("unavailable", "block-base-missing"), nil, nil
 		}
@@ -462,9 +482,9 @@ var controlChar = regexp.MustCompile(`[\x00-\x1f\x7f]`)
 func (w *TicketRunner) exclusion(file string, ticketCfg map[string]any) (string, error) {
 	data, err := os.ReadFile(filepath.Join(w.Home, ".code-forge", "runs", w.RunID+".json"))
 	var record any
-	if err == nil && utf8.Valid(data) && !loneSurrogate.Match(data) {
-		if json.Unmarshal(data, &record) != nil {
-			record = nil
+	if err == nil && utf8.Valid(data) {
+		if record, err = ledger.ParseRow(data); err != nil {
+			record, err = nil, nil
 		}
 	} else if err == nil {
 		return "", unsupported("run record bytes Node would decode with replacements")
@@ -500,7 +520,7 @@ func (w *TicketRunner) exclusion(file string, ticketCfg map[string]any) (string,
 // configInForce: snapshotFor(record, ”) — nil for no snapshot, bad when it
 // does not match its hash.
 func (w *TicketRunner) configInForce(data []byte) (map[string]any, bool, error) {
-	rec, err := ledger.DecodeObject(data)
+	rec, err := ledger.ParseObject(data)
 	if err != nil {
 		return nil, false, unsupported("run record decode")
 	}
@@ -530,7 +550,7 @@ func (w *TicketRunner) configInForce(data []byte) (map[string]any, bool, error) 
 	if hex.EncodeToString(sum[:]) != hash {
 		return nil, true, nil
 	}
-	m, err := plainMap(snap)
+	m, err := configMap(snap)
 	if err != nil {
 		return nil, false, unsupported("config snapshot form")
 	}

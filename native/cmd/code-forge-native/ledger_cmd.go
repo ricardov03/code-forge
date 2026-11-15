@@ -17,8 +17,6 @@ import (
 const ledgerUsage = "usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note \"...\"] | outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...\n"
 const ledgerTailUsage = "usage: code-forge ledger tail --slug <slug> [--n <count> | -n <count>]\n"
 
-var ledgerSurrogatePattern = regexp.MustCompile(`(?i)\\ud[89a-f][0-9a-f]{2}`)
-
 func init() { routes["ledger"] = runLedger }
 
 var ledgerSubUsage = map[string]string{
@@ -324,16 +322,13 @@ func ledgerTail(slug string, n float64) (int, string, string, bool) {
 				}
 				return 0, "", "", false // Node owns its precise JSON syntax errors.
 			}
-			// The existing ordered ledger decoder also supports scalar/array rows
-			// through this envelope, without losing nested property order.
-			if ledgerSurrogatePattern.MatchString(line) {
-				return 0, "", "", false
-			}
-			obj, err := ledger.DecodeObject([]byte(`{"row":` + line + `}`))
+			// Any row value, nested property order kept; a lone surrogate escape
+			// stays WTF-8 and JSON.stringify writes it back as the escape (B704).
+			value, err := ledger.ParseOrdered([]byte(line))
 			if err != nil {
 				return 0, "", "", false
 			}
-			encoded, err := ledger.Stringify(obj.Get("row"), false)
+			encoded, err := ledger.Stringify(value, false)
 			if err != nil {
 				return 0, "", "", false
 			}

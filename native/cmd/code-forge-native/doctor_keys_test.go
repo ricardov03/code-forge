@@ -230,10 +230,11 @@ func TestB483DoctorOpTimeoutRetriesOnce(t *testing.T) {
 	}
 }
 
-// An index Go cannot read back as JSON.parse does keeps the hand-over.
+// An index Go cannot read back as JSON.parse does keeps the hand-over (a lone
+// surrogate escape reads in Go since B704: TestB704KeyIndexLoneSurrogateInGo).
 func TestB483DoctorKeyIndexAmbiguityHandsOver(t *testing.T) {
 	home, _ := b474Project(t, b483OpCfg, b483Now)
-	writeHomeFile(t, home, ".code-forge/store/index.json", `{"x":"\ud800"}`)
+	writeHomeFile(t, home, ".code-forge/store/index.json", `{"x":1e999}`)
 	expectHandover(t, "doctor-key-refresh", "doctor", "--quick")
 	home, _ = b474Project(t, "provider: anthropic\n"+b474Levels, b483Now)
 	writeHomeFile(t, home, ".code-forge/store/jev.key", `{"v":"k1","exp":999000000}`)

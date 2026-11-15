@@ -308,7 +308,7 @@ func movedText(m *mvMoves, content *string, keys []int) string {
 // current file, ascending. Only the section path asks for it, after
 // sectionGroups read the same headings.
 func mvHeadingLines(content *string) []int {
-	headings, _ := markdownHeadings(content)
+	headings := markdownHeadings(content)
 	out := make([]int, 0, len(headings))
 	for line := range headings {
 		out = append(out, line)
