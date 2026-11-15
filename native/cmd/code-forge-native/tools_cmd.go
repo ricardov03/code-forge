@@ -508,7 +508,7 @@ func prepareToolsInstall(args []string, usageError func(string) func(_, stderr i
 			manual = append(manual, row{tool.id, hint})
 		}
 	}
-	if len(runs) > 0 && !flags["yes"] && !flags["dry-run"] && toolsStdinTTY() {
+	if toolsNeedsNodePrompt(len(runs), flags["yes"], flags["dry-run"]) {
 		return nil, hToolsConfirm, false
 	}
 	printTable := func(b *strings.Builder) {
@@ -541,8 +541,13 @@ func prepareToolsInstall(args []string, usageError func(string) func(_, stderr i
 		}
 		flush()
 		if len(runs) > 0 && !flags["yes"] {
-			fmt.Fprint(stderr, "tools: no terminal to confirm; nothing installed — pass --yes to install the plan above\n")
-			return 2
+			if !toolsStdinTTY() {
+				fmt.Fprint(stderr, "tools: no terminal to confirm; nothing installed — pass --yes to install the plan above\n")
+				return 2
+			}
+			if code, ok := toolsAskInstall(stdout, len(runs)); !ok {
+				return code
+			}
 		}
 		failed := 0
 		for _, r := range runs {
