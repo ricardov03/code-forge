@@ -33,6 +33,14 @@ func b714TranscriptAt(name, text string) func(f *b684Fixture) {
 	}
 }
 
+// b714LateClaim: a late finding whose claim holds the given text.
+func b714LateClaim(claim string) func(f *b684Fixture, hash string) {
+	return func(f *b684Fixture, hash string) {
+		b684Approved(f, hash)
+		f.row(ledger.Object{{Key: "event", Value: "review.late_finding"}, {Key: "block", Value: "B1"}, {Key: "file", Value: "sample.mjs"}, {Key: "finding", Value: "L1"}, {Key: "severity", Value: "warning"}, {Key: "claim", Value: claim}})
+	}
+}
+
 var b714CloseCases = []struct {
 	name, ask, args string
 	setup           b684Setup
@@ -69,6 +77,9 @@ var b714CloseCases = []struct {
 	// character: prepareAcceptHit's form refusal.
 	{"hit-path-tab", "yes", "|--decide|--reason|the stash was harmless", b684Setup{review: b684Approved}, b714TranscriptAt("t\tx.log", b697Hit)},
 	{"hit-path-tab-finding", "yes", "|--decide|--reason|both are fine", b684Setup{review: b684Finding("warning")}, b714TranscriptAt("t\x1bx.log", b697Hit)},
+	// --decide labels with control characters in the claim text.
+	{"label-control", "yes", "|--decide|--reason|late is fine", b684Setup{review: b714LateClaim("tab\there\x1b[31m red\r\nnext\x7f")}, nil},
+	{"label-control-no", "no", "|--decide|--reason|late is fine", b684Setup{review: b714LateClaim("bell\x07 and \x00 nul")}, nil},
 	{"hcl-infinity", "notty", "", b684Setup{review: b684Approved}, b714LengthChecks("Infinity")},
 }
 
