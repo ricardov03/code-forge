@@ -582,6 +582,13 @@ status and block waits with Node and check fallback when the daemon fails.
 `parity-gates-custom` waits for all fixture files to be written before starting Go.
 This prevents random failures under load from reading a partial fixture.
 
+The error log (`~/.code-forge/logs/errors.jsonl`) is written by Go with Node's
+rules. Every Go command that reads a run's signer key registers it as a secret,
+as Node's `loadKey` does, so a failure after that point logs the key as
+`[REDACTED]` in any command, not only `autopilot` (B710). The last error text
+of `gates` is kept and trimmed with JavaScript's `trim` (U+FEFF is trimmed,
+U+0085 is kept), as Node's stderr capture does (B711).
+
 New hand-over reasons go at the end only: one constant at the end of the
 `const` block and one entry at the end of the `handoverReasons` array in
 `native/cmd/code-forge-native/handover_reasons.go`. That file holds only the

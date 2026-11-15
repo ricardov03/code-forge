@@ -17,6 +17,7 @@ import (
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/sign"
 )
 
 type Object = map[string]any
@@ -41,6 +42,7 @@ func ReadKey(home, id string) []byte {
 	info, err := os.Stat(p)
 	if err == nil && info.Mode().Perm()&0077 == 0 {
 		if key, err := os.ReadFile(p); err == nil && len(key) == 32 {
+			sign.KeyLoaded(key) // loadKey registers the key (B710)
 			return key
 		}
 	}

@@ -35,8 +35,11 @@ var gatesLastMessage any
 
 func gatesErrf(format string, args ...any) {
 	s := fmt.Sprintf(format, args...)
-	if errorLogTrim(s) != "" {
-		gatesLastMessage = s // captureStderr keeps the write; buildEntry trims it
+	// captureStderr keeps the last write whose JavaScript trim is not empty;
+	// buildEntry trims it with JavaScript's trim (U+FEFF yes, U+0085 no)
+	// (B711; errorLogTrim is B699's JS trim, so buildEntry's trim is a no-op).
+	if t := errorLogTrim(s); t != "" {
+		gatesLastMessage = t
 	}
 	fmt.Fprint(os.Stderr, s)
 }

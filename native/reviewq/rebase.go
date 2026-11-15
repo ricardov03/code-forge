@@ -143,6 +143,7 @@ func RebaseCheck(home, root, run, id string, exclude func(string) (string, bool)
 		if len(key) != 32 {
 			return rebaseError("bad-key", "run "+run+" signer key is not 32 bytes")
 		}
+		sign.KeyLoaded(key) // loadKey registers the key (B710)
 		pending := rebaseObject(b, "rebase_check")
 		if b.Get("rebase_check") != nil {
 			verified, e := sign.VerifyRow(pending.Map(), key)

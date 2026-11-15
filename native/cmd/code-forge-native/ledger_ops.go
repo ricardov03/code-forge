@@ -21,6 +21,7 @@ import (
 	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/runstatus"
+	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -776,6 +777,7 @@ func ledgerLoadKey(run string) (message, secret string, ok bool) {
 	if len(key) != 32 {
 		return fmt.Sprintf("run %s signer key is not 32 bytes", run), "", true
 	}
+	sign.KeyLoaded(key) // loadKey registers the key (B710)
 	return "", hex.EncodeToString(key), true
 }
 
