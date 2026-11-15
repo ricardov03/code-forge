@@ -16,6 +16,14 @@ func b714LengthChecks(length any) func(f *b684Fixture) {
 	return b697Checks(ledger.Object{{Key: "a", Value: "look"}, {Key: "length", Value: length}})
 }
 
+// b714RawLate: a late finding whose file or finding is not text.
+func b714RawLate(file, finding any) func(f *b684Fixture, hash string) {
+	return func(f *b684Fixture, hash string) {
+		b684Approved(f, hash)
+		f.row(ledger.Object{{Key: "event", Value: "review.late_finding"}, {Key: "block", Value: "B1"}, {Key: "file", Value: file}, {Key: "finding", Value: finding}, {Key: "severity", Value: "warning"}, {Key: "claim", Value: "a late claim"}})
+	}
+}
+
 var b714CloseCases = []struct {
 	name, ask, args string
 	setup           b684Setup
@@ -38,6 +46,16 @@ var b714CloseCases = []struct {
 	{"hcl-array-two", "notty", "", b684Setup{review: b684Approved}, b714LengthChecks([]any{float64(1), float64(2)})},
 	{"hcl-array-empty", "notty", "", b684Setup{review: b684Approved}, b714LengthChecks([]any{})},
 	{"hcl-object", "notty", "", b684Setup{review: b684Approved}, b714LengthChecks(ledger.Object{{Key: "n", Value: float64(1)}})},
+	// --decide with a late row whose file or finding is not text: Node's
+	// waivePrecheck refuses the first one that is truthy on both sides.
+	{"raw-file-number", "yes", "|--decide|--reason|late is fine", b684Setup{review: b714RawLate(float64(5), "L1")}, nil},
+	{"raw-file-empty-array", "yes", "|--decide|--reason|late is fine", b684Setup{review: b714RawLate([]any{}, "L1")}, nil},
+	{"raw-file-bad-finding", "yes", "|--decide|--reason|late is fine", b684Setup{review: b714RawLate(true, "L 1")}, nil},
+	{"raw-finding-number", "yes", "|--decide|--reason|late is fine", b684Setup{review: b714RawLate("sample.mjs", float64(7))}, nil},
+	{"raw-finding-array", "yes", "|--decide|--reason|late is fine", b684Setup{review: b714RawLate("sample.mjs", []any{"L1"})}, nil},
+	{"raw-finding-object-json", "yes", "|--decide|--reason|late is fine|--json", b684Setup{review: b714RawLate("sample.mjs", ledger.Object{{Key: "valueOf", Value: "x"}})}, nil},
+	{"raw-file-zero", "yes", "|--decide|--reason|late is fine", b684Setup{review: b714RawLate(float64(0), "L1")}, nil},
+	{"raw-proof", "yes", "|--decide|--reason|late is fine", b684Setup{review: b714RawLate(float64(5), "proof")}, nil},
 	{"hcl-infinity", "notty", "", b684Setup{review: b684Approved}, b714LengthChecks("Infinity")},
 }
 

@@ -246,11 +246,28 @@ func closeHumanDecisions(in closeDecideInput) (actions []humanDecision, preview 
 		}
 		if b.Raw != nil {
 			// A row's file or finding that is not text: Node decides it only
-			// when both are truthy, with the values as they are.
-			if b.File != "" && gatecheck.Truthy(b.Raw.Finding, b.Raw.HasFinding) {
+			// when both are truthy, with the values as they are. Its pair key
+			// is the template-literal text; waivePrecheck then always refuses
+			// (B714): a finding that is not text, or a file that is not.
+			if !gatecheck.Truthy(b.Raw.File, b.Raw.HasFile) || !gatecheck.Truthy(b.Raw.Finding, b.Raw.HasFinding) || b.Raw.Finding == "proof" {
+				continue
+			}
+			if !closeDecideTextable(b.Raw.File) || !closeDecideTextable(b.Raw.Finding) {
+				// V8 cannot make the value primitive: a TypeError Go does not reproduce.
 				return nil, nil, nil, false
 			}
-			continue
+			pair := gatecheck.JSString(b.Raw.File, true) + "\x00" + gatecheck.JSString(b.Raw.Finding, true)
+			if seen[pair] {
+				continue
+			}
+			seen[pair] = true
+			msg := "a finding id is required (letters, digits, . _ : -)"
+			if finding, isText := b.Raw.Finding.(string); isText {
+				if msg = blockstate.Finding(finding); msg == "" {
+					msg = "--file is required"
+				}
+			}
+			return actions, in.rows, &state.Error{Code: "usage", Message: msg}, true
 		}
 		if b.File == "" || b.Finding == "" || b.Finding == "proof" {
 			continue
@@ -318,6 +335,32 @@ func closeHumanDecisions(in closeDecideInput) (actions []humanDecision, preview 
 		actions = append(actions, humanDecision{label, row})
 	}
 	return actions, preview, nil, true
+}
+
+// closeDecideTextable reports whether String(v) works in V8 for a decoded
+// JSON value. ToString asks toString first: an object (or one inside an
+// array) whose own toString key is not callable falls to valueOf, which gives
+// the object back, so V8 throws "Cannot convert object to primitive value".
+// An own valueOf alone is never reached ("[object Object]").
+func closeDecideTextable(v any) bool {
+	switch x := v.(type) {
+	case map[string]any:
+		_, own := x["toString"]
+		return !own
+	case ledger.Object:
+		for _, f := range x {
+			if f.Key == "toString" {
+				return false
+			}
+		}
+	case []any:
+		for _, item := range x {
+			if !closeDecideTextable(item) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // closeWaivePrecheck is block.mjs's waivePrecheck for one decided finding: the
