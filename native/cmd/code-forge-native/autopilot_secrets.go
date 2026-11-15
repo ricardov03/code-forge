@@ -5,10 +5,12 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ricardov03/code-forge/native/autopilot"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -21,10 +23,23 @@ import (
 
 var autopilotSecrets []string
 
+// autopilotSecretsMu guards autopilotSecrets: a worker's goroutines can load
+// the key while another one writes the error log.
+var autopilotSecretsMu sync.Mutex
+
 func autopilotRegisterSecret(value string) {
+	autopilotSecretsMu.Lock()
+	defer autopilotSecretsMu.Unlock()
 	if value != "" && !slices.Contains(autopilotSecrets, value) {
 		autopilotSecrets = append(autopilotSecrets, value)
 	}
+}
+
+// B710: Node's loadKey (and generateKey) registers the run's signer key in
+// every verb, not only autopilot, so every Go signer key loader reports the
+// key through sign.KeyLoaded and it joins the one registered set.
+func init() {
+	sign.OnKeyLoaded(func(key []byte) { autopilotRegisterSecret(hex.EncodeToString(key)) })
 }
 
 // autopilotRegisterKey is loadKey's registerSecret: the key, when it reads.
@@ -37,8 +52,11 @@ func autopilotRegisterKey(home, runID string) {
 // autopilotRedact is redactString: every occurrence of every registered
 // secret, ranges merged, each merged range one [REDACTED].
 func autopilotRedact(text string) string {
+	autopilotSecretsMu.Lock()
+	secrets := append([]string(nil), autopilotSecrets...)
+	autopilotSecretsMu.Unlock()
 	ranges := [][2]int{}
-	for _, secret := range autopilotSecrets {
+	for _, secret := range secrets {
 		for at := strings.Index(text, secret); at != -1; {
 			ranges = append(ranges, [2]int{at, at + len(secret)})
 			next := strings.Index(text[at+1:], secret)

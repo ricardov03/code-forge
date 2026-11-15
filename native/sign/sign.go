@@ -80,3 +80,19 @@ func clone(row map[string]any) map[string]any {
 	}
 	return out
 }
+
+// keyLoaded is the process's registerSecret for a signer key (B710): Node's
+// loadKey and generateKey register the key's hex with redact.mjs every time
+// they read or create it, in every verb. The command sets it at start.
+var keyLoaded func(key []byte)
+
+// OnKeyLoaded sets what KeyLoaded calls; nil turns it off.
+func OnKeyLoaded(f func(key []byte)) { keyLoaded = f }
+
+// KeyLoaded is called by every signer key loader once the key passed its
+// mode and length checks (and by the key generator once it is written).
+func KeyLoaded(key []byte) {
+	if f := keyLoaded; f != nil && len(key) > 0 {
+		f(key)
+	}
+}

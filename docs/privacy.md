@@ -64,7 +64,8 @@ for each fingerprint (fingerprints and times only). A warning never shows the hi
 ## The built-in cleaning rules
 
 Every message and stack is first passed through code-forge's secret redaction, then these rules,
-in this order. They run when a line is written, on the whole report, again after the AI check's
+in this order. The redaction masks, as `[REDACTED]`, every key the command has read so far,
+including the run's signer key in every command that reads it (in the Go engine since B710). They run when a line is written, on the whole report, again after the AI check's
 replacements, and again after you edit the text.
 
 | Rule | Replaced by |

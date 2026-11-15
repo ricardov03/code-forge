@@ -215,6 +215,7 @@ func SignRow(home, runID string, row ledger.Object) (ledger.Object, error) {
 	if len(key) != 32 {
 		return nil, &Error{"bad-key", fmt.Sprintf("run %s signer key is not 32 bytes", runID)}
 	}
+	sign.KeyLoaded(key) // loadKey registers the key (B710)
 	stamped := ledger.Object{{Key: "run", Value: runID}}
 	for _, field := range row {
 		stamped.Set(field.Key, field.Value)

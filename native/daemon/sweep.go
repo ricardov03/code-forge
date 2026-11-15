@@ -72,5 +72,6 @@ func (s *server) sweepKey(run string) []byte {
 	if err != nil || len(key) != 32 {
 		return nil
 	}
+	sign.KeyLoaded(key) // loadKey registers the key (B710)
 	return key
 }
