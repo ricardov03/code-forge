@@ -6,6 +6,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+- `review-file` with an unknown flag holding a value (a path, a 1Password reference, an email) and `block accept-hit` on a Codex transcript with lone `\uD800`–`\uDFFF` escapes or deep nesting, or with an error text holding a no-break space or vertical tab, run in Go with Node's output, exit and error-log entry; they no longer hand over to Node (`enqueue-flag-redaction`). Go's error log now masks registered secrets before scrubbing, scrubs like Node's JavaScript regexes and trims messages with JavaScript's `trim` (U+FEFF trimmed, U+0085 kept). B706
 - Tests: the native-install, entry and config-golden Node tests give their private package copies a node_modules without the `@codedology` platform packages, so CI (which installs the published `@codedology/code-forge-<target>` binary) no longer finds the release binary in place of the test's own. B701
 - `tools install` and `logs clear` with stdin at a terminal and stdout piped (for example `| tee`) ask their question in Go: clack's frames on the pipe at 80 columns, colored only by `FORCE_COLOR`, with the same answers, output, exit codes and error-log row as Node; they no longer hand over to Node (`tools-confirm`, `logs-clear-prompt`). B698
 - `tools install` at a terminal asks its one question in Go (`Run <n> install command(s)?`, default no): yes runs the installs, any other answer prints "cancelled — nothing installed" and exits 1, as in Node; it no longer hands over to Node. B682

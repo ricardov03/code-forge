@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -25,6 +24,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/humanask"
+	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/state"
@@ -82,7 +82,7 @@ func (h *humanVerb) fallback() int {
 	return blockHandover(h.original(), hBlockUnportedSubcommand)
 }
 func (h *humanVerb) text(code int, text string) int {
-	if !h.marked && (!closeTextSafe(text) || reviewWaitLogging() && strings.ContainsFunc(text, humanLogSpace)) {
+	if !h.marked && !closeTextSafe(text) {
 		return h.fallback()
 	}
 	h.mark()
@@ -93,12 +93,6 @@ func (h *humanVerb) text(code int, text string) int {
 	return code
 }
 
-// humanLogSpace (B685): a JavaScript \s character Go's regexp \s does not
-// match (\v and the Unicode spaces). The error log's scrubber and fingerprint
-// split on \s, so such text stays with Node.
-func humanLogSpace(r rune) bool {
-	return errorLogSpace(r) && !strings.ContainsRune("\t\n\f\r ", r)
-}
 func (h *humanVerb) fail(err error) int {
 	var se *state.Error
 	if errors.As(err, &se) {
@@ -300,11 +294,7 @@ func runBlockAcceptHit(args []string) int {
 	// the item.completed lines of the named line's item (accept-hit.mjs).
 	lineSet := map[int64]bool{line: true}
 	if !hasRule {
-		paired, ok := acceptHitCodexPairs(lines, line)
-		if !ok {
-			return h.fallback()
-		}
-		for _, n := range paired {
+		for _, n := range acceptHitCodexPairs(lines, line) {
 			lineSet[n] = true
 		}
 	}
@@ -349,36 +339,27 @@ func runBlockAcceptHit(args []string) int {
 	return 0
 }
 
-// acceptHitLoneSurrogate: a JSON \u escape of a UTF-16 surrogate. Go decodes a
-// lone one to U+FFFD, so two different item ids could compare equal.
-var acceptHitLoneSurrogate = regexp.MustCompile(`(?i)\\ud[89a-f][0-9a-f]{2}`)
-
 // acceptHitCodexPairs is prepareAcceptHit's Codex pairing: when every
 // nonblank line parses as a JSON object with a string type, the first is
 // thread.started and the named line is an item.* event with a string item.id,
 // the lines of that id's item.completed events. Anything else (a line JSON.parse
-// refuses, plain text) pairs nothing. ok is false where Go could read a line
-// differently from JSON.parse (nesting past Go's depth limit, a surrogate escape).
-func acceptHitCodexPairs(lines []string, line int64) (paired []int64, ok bool) {
+// refuses, plain text) pairs nothing. B706: jsonx reads each line as JSON.parse
+// does (a lone surrogate escape stays its own code unit, any depth), so item
+// ids compare as JavaScript's === compares them.
+func acceptHitCodexPairs(lines []string, line int64) (paired []int64) {
 	events := make([]map[string]any, len(lines))
 	first := true
 	for i, s := range lines {
 		if humanTrim(s) == "" {
 			continue
 		}
-		var v any
-		dec := json.NewDecoder(strings.NewReader(s))
-		dec.UseNumber()
-		if !json.Valid([]byte(s)) || dec.Decode(&v) != nil {
-			var probe any
-			if err := json.Unmarshal([]byte(s), &probe); err != nil && strings.Contains(err.Error(), "exceeded max depth") {
-				return nil, false
-			}
-			return nil, true // JSON.parse throws: plain text
+		v, err := jsonx.Parse(s)
+		if err != nil {
+			return nil // JSON.parse throws: plain text
 		}
 		obj, isObj := v.(map[string]any)
 		if _, isText := obj["type"].(string); !isObj || !isText || first && obj["type"] != "thread.started" {
-			return nil, true
+			return nil
 		}
 		first = false
 		events[i] = obj
@@ -387,17 +368,14 @@ func acceptHitCodexPairs(lines []string, line int64) (paired []int64, ok bool) {
 	item, _ := events[line-1]["item"].(map[string]any)
 	id, isText := item["id"].(string)
 	if !strings.HasPrefix(kind, "item.") || !isText {
-		return nil, true
-	}
-	if acceptHitLoneSurrogate.MatchString(strings.Join(lines, "\n")) {
-		return nil, false
+		return nil
 	}
 	for i, event := range events {
 		if item, _ := event["item"].(map[string]any); event["type"] == "item.completed" && item != nil && item["id"] == id {
 			paired = append(paired, int64(i+1))
 		}
 	}
-	return paired, true
+	return paired
 }
 
 // ---- amend-acceptance ----

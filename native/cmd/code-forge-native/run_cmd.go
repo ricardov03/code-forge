@@ -148,7 +148,7 @@ func (o *runOut) err(s string) {
 		s = o.redact(s)
 	}
 	fmt.Fprint(os.Stderr, s)
-	if strings.TrimSpace(s) != "" {
+	if jsTrim(s) != "" { // captureStderr: text.trim().length > 0
 		o.last = s
 	}
 }

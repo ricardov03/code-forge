@@ -117,7 +117,10 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 			}
 		}
 	}
-	clean, counts := gatesScrubber(slug)
+	// buildEntry's clean is scrub(redact(s)): the process's registered secrets
+	// (Node's redact.mjs set) are masked first, then the scrubber runs (B706).
+	scrub, counts := gatesScrubber(slug)
+	clean := func(s string) string { return scrub(errorLogRedact(s)) }
 	if text, ok := message.(string); ok {
 		text = clean(errorLogTrim(text))
 		if len(text) > 2048 {
