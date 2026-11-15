@@ -36,8 +36,6 @@ const (
 	hCloseHome
 	hCloseStateStorage
 	hCloseConfig
-	hCloseHuman
-	hCloseExternalReview
 	hCloseLight
 	hCloseHumanChecksShape
 	hCloseRepo
@@ -137,7 +135,6 @@ const (
 	hOutcomeUnsupported
 	hOutcomeRecordUnported
 	hToolsUnsupported
-	hToolsConfirm
 	hValidateUnported
 	hValidateSchemaIssues
 	hValidateSecretValues
@@ -188,7 +185,6 @@ const (
 	hAutopilotApproveConfig
 	hAutopilotApproveValue
 	hAutopilotApproveChanged
-	hHelpVerbs
 	hVersionPackage
 	hFactsSession
 	hProofConfig
@@ -228,14 +224,12 @@ const (
 	hInitAnswers
 	hInitOutput
 	hDoctorFullInvalidConfig
-	hDoctorFullLiveWorker
 	hDoctorNativeBinary
 	hDoctorWorkerRegistry
 	hDoctorReviewStateRecord
 	hInitJevKey
 	hInitJevOp
 	hInitModels
-	hInitDoctor
 	hInitLinks
 	hInitConfigShape
 	hInitConfigCheck
@@ -345,8 +339,6 @@ var handoverReasons = [...]string{
 	hCloseHome:                "close-home",
 	hCloseStateStorage:        "close-state-storage",
 	hCloseConfig:              "close-config",
-	hCloseHuman:               "close-human",
-	hCloseExternalReview:      "close-external-review",
 	hCloseLight:               "close-light",
 	hCloseHumanChecksShape:    "close-human-checks-shape",
 	hCloseRepo:                "close-repo",
@@ -446,7 +438,6 @@ var handoverReasons = [...]string{
 	hOutcomeUnsupported:       "outcome-unsupported",
 	hOutcomeRecordUnported:    "outcome-record-unported",
 	hToolsUnsupported:         "tools-unsupported",
-	hToolsConfirm:             "tools-confirm",
 	hValidateUnported:         "validate-unported",
 	hValidateSchemaIssues:     "validate-schema-issues",
 	hValidateSecretValues:     "validate-secret-values",
@@ -497,7 +488,6 @@ var handoverReasons = [...]string{
 	hAutopilotApproveConfig:   "autopilot-approve-config",
 	hAutopilotApproveValue:    "autopilot-approve-value",
 	hAutopilotApproveChanged:  "autopilot-approve-changed",
-	hHelpVerbs:                "help-verbs",
 	hVersionPackage:           "version-package",
 	hFactsSession:             "facts-session",
 	hProofConfig:              "proof-config",
@@ -537,14 +527,12 @@ var handoverReasons = [...]string{
 	hInitAnswers:              "init-answers",
 	hInitOutput:               "init-output",
 	hDoctorFullInvalidConfig:  "doctor-full-invalid-config",
-	hDoctorFullLiveWorker:     "doctor-full-live-worker",
 	hDoctorNativeBinary:       "doctor-native-binary",
 	hDoctorWorkerRegistry:     "doctor-worker-registry",
 	hDoctorReviewStateRecord:  "doctor-review-state-record",
 	hInitJevKey:               "init-jev-key",
 	hInitJevOp:                "init-jev-op",
 	hInitModels:               "init-models",
-	hInitDoctor:               "init-doctor",
 	hInitLinks:                "init-links",
 	hInitConfigShape:          "init-config-shape",
 	hInitConfigCheck:          "init-config-check",

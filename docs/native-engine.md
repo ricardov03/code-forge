@@ -211,6 +211,7 @@ and writes nothing, in Go. Review dates in every ECMAScript date-time form (year
 `±YYYYYY` years, `T24:00`, local time) are read like V8, and since B709 the plain legacy forms too
 (`Jan 2 2020`, `2020/01/02 10:20`, `1/2/2020`, `2020-01-01 10:00`); only other legacy forms stay `close-gates-format`.
 Go answers every `--help` spelling of `block close`, so `close-help` is never recorded; B464 removed it and 76 other reason codes no Go path returned.
+B729 removed six more that no Go path returned (`close-human`, `close-external-review`, `tools-confirm`, `help-verbs`, `doctor-full-live-worker`, `init-doctor`); the `<verb>-autopilot-grant`, `<verb>-pending-approval` and `<verb>-end-hook` codes for `claim`, `stop`, `open`, `close` and `land` stay, because Go builds them from the verb and the run's state.
 `land-merge-gate` is reserved for a full-suite gate configuration Go cannot run.
 If Go itself fails with an internal error (a Go panic) on the main goroutine, it never
 exits with the usage-error code 2 or prints a stack trace (B508). A command that writes no

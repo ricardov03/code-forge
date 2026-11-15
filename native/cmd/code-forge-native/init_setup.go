@@ -23,8 +23,8 @@ import (
 // it returns the run (every write happens inside it) or the narrow reason a
 // step Go does not serve hands over before anything is written: a Jev key
 // read from the key store (init-jev-key), a 1Password item lookup
-// (init-jev-op), the tools step (init-tools), the model refresh
-// (init-models), the doctor (init-doctor), a link Go cannot place like Node
+// (init-jev-op), the model refresh (init-models), a doctor row Go cannot
+// give like Node (the doctor's own reason), a link Go cannot place like Node
 // (init-links), a config Go cannot rebuild byte for byte
 // (init-config-shape), a config the schema or the secret scan judges
 // (init-config-check) and a user config Go cannot read like Node
