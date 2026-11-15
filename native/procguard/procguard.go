@@ -76,6 +76,24 @@ var table = func() (map[int]proc, bool) {
 	return rows, true
 }
 
+// TestBuild reports whether this binary was built by a test helper (the
+// builtForTest link flag). Such a binary refuses every signal to a process
+// that does not descend from the test root (B529), so a scan for processes
+// to stop can skip the others (B754). Never true for a product binary or for
+// an in-process test.
+func TestBuild() bool { return builtForTest != "" }
+
+// MaySignal reports whether a guarded process may signal pid, judged on a
+// process table given as pid -> ppid: pid descends from the test root
+// (B754). It reads no process table of its own.
+func MaySignal(ppids map[int]int, pid int) bool {
+	rows := make(map[int]proc, len(ppids))
+	for p, ppid := range ppids {
+		rows[p] = proc{ppid: ppid}
+	}
+	return descends(rows, pid, root())
+}
+
 // descends reports whether pid's parent chain reaches top (pid != top).
 func descends(rows map[int]proc, pid, top int) bool {
 	seen := map[int]bool{}

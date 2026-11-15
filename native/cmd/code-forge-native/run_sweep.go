@@ -76,6 +76,9 @@ var (
 	// for every candidate at once (runProcessEnvs: one ps -E call on darwin,
 	// B748); a test that sets it is asked per process.
 	runReadEnv func(runProc) map[string]string
+	// runSweepScoped (B754): run start's sweep looks only at processes this
+	// binary may signal; true only in a binary built for a test.
+	runSweepScoped = procguard.TestBuild
 )
 
 func runParseProcesses(text string) []runProc {
@@ -368,9 +371,21 @@ func runSweepRootUnreadable(root string) bool {
 func runSweepItems(home string) []runProc {
 	rows := runReadProcesses()
 	uid := os.Getuid()
+	// B754: a binary built for a test can signal only the test's own
+	// descendants (procguard), so it reads no other process's environment:
+	// its sweep no longer depends on how many processes the machine runs.
+	scoped := runSweepScoped()
+	ppids := map[int]int{}
+	if scoped {
+		for _, p := range rows {
+			if _, seen := ppids[p.pid]; !seen {
+				ppids[p.pid] = p.ppid
+			}
+		}
+	}
 	own := []runProc{}
 	for _, p := range rows {
-		if p.uid == uid {
+		if p.uid == uid && (!scoped || procguard.MaySignal(ppids, p.pid)) {
 			own = append(own, p)
 		}
 	}

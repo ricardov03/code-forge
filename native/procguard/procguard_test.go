@@ -36,3 +36,20 @@ func TestAllowedUsesTable(t *testing.T) {
 		t.Fatal("wrong verdicts")
 	}
 }
+
+// B754: MaySignal judges a given pid -> ppid table against the test root.
+func TestMaySignalUsesGivenTable(t *testing.T) {
+	t.Setenv(Env, "10")
+	ppids := map[int]int{10: 1, 20: 10, 21: 20, 30: 1, 40: 99}
+	for _, c := range []struct {
+		pid  int
+		want bool
+	}{{20, true}, {21, true}, {10, false}, {30, false}, {40, false}, {77, false}} {
+		if got := MaySignal(ppids, c.pid); got != c.want {
+			t.Errorf("MaySignal(%d) = %v", c.pid, got)
+		}
+	}
+	if TestBuild() {
+		t.Error("an in-process test is not a test build")
+	}
+}
