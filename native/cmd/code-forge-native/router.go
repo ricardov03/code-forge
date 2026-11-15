@@ -15,6 +15,12 @@ import (
 var routes = map[string]func([]string) int{}
 
 func run(args []string) (int, error) {
+	// B715: the safe-output set is the process's (Node's redact.mjs set): a
+	// verb starts with none registered. A real process runs one verb, so this
+	// clears nothing there; in-process tests run many verbs one after another.
+	autopilotSecretsMu.Lock()
+	autopilotSecrets = nil
+	autopilotSecretsMu.Unlock()
 	if len(args) == 0 {
 		// B458: no verb is help, as in bin/code-forge.mjs.
 		args = []string{"help"}

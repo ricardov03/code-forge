@@ -211,6 +211,9 @@ func keysCacheHoursFor(p keysParsed, cwd string, strict bool) keysCache {
 }
 
 // keysRedactor is writeSafe: every registered value is masked on its way out.
+// B715: register is also Node's registerSecret (the key store registers
+// every key it hands out), so the value joins the verb's one safe-output set
+// and later lines of the same process mask it too.
 type keysRedactor struct {
 	secrets []string
 }
@@ -218,6 +221,7 @@ type keysRedactor struct {
 func (r *keysRedactor) register(value string) {
 	if value != "" {
 		r.secrets = append(r.secrets, value)
+		autopilotRegisterSecret(value)
 	}
 }
 
@@ -252,7 +256,15 @@ func (r *keysRedactor) clean(text string) string {
 	return b.String()
 }
 
-func (r *keysRedactor) write(w io.Writer, text string) { _, _ = io.WriteString(w, r.clean(text)) }
+// write masks once, as writeSafe: a safe stream masks every registered
+// secret itself (B715), any other writer gets the local mask.
+func (r *keysRedactor) write(w io.Writer, text string) {
+	if safeRouted(w) {
+		_, _ = io.WriteString(w, text)
+		return
+	}
+	_, _ = io.WriteString(w, r.clean(text))
+}
 
 // keysJSISO is new Date(ms).toISOString() for a valid time.
 func keysJSISO(ms float64) string {
