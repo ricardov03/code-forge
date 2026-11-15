@@ -381,13 +381,14 @@ func (u *initWizUI) askJevSource(home string, stderr io.Writer) (ans iwjAnswer, 
 func iwjStorePut(home, value string) string {
 	entry, _ := ledger.Stringify(ledger.Object{{Key: "v", Value: value}, {Key: "exp", Value: nil}}, false)
 	backend := "file"
-	kc, kcOK := kcStore{}, false
+	var kc *kcStore
 	if os.Getenv("CODE_FORGE_KEY_BACKEND") != "file" {
-		kc, kcOK = kcOpen()
+		// B679: on Linux the Secret Service, or no keychain (file alone)
+		kc, _ = kcChain()
 	}
-	if kcOK {
+	if kc != nil {
 		backend = kc.name
-		if failure := iwjKcSet(kc, "jev", string(entry)); failure != "" {
+		if failure := iwjKcSet(*kc, "jev", string(entry)); failure != "" {
 			return failure
 		}
 	} else if err := writePrivateFile(filepath.Join(home, ".code-forge", "store", "jev.key"), string(entry)); err != nil {
@@ -405,6 +406,13 @@ func iwjStorePut(home, value string) string {
 // iwjKcSet is security-cli.mjs set with its error messages: the entry in on
 // stdin twice, read back and compared (a mismatch deletes the item).
 func iwjKcSet(kc kcStore, name, entry string) string {
+	if kc.ss != nil {
+		// B679: Entry.setPassword's error message (keyring-core's Display)
+		if err := kc.ss.set(name, entry); err != nil {
+			return err.Error()
+		}
+		return ""
+	}
 	exit := func(res childResult) string {
 		if res.code == nil {
 			return "null"

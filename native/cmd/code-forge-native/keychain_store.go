@@ -12,6 +12,14 @@ package main
 // read through `security` gives Node's value under Node's backend name.
 // Off macOS, or without a usable `security`, Go does not open the keychain
 // and the callers keep their hand-over.
+//
+// B679: on Linux the keychain is @napi-rs/keyring's Secret Service store
+// (keychain_secretservice.go). Node's Linux chain is [keychain, file]
+// (security-cli is macOS only): with the package's Linux binding, the
+// keychain is the Secret Service when it connects and answers the probe,
+// else the kernel keyutils store (keyring-node linux_credential_builder.rs),
+// which Go does not serve (the callers hand over); without the binding the
+// chain is the file store alone (kcChain).
 
 import (
 	"encoding/json"
@@ -48,25 +56,73 @@ var (
 
 // kcStore is the keychain backend Go reads and writes; name is the backend
 // name Node reports for it (source, index rows, `keys test` lines).
-type kcStore struct{ name string }
+type kcStore struct {
+	name string
+	ss   *ssStore // B679: the Secret Service store on Linux; nil is `security`
+}
 
 // kcOpen is the keychain half of the default chain: ok false means Go cannot
 // stand in for it (not macOS, or `security help` fails like Node's
 // available()).
 func kcOpen() (kcStore, bool) {
+	if keysGOOS == "linux" {
+		return kcOpenLinux()
+	}
 	if keysGOOS != "darwin" || !keysSecurityAvailable() {
 		return kcStore{}, false
 	}
 	if kcNapiKeyring(kcPackageRoot()) {
-		return kcStore{"keychain"}, true
+		return kcStore{name: "keychain"}, true
 	}
-	return kcStore{"security-cli"}, true
+	return kcStore{name: "security-cli"}, true
+}
+
+// kcOpenLinux is Node's keychain backend on Linux: the binding loads, the
+// Secret Service connects and the probe read does not throw. ok false is
+// "Go cannot stand in" (no binding: see kcChain; no Secret Service: Node's
+// keyutils store).
+func kcOpenLinux() (kcStore, bool) {
+	if !kcNapiKeyring(kcPackageRoot()) {
+		return kcStore{}, false
+	}
+	api, err := ssConnect()
+	if err != nil {
+		return kcStore{}, false
+	}
+	store := &ssStore{api: api}
+	if !store.probe() {
+		return kcStore{}, false
+	}
+	return kcStore{name: "keychain", ss: store}, true
+}
+
+// kcChain is the keychain part of createDefaultKeyStore for the callers
+// that also read the file store: kc nil with ok true is a chain with no
+// keychain backend at all (Linux without @napi-rs/keyring's binding, where
+// Node's chain is the file store alone); ok false keeps the hand-over.
+func kcChain() (*kcStore, bool) {
+	if keysGOOS == "linux" && !kcNapiKeyring(kcPackageRoot()) {
+		return nil, true
+	}
+	store, ok := kcOpen()
+	if !ok {
+		return nil, false
+	}
+	return &store, true
+}
+
+// kcLinuxMusl is the binding loader's isMusl (/usr/bin/ldd names musl);
+// tests stand in.
+var kcLinuxMusl = func() bool {
+	data, err := os.ReadFile("/usr/bin/ldd")
+	return err == nil && strings.Contains(string(data), "musl")
 }
 
 // kcNapiKeyring says whether import('@napi-rs/keyring') from
-// src/keys/backends would find the package and its macOS binding (the
-// package's index.js: ./keyring.darwin-universal.node, the
-// -darwin-universal package, then the same two for process.arch).
+// src/keys/backends would find the package and its binding for keysGOOS
+// (the package's index.js: on macOS ./keyring.darwin-universal.node, the
+// -darwin-universal package, then the same two for process.arch; on Linux
+// ./keyring.linux-<arch>-<gnu|musl>.node, then that package).
 func kcNapiKeyring(root string) bool {
 	if root == "" {
 		return false
@@ -78,6 +134,16 @@ func kcNapiKeyring(root string) bool {
 	names := []string{"darwin-universal"}
 	if kcArch != "" {
 		names = append(names, "darwin-"+kcArch)
+	}
+	if keysGOOS == "linux" {
+		names = nil
+		if kcArch != "" {
+			libc := "gnu"
+			if kcLinuxMusl() {
+				libc = "musl"
+			}
+			names = []string{"linux-" + kcArch + "-" + libc}
+		}
 	}
 	for _, name := range names {
 		if kcIsFile(filepath.Join(dir, "keyring."+name+".node")) || kcResolvePackage(dir, "@napi-rs/keyring-"+name) != "" {
@@ -128,6 +194,10 @@ func kcExec(input *string, args ...string) childResult {
 // get is backend.get: the stored text, found false for no item (exit 44) or
 // an empty password; ok false is Node's throw (any other exit, a timeout).
 func (kc kcStore) get(name string) (raw string, found, ok bool) {
+	if kc.ss != nil {
+		value, found, err := kc.ss.get(name)
+		return value, found, err == nil
+	}
 	res := kcExec(nil, "find-generic-password", "-s", kcService, "-a", name, "-w")
 	if res.timedOut || res.code == nil {
 		return "", false, false
@@ -146,6 +216,13 @@ func (kc kcStore) get(name string) (raw string, found, ok bool) {
 // is read back; a stored value that differs is deleted and the write fails.
 // The error text is the reason Node's reasonOf gives (the error class).
 func (kc kcStore) set(name, value string) string {
+	if kc.ss != nil {
+		// a napi-rs error from an anyhow error has code "GenericFailure"
+		if kc.ss.set(name, value) != nil {
+			return "GenericFailure"
+		}
+		return ""
+	}
 	if strings.ContainsAny(value, "\r\n") {
 		return "TypeError"
 	}
@@ -167,6 +244,10 @@ func (kc kcStore) set(name, value string) string {
 // delete is backend.delete: true when an item was removed, false when none
 // was there; ok false is Node's throw.
 func (kc kcStore) delete(name string) (removed, ok bool) {
+	if kc.ss != nil {
+		removed, err := kc.ss.delete(name)
+		return removed, err == nil
+	}
 	res := kcExec(nil, "delete-generic-password", "-s", kcService, "-a", name)
 	if res.timedOut || res.code == nil {
 		return false, false

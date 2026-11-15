@@ -198,20 +198,14 @@ func TestB610DoctorCachesOpInKeychain(t *testing.T) {
 	}
 }
 
-// What Go still cannot do goes to Node: a `security` that fails on read,
-// and no macOS keychain at all (Node's Secret Service / Credential Manager).
+// What Go still cannot do goes to Node: a `security` that fails on read.
 func TestB610DoctorKeychainHandOvers(t *testing.T) {
 	b474Project(t, "provider: anthropic\n"+b474Levels, b483Now)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
 	kc := b610Fake(t, true)
 	kc.fail(t)
 	expectHandover(t, "doctor-key-store", "doctor", "--quick")
-
-	b474Project(t, "provider: anthropic\n"+b474Levels, b483Now)
-	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
-	b610Fake(t, true)
-	keysGOOS = "linux"
-	expectHandover(t, "doctor-key-store", "doctor", "--quick")
+	// B679: Linux runs in Go (b679_secretservice_test.go)
 }
 
 // keys test and keys remove on the default chain read and delete the

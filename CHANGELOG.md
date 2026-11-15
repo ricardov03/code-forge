@@ -16,6 +16,9 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Changed
 
 - `keys set <name>` (the hidden prompt on a terminal), `keys set --op` and `keys test --ref` with an `op://` reference, a 1Password item ID or an item link now run in the Go engine with Node's output, exit codes and stored files; the typed value is read with echo off and the terminal mode comes back on every path, including a signal. B678
+### Changed
+
+- On Linux, `doctor`, `keys test`, `keys remove`, `init` (auto step and wizard), `jev ask` and `worker` read and write the Jev key in the Secret Service store that `@napi-rs/keyring` uses (same items, labels and index rows as Node) in Go, and without the package's Linux binding use the file store alone like Node; Linux with the binding but no Secret Service (Node's keyutils store) still hands over. B679
 
 ## [0.24.0] — 2026-11-14
 

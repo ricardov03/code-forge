@@ -27,9 +27,10 @@ var initInstallTool = func(argv []string) childResult { return toolsExec(argv, 6
 // Jev flag and no keys.jev: the env variable, else the file store
 // (CODE_FORGE_KEY_BACKEND=file) read with the 24 h cap. pre is the store's
 // own side effect (an expired entry dropped, a longer expiry cut), run before
-// anything else, like Node's read. The default chain reads the OS keychain:
-// that stays with Node (init-jev-keychain), as does a store file or index Go
-// cannot read back like Node (init-jev-key).
+// anything else, like Node's read. The default chain reads the OS keychain
+// (macOS through `security`, Linux's Secret Service since B679); a keychain
+// Go cannot open stays with Node (init-jev-keychain), as does a store file or
+// index Go cannot read back like Node (init-jev-key).
 type initJevAuto struct {
 	found       bool
 	ref, source string
@@ -43,16 +44,19 @@ func initJevAutoPlan(home string) (initJevAuto, handoverReason) {
 	}
 	if os.Getenv("CODE_FORGE_KEY_BACKEND") != "file" {
 		// B610: the keychain through `security` first, then the file store
-		kc, ok := kcOpen()
+		// B679: on Linux the Secret Service, or no keychain (file alone)
+		kc, ok := kcChain()
 		if !ok {
 			return initJevAuto{}, hInitJevKeychain
 		}
-		raw, found, ok := kc.get("jev")
-		if !ok {
-			return initJevAuto{}, hInitJevKeychain
-		}
-		if found {
-			return initJevAutoKeychain(home, kc, raw)
+		if kc != nil {
+			raw, found, ok := kc.get("jev")
+			if !ok {
+				return initJevAuto{}, hInitJevKeychain
+			}
+			if found {
+				return initJevAutoKeychain(home, *kc, raw)
+			}
 		}
 	}
 	keyFile := filepath.Join(home, ".code-forge", "store", "jev.key")

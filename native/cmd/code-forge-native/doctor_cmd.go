@@ -422,14 +422,15 @@ func jevKeyChain(cfg map[string]any, home string, now float64, opOK bool) (func(
 		return keyed(doctorRow{"keys", "OK", "keys", "jev key from env, no expiry" + suffix}, value)
 	}
 	// B610: the default chain reads the OS keychain through `security`
-	// first (the writer), then the 0600 file store.
+	// first (the writer), then the 0600 file store. B679: on Linux the
+	// keychain is the Secret Service, or none (the file store alone).
 	var kc *kcStore
 	if os.Getenv("CODE_FORGE_KEY_BACKEND") != "file" {
-		store, ok := kcOpen()
+		store, ok := kcChain()
 		if !ok {
 			return nil, none, hDoctorKeyStore
 		}
-		kc = &store
+		kc = store
 	}
 	okRow := func(source string, exp *float64) doctorRow {
 		if exp != nil && *exp-now < 3_600_000 {

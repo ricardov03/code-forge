@@ -344,13 +344,16 @@ func b550JevKey(call *b550JevCall, cfg map[string]any, values map[string]string)
 	if os.Getenv("CODE_FORGE_KEY_BACKEND") != "file" {
 		// B610: the keychain through `security` first; a hit that needs a
 		// store change (expired, too long) stays with Node
-		kc, ok := kcOpen()
+		// B679: on Linux the Secret Service, or no keychain (file alone)
+		kc, ok := kcChain()
 		if !ok {
 			return false
 		}
-		raw, found, ok := kc.get(storeName)
-		if !ok {
-			return false
+		raw, found := "", false
+		if kc != nil {
+			if raw, found, ok = kc.get(storeName); !ok {
+				return false
+			}
 		}
 		if found {
 			value, exp, ok := decodeKeyEntry(raw)
