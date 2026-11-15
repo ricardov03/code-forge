@@ -45,9 +45,12 @@ func (idx *Index) Refresh() error {
 	if idx.entries == nil {
 		idx.entries = make(map[string]cached)
 	}
+	// Node's blockTickets and reviewIdentity throw WorkerError
+	// queue-unreadable for a queue they cannot list; only block close reads
+	// the raw scandir error, through TicketNames itself (B718, B735).
 	names, err := TicketNames(idx.Dir)
 	if err != nil {
-		return err
+		return fmt.Errorf("queue-unreadable")
 	}
 	seen := make(map[string]bool)
 	for _, name := range names {

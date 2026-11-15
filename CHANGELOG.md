@@ -6,6 +6,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+- `block rebase` (and every other reader of the review queue index: `review-file`, the worker, `block close`'s review wait and `--auto-claim` join) again fails with `queue-unreadable` when `.code-forge/queue` cannot be listed, as Node's `blockTickets` and `reviewIdentity` do; since B718 it printed the raw `scandir` error, which only `block close`'s worker-pin check prints (Node's `closeBlock`). B735
 - Six hand-over reason codes no Go path could return are gone from the Go table (`close-human`, `close-external-review`, `tools-confirm`, `help-verbs`, `doctor-full-live-worker`, `init-doctor`); the grant, pending-approval and end-hook codes of `block claim|stop|open|close|land` stay, as Go still returns them. (B729)
 - A config file that is `null` (or a nil map or list inside a signed value) is written as `null` in Go's canonical form again, as Node writes it; since B696 Go wrote `{}` or `[]`. (B722)
 - Go reads a lone surrogate escape in ledger rows, `errors.jsonl`, gate acceptance files, the key index and the worker's state, ticket and registry files the way `JSON.parse` does and writes it back as Node does (`ledger tail`, `ledger calibration`, `logs`, `logs summary`, `gates acceptance`, key index rewrites, worker reads), and a Markdown recheck stop naming a heading cut inside a surrogate pair runs in Go byte-equal to Node; paths, argv and report text that meet U+FFFD on Node still hand over. B704

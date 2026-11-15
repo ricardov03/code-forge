@@ -73,10 +73,15 @@ func TestB718RefreshScandirError(t *testing.T) {
 	if err := os.WriteFile(dir, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := (&Index{Dir: dir}).Refresh()
+	_, err := TicketNames(dir)
 	var pe *os.PathError
 	if !errors.As(err, &pe) || pe.Op != "scandir" || pe.Path != dir || !errors.Is(err, syscall.ENOTDIR) {
-		t.Fatalf("Refresh() = %v, want scandir ENOTDIR on %s", err, dir)
+		t.Fatalf("TicketNames() = %v, want scandir ENOTDIR on %s", err, dir)
+	}
+	// B735: every Index.Refresh caller (block rebase, review-file, the
+	// worker) keeps Node's WorkerError queue-unreadable.
+	if err := (&Index{Dir: dir}).Refresh(); err == nil || err.Error() != "queue-unreadable" {
+		t.Fatalf("Refresh() = %v, want queue-unreadable", err)
 	}
 }
 
