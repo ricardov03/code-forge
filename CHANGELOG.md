@@ -7,6 +7,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ## [Unreleased]
 
 - `block reopen` at a terminal runs in Go: the owner's question, the answers, the signed human `review.reopened` row, the cleared done marker and the reopened review ticket match Node; it no longer hands over to Node. B680
+- Go reads no data file from the Node `src/` tree: the review lenses, the finding schema and the known-fixes table are built into the binary, and `upgrade` (and `init`, which shares its package-root check) find the package root by its `package.json` name instead of `src/cli/upgrade.mjs`. A known-fixes table under an installed package's `src/util` no longer sends `logs` to Node. B688
 
 ## [0.24.0] — 2026-11-14
 

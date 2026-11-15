@@ -38,7 +38,9 @@ npm run known-fix -- check               # validate the whole table
 ```
 
 The version is the release that carries the fix (usually the one you are about to make). This
-appends one entry to `src/util/known-fixes.json`, which ships in the package:
+appends one entry to `src/util/known-fixes.json`, which ships in the package. The Go binary has
+its own built-in copy (B688): copy the file to `native/cmd/code-forge-native/data/known-fixes.json`
+before the release build; a Go test fails while the two differ.
 
 ```json
 [
