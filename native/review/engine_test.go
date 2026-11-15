@@ -288,7 +288,6 @@ func TestReviewFileUnsupportedBeforeSpawn(t *testing.T) {
 	useRepoLenses(t)
 	fx := readFixture(t, "packet_fixture.json")
 	fx.After["README.md"] = strings.Repeat("# head\nsome words here\n", 200)
-	fx.After["emoji.md"] = "# " + strings.Repeat("a", 117) + "\U0001F600 tail\n" + strings.Repeat("some words here\n", 200)
 	repo := buildRepo(t, fx)
 	f := func(v float64) *float64 { return &v }
 	withReview := func(r map[string]any) map[string]any { c := baseCfg(); c["review"] = r; return c }
@@ -306,9 +305,8 @@ func TestReviewFileUnsupportedBeforeSpawn(t *testing.T) {
 		{"fallback-ladder", Input{File: "notes.txt", Cfg: withL2(map[string]any{"provider": "claude", "model": "m2", "fallback": []any{"x"}}), Risk: f(1)}},
 		{"no-model", Input{File: "notes.txt", Cfg: withL2(map[string]any{"provider": "claude"}), Risk: f(1)}},
 		{"no-provider", Input{File: "notes.txt", Cfg: map[string]any{"levels": map[string]any{"L2": map[string]any{"model": "m2"}}}, Risk: f(1)}},
-		// B545: a Markdown file over the budget reviews by section (TestB545MarkdownSectionsMatchNode);
-		// only a heading Node cuts inside a surrogate pair stays with Node
-		{"markdown-heading-surrogate-cut", Input{File: "emoji.md", Cfg: withReview(map[string]any{"budgets": map[string]any{"full_in": 100.0}}), Risk: f(1)}},
+		// B545/B696: a Markdown file over the budget reviews by section in Go, a heading cut
+		// inside a surrogate pair too (TestB696MarkdownHeadingSurrogateCutMatchNode)
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

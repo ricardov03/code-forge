@@ -226,24 +226,9 @@ func DiagnoseAnswer(res ledger.Object) ledger.Object {
 		{Key: "top_keys", Value: topKeys}, {Key: "other_keys", Value: float64(other)}, {Key: "schema_errors", Value: list}, {Key: "errors_total", Value: float64(len(errs))}}
 }
 
-// cut120 is .slice(0, 120) in UTF-16 units.
-func cut120(s string) string {
-	n := 0
-	for i, r := range s {
-		w := 1
-		if r >= 0x10000 {
-			w = 2
-		}
-		if n+w > diagnosisMessage {
-			if n < diagnosisMessage {
-				return s[:i] + "�" // a cut surrogate pair
-			}
-			return s[:i]
-		}
-		n += w
-	}
-	return s
-}
+// cut120 is .slice(0, 120) in UTF-16 units; a cut surrogate pair keeps its
+// high half (WTF-8), which the row writes as \udXXX like Node (B696).
+func cut120(s string) string { return sliceUTF16(s, diagnosisMessage) }
 
 // v8Error is a JSON.parse failure as plainParseError leaves it: plain is the
 // cut message; at is the byte offset of V8's position (-1 when the message

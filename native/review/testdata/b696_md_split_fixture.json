@@ -1,0 +1,217 @@
+{
+ "commit": {
+  "emoji.md": "# Intro\nintro line 0 plain text words\nintro line 1 plain text words\nintro line 2 plain text words\nintro line 3 plain text words\nintro line 4 plain text words\nintro line 5 plain text words\nintro line 6 plain text words\nintro line 7 plain text words\n\n# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀 tail\nemoji line 0 plain text words\nemoji line 1 plain text words\nemoji line 2 plain text words\nemoji line 3 plain text words\nemoji line 4 plain text words\nemoji line 5 plain text words\nemoji line 6 plain text words\nemoji line 7 plain text words\nemoji line 8 plain text words\nemoji line 9 plain text words\nemoji line 10 plain text words\nemoji line 11 plain text words\nemoji line 12 plain text words\nemoji line 13 plain text words\n\n# Third\nthird line 0 plain text words\nthird line 1 plain text words\nthird line 2 plain text words\nthird line 3 plain text words\nthird line 4 plain text words\nthird line 5 plain text words\nthird line 6 plain text words\nthird line 7 plain text words\n"
+ },
+ "after": {
+  "emoji.md": "# Intro\nintro line 0 plain text words\nintro line 1 plain text words\nintro line 2 CHANGED words here\nintro line 3 plain text words\nintro line 4 plain text words\nintro line 5 plain text words\nintro line 6 plain text words\nintro line 7 plain text words\n\n# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀 tail\nemoji line 0 CHANGED words here\nemoji line 1 plain text words\nemoji line 2 CHANGED words here\nemoji line 3 plain text words\nemoji line 4 CHANGED words here\nemoji line 5 plain text words\nemoji line 6 CHANGED words here\nemoji line 7 plain text words\nemoji line 8 CHANGED words here\nemoji line 9 plain text words\nemoji line 10 CHANGED words here\nemoji line 11 plain text words\nemoji line 12 CHANGED words here\nemoji line 13 plain text words\n\n# Third\nthird line 0 plain text words\nthird line 1 plain text words\nthird line 2 plain text words\nthird line 3 plain text words\nthird line 4 plain text words\nthird line 5 CHANGED words here\nthird line 6 plain text words\nthird line 7 plain text words\n"
+ },
+ "cases": [
+  {
+   "name": "md-split-heading-reviewed",
+   "file": "emoji.md",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 1000,
+      "quick_in": 700
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "one",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "two",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F1",
+        "file": "emoji.md",
+        "line_start": 13,
+        "line_end": 13,
+        "severity": "nit",
+        "category": "docs",
+        "claim": "c",
+        "evidence": "e",
+        "fix": "x"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "three",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "md-split-heading-unavailable",
+   "file": "emoji.md",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 1000,
+      "quick_in": 700
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "one",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "exit",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 1
+    }
+   ]
+  },
+  {
+   "name": "md-split-heading-too-big",
+   "file": "emoji.md",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 900,
+      "quick_in": 700
+     }
+    }
+   },
+   "script": []
+  },
+  {
+   "name": "needs-file-path-cut",
+   "file": "emoji.md",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 1000,
+      "quick_in": 700
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "one",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀.md",
+       "b.md"
+      ]
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  }
+ ]
+}

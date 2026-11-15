@@ -306,7 +306,7 @@ func movedText(m *mvMoves, content *string, keys []int) string {
 
 // mvHeadingLines is moved.mjs headingLines: the heading line numbers of the
 // current file, ascending. Only the section path asks for it, after
-// sectionGroups accepted the same headings.
+// sectionGroups read the same headings.
 func mvHeadingLines(content *string) []int {
 	headings, _ := markdownHeadings(content)
 	out := make([]int, 0, len(headings))

@@ -740,7 +740,7 @@ func needsFileRound(summary ledger.Object, spec sessionSpec, base string, packet
 	}
 	requested := []any{}
 	for _, p := range paths[:min(10, len(paths))] {
-		requested = append(requested, cutUTF16(gates.Mask(p, in.Secrets), 200))
+		requested = append(requested, sliceUTF16(gates.Mask(p, in.Secrets), 200)) // B696: a cut pair keeps its high half, as Node
 	}
 	changed := in.ChangedFiles
 	if changed == nil {

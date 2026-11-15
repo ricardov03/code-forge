@@ -21,10 +21,10 @@ var (
 const sectionHeadingMax = 120
 
 // markdownHeadings is sections.mjs markdownHeadings: 1-based line → the
-// heading line, trimmed and cut at 120 UTF-16 units. B683: split names the
-// lines whose cut falls inside a surrogate pair: Node keeps the lone high
-// half there, the Go text stops before the pair. Line numbers and section
-// bounds never depend on it; only a heading Go would print does.
+// heading line, trimmed and cut at 120 UTF-16 units. A cut inside a
+// surrogate pair keeps its high half as Node does, held as WTF-8 (jsonx's
+// lone surrogate), so rows and results write it as \udXXX (B696). split
+// names those lines (B683): only the recheck stop still hands them to Node.
 func markdownHeadings(content *string) (out map[int]string, split map[int]bool) {
 	out, split = map[int]string{}, map[int]bool{}
 	lines := SplitLines(content)
@@ -58,18 +58,20 @@ func markdownHeadings(content *string) (out map[int]string, split map[int]bool) 
 			continue
 		}
 		if sectionHeadingRE.MatchString(line) {
-			text, ok := sliceUTF16(trimJS(line), sectionHeadingMax)
-			if !ok {
+			trimmed := trimJS(line)
+			out[i+1] = sliceUTF16(trimmed, sectionHeadingMax)
+			if cutsPairUTF16(trimmed, sectionHeadingMax) {
 				split[i+1] = true
 			}
-			out[i+1] = text
 		}
 	}
 	return out, split
 }
 
-// sliceUTF16 is JS s.slice(0, n); ok false when the cut splits a pair.
-func sliceUTF16(s string, n int) (string, bool) {
+// sliceUTF16 is JS s.slice(0, n). A cut inside a surrogate pair keeps the
+// pair's high surrogate as WTF-8 (ED A0..AF 80..BF), the form jsonx and canon
+// read and write as a lone surrogate.
+func sliceUTF16(s string, n int) string {
 	units := 0
 	for i, r := range s {
 		w := 1
@@ -77,11 +79,31 @@ func sliceUTF16(s string, n int) (string, bool) {
 			w = 2
 		}
 		if units+w > n {
-			return s[:i], units == n
+			if units == n {
+				return s[:i]
+			}
+			high := 0xD800 + (r-0x10000)>>10
+			return s[:i] + string([]byte{0xED, 0x80 | byte(high>>6&0x3F), 0x80 | byte(high&0x3F)})
 		}
 		units += w
 	}
-	return s, true
+	return s
+}
+
+// cutsPairUTF16 is whether JS s.slice(0, n) cuts inside a surrogate pair.
+func cutsPairUTF16(s string, n int) bool {
+	units := 0
+	for _, r := range s {
+		w := 1
+		if r >= 0x10000 {
+			w = 2
+		}
+		if units+w > n {
+			return units != n
+		}
+		units += w
+	}
+	return false
 }
 
 type sectionPiece struct {
@@ -393,13 +415,8 @@ func prepareSections(p *prepared, d *FileDiff, split *Packet, in Input, paired s
 		p.early = result(ledger.Object{{Key: "status", Value: "split_required"}, {Key: "approved", Value: false}}, tail...)
 		return p
 	}
-	// B683: a heading Node prints with a lone surrogate half stays with Node
-	cutPair := unsupported("a Markdown section heading cut inside a surrogate pair is not ported")
 	packed := packSections(d, split.Budget, measure)
 	if !packed.ok {
-		if packed.sectionSplit {
-			return nil, cutPair
-		}
 		return splitOutcome(packed.tokensIn, split.Budget, packed.section), nil
 	}
 	if len(packed.sections) == 0 {
@@ -414,22 +431,11 @@ func prepareSections(p *prepared, d *FileDiff, split *Packet, in Input, paired s
 		if over != nil {
 			heading := "(before first heading)"
 			if len(sec.headings) > 0 {
-				if sec.split[0] {
-					return nil, cutPair
-				}
 				heading = sec.headings[0]
 			}
 			return splitOutcome(over.TokensIn, over.Budget, heading), nil
 		}
 		out = append(out, sectionPacket{sec, packets})
-	}
-	// the result lists every section's headings
-	for _, sec := range packed.sections {
-		for _, cut := range sec.split {
-			if cut {
-				return nil, cutPair
-			}
-		}
 	}
 	p.sections = out
 	return p, nil

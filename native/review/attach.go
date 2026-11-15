@@ -170,8 +170,9 @@ func validContinuations(b []byte) int {
 	return n
 }
 
-// cutUTF16 is .slice(0, n) in UTF-16 units (a cut surrogate pair keeps
-// U+FFFD, as cut120).
+// cutUTF16 is .slice(0, n) in UTF-16 units for text written to a file: a cut
+// surrogate pair becomes U+FFFD, as Node's UTF-8 write of a lone surrogate.
+// Row values keep the lone surrogate with sliceUTF16 (B696).
 func cutUTF16(s string, max int) string {
 	n := 0
 	for i, r := range s {
