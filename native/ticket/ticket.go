@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
+
+	"github.com/ricardov03/code-forge/native/jsonx"
 )
 
 // Parts uses pointers to distinguish absent strings from present empty strings.
@@ -18,8 +20,10 @@ type Parts struct {
 	ReopenedAt         *string `json:"reopened_at,omitempty"`
 }
 
+// hash is createHash('sha256').update(text): Node encodes a string with a
+// lone surrogate (WTF-8 here) as UTF-8 with U+FFFD (B704).
 func hash(text string) string {
-	digest := sha256.Sum256([]byte(text))
+	digest := sha256.Sum256([]byte(jsonx.WellFormed(text)))
 	return hex.EncodeToString(digest[:])[:24]
 }
 

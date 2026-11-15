@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/gatecheck"
+	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/ticket"
 )
@@ -258,7 +259,8 @@ func AnswersID(p ticket.Parts, byFile, byHash string, answers []string) string {
 	if p.Tree != nil {
 		parts = append(parts, *p.Tree)
 	}
-	hash := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	// update(string): a lone surrogate is hashed as U+FFFD, as Node does (B704)
+	hash := sha256.Sum256([]byte(jsonx.WellFormed(strings.Join(parts, "\x00"))))
 	return hex.EncodeToString(hash[:])[:24]
 }
 

@@ -48,8 +48,6 @@ var opMessages = map[string]string{
 var (
 	opLocked   = regexp.MustCompile(`(?i)not (currently )?signed in|signin|sign in|locked|unlock|session (has )?expired|desktop app|biometric`)
 	opNotFound = regexp.MustCompile(`(?i)isn't an item|isn't a vault|isn't a field|no item found|(item|vault|field) not found|could not find (the )?(item|vault|field)|not authori[sz]ed|unauthori[sz]ed|no access|permission`)
-	// a \uD800-\uDFFF escape: JSON.parse keeps a lone surrogate, Go does not
-	jsonSurrogate = regexp.MustCompile(`\\u[dD][89a-fA-F]`)
 )
 
 // keyIndexReadable says whether Go rewrites index.json as Node's readIndex +
@@ -60,10 +58,12 @@ func keyIndexReadable(home, name string, rowMerge bool) bool {
 	if err != nil {
 		return true // missing reads as {}, any other error is a failed update
 	}
-	if !utf8.Valid(data) || jsonSurrogate.Match(data) {
+	if !utf8.Valid(data) {
 		return false
 	}
-	value, err := ledger.DecodeValue(data)
+	// JSON.parse keeps a lone surrogate escape (WTF-8 here) and
+	// JSON.stringify writes it back as the escape (B704)
+	value, err := ledger.ParseOrdered(data)
 	if err != nil {
 		return !json.Valid(data) // a SyntaxError reads as {}; a number Go cannot hold hands over
 	}
@@ -92,7 +92,7 @@ func updateKeyIndex(home string, change func(index *ledger.Object)) error {
 	data, err := os.ReadFile(file)
 	switch {
 	case err == nil:
-		if value, err := ledger.DecodeValue(data); err == nil {
+		if value, err := ledger.ParseOrdered(data); err == nil {
 			if obj, ok := value.(ledger.Object); ok {
 				index = obj
 			}

@@ -143,6 +143,81 @@ func ParseRow(data []byte) (Row, error) {
 	return row, nil
 }
 
+// ParseOrdered is ParseRow with each object's property order kept (Object
+// values, as DecodeValue reads them): JSON.parse of one value. A text with a
+// lone surrogate escape keeps the surrogate as WTF-8 (B704), so a state body,
+// run record or ticket Node wrote reads back as Node reads it.
+func ParseOrdered(data []byte) (any, error) {
+	v, err := DecodeValue(data)
+	if err != nil || !surrogateEscape.Match(data) {
+		return v, err
+	}
+	if x, xerr := jsonx.ParseOrdered(jsonx.DecodeUTF8(data)); xerr == nil && jsonx.ContainsLoneSurrogate(x) {
+		return fromJSONX(x), nil
+	}
+	return v, nil
+}
+
+// ParseObject is ParseOrdered for a text that must hold one JSON object.
+func ParseObject(data []byte) (Object, error) {
+	v, err := ParseOrdered(data)
+	if err != nil {
+		return nil, err
+	}
+	obj, ok := v.(Object)
+	if !ok {
+		return nil, fmt.Errorf("expected a JSON object")
+	}
+	return obj, nil
+}
+
+// HasLoneSurrogate reports whether a parsed value (Object, map, array or
+// string, at any depth, keys included) holds a lone surrogate (WTF-8).
+func HasLoneSurrogate(v any) bool {
+	switch x := v.(type) {
+	case string:
+		return jsonx.HasLoneSurrogate(x)
+	case Object:
+		for _, f := range x {
+			if jsonx.HasLoneSurrogate(f.Key) || HasLoneSurrogate(f.Value) {
+				return true
+			}
+		}
+	case []any:
+		for _, e := range x {
+			if HasLoneSurrogate(e) {
+				return true
+			}
+		}
+	case map[string]any:
+		for k, e := range x {
+			if jsonx.HasLoneSurrogate(k) || HasLoneSurrogate(e) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// fromJSONX turns jsonx's ordered objects into ledger Objects.
+func fromJSONX(v any) any {
+	switch x := v.(type) {
+	case jsonx.Object:
+		out := make(Object, 0, len(x))
+		for _, m := range x {
+			out = append(out, Field{Key: m.Key, Value: fromJSONX(m.Value)})
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = fromJSONX(e)
+		}
+		return out
+	}
+	return v
+}
+
 // surrogateEscape finds a \uD800-\uDFFF escape (or text that looks like one).
 var surrogateEscape = regexp.MustCompile(`\\u[dD][89a-fA-F]`)
 

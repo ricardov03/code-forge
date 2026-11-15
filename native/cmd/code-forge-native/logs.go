@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/humanask"
+	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/pkgroot"
 )
@@ -35,7 +36,6 @@ var logsPositive = regexp.MustCompile(`^[1-9][0-9]*$`)
 var logsFP = regexp.MustCompile(`^[0-9a-f]{12}$`)
 var logsWord = regexp.MustCompile(`^[a-z]+$`)
 var logsCrumb = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}( [a-z][a-z0-9-]{0,39})?$`)
-var logsSurrogate = regexp.MustCompile(`(?i)\\ud[89ab][0-9a-f]{2}|\\ud[cdef][0-9a-f]{2}`)
 
 const logsUsage = "usage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n" +
 	"       code-forge logs report [--last N] [--kind K] [--verb V] [--note \"text\"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]\n"
@@ -155,6 +155,12 @@ func runLogs(args []string) int {
 				output, ok = logsSummary(entries, n, asJSON)
 			case "report":
 				if logsReportPicks(entries, flags, n) {
+					for _, entry := range entries {
+						if ledger.HasLoneSurrogate(entry) {
+							// the report's issue text and argv meet a lone surrogate as U+FFFD on Node (B704)
+							return logsHandover(args, hLogsDecode)
+						}
+					}
 					return logsReport(args, flags, entries, n, crumb) // B554
 				}
 				output = "no matching errors to report\n"
@@ -170,7 +176,8 @@ func runLogs(args []string) int {
 		}
 	}
 	gatesBreadcrumbName(crumb)
-	fmt.Fprint(os.Stdout, output)
+	// Node writes a lone surrogate to stdout as U+FFFD (B704)
+	fmt.Fprint(os.Stdout, jsonx.WellFormed(output))
 	return 0
 }
 
@@ -323,12 +330,13 @@ func logsRead(file string) ([]ledger.Object, bool) {
 	if err != nil {
 		return nil, true // Node treats every read failure as a missing log.
 	}
-	if !utf8.Valid(data) || logsSurrogate.Match(data) {
-		return nil, false // JSON.parse retains lone UTF-16 surrogates.
+	if !utf8.Valid(data) {
+		return nil, false
 	}
 	entries := []ledger.Object{}
 	for _, line := range strings.Split(string(data), "\n") {
-		entry, err := ledger.DecodeObject([]byte(line))
+		// JSON.parse keeps a lone surrogate escape (WTF-8 here, B704)
+		entry, err := ledger.ParseObject([]byte(line))
 		if err != nil {
 			if strings.HasPrefix(strings.TrimSpace(line), "{") && json.Valid([]byte(line)) {
 				return nil, false // e.g. JSON.parse accepts overflowing numbers.

@@ -205,7 +205,8 @@ func checkText(text string, anchor ledger.Object, w StateWhere) Loaded {
 	if sha256Hex(text) != anchor.Get("state_sha") {
 		return Loaded{Status: "tampered", Seq: seq}
 	}
-	body, err := ledger.DecodeObject([]byte(text))
+	// JSON.parse keeps a lone surrogate escape (WTF-8 here, B704)
+	body, err := ledger.ParseObject([]byte(text))
 	if err != nil || !bodyMatches(body, w, seq) {
 		return Loaded{Status: "tampered", Seq: seq}
 	}

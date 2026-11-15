@@ -12,7 +12,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -145,8 +144,6 @@ func line(o ledger.Object) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-var loneSurrogate = regexp.MustCompile(`\\u[dD][89a-fA-F][0-9a-fA-F]{2}`)
-
 // readJSON is queue.mjs readJSON for an object: nil when missing or not a
 // JSON object. Bytes Node would decode with replacements are undecided.
 func readJSON(file string) (ledger.Object, error) {
@@ -154,10 +151,11 @@ func readJSON(file string) (ledger.Object, error) {
 	if err != nil {
 		return nil, nil
 	}
-	if !utf8.Valid(data) || loneSurrogate.Match(data) || bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}) {
+	if !utf8.Valid(data) || bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}) {
 		return nil, ErrUndecided
 	}
-	obj, err := ledger.DecodeObject(data)
+	// JSON.parse keeps a lone surrogate escape (WTF-8 here, B704)
+	obj, err := ledger.ParseObject(data)
 	if err != nil {
 		return nil, nil
 	}

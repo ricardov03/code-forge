@@ -23,10 +23,10 @@ const sectionHeadingMax = 120
 // markdownHeadings is sections.mjs markdownHeadings: 1-based line → the
 // heading line, trimmed and cut at 120 UTF-16 units. A cut inside a
 // surrogate pair keeps its high half as Node does, held as WTF-8 (jsonx's
-// lone surrogate), so rows and results write it as \udXXX (B696). split
-// names those lines (B683): only the recheck stop still hands them to Node.
-func markdownHeadings(content *string) (out map[int]string, split map[int]bool) {
-	out, split = map[int]string{}, map[int]bool{}
+// lone surrogate), so rows, results and state write it as \udXXX (B696;
+// B704: a recheck stop naming such a heading too).
+func markdownHeadings(content *string) map[int]string {
+	out := map[int]string{}
 	lines := SplitLines(content)
 	for i, l := range lines {
 		lines[i] = strings.TrimSuffix(l, "\r")
@@ -60,12 +60,9 @@ func markdownHeadings(content *string) (out map[int]string, split map[int]bool) 
 		if sectionHeadingRE.MatchString(line) {
 			trimmed := trimJS(line)
 			out[i+1] = sliceUTF16(trimmed, sectionHeadingMax)
-			if cutsPairUTF16(trimmed, sectionHeadingMax) {
-				split[i+1] = true
-			}
 		}
 	}
-	return out, split
+	return out
 }
 
 // sliceUTF16 is JS s.slice(0, n). A cut inside a surrogate pair keeps the
@@ -88,22 +85,6 @@ func sliceUTF16(s string, n int) string {
 		units += w
 	}
 	return s
-}
-
-// cutsPairUTF16 is whether JS s.slice(0, n) cuts inside a surrogate pair.
-func cutsPairUTF16(s string, n int) bool {
-	units := 0
-	for _, r := range s {
-		w := 1
-		if r >= 0x10000 {
-			w = 2
-		}
-		if units+w > n {
-			return units != n
-		}
-		units += w
-	}
-	return false
 }
 
 type sectionPiece struct {
@@ -225,7 +206,6 @@ func headerOf(p *sectionPiece) string {
 type sectionGroup struct {
 	key     int
 	heading string
-	split   bool // the heading's cut split a surrogate pair (markdownHeadings)
 	diff    *FileDiff
 }
 
@@ -236,7 +216,7 @@ func reparsed(d *FileDiff, text string) *FileDiff {
 
 // sectionGroups is sections.mjs sectionGroups; ok false is Node's null.
 func sectionGroups(d *FileDiff) ([]sectionGroup, bool) {
-	headings, split := markdownHeadings(d.Content)
+	headings := markdownHeadings(d.Content)
 	all := strings.Split(d.DiffText, "\n")
 	if all[len(all)-1] == "" {
 		all = all[:len(all)-1]
@@ -291,7 +271,7 @@ func sectionGroups(d *FileDiff) ([]sectionGroup, bool) {
 		for _, p := range g.pieces {
 			lines = append(append(lines, headerOf(p)), p.lines...)
 		}
-		out = append(out, sectionGroup{g.key, heading, split[g.key], reparsed(d, strings.Join(lines, "\n")+"\n")})
+		out = append(out, sectionGroup{g.key, heading, reparsed(d, strings.Join(lines, "\n")+"\n")})
 	}
 	return out, true
 }
@@ -322,19 +302,17 @@ func mergeGroups(d *FileDiff, groups []sectionGroup) *FileDiff {
 type mdSection struct {
 	index    int
 	headings []string
-	split    []bool // per heading: its cut split a surrogate pair
 	keys     []int
 	diff     *FileDiff
 }
 
 // packResult is packSections' answer: sections, or split at tokensIn with
-// the named section ("" = none; sectionSplit: its cut split a pair).
+// the named section ("" = none).
 type packResult struct {
-	ok           bool
-	sections     []mdSection
-	tokensIn     int
-	section      string
-	sectionSplit bool
+	ok       bool
+	sections []mdSection
+	tokensIn int
+	section  string
 }
 
 // measure gets the part and its heading-group keys (nil = the whole file).
@@ -359,7 +337,6 @@ func packSections(d *FileDiff, budget int, measure func(*FileDiff, []int) int) p
 		s := mdSection{index: len(sections) + 1, diff: mergeGroups(d, open)}
 		for _, g := range open {
 			s.headings = append(s.headings, g.heading)
-			s.split = append(s.split, g.split)
 			s.keys = append(s.keys, g.key)
 		}
 		sections = append(sections, s)
@@ -368,7 +345,7 @@ func packSections(d *FileDiff, budget int, measure func(*FileDiff, []int) int) p
 	for _, g := range groups {
 		alone := size([]sectionGroup{g})
 		if alone > budget {
-			return packResult{tokensIn: alone, section: g.heading, sectionSplit: g.split}
+			return packResult{tokensIn: alone, section: g.heading}
 		}
 		if len(open) > 0 && size(append(append([]sectionGroup{}, open...), g)) > budget {
 			flush()
