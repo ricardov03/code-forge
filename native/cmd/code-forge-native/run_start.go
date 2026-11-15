@@ -297,6 +297,28 @@ func runLaunchReaped(exited <-chan struct{}) {
 	}
 }
 
+// runWorkerLaunchEnv is the worker's environment (nil: this process's)
+// without the caller's owner variables (B736). The worker outlives its
+// caller (its parent is init), and an inherited CODE_FORGE_OWNER_PID names
+// that dead caller: every owner-based sweep then read the live worker of an
+// open run as a proven orphan. Node's sweepProcesses (Node `run start`)
+// knows only `node code-forge.mjs worker` as a worker and stopped the Go
+// worker with SIGTERM, 2 s, SIGKILL, which left its lazy root. A worker is
+// judged by its run record; its own children get it as owner (childreg).
+func runWorkerLaunchEnv(env []string) []string {
+	if env == nil {
+		env = os.Environ()
+	}
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "CODE_FORGE_OWNER_PID=") || strings.HasPrefix(kv, "CODE_FORGE_OWNER_START_TIME=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 // runLaunchWorkerJudged is runLaunchWorkerEnv; strict stops at a worker
 // registry Go cannot judge (errRunLaunchUndecided) instead of reading it as
 // "not announced yet".
@@ -307,7 +329,7 @@ func runLaunchWorkerJudged(runID, workspace, binary string, env []string, strict
 	}
 	cmd := exec.Command(binary, "worker", "--run", runID)
 	cmd.Dir = repoRoot
-	cmd.Env = env
+	cmd.Env = runWorkerLaunchEnv(env)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	pid := 0
 	exited := make(chan struct{})
