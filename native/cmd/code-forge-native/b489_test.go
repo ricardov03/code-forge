@@ -200,8 +200,8 @@ func TestB489WorkerUnportedTicketHandsOver(t *testing.T) {
 	f := newB489Fix(t)
 	id := f.unported(t)
 	code, out, _ := b460Call(t, "worker", "--run", "r1", "--once")
-	if code != 127 || out != "" {
-		t.Fatalf("worker = %d %q, want the Node hand-over (127)", code, out)
+	if code != 1 || out != "" {
+		t.Fatalf("worker = %d %q, want the Go refusal (exit 1)", code, out)
 	}
 	if got := strings.Join(b460Handovers(t, f.home), ","); got != "worker worker-ticket-unported" {
 		t.Fatalf("hand-overs %s", got)
@@ -229,12 +229,12 @@ func TestB489WorkerHandOverCases(t *testing.T) {
 		code                      int
 		want                      string
 	}{
-		{"no snapshot", "", "file", "", false, 127, "worker worker-config"},
+		{"no snapshot", "", "file", "", false, 1, "worker worker-config"},
 		// B533: a resolvable Jev key serves in Go; only the sources Go
 		// cannot read like Node keep a narrow reason.
-		{"bad key reference", `{"system1":{"key":"keychain:BAD NAME"},"version":1}`, "file", "", false, 127, "worker worker-jev-key-ref"},
-		{"undecodable store", `{"version":1}`, "file", "{bad", false, 127, "worker worker-jev-key-store"},
-		{"keychain holds a key", `{"version":1}`, "", "", true, 127, "worker worker-jev-keychain"},
+		{"bad key reference", `{"system1":{"key":"keychain:BAD NAME"},"version":1}`, "file", "", false, 1, "worker worker-jev-key-ref"},
+		{"undecodable store", `{"version":1}`, "file", "{bad", false, 1, "worker worker-jev-key-store"},
+		{"keychain holds a key", `{"version":1}`, "", "", true, 1, "worker worker-jev-keychain"},
 	}
 	oldProbe := workerJevProbe
 	t.Cleanup(func() { workerJevProbe = oldProbe })

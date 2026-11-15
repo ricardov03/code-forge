@@ -204,9 +204,12 @@ test('write kit fails closed for malformed owners, stale races, unsafe hashes an
   assert.deepEqual(await go(t, { op: 'bad-locks' }), { error: await caught(() => listBadLocks()) }, 'obstructed lock listing has the exact Node error code and message');
   await rm(locks);
   const handed = spawnSync(binary, ['kit-unported'], { env: { ...process.env, CODE_FORGE_NODE: '/nonexistent' }, encoding: 'utf8' });
-  assert.equal(handed.status, 127, 'unported public command still hands over to Node');
+  // B690a: an unknown verb gets Node's unknown-verb text from Go, without Node.
+  assert.equal(handed.status, 1, 'unknown public command exits 1 in Go');
+  assert.equal(handed.stdout, '');
+  assert.match(handed.stderr, /^code-forge: unknown verb "kit-unported"\nVerbs:\n/, 'Go prints the unknown-verb text');
   assert.deepEqual(await runParity(['kit-unported'], { fixture: { repo: tree, home }, goCommand: binary,
-    env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } }), { equal: true, diffs: [] }, 'handover has zero process or state differences under the parity harness');
+    env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } }), { equal: true, diffs: [] }, 'unknown verb has zero process or state differences from Node');
 });
 
 test('tree-at-open rejects invalid bases before Git can interpret options', async (t) => {

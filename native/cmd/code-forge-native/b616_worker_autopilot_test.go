@@ -155,8 +155,8 @@ func TestB616WorkerManyReloadsHandOver(t *testing.T) {
 	recordBefore := b616Read(t, runFile)
 	ymlBefore := b616Read(t, filepath.Join(base, "ws", ".code-forge.yml"))
 	code, out, _ := b460Call(t, "worker", "--run", "r-fix", "--once")
-	if code != 127 || out != "" {
-		t.Fatalf("worker = %d %q, want a hand-over", code, out)
+	if code != 1 || out != "" {
+		t.Fatalf("worker = %d %q, want the Go refusal", code, out)
 	}
 	if rows := b460Handovers(t, filepath.Join(base, "home")); len(rows) != 1 || rows[0] != "worker worker-ticket-unported" {
 		t.Fatalf("hand-overs %v", rows)

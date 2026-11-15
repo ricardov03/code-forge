@@ -2,12 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"syscall"
-
-	"github.com/ricardov03/code-forge/native/pkgroot"
+	"sort"
+	"strings"
 )
 
 // Only verbs explicitly registered here run in Go. Internal accelerators are
@@ -52,42 +50,59 @@ func run(args []string) (int, error) {
 			return route(args[1:]), nil
 		}
 	}
-	return handover(args)
+	verb := ""
+	if len(args) > 0 {
+		verb = args[0]
+	}
+	return unknownVerb(verb), nil
 }
 
-func handover(args []string, reasons ...handoverReason) (int, error) {
+// B690a: Go never starts Node. A verb that is not in the route table gets
+// Node's unknown-verb text (bin/code-forge.mjs: the verb list is src/cli's
+// file names, which handoverCommands lists), exit 1, and writes nothing.
+func unknownVerb(verb string) int {
+	verbs := make([]string, 0, len(handoverCommands))
+	for name := range handoverCommands {
+		verbs = append(verbs, name)
+	}
+	sort.Strings(verbs)
+	var b strings.Builder
+	b.WriteString("code-forge: unknown verb \"" + verb + "\"\nVerbs:\n")
+	for _, name := range verbs {
+		b.WriteString("  " + name + "\n")
+	}
+	fmt.Fprint(os.Stderr, b.String())
+	return 1
+}
+
+// refuseUnported is the B690a answer for every case Go does not serve yet
+// (it used to start Node): one line on stderr naming the command and the
+// reason, exit 1, nothing on stdout and no state, ledger or queue change.
+// The handovers.jsonl row is still written (same fields as before), so
+// `logs handovers` and doctor keep counting these cases. With no reason the
+// verb's default reason applies.
+func refuseUnported(args []string, reasons ...handoverReason) int {
 	reason := defaultHandoverReason(args)
 	if len(reasons) > 0 {
 		reason = reasons[0]
 	}
+	return refuseUnportedTo(os.Stderr, args, reason)
+}
+
+// refuseUnportedTo writes the refusal to w (the panic guard passes the
+// stderr the command started with).
+func refuseUnportedTo(w io.Writer, args []string, reason handoverReason) int {
 	if refusal := untilDoneHandoverRefusal(args); refusal != "" {
-		// B649: never let Node read an until-done grant
+		// B649: an until-done grant keeps its own refusal text
 		recordHandover(args, handoverReasons[hUntilDoneGrant])
-		fmt.Fprint(hudStderr, refusal)
-		return 1, nil
+		fmt.Fprint(w, refusal)
+		return 1
 	}
 	recordHandover(args, handoverReasons[reason])
-	node := os.Getenv("CODE_FORGE_NODE")
-	if node == "" {
-		node = "node"
+	name, sub := handoverCommand(args)
+	if sub != "" && sub != "unknown" {
+		name += " " + sub
 	}
-	nodePath, err := exec.LookPath(node)
-	if err != nil {
-		return 127, fmt.Errorf("node executable %q not found: %w", node, err)
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		return 1, fmt.Errorf("locate package executable: %w", err)
-	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		return 1, fmt.Errorf("resolve package executable: %w", err)
-	}
-	script := filepath.Join(pkgroot.FromExecutable(executable), "bin", "code-forge.mjs")
-	argv := append([]string{node, script}, args...)
-	childregRelease() // Node makes its own root
-	if err := syscall.Exec(nodePath, argv, os.Environ()); err != nil {
-		return 126, fmt.Errorf("exec node: %w", err)
-	}
-	return 0, nil // Exec replaces this process on success.
+	fmt.Fprintf(w, "code-forge: %s is not supported in this case yet (%s). Please report it: code-forge logs report\n", name, handoverReasons[reason])
+	return 1
 }

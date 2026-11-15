@@ -68,6 +68,12 @@ async function executeAsync(f, args) {
   const [code] = await once(child, 'close');
   return { code, stdout, stderr };
 }
+// B690a: Go refuses a case it does not run yet: exit 1, no stdout, one stderr line.
+function b690aAssertRefusal(result, label) {
+  assert.equal(result.code, 1, `${label}: the Go refusal exits 1`);
+  assert.equal(result.stdout, '', `${label}: no stdout`);
+  assert.match(result.stderr, /^code-forge: review-file is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/, `${label}: one refusal line`);
+}
 async function parity(f, args = ARGS, options = {}, page) {
   const r = await runParity(args, { fixture: f, goCommand: BIN, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE }, ...options });
   // B613: a page means Go prints the help page around Node's usage; nothing else may differ.
@@ -202,7 +208,7 @@ test('enqueue flag modes and cache retries run in Go with zero Node parity diffe
   assert.deepEqual(execute(rebased, rebaseArgs), execute(rebased, rebaseArgs, true), 'existing path-derived rebase tickets give byte-equal replies on their original tree');
 });
 
-test('enqueue flag refusals preserve cache bytes and unsupported cases hand over before writes', async () => {
+test('enqueue flag refusals preserve cache bytes and unsupported cases get the Go refusal before writes', async () => {
   const f = await fixture();
   assert.equal(execute(f, [...ARGS, '--fresh', '--answers=f1', '--of=sample.mjs']).code, 2, 'fresh plus answers is native usage');
   const cases = [
@@ -236,9 +242,10 @@ test('enqueue flag refusals preserve cache bytes and unsupported cases hand over
   await put(f.home, 'ledger/fixture.jsonl', JSON.stringify(signRow({ event: 'review.cap', run: RUN, block: 'B1', file: 'sample.mjs', open: ['f1'] }, Buffer.alloc(32, 7))) + '\n');
   const capArgs = ['review-file', 'answer.mjs', '--block=B1', `--run=${RUN}`, '--answers=f1', '--of=sample.mjs'];
   const capBefore = await snapshot(f);
-  assert.equal(execute(f, capArgs).code, 127, 'unsupported cap clearing rules hand over');
-  assert.deepEqual(await snapshot(f), capBefore, 'unsupported answers case changes zero state bytes or modes');
-  await parity(f, capArgs, { env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } });
+  for (const node of [NO_NODE, process.execPath]) {
+    b690aAssertRefusal(execute(f, capArgs, false, { CODE_FORGE_NODE: node }), 'unsupported cap clearing rules');
+    assert.deepEqual(await snapshot(f), capBefore, 'unsupported answers case changes zero state bytes or modes');
+  }
 });
 
 test('answers marker and result with a lone surrogate run in Go with zero Node parity differences', async () => {

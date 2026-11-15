@@ -1801,8 +1801,7 @@ func runReportVerb(args []string) int {
 	}
 	plan := reportDecide(args)
 	if plan == nil {
-		code, _ := handover(append([]string{"report"}, args...))
-		return code
+		return refuseUnported(append([]string{"report"}, args...))
 	}
 	contextApplyTmpRoot()
 	before := gatesBreadcrumbName("report")
@@ -1811,8 +1810,7 @@ func runReportVerb(args []string) int {
 	if code == -1 {
 		// an export directory or file Go could not write: Node redoes the same idempotent
 		// writes and reports its own error text
-		code, _ = handover(append([]string{"report"}, args...))
-		return code
+		return refuseUnported(append([]string{"report"}, args...))
 	}
 	if code != 0 {
 		var message any

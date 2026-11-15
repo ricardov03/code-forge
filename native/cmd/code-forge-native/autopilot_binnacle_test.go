@@ -283,8 +283,8 @@ func TestAutopilotBinnacleHandsOver(t *testing.T) {
 		{[]string{"binnacle", "--run", "r-c", "--link", "https://example.com/a/../b"}, "autopilot-binnacle"},
 	}
 	for _, tc := range cases {
-		if code, out, _ := autopilotCall(t, tc.args...); code != 127 || out != "" {
-			t.Fatalf("%v: hand-over exit = %d stdout %q, want 127", tc.args, code, out)
+		if code, out, _ := autopilotCall(t, tc.args...); code != 1 || out != "" {
+			t.Fatalf("%v: refusal exit = %d stdout %q, want 1", tc.args, code, out)
 		}
 	}
 	logData, err := os.ReadFile(filepath.Join(f.home, ".code-forge", "native", "handovers.jsonl"))

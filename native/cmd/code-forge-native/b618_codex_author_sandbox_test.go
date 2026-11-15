@@ -200,8 +200,8 @@ func TestB618CodexBadEffortStillHandsOver(t *testing.T) {
 	} {
 		w := b618AuthorFixture(t, "author", "xhigh")
 		code, out, _ := b460Call(t, c.args...)
-		if code != 127 || out != "" {
-			t.Fatalf("%v = %d %q; want the Node hand-over", c.args, code, out)
+		if code != 1 || out != "" {
+			t.Fatalf("%v = %d %q; want the Go refusal", c.args, code, out)
 		}
 		if got := b460Handovers(t, filepath.Join(w, "home")); len(got) != 1 || got[0] != c.args[0]+" "+c.reason {
 			t.Fatalf("%v: handovers %v", c.args, got)
@@ -294,8 +294,8 @@ func TestB618SpawnSandboxNotMappingStillHandsOver(t *testing.T) {
 	w := b551rFixture(t, "ok", "")
 	b460Write(t, filepath.Join(w, "repo", ".code-forge.yml"), b551rConfig+"coder:\n  sandbox: workspace\n")
 	code, out, _ := b460Call(t, "spawn", "--level", "L3", "--role", "coder", "--brief", "brief.md")
-	if code != 127 || out != "" {
-		t.Fatalf("= %d %q; want the Node hand-over", code, out)
+	if code != 1 || out != "" {
+		t.Fatalf("= %d %q; want the Go refusal", code, out)
 	}
 	if got := strings.Join(b460Handovers(t, filepath.Join(w, "home")), ","); got != "spawn spawn-codex-sandbox" {
 		t.Fatalf("hand-overs = %s", got)

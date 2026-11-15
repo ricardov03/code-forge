@@ -180,8 +180,8 @@ func TestB477SpawnUnportedCasesHandOver(t *testing.T) {
 		{"spawn", "--level", "L1", "--role", "reviewer", "--brief", "missing.md"},
 		{"spawn", "--level", "L0", "--role", "reviewer", "--brief", "brief.md"},
 	} {
-		if code, out, _ := b460Call(t, args...); code != 127 || out != "" {
-			t.Fatalf("%v = %d %q, want the Node hand-over (127)", args, code, out)
+		if code, out, _ := b460Call(t, args...); code != 1 || out != "" {
+			t.Fatalf("%v = %d %q, want the Go refusal (exit 1)", args, code, out)
 		}
 	}
 	got := b460Handovers(t, f.home)

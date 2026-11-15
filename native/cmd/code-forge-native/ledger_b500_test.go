@@ -139,7 +139,7 @@ func TestB500LedgerAddInGo(t *testing.T) {
 		t.Errorf("missing --usd: got (%d, %q, %q)", code, out, errText)
 	}
 	// A run record that is not JSON: Node's parse error text stays with Node.
-	if code, _, _ := b500Run(t, "ledger", "add", "coder", "--run", "r7", "--block", "B1", "--usd", "1"); code != 127 || b500HandedOver(t, home) != "ledger-run-record" {
+	if code, _, _ := b500Run(t, "ledger", "add", "coder", "--run", "r7", "--block", "B1", "--usd", "1"); code != 1 || b500HandedOver(t, home) != "ledger-run-record" {
 		t.Errorf("bad record: exit %d, reason %q", code, b500HandedOver(t, home))
 	}
 	if _, row2 := b500NewRow(t, file); row2["usd"] != row["usd"] {
@@ -187,7 +187,7 @@ func TestB500LedgerOutsideReviewInGo(t *testing.T) {
 	if reason := b500HandedOver(t, home); reason != "" {
 		t.Errorf("handed over: %s", reason)
 	}
-	if code, _, _ := b500Run(t, "ledger", "outside-review", "--run", "r7", "--pr", "7", "--rounds", "2", "--findings", "3"); code != 127 || b500HandedOver(t, home) != "ledger-run-record" {
+	if code, _, _ := b500Run(t, "ledger", "outside-review", "--run", "r7", "--pr", "7", "--rounds", "2", "--findings", "3"); code != 1 || b500HandedOver(t, home) != "ledger-run-record" {
 		t.Errorf("bad record: exit %d, reason %q", code, b500HandedOver(t, home))
 	}
 	b500NewRow(t, file)

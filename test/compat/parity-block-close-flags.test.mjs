@@ -190,7 +190,7 @@ test('close flags run natively with byte parity for process, signed state and gi
   }
 });
 
-test('still-handed-over close flags record exactly one row with the boundary reason', async () => {
+test('still-refused close flags record exactly one row with the boundary reason', async () => {
   /** @type {[Record<string, any>, string[], string][]} */
   // B451 runs --help=<value> and -h=<value> in Go; a token-like argument still hands the close to Node.
   const cases = [
@@ -222,7 +222,8 @@ test('still-handed-over close flags record exactly one row with the boundary rea
     const f = await fixture('auto-tree', config);
     const before = await snapshot(path.join(f.repo, '.code-forge'));
     const result = await launch(f, [...args, ...flags, '--json'], { CODE_FORGE_HANDOVER_LOG: '1' });
-    assert.equal(result.code, 127, `${flags}: still delegates when Node is unavailable`);
+    // B690a: Go never starts Node; the case gets one refusal line, exit 1.
+    assert.deepEqual({ code: result.code, stdout: result.stdout, stderr: result.stderr }, { code: 1, stdout: '', stderr: `code-forge: block close is not supported in this case yet (${reason}). Please report it: code-forge logs report\n` }, `${flags}: refused in Go`);
     const log = await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8');
     assert.equal(log.endsWith('\n'), true, 'one newline-terminated telemetry row');
     const rows = log.trimEnd().split('\n').map((line) => JSON.parse(line));
@@ -293,8 +294,11 @@ test('close flag refusals, concurrent claims and whole-command handovers preserv
       }
       const before = await Promise.all([snapshot(f.home), snapshot(path.join(f.repo, '.code-forge'))]);
       const result = await launch(f, [...args, ...flags, ...extra, '--json']);
-      assert.equal(result.code, 127, `${JSON.stringify(config)}, grant=${grant}, ${flags}, ${extra}: whole close hands over`);
-      assert.deepEqual(await Promise.all([snapshot(f.home), snapshot(path.join(f.repo, '.code-forge'))]), before, 'zero Go state writes before handover');
+      // B690a: the whole close is refused in Go (it went to Node before).
+      assert.equal(result.code, 1, `${JSON.stringify(config)}, grant=${grant}, ${flags}, ${extra}: whole close is refused`);
+      assert.equal(result.stdout, '', 'the refusal writes no stdout');
+      assert.match(result.stderr, /^code-forge: block close is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/, 'one refusal line');
+      assert.deepEqual(await Promise.all([snapshot(f.home), snapshot(path.join(f.repo, '.code-forge'))]), before, 'zero Go state writes on the refusal');
     }
   }
   const f = await fixture('auto');

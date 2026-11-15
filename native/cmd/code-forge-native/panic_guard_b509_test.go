@@ -130,8 +130,8 @@ func TestB509GoroutinePanicStopsWritingVerb(t *testing.T) {
 	}
 }
 
-// The goroutine handler in-process: a read-only command goes to Node with a
-// go-panic row (exit 127 here, no Node), a writing command stops with exit 1;
+// The goroutine handler in-process: a read-only command gets the B690a
+// refusal with a go-panic row (exit 1), a writing command stops with exit 1;
 // the first panic wins and the process exit is called once.
 func TestB509GoroutinePanicHandler(t *testing.T) {
 	cases := []struct {
@@ -139,8 +139,8 @@ func TestB509GoroutinePanicHandler(t *testing.T) {
 		code          int
 		reason, start string
 	}{
-		{[]string{"status", "--json"}, 127, "go-panic", "code-forge-native: node executable"},
-		{[]string{"logs", "summary"}, 127, "go-panic", "code-forge-native: node executable"},
+		{[]string{"status", "--json"}, 1, "go-panic", "code-forge: status is not supported in this case yet (go-panic). Please report it: code-forge logs report"},
+		{[]string{"logs", "summary"}, 1, "go-panic", "code-forge: logs summary is not supported in this case yet (go-panic). Please report it: code-forge logs report"},
 		{[]string{"block", "land", "B1", "--run", "r-1"}, 1, "go-panic-stopped", "code-forge: internal error in the Go engine (block land, at b509UnitPanic panic_guard_b509_test.go:"},
 		{[]string{"internal", "serve", "--home", "h", "--run", "r-1"}, 1, "go-panic-stopped", "code-forge: internal error in the Go engine (unknown, at b509UnitPanic panic_guard_b509_test.go:"},
 	}

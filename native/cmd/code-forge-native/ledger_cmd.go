@@ -30,11 +30,7 @@ var ledgerSubUsage = map[string]string{
 const ledgerOutsideReviewUsage = "usage: code-forge ledger outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]..."
 
 func ledgerHandover(args []string, reason handoverReason) int {
-	code, err := handover(append([]string{"ledger"}, args...), reason)
-	if err != nil {
-		fmt.Fprintln(safeStderr, "code-forge-native:", err)
-	}
-	return code
+	return refuseUnported(append([]string{"ledger"}, args...), reason)
 }
 
 // The Node parser uses the first exact flag occurrence, and only a double dash

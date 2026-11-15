@@ -398,7 +398,7 @@ func TestB554LogsReportHandsOverWhatStaysInNode(t *testing.T) {
 			before := b500Read(t, c.errorLog())
 			// errText is only the launcher's note that no Node runs in tests.
 			code, out, _ := b500Run(t, append([]string{"logs", "report"}, tc.args...)...)
-			if code != 127 || out != "" || b500HandedOver(t, c.home) != tc.reason {
+			if code != 1 || out != "" || b500HandedOver(t, c.home) != tc.reason {
 				t.Errorf("got (%d, %q) reason %q, want handover %q", code, out, b500HandedOver(t, c.home), tc.reason)
 			}
 			if c.fakeLog(t) != "" || b500Read(t, c.errorLog()) != before {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,27 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/review"
 	"github.com/ricardov03/code-forge/native/session"
 	"github.com/ricardov03/code-forge/native/worker"
 )
 
-// B561: a Go worker that hands its run to Node replaces itself (same pid) with
-// the Node worker. Node needs time to start and boot; a `review-file --wait`
-// already polling must not read that gap as worker_down. The fake `node` here
-// is this test binary (same pid as the Go worker, through exec): it waits as a
-// slow Node start would, then boots like loop.mjs (prune the registry, refuse
-// on a live entry, announce) and answers the ticket.
-//
-// Load (B661): the fake reads its own ps start time during its start-up, before
-// the prune. Announce read it with a ps call between the prune (the hand-over
-// announcement gone) and the write of its own entry; under machine load that
-// ps took 350-380 ms, two of the waiter's 200 ms polls fell in the gap and it
-// answered worker_down. The waits below are caps, not speed bounds.
-
-// b561FakeNodeStartMs stands in for Node's start-up before its boot lock.
-const b561FakeNodeStartMs = 1000
+// B561: a Go worker that met a ticket it does not serve used to replace
+// itself (same pid) with the Node worker. B690a: Go never starts Node; the
+// worker prints the refusal, writes the hand-over row, withdraws its
+// announcement and exits 1, and a `review-file --wait` already polling
+// answers worker_down (no worker serves the queue any more).
 
 // TestB561WorkerChild runs `worker` with the arguments after "--".
 func TestB561WorkerChild(t *testing.T) {
@@ -50,72 +38,15 @@ func TestB561WorkerChild(t *testing.T) {
 	os.Exit(runWorkerVerb(args))
 }
 
-// TestB561FakeNode is the Node worker the Go worker execs into.
-func TestB561FakeNode(t *testing.T) {
-	if os.Getenv("B561_FAKE_NODE") != "1" {
-		return
-	}
-	root, ticket, run := os.Getenv("B561_ROOT"), os.Getenv("B561_TICKET"), os.Getenv("B561_RUN")
-	own := filelock.ProcessStartTime(os.Getpid())
-	probes := worker.Probes{StartTime: func(pid int) *string {
-		if pid == os.Getpid() && own != nil {
-			return own
-		}
-		return filelock.ProcessStartTime(pid)
-	}}
-	time.Sleep(b561FakeNodeStartMs * time.Millisecond)
-	// loop.mjs boot: workerRegistry(prune) then liveWorker for the legacy file.
-	entries, err := worker.Registry(root, true, probes)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "worker:", err)
-		os.Exit(1)
-	}
-	count := 0
-	for _, e := range entries {
-		if e.Live {
-			count++
-		}
-	}
-	if legacy, _ := worker.Live(root, worker.LiveOpts{}, probes); legacy != nil && count == 0 {
-		count++
-	}
-	if count >= 1 {
-		fmt.Fprintln(os.Stderr, "worker: review.workers limit 1: a live or unreadable worker entry already serves this queue")
-		os.Exit(1)
-	}
-	self, err := worker.Announce(root, os.Getpid(), run, probes)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "worker:", err)
-		os.Exit(1)
-	}
-	marker := filepath.Join(worker.QueueDir(root), ticket+".done")
-	if err := os.WriteFile(marker, []byte(`{"ticket":"`+ticket+`"}`+"\n"), 0o644); err != nil {
-		os.Exit(1)
-	}
-	// Serve until the waiter has read the marker, then stop cleanly.
-	time.Sleep(500 * time.Millisecond)
-	start, _ := self.Get("start_time").(string)
-	_ = worker.Retract(root, os.Getpid(), &start, probes)
-	os.Exit(0)
-}
-
 func TestB561WaitSurvivesWorkerHandOverToNode(t *testing.T) {
 	f := newB489Fix(t)
 	schema, _ := session.FindingSchemaPath()
 	lenses, _ := review.LensDir()
 	ticket := strings.Repeat("c", 24)
 
-	bin := t.TempDir()
-	fakeNode := filepath.Join(bin, "fake-node")
-	script := "#!/bin/sh\nexec \"" + os.Args[0] + "\" -test.run='^TestB561FakeNode$'\n"
-	if err := os.WriteFile(fakeNode, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
 	cmd := exec.Command(os.Args[0], "-test.run=^TestB561WorkerChild$", "--", "--run", "r1", "--poll-ms", "20")
 	cmd.Dir = f.root
-	cmd.Env = append(os.Environ(), "B561_WORKER_CHILD=1", "B561_FAKE_NODE=1", "B561_SCHEMA="+schema, "B561_LENSES="+lenses,
-		"B561_ROOT="+f.root, "B561_TICKET="+ticket, "B561_RUN=r1", "CODE_FORGE_NODE="+fakeNode)
+	cmd.Env = append(os.Environ(), "B561_WORKER_CHILD=1", "B561_SCHEMA="+schema, "B561_LENSES="+lenses, "CODE_FORGE_NODE=/nonexistent-b561-node")
 	var workerErr strings.Builder
 	cmd.Stderr = &workerErr
 	if err := cmd.Start(); err != nil {
@@ -151,33 +82,34 @@ func TestB561WaitSurvivesWorkerHandOverToNode(t *testing.T) {
 	}
 
 	// A waiter polls the ticket, then the unported ticket arrives and the Go
-	// worker hands the run to Node.
+	// worker refuses it (B690a) and stops.
 	waited := make(chan reviewFileRun, 1)
 	go func() { waited <- reviewFileExec(t, f.root, f.home, false, "--wait", ticket, "--max", "120s") }()
 	time.Sleep(300 * time.Millisecond)
 	f.unported(t)
 
+	select {
+	case <-exited:
+	case <-time.After(60 * time.Second):
+		t.Fatal("the Go worker did not stop")
+	}
+	want := "code-forge: worker is not supported in this case yet (worker-ticket-unported). Please report it: code-forge logs report\n"
+	if code := cmd.ProcessState.ExitCode(); code != 1 || !strings.HasSuffix(workerErr.String(), want) {
+		t.Fatalf("worker exit %d (%v) stderr %q; want exit 1 ending in %q", code, waitErr, workerErr.String(), want)
+	}
 	var got reviewFileRun
 	select {
 	case got = <-waited:
 	case <-time.After(150 * time.Second):
 		t.Fatal("the waiter did not return")
 	}
-	if got.code != 0 || got.stdout != `{"ticket":"`+ticket+`","status":"done","result":null}`+"\n" {
+	if got.code != 3 || got.stdout != `{"ticket":"`+ticket+`","status":"worker_down"}`+"\n" {
 		t.Fatalf("waiter = %d %q %q; worker stderr %s", got.code, got.stdout, got.stderr, workerErr.String())
-	}
-	select {
-	case <-exited:
-		if waitErr != nil {
-			t.Fatalf("the Node worker refused the hand-over: %v; stderr %s", waitErr, workerErr.String())
-		}
-	case <-time.After(60 * time.Second):
-		t.Fatal("the Node worker did not stop")
 	}
 	if rows := strings.Join(b460Handovers(t, f.home), ","); rows != "worker worker-ticket-unported" {
 		t.Fatalf("hand-overs %s", rows)
 	}
-	// Node's boot pruned the hand-over announcement; Node retracted its own.
+	// The refused worker withdrew its announcement.
 	if names, _ := os.ReadDir(worker.WorkersDir(f.root)); len(names) != 0 {
 		t.Fatalf("announcements left: %v", names)
 	}

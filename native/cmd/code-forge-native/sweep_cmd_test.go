@@ -17,8 +17,8 @@ import (
 
 const b486Usage = "usage: code-forge sweep [--apply] [--json]\nDry run by default: list stale workers, dead-run registry children and marked orphans with RSS and total MB.\n--apply stops proven stale processes with SIGTERM, then SIGKILL after a grace period.\nZombies are reported by parent only; neither they nor their parents are signalled. Live engines have no memory limit.\n"
 
-// b486Env: a temp HOME, a temp base for run roots, Node unreachable (so a
-// hand-over shows as exit 127 with an error) and a process table that lists
+// b486Env: a temp HOME, a temp base for run roots, Node unreachable (a case
+// Go does not serve gets the B690a refusal, exit 1) and a process table that lists
 // only the given fake rows. Nothing real is signalled by a dry run.
 func b486Env(t *testing.T, rows []runProc, envs map[int]map[string]string) (home, base string) {
 	t.Helper()
@@ -377,7 +377,7 @@ func TestB486SweepHandovers(t *testing.T) {
 		t.Setenv("CODE_FORGE_HANDOVER_LOG", "0")
 		for _, home := range []string{"", "rel"} {
 			t.Setenv("HOME", home)
-			if code, out, errText, _ := b486Call(t); !strings.Contains(errText, "/nonexistent-b486-node") || code != 127 || out != "" {
+			if code, out, errText, _ := b486Call(t); !b690aIsRefusal(errText) || code != 1 || out != "" {
 				t.Fatalf("HOME=%q: code=%d out=%q err=%q", home, code, out, errText)
 			}
 		}
@@ -389,7 +389,7 @@ func TestB486SweepHandovers(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chmod(base, 0o700) })
 		code, out, errText, _ := b486Call(t)
-		if !strings.Contains(errText, "/nonexistent-b486-node") || code != 127 || out != "" {
+		if !b690aIsRefusal(errText) || code != 1 || out != "" {
 			t.Fatalf("code=%d out=%q err=%q", code, out, errText)
 		}
 		if got := fmt.Sprint(b486Handovers(t, home)); got != "[sweep-root-unreadable]" {
@@ -406,7 +406,7 @@ func TestB486SweepHandovers(t *testing.T) {
 		env["HOME"] = home
 		b486Record(t, home, "r-odd", `{"run_id":"r-odd","status":"running","workspace":7}`)
 		code, out, errText, _ := b486Call(t, "--json")
-		if !strings.Contains(errText, "/nonexistent-b486-node") || code != 127 || out != "" {
+		if !b690aIsRefusal(errText) || code != 1 || out != "" {
 			t.Fatalf("code=%d out=%q err=%q", code, out, errText)
 		}
 		if got := fmt.Sprint(b486Handovers(t, home)); got != "[sweep-idle-unknown]" {

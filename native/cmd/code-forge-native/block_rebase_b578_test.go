@@ -216,7 +216,7 @@ func TestB578RebaseNarrowHandovers(t *testing.T) {
 			before := f.stateFiles()
 			oldHead := f.git(f.tree, "rev-parse", "HEAD")
 			code, stdout, stderr := f.rebase()
-			if code != 127 || stdout != "" || !strings.Contains(stderr, `node executable "/nonexistent" not found`) {
+			if code != 1 || stdout != "" || !b690aIsRefusal(stderr) {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 			}
 			data, err := os.ReadFile(filepath.Join(f.home, ".code-forge", "native", "handovers.jsonl"))

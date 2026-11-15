@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// b500Env gives a test a temp HOME, no Node (a handover exits 127) and a
+// b500Env gives a test a temp HOME, no Node (a refusal exits 1) and a
 // working directory; it returns the real path of that directory.
 func b500Env(t *testing.T) (home, work string) {
 	t.Helper()
@@ -36,7 +36,7 @@ func b500Env(t *testing.T) (home, work string) {
 	return home, real
 }
 
-// b500Run runs one command in process; a handover shows as exit 127.
+// b500Run runs one command in process; a B690a refusal shows as exit 1.
 func b500Run(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -334,7 +334,7 @@ func TestB500PipelineKeepsNamedHandovers(t *testing.T) {
 			b500Write(t, filepath.Join(work, "o", "a.json"), tc.outcome)
 		}
 		code, out, _ := b500Run(t, "pipeline", "status")
-		if code != 127 || out != "" || b500HandedOver(t, home) != tc.reason {
+		if code != 1 || out != "" || b500HandedOver(t, home) != tc.reason {
 			t.Errorf("%q %q: got (%d, %q, %q), want a %s handover", tc.yaml, tc.outcome, code, out, b500HandedOver(t, home), tc.reason)
 		}
 	}
@@ -398,10 +398,10 @@ func TestB500RouterHintStateAndLedger(t *testing.T) {
 	t.Cleanup(func() { routerLogStderrTTY, routerLogNow = oldTTY, oldNow })
 	hints := filepath.Join(home, ".code-forge", "logs", "hints.json")
 	b500Write(t, hints, `{"0123456789ab":"Nov 11 2026"}`+"\n")
-	if code, out, _ := b500Run(t, "pipeline", "status"); code != 127 || out != "" || b500HandedOver(t, home) != "router-hint-state" {
+	if code, out, _ := b500Run(t, "pipeline", "status"); code != 1 || out != "" || b500HandedOver(t, home) != "router-hint-state" {
 		t.Errorf("odd hint time: got (%d, %q, %s), want a router-hint-state handover", code, out, b500HandedOver(t, home))
 	}
-	if code, _, _ := b500Run(t, "ledger", "outcome", "--scan-git", "--slug", "s"); code != 127 || b500HandedOver(t, home) != "ledger-error-hint" {
+	if code, _, _ := b500Run(t, "ledger", "outcome", "--scan-git", "--slug", "s"); code != 1 || b500HandedOver(t, home) != "ledger-error-hint" {
 		t.Errorf("ledger odd hint time: got (%d, %s)", code, b500HandedOver(t, home))
 	}
 	b500Write(t, hints, "not json\n")

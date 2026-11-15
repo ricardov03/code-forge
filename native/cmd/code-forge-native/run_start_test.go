@@ -21,8 +21,8 @@ import (
 // (`<binary> worker --run <id>`, B511): it announces itself in the queue's
 // worker registry the way the worker does, then keeps running.
 // FAKE_WORKER_MODE=exit makes it die at once; FAKE_WORKER_RUN makes it
-// announce another run. Node is never needed: CODE_FORGE_NODE names a missing
-// file, so a hand-over fails the call with exit 127.
+// announce another run. Node is never needed: a case Go does not serve gets
+// the B690a refusal (exit 1).
 const fakeNodeScript = `#!/bin/sh
 if [ "$1" != "worker" ] || [ "$2" != "--run" ]; then echo "fake worker: bad argv: $*" >&2; exit 127; fi
 echo $$ >> "$FAKE_PIDS"
@@ -356,8 +356,8 @@ func TestRunStartSweep(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chmod(f.tmpRoot, 0o700) })
 		sleeper, _ := startSleeper(t)
 		code, out, _ := runVerbCall(t, "start", "--cwd", f.repo, "--run", "r-new", "--worker-pid", strconv.Itoa(sleeper.Process.Pid))
-		if code != 127 || out != "" {
-			t.Fatalf("sweep = %d %q, want the hand-over", code, out)
+		if code != 1 || out != "" {
+			t.Fatalf("sweep = %d %q, want the Go refusal", code, out)
 		}
 		data, _ := os.ReadFile(filepath.Join(f.home, ".code-forge", "native", "handovers.jsonl"))
 		if !bytes.Contains(data, []byte(`"reason":"run-sweep"`)) {

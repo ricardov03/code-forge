@@ -17,10 +17,18 @@ func TestHandoverTelemetry(t *testing.T) {
 	t.Setenv("CODE_FORGE_NODE", filepath.Join(home, "missing-node"))
 	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
 	t.Setenv("CODE_FORGE_NATIVE", "1")
-	// B689: land runs in Go; an unknown verb is still unrouted
+	// B690a: an unknown verb writes nothing; a refusal (here with the
+	// default unrouted reason) writes one private-safe row, exit 1
 	code, _ := run([]string{"private-verb", "private-value"})
-	if code != 127 {
-		t.Fatalf("handover exit = %d, want 127", code)
+	if code != 1 {
+		t.Fatalf("unknown verb exit = %d, want 1", code)
+	}
+	if _, err := os.Stat(handoverLogPath()); err == nil {
+		t.Fatal("an unknown verb wrote a hand-over row")
+	}
+	code = refuseUnported([]string{"private-verb", "private-value"})
+	if code != 1 {
+		t.Fatalf("refusal exit = %d, want 1", code)
 	}
 	data, err := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
 	if err != nil {

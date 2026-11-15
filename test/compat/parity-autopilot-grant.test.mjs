@@ -132,7 +132,7 @@ test('claim/stop/open/close grants have Node byte, exit, state and signed-row pa
   }
 });
 
-test('grant boundaries preserve refusals and unsupported shapes hand over without mutation', async () => {
+test('grant boundaries preserve refusals and unsupported shapes are refused without mutation', async () => {
   for (const options of [{ human: true, scope: false }, { acceptanceHuman: true }]) {
     const verb = options.human ? 'close' : 'open';
     const f = await fixture('active', options);
@@ -186,11 +186,16 @@ test('grant boundaries preserve refusals and unsupported shapes hand over withou
   for (const verb of ['claim', 'stop', 'open', 'close']) {
     const f = await fixture('active', { unknown: true });
     const before = await Promise.all([readFile(recordFile(f)), readFile(ledgerFile(f))]);
-    assert.equal(launch(f, args(verb, true), { CODE_FORGE_HANDOVER_LOG: '1', CODE_FORGE_NATIVE: '1' }).status, 127, `${verb}: unknown shape delegates to unavailable Node`);
-    assert.deepEqual(await Promise.all([readFile(recordFile(f)), readFile(ledgerFile(f))]), before, `${verb}: no record or ledger mutation before delegation`);
+    // B690a: Go never starts Node; an unknown grant shape gets the Go refusal.
+    const refusal = { status: 1, stdout: '', stderr: `code-forge: block ${verb} is not supported in this case yet (${verb}-autopilot-grant). Please report it: code-forge logs report\n` };
+    const refused = launch(f, args(verb, true), { CODE_FORGE_HANDOVER_LOG: '1', CODE_FORGE_NATIVE: '1' });
+    assert.deepEqual({ status: refused.status, stdout: refused.stdout, stderr: refused.stderr }, refusal, `${verb}: unknown shape is refused in Go`);
+    assert.deepEqual(await Promise.all([readFile(recordFile(f)), readFile(ledgerFile(f))]), before, `${verb}: no record or ledger mutation on the refusal`);
     const log = JSON.parse(launch(f, ['logs', 'handovers', '--json']).stdout);
     assert.equal(log.total, 1, `${verb}: exactly one handover`);
     assert.deepEqual(log.rows.map(({ sub, reason, count }) => [sub, reason, count]), [[verb, `${verb}-autopilot-grant`, 1]], `${verb}: stable B282 reason`);
-    await parity(f, args(verb, true), { CODE_FORGE_NODE: process.execPath });
+    const withNode = launch(f, args(verb, true), { CODE_FORGE_NODE: process.execPath, CODE_FORGE_NATIVE: '1' });
+    assert.deepEqual({ status: withNode.status, stdout: withNode.stdout, stderr: withNode.stderr }, refusal, `${verb}: a working Node changes nothing`);
+    assert.deepEqual(await Promise.all([readFile(recordFile(f)), readFile(ledgerFile(f))]), before, `${verb}: still no record or ledger mutation`);
   }
 });

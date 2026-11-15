@@ -137,8 +137,8 @@ func TestB460WorkerServingHandsOver(t *testing.T) {
 	if code, out, errText := b460Call(t, "worker", "--run", "r-live", "--once"); code != 1 || out != "" || errText != "worker: not inside a git repository\n" {
 		t.Fatalf("r-live = %d %q %q", code, out, errText)
 	}
-	if code, out, _ := b460Call(t, "worker", "--run", "r-junk"); code != 127 || out != "" {
-		t.Fatalf("r-junk = %d %q, want the Node hand-over (127)", code, out)
+	if code, out, _ := b460Call(t, "worker", "--run", "r-junk"); code != 1 || out != "" {
+		t.Fatalf("r-junk = %d %q, want the Go refusal (exit 1)", code, out)
 	}
 	got := strings.Join(b460Handovers(t, f.home), ",")
 	if got != "worker worker-record" {
@@ -208,8 +208,8 @@ func TestB460SpawnSessionHandsOver(t *testing.T) {
 		{"spawn", "--level", "L1", "--role", "coder", "--brief", "b.md"},
 		{"spawn", "--level", "L1", "--role", "reviewer", "--brief", "b.md", "--print-argv"},
 	} {
-		if code, out, _ := b460Call(t, args...); code != 127 || out != "" {
-			t.Fatalf("%v = %d %q, want the Node hand-over (127)", args, code, out)
+		if code, out, _ := b460Call(t, args...); code != 1 || out != "" {
+			t.Fatalf("%v = %d %q, want the Go refusal (exit 1)", args, code, out)
 		}
 	}
 	got := strings.Join(b460Handovers(t, f.home), ",")

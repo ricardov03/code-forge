@@ -89,14 +89,17 @@ test('land usage and bad max boundaries match Node without starting Node', async
   await writeFile(file, JSON.stringify(unsupported, null, 2) + '\n');
   const before = await Promise.all((await readdir(runs)).sort().map(async (name) => [name, await readFile(path.join(runs, name))]));
   const unavailable = launch(f, [...args, '--json']);
-  assert.equal(unavailable.status, 127, 'unsupported ownership shape hands over the entire land before Go writes');
+  // B690a: Go never starts Node; the whole land gets the Go refusal before Go writes
+  assert.equal(unavailable.status, 1, 'unsupported ownership shape refuses the entire land before Go writes');
+  assert.equal(unavailable.stdout, '');
+  assert.match(unavailable.stderr, /^code-forge: block land is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/);
   const probe = path.join(scratch, 'argv-node');
   await writeFile(probe, `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(process.argv.slice(3)) + '\\n');\n`);
   await chmod(probe, 0o755);
   const forwarded = launch(f, [...args, '--json'], { CODE_FORGE_NODE: probe });
-  assert.deepEqual([forwarded.status, forwarded.stdout, forwarded.stderr], [0, JSON.stringify([...args, '--json']) + '\n', ''], 'whole-land handover forwards every original argument exactly once');
-  assert.deepEqual(await Promise.all((await readdir(runs)).sort().map(async (name) => [name, await readFile(path.join(runs, name))])), before, 'handover preserves all run bytes');
-  assert.deepEqual((await readdir(path.join(f.home, '.code-forge'))).sort(), ['runs'], 'zero Go ledger rows or other state directories on handover');
+  assert.deepEqual([forwarded.status, forwarded.stdout, forwarded.stderr], [1, '', unavailable.stderr], 'a working Node is never started: the same refusal');
+  assert.deepEqual(await Promise.all((await readdir(runs)).sort().map(async (name) => [name, await readFile(path.join(runs, name))])), before, 'the refusal preserves all run bytes');
+  assert.deepEqual((await readdir(path.join(f.home, '.code-forge'))).sort(), ['runs'], 'zero Go ledger rows or other state directories on the refusal');
 });
 
 const KEY = Buffer.alloc(32, 27);
@@ -361,7 +364,8 @@ test('no daemon hands over before any Go writes', async () => {
     try {
       const before = await snapshot(direct);
       const result = await native(direct, [...args, ...extra]);
-      assert.equal(result.code, 127, result.stderr);
+      assert.equal(result.code, 1, result.stderr); // B690a: the Go refusal
+      assert.match(result.stderr, /^code-forge: block land is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/);
       assert.deepEqual(await snapshot(direct), before, 'every state byte and directory unchanged');
     } finally { await daemon?.cleanup(); await rm(home, { recursive: true, force: true }); }
   }
@@ -384,8 +388,9 @@ test('auto-claim enqueue handover on a later file hands over the whole land with
     try {
       const before = await snapshot(direct);
       const result = await native(direct, [...args, ...(json ? ['--json'] : [])]);
-      assert.equal(result.code, 127, result.stderr);
-      assert.equal(result.stdout, '', 'no auto-claimed output before whole-land handover');
+      assert.equal(result.code, 1, result.stderr); // B690a: the Go refusal
+      assert.match(result.stderr, /^code-forge: block land is not supported in this case yet \([a-z0-9:-]+\)\. Please report it: code-forge logs report\n$/);
+      assert.equal(result.stdout, '', 'no auto-claimed output before the whole-land refusal');
       assert.deepEqual(await snapshot(direct), before, 'all run, ledger and queue bytes and directories are unchanged');
       assert.ok(daemon.requests.every((request) => request.method === 'ping'), 'join and gates never start');
     } finally { await daemon.cleanup(); await rm(home, { recursive: true, force: true }); }

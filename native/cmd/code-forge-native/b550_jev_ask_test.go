@@ -320,8 +320,8 @@ func TestB550JevAskHandsOverBeforeSideEffects(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			f, fake := newB550Jev(t, c.config, 200, b550JevOK, false)
 			code, out, _ := b460Call(t, "jev", "ask", "lane", "--state", c.state)
-			if code != 127 || out != "" {
-				t.Fatalf("= %d %q; want the Node hand-over", code, out)
+			if code != 1 || out != "" {
+				t.Fatalf("= %d %q; want the Go refusal", code, out)
 			}
 			if got := b460Handovers(t, f.home); len(got) != 1 || got[0] != "jev "+c.reason {
 				t.Fatalf("handovers %v", got)

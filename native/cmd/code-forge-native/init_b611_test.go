@@ -96,9 +96,8 @@ func b611Setup(t *testing.T, env map[string]string, op bool) (home, cwd, repo st
 
 func b611Served(t *testing.T, home string, code int) {
 	t.Helper()
-	if code == 127 {
-		handed, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
-		t.Fatalf("handed over to Node: %s", handed)
+	if handed, err := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl")); err == nil {
+		t.Fatalf("refused in Go (exit %d): %s", code, handed)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".code-forge", "native", "handovers.jsonl")); err == nil {
 		t.Fatal("a hand-over row was written")
@@ -279,8 +278,8 @@ func TestB611InitWizardJevKeyHandOver(t *testing.T) {
 	}
 	before := b528Tree(t, cwd, home, cwd)
 	code, transcript := b528Run(t, cwd, []string{"\r"}, "--skip-doctor")
-	if code != 127 || !strings.HasPrefix(transcript, "code-forge-native: node executable") || strings.Count(transcript, "\n") != 1 {
-		t.Fatalf("code=%d transcript=%q; want the Node hand-over before any output", code, transcript)
+	if code != 1 || !b690aIsRefusal(transcript) {
+		t.Fatalf("code=%d transcript=%q; want the Go refusal before any output", code, transcript)
 	}
 	data, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
 	var row handoverRow
