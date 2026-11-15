@@ -48,8 +48,10 @@ func b527Tree(t *testing.T, root, home, cwd string) string {
 		row := rel + " " + info.Mode().String()
 		switch {
 		case info.Mode()&fs.ModeSymlink != 0:
+			// B742: a link's own mode bits differ by OS (macOS keeps them,
+			// Linux is always 0777), so a link row is "L -> <target>"
 			target, _ := os.Readlink(p)
-			row += " -> " + target
+			row = rel + " L -> " + target
 		case info.Mode().IsRegular():
 			data, _ := os.ReadFile(p)
 			if len(data) > 4096 {
