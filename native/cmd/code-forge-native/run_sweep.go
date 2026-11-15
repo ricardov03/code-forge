@@ -166,7 +166,10 @@ func runEnvFromPs(p runProc, out string) map[string]string {
 	if !strings.HasPrefix(text, p.command+" ") {
 		return nil
 	}
-	text = text[len(p.command)+1:]
+	// B747: ps ends the row with "\n"; that is the end of the last variable
+	// (the value of a marker stops at a line end, so with the "\n" kept the
+	// process's last variable was never read).
+	text = strings.TrimSuffix(text[len(p.command)+1:], "\n")
 	markers := map[string]string{}
 	for _, name := range runEnvMarkers {
 		if value, ok := runEnvMarker(text, name); ok {

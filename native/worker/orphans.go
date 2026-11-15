@@ -104,7 +104,9 @@ func ReadProcessEnv(p ProcInfo) map[string]string {
 		if !strings.HasPrefix(text, p.Command+" ") {
 			return nil
 		}
-		text = text[len(p.Command)+1:]
+		// B747: ps ends the row with "\n", the end of the last variable
+		// (kept, the last variable's value carried it and never matched).
+		text = strings.TrimSuffix(text[len(p.Command)+1:], "\n")
 	default:
 		return nil
 	}
