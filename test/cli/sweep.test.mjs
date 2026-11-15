@@ -173,17 +173,76 @@ async function orphan(marked) {
   return pid;
 }
 
+/** Gone or a zombie: the pid no longer names a live process. @param {number} pid */
+function gone(pid) {
+  const row = reaper.readProcesses().find((p) => p.pid === pid);
+  return !row || row.state.startsWith('Z');
+}
+
+/** Event wait: resolves once `pid` is gone (B739), never a fixed sleep. @param {number} pid */
+async function waitGone(pid) {
+  const deadline = Date.now() + 5000;
+  while (!gone(pid)) {
+    if (Date.now() > deadline) assert.fail(`pid ${pid} still alive after SIGKILL`);
+    await sleep(10);
+  }
+}
+
+const MARKED_ATTEMPTS = 5;
+
+/**
+ * B739: the marked orphan is a real process of this user with a dead owner, so any `run start`
+ * running at the same time in another test file (src/cli/run.mjs sweepProcesses apply, Go
+ * run_sweep.go; neither scopes orphans by run id or HOME) may stop it before this dry run reads
+ * ps. Only an orphan proven gone after the dry run is replaced by a fresh one; a live orphan must
+ * be listed exactly, and a dry run that stops the orphan every time still fails.
+ * @param {number} unmarked @param {(pid: number, attempt: number) => Promise<void>} [interfere]
+ */
+async function dryRunWithMarkedOrphan(unmarked, interfere = async () => {}) {
+  const taken = [];
+  for (let attempt = 1; attempt <= MARKED_ATTEMPTS; attempt++) {
+    const marked = await orphan(true);
+    await interfere(marked, attempt);
+    const dry = await command(['--json']);
+    assert.equal(dry.code, 0);
+    if (gone(marked)) { taken.push(marked); continue; }
+    const listed = dry.json.items.filter((p) => [marked, unmarked].includes(p.pid)).map((p) => [p.kind, p.pid]);
+    return { marked, listed, taken };
+  }
+  return assert.fail(`${MARKED_ATTEMPTS} marked orphans were gone after the dry run: ${taken.join(', ')}`);
+}
+
 test('sweep lists and stops marked orphans of dead owners, preserving unmarked orphans', async () => {
-  const marked = await orphan(true);
   const unmarked = await orphan(false);
-  const dry = await command(['--json']);
-  assert.equal(dry.code, 0);
-  assert.deepEqual(dry.json.items.filter((p) => [marked, unmarked].includes(p.pid)).map((p) => [p.kind, p.pid]), [['orphan', marked]]);
-  assert.equal(reaper.isAlive(marked), true);
+  const { marked, listed } = await dryRunWithMarkedOrphan(unmarked);
+  assert.deepEqual(listed, [['orphan', marked]]);
   assert.equal((await command(['--apply', '--json'])).code, 0);
   await sleep(100);
   assert.equal(reaper.readStartTime(marked), null, 'marked orphan stopped');
   assert.equal(reaper.isAlive(unmarked), true, 'unmarked orphan preserved');
+});
+
+test('B739: a marked orphan stopped by another sweeper before the dry run is replaced, and a live one is listed exactly', async () => {
+  const unmarked = await orphan(false);
+  const killFirst = async (/** @type {number} */ pid, /** @type {number} */ attempt) => {
+    if (attempt === 1) { process.kill(pid, 'SIGKILL'); await waitGone(pid); }
+  };
+  let first = 0;
+  const { marked, listed, taken } = await dryRunWithMarkedOrphan(unmarked, async (pid, attempt) => {
+    if (attempt === 1) first = pid;
+    await killFirst(pid, attempt);
+  });
+  // A concurrent `run start` may take a later attempt too, so at least one, the first, was replaced.
+  assert.ok(taken.length >= 1 && taken[0] === first, 'the stopped orphan was replaced');
+  assert.ok(!taken.includes(marked));
+  assert.deepEqual(listed, [['orphan', marked]], 'the fresh live marked orphan is listed, the unmarked one is not');
+  try { process.kill(marked, 'SIGKILL'); } catch { /* already stopped by a concurrent sweeper */ }
+});
+
+test('B739: an orphan gone after every dry run still fails, never passes silently', async () => {
+  const unmarked = await orphan(false);
+  const killAll = async (/** @type {number} */ pid) => { process.kill(pid, 'SIGKILL'); await waitGone(pid); };
+  await assert.rejects(dryRunWithMarkedOrphan(unmarked, killAll), new RegExp(`${MARKED_ATTEMPTS} marked orphans were gone after the dry run`));
 });
 
 test('zombie ps lines are grouped by parent command and never eligible for a signal', async (t) => {
