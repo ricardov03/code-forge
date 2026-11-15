@@ -6,6 +6,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+- Gates: a gate child started by Go gets the default action for every signal the engine inherited as ignored, as Node's spawn does; under `nohup` (SIGHUP ignored) or as a script's background job (SIGINT ignored) a gate killed by SIGHUP or SIGINT used to exit 0 and pass, and `TestExecuteSignalNames/HUP` failed in a full suite run with SIGHUP ignored. B719
 - Tests: the native-install, entry and config-golden Node tests give their private package copies a node_modules without the `@codedology` platform packages, so CI (which installs the published `@codedology/code-forge-<target>` binary) no longer finds the release binary in place of the test's own. B701
 - `tools install` and `logs clear` with stdin at a terminal and stdout piped (for example `| tee`) ask their question in Go: clack's frames on the pipe at 80 columns, colored only by `FORCE_COLOR`, with the same answers, output, exit codes and error-log row as Node; they no longer hand over to Node (`tools-confirm`, `logs-clear-prompt`). B698
 - `tools install` at a terminal asks its one question in Go (`Run <n> install command(s)?`, default no): yes runs the installs, any other answer prints "cancelled — nothing installed" and exits 1, as in Node; it no longer hands over to Node. B682

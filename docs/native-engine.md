@@ -487,6 +487,13 @@ engine used to lower the child after it started; on macOS that change could
 be lost while the child was still starting, and the gate then ran at nice 0
 (B420).
 
+That short copy also gives the gate the default action for every signal the
+engine itself ignores, as Node's spawn does. A `gates run` started under
+`nohup` (SIGHUP ignored) or as a background job of a script (SIGINT ignored)
+used to pass that ignore on, so a gate killed by SIGHUP or SIGINT could exit
+0 and pass; it now ends as `gate terminated: SIGHUP` (or `SIGINT`) as in Node
+(B719).
+
 ## Rebase runs in Go (B431)
 
 `block rebase <id> --run <run>` (with only `--json`) of an open block with a
