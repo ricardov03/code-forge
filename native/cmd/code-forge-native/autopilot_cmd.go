@@ -139,7 +139,7 @@ func autopilotParse(sub string, args []string) (autopilotFlags, error) {
 func autopilotHandover(args []string, reason handoverReason) int {
 	code, err := handover(append([]string{"autopilot"}, args...), reason)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	return code
 }
@@ -148,12 +148,12 @@ func runAutopilot(args []string) int {
 	help := func(s string) bool { return s == "--help" || s == "-h" }
 	// The Node router answers help before breadcrumbs and handlers.
 	if len(args) > 0 && help(args[0]) {
-		fmt.Fprint(os.Stdout, autopilotUsage)
+		fmt.Fprint(safeStdout, autopilotUsage)
 		return 0
 	}
 	if len(args) > 1 && help(args[1]) {
 		if usage, ok := autopilotSubUsage[args[0]]; ok {
-			fmt.Fprint(os.Stdout, usage)
+			fmt.Fprint(safeStdout, usage)
 			return 0
 		}
 	}

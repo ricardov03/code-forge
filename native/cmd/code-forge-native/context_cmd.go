@@ -36,13 +36,13 @@ func (w *contextErrWriter) Write(p []byte) (int, error) {
 	if text := strings.TrimSpace(string(p)); text != "" {
 		w.last = text
 	}
-	return os.Stderr.Write(p)
+	return safeStderr.Write(p)
 }
 
 func runContext(args []string) int {
 	// The router prints help before config, breadcrumbs or logging.
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") || len(args) > 1 && args[0] == "pack" && (args[1] == "--help" || args[1] == "-h") {
-		fmt.Fprint(os.Stdout, contextUsage)
+		fmt.Fprint(safeStdout, contextUsage)
 		return 0
 	}
 	contextApplyTmpRoot()
@@ -279,11 +279,11 @@ func contextPack(args []string, stderr io.Writer) int {
 	if seen["json"] {
 		out := ledger.Object{{Key: "path", Value: result.Path}, {Key: "tokens", Value: result.Tokens}, {Key: "lines", Value: result.Lines}, {Key: "cut", Value: result.Cut}, {Key: "sha256", Value: result.SHA256}}
 		data, _ := ledger.Stringify(out, false)
-		fmt.Fprintln(os.Stdout, string(data))
+		fmt.Fprintln(safeStdout, string(data))
 	} else if seen["path-only"] {
-		fmt.Fprintf(os.Stdout, "%s\ntokens ~%d\n", result.Path, result.Tokens)
+		fmt.Fprintf(safeStdout, "%s\ntokens ~%d\n", result.Path, result.Tokens)
 	} else {
-		fmt.Fprint(os.Stdout, result.Text)
+		fmt.Fprint(safeStdout, result.Text)
 	}
 	return 0
 }

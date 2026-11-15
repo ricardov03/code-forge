@@ -21,7 +21,7 @@ const decisionsUsage = "usage: code-forge decisions list [--run <r>] [--json]"
 
 // runDecisions serves `decisions list` (B390): the close.decision rows the
 // autopilot signed when it decided a block close for the owner.
-func runDecisions(args []string) int { return decisionsMain(args, os.Stdout, os.Stderr) }
+func runDecisions(args []string) int { return decisionsMain(args, safeStdout, safeStderr) }
 
 var decisionsSlug = regexp.MustCompile(`^([a-z0-9][a-z0-9-]*)\.`)
 

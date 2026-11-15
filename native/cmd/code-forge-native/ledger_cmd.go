@@ -34,7 +34,7 @@ const ledgerOutsideReviewUsage = "usage: code-forge ledger outside-review --run 
 func ledgerHandover(args []string, reason handoverReason) int {
 	code, err := handover(append([]string{"ledger"}, args...), reason)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	return code
 }
@@ -78,12 +78,12 @@ func ledgerHelpFlag(s string) bool { return s == "--help" || s == "-h" }
 // log); every other run notes a breadcrumb and logs a non-zero exit.
 func runLedger(args []string) int {
 	if len(args) > 0 && ledgerHelpFlag(args[0]) {
-		fmt.Fprint(os.Stdout, ledgerUsage)
+		fmt.Fprint(safeStdout, ledgerUsage)
 		return 0
 	}
 	if len(args) > 1 && ledgerHelpFlag(args[1]) {
 		if usage, ok := ledgerSubUsage[args[0]]; ok {
-			fmt.Fprint(os.Stdout, usage)
+			fmt.Fprint(safeStdout, usage)
 			return 0
 		}
 	}
@@ -110,8 +110,8 @@ func runLedger(args []string) int {
 	}
 	before := gatesBreadcrumbName(crumb)
 	out, errText := ledgerRedact(result.out, result.secret), ledgerRedact(result.err, result.secret)
-	fmt.Fprint(os.Stdout, out)
-	fmt.Fprint(os.Stderr, errText)
+	fmt.Fprint(safeStdout, out)
+	fmt.Fprint(safeStderr, errText)
 	if result.code != 0 {
 		var message any
 		if trimmed := strings.TrimFunc(errText, errorLogSpace); trimmed != "" {

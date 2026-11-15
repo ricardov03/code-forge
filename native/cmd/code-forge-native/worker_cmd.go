@@ -25,7 +25,7 @@ const workerUsage = "usage: code-forge worker --run <id> [--cwd <dir>] [--poll-m
 func workerHandover(args []string, reason handoverReason) int {
 	code, err := handover(append([]string{"worker"}, args...), reason)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	return code
 }
@@ -65,7 +65,7 @@ func workerPlan(home string, args []string) (func(o *runOut) int, handoverReason
 func runWorkerVerb(args []string) int {
 	// The Node router answers help before breadcrumbs and handlers.
 	if len(args) > 0 && cliHelp(args[0]) {
-		fmt.Fprint(os.Stdout, workerUsage)
+		fmt.Fprint(safeStdout, workerUsage)
 		return 0
 	}
 	home := os.Getenv("HOME")

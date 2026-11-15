@@ -218,7 +218,7 @@ func blockClaimStop(sub string, args []string) int {
 	// Node's router logs a failed verb with its last stderr line.
 	logged := func(code int, text string) int {
 		before := gatesBreadcrumbName("block " + sub)
-		fmt.Fprintln(os.Stderr, text)
+		fmt.Fprintln(safeStderr, text)
 		nativeVerbFailure("block", sub, args, code, text, before)
 		return code
 	}
@@ -253,7 +253,7 @@ func blockClaimStop(sub string, args []string) int {
 			if sub == "stop" {
 				usage = "<id> --run <r> --reason <text>"
 			}
-			fmt.Fprintf(os.Stdout, "usage: code-forge block %s %s [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n", sub, usage)
+			fmt.Fprintf(safeStdout, "usage: code-forge block %s %s [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n", sub, usage)
 			return 0
 		}
 	}
@@ -298,7 +298,7 @@ func blockClaimStop(sub string, args []string) int {
 			return fallback(hStopDoneFacts)
 		}
 	}
-	blockGrantExpiry(home, run, os.Stderr)
+	blockGrantExpiry(home, run, safeStderr)
 	if sub == "claim" {
 		file := positionals[1]
 		if err := blockops.ValidateClaim(file); err != nil {
@@ -328,7 +328,7 @@ func blockClaimStop(sub string, args []string) int {
 	doneFile := ""
 	if sub == "stop" {
 		doneFile = blockWriteDone(home, run, id, reason, record)
-		defer blockRunEndHook(home, run, id, "stopped", doneFile, record, os.Stderr)
+		defer blockRunEndHook(home, run, id, "stopped", doneFile, record, safeStderr)
 	}
 	if flags["json"] == true {
 		out := ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "stopped"}}
@@ -339,11 +339,11 @@ func blockClaimStop(sub string, args []string) int {
 			blockDoneJSON(&out, record, doneFile)
 		}
 		data, _ := ledger.Stringify(out, false)
-		fmt.Fprintln(os.Stdout, string(data))
+		fmt.Fprintln(safeStdout, string(data))
 	} else if sub == "claim" {
-		fmt.Fprintf(os.Stdout, "block %s claimed %s\n", id, positionals[1])
+		fmt.Fprintf(safeStdout, "block %s claimed %s\n", id, positionals[1])
 	} else {
-		fmt.Fprintf(os.Stdout, "block %s stopped\n", id)
+		fmt.Fprintf(safeStdout, "block %s stopped\n", id)
 	}
 	return 0
 }
@@ -422,7 +422,7 @@ var blockCommit = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
 func blockWriteDone(home, run, id, reason string, record ledger.Object) string {
 	at := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	if id == "." || id == ".." || strings.ContainsAny(id, "/\\\x00") {
-		fmt.Fprintf(os.Stderr, "warning: done file not written: block id %s cannot name a done file\n", statusQuote(id))
+		fmt.Fprintf(safeStderr, "warning: done file not written: block id %s cannot name a done file\n", statusQuote(id))
 		return ""
 	}
 	facts, _ := blockDoneFacts(home, run, id, record)
@@ -470,7 +470,7 @@ func blockWriteDone(home, run, id, reason string, record ledger.Object) string {
 		if errors.As(err, &errno) {
 			code = blockErrno(errno)
 		}
-		fmt.Fprintln(os.Stderr, "warning: done file not written:", code)
+		fmt.Fprintln(safeStderr, "warning: done file not written:", code)
 		return ""
 	}
 	return file

@@ -36,11 +36,11 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 	json := flags["json"] == true
 	emit := func(row ledger.Object) {
 		data, _ := ledger.Stringify(row, false)
-		fmt.Fprintln(os.Stdout, string(data))
+		fmt.Fprintln(safeStdout, string(data))
 	}
 	stoppedID, step := ids[0], "preflight"
 	stop := func(reason string) int {
-		fmt.Fprintf(os.Stderr, "block %s land stopped at %s: %s\n", stoppedID, step, strings.TrimSpace(reason))
+		fmt.Fprintf(safeStderr, "block %s land stopped at %s: %s\n", stoppedID, step, strings.TrimSpace(reason))
 		if json {
 			emit(ledger.Object{{Key: "block", Value: stoppedID}, {Key: "event", Value: "refused"}, {Key: "step", Value: step}, {Key: "reason", Value: strings.TrimSpace(reason)}})
 		}
@@ -158,7 +158,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if json {
 				emit(ledger.Object{{Key: "block", Value: block.id}, {Key: "event", Value: "parked"}, {Key: "reason", Value: "block_rebase_conflict"}, {Key: "files", Value: files}})
 			} else {
-				fmt.Fprintf(os.Stdout, "block %s parked: block_rebase_conflict (%s)\n", block.id, strings.Join(files, ", "))
+				fmt.Fprintf(safeStdout, "block %s parked: block_rebase_conflict (%s)\n", block.id, strings.Join(files, ", "))
 			}
 		})
 		if err != nil {
@@ -176,7 +176,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		keep := 0
 		defer func() {
 			if err := landBatchRestore(home, run, batch, keep); err != nil {
-				fmt.Fprintln(os.Stderr, "cannot restore not-landed block:", err)
+				fmt.Fprintln(safeStderr, "cannot restore not-landed block:", err)
 				if failed == nil {
 					failed = err
 				}
@@ -190,7 +190,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		defer func() {
 			if added {
 				if _, err := gitx.Run(main, "worktree", "remove", "--force", temporary); err != nil {
-					fmt.Fprintln(os.Stderr, "cannot remove merge-gate worktree:", err)
+					fmt.Fprintln(safeStderr, "cannot remove merge-gate worktree:", err)
 					code = 1
 					return
 				}
@@ -334,9 +334,9 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 					if json {
 						emit(ledger.Object{{Key: "event", Value: "merge_gate"}, {Key: "reason", Value: scope.Reason}, {Key: "batch", Value: mergeReason}, {Key: "test_count", Value: len(scope.Files)}, {Key: "skipped", Value: len(scope.Files) == 0}})
 					} else if len(scope.Files) == 0 {
-						fmt.Fprintf(os.Stdout, "merge gate: no test selected (%s); test gate skipped\n", mergeReason)
+						fmt.Fprintf(safeStdout, "merge gate: no test selected (%s); test gate skipped\n", mergeReason)
 					} else {
-						fmt.Fprintf(os.Stdout, "merge gate: %d selected test files (%s, %s)\n", len(scope.Files), scope.Reason, mergeReason)
+						fmt.Fprintf(safeStdout, "merge gate: %d selected test files (%s, %s)\n", len(scope.Files), scope.Reason, mergeReason)
 					}
 				}
 				suite := landCapture(func(s *landStep) int {
@@ -425,7 +425,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 				if json {
 					emit(ledger.Object{{Key: "block", Value: block.id}, {Key: "event", Value: "landed"}})
 				} else {
-					fmt.Fprintf(os.Stdout, "block %s landed\n", block.id)
+					fmt.Fprintf(safeStdout, "block %s landed\n", block.id)
 				}
 			}
 		}
@@ -443,7 +443,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 				if json {
 					emit(ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "not landed"}, {Key: "after", Value: stoppedID}})
 				} else {
-					fmt.Fprintf(os.Stdout, "block %s not landed (after %s)\n", id, stoppedID)
+					fmt.Fprintf(safeStdout, "block %s not landed (after %s)\n", id, stoppedID)
 				}
 			}
 		}

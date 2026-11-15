@@ -34,14 +34,14 @@ func healHome() string { return os.Getenv("HOME") }
 func runHeal(args []string) int {
 	usage := func(message string) int {
 		if message != "" {
-			fmt.Fprintln(os.Stderr, "heal: "+message)
+			fmt.Fprintln(safeStderr, "heal: "+message)
 		}
-		fmt.Fprintln(os.Stderr, healUsage)
+		fmt.Fprintln(safeStderr, healUsage)
 		return 2
 	}
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
-			fmt.Println(healUsage)
+			fmt.Fprintln(safeStdout, healUsage)
 			return 0
 		}
 	}
@@ -84,7 +84,7 @@ func runHeal(args []string) int {
 	}
 	home := healHome()
 	if home == "" {
-		fmt.Fprintln(os.Stderr, "heal: HOME is not set")
+		fmt.Fprintln(safeStderr, "heal: HOME is not set")
 		return 1
 	}
 	switch sub {
@@ -94,18 +94,18 @@ func runHeal(args []string) int {
 		}
 		items, err := healItems(home, opts.run)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "heal:", err)
+			fmt.Fprintln(safeStderr, "heal:", err)
 			return 1
 		}
 		if opts.json {
-			_ = json.NewEncoder(os.Stdout).Encode(items)
+			_ = json.NewEncoder(safeStdout).Encode(items)
 			return 0
 		}
 		if len(items) == 0 {
-			fmt.Println("heal: no items")
+			fmt.Fprintln(safeStdout, "heal: no items")
 			return 0
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		w := tabwriter.NewWriter(safeStdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tSTATUS\tKIND\tRUN\tBLOCK\tTRIES\tARGV")
 		for _, it := range items {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n", it.ID, it.Status, it.Kind, it.Run, it.Block, it.Tries, strings.Join(it.Argv, " "))
@@ -118,7 +118,7 @@ func runHeal(args []string) int {
 		}
 		items, err := healItems(home, opts.run)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "heal:", err)
+			fmt.Fprintln(safeStderr, "heal:", err)
 			return 1
 		}
 		for _, it := range items {
@@ -126,17 +126,17 @@ func runHeal(args []string) int {
 				continue
 			}
 			if opts.json {
-				_ = json.NewEncoder(os.Stdout).Encode(it)
+				_ = json.NewEncoder(safeStdout).Encode(it)
 				return 0
 			}
-			fmt.Printf("id: %s\nrun: %s\nblock: %s\nkind: %s\nstatus: %s\ntries: %d\nargv: %s\ncwd: %s\ncreated: %s\nupdated: %s\n", it.ID, it.Run, it.Block, it.Kind, it.Status, it.Tries, strings.Join(it.Argv, " "), it.Cwd, it.CreatedAt, it.UpdatedAt)
+			fmt.Fprintf(safeStdout, "id: %s\nrun: %s\nblock: %s\nkind: %s\nstatus: %s\ntries: %d\nargv: %s\ncwd: %s\ncreated: %s\nupdated: %s\n", it.ID, it.Run, it.Block, it.Kind, it.Status, it.Tries, strings.Join(it.Argv, " "), it.Cwd, it.CreatedAt, it.UpdatedAt)
 			if it.NextAt != "" {
-				fmt.Printf("next try: %s\n", it.NextAt)
+				fmt.Fprintf(safeStdout, "next try: %s\n", it.NextAt)
 			}
-			fmt.Printf("detail:\n%s\n", it.Detail)
+			fmt.Fprintf(safeStdout, "detail:\n%s\n", it.Detail)
 			return 0
 		}
-		fmt.Fprintf(os.Stderr, "heal: no item %s\n", opts.pos[0])
+		fmt.Fprintf(safeStderr, "heal: no item %s\n", opts.pos[0])
 		return 1
 	case "run":
 		if len(opts.pos) != 0 || opts.run == "" {
@@ -182,10 +182,10 @@ func healRun(home, run string, max int, once, watch, asJSON bool) int {
 	if err != nil {
 		var busy *healq.ErrBusy
 		if errors.As(err, &busy) {
-			fmt.Fprintln(os.Stderr, "heal run:", busy.Error())
+			fmt.Fprintln(safeStderr, "heal run:", busy.Error())
 			return 1
 		}
-		fmt.Fprintln(os.Stderr, "heal run:", err)
+		fmt.Fprintln(safeStderr, "heal run:", err)
 		return 1
 	}
 	defer release()
@@ -194,12 +194,12 @@ func healRun(home, run string, max int, once, watch, asJSON bool) int {
 		exe, err = filepath.EvalSymlinks(exe)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "heal run: locate the code-forge binary:", err)
+		fmt.Fprintln(safeStderr, "heal run: locate the code-forge binary:", err)
 		return 1
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
-	r := &healq.Runner{Home: home, Run: run, Exe: exe, MaxTries: max, Log: os.Stderr}
+	r := &healq.Runner{Home: home, Run: run, Exe: exe, MaxTries: max, Log: safeStderr}
 	switch {
 	case watch:
 		err = r.Watch(ctx, healPoll)
@@ -209,13 +209,13 @@ func healRun(home, run string, max int, once, watch, asJSON bool) int {
 		err = r.Drain(ctx)
 	}
 	if err != nil && ctx.Err() == nil {
-		fmt.Fprintln(os.Stderr, "heal run:", err)
+		fmt.Fprintln(safeStderr, "heal run:", err)
 		return 1
 	}
 	if asJSON {
-		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"run": run, "healed": r.Healed, "needs_coder": r.NeedsCoder})
+		_ = json.NewEncoder(safeStdout).Encode(map[string]any{"run": run, "healed": r.Healed, "needs_coder": r.NeedsCoder})
 	} else {
-		fmt.Printf("heal run %s: %d healed, %d need a coder\n", run, r.Healed, r.NeedsCoder)
+		fmt.Fprintf(safeStdout, "heal run %s: %d healed, %d need a coder\n", run, r.Healed, r.NeedsCoder)
 	}
 	if r.NeedsCoder > 0 {
 		return 1
@@ -248,10 +248,10 @@ func healWrap(verb []string, fn func([]string) int) func([]string) int {
 		cwd, _ := os.Getwd()
 		item, err := healq.Enqueue(os.Getenv("HOME"), run, block, kind, argv, cwd, text, time.Now())
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "heal: not queued: %s\n", err)
+			fmt.Fprintf(safeStderr, "heal: not queued: %s\n", err)
 			return code
 		}
-		fmt.Fprintf(os.Stderr, "heal: queued %s\n", item.ID)
+		fmt.Fprintf(safeStderr, "heal: queued %s\n", item.ID)
 		return code
 	}
 }

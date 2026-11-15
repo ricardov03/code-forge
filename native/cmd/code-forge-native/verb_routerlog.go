@@ -127,7 +127,7 @@ func routerHint(fp string, code int) {
 	if err != nil {
 		return
 	}
-	fmt.Fprint(os.Stderr, routerHintLine)
+	fmt.Fprint(safeStderr, routerHintLine)
 	file := routerHintFile()
 	if os.MkdirAll(filepath.Dir(file), 0700) != nil {
 		return

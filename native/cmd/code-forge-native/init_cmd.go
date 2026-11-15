@@ -591,7 +591,7 @@ func runInitVerb(args []string) int {
 		before := gatesBreadcrumbName("init")
 		stderr := &contextErrWriter{}
 		eof := false
-		code := serve(os.Stdout, stderr, &eof)
+		code := serve(safeStdout, stderr, &eof)
 		if code != 0 && !eof {
 			var message any
 			if stderr.last != "" {

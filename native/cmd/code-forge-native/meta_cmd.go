@@ -51,12 +51,12 @@ func metaIsHelp(s string) bool { return s == "--help" || s == "-h" }
 // form falls through to the verb, as in Node.
 func metaHelp(args []string, usage string, sub map[string]string) bool {
 	if len(args) > 0 && metaIsHelp(args[0]) {
-		fmt.Fprint(os.Stdout, usage)
+		fmt.Fprint(safeStdout, usage)
 		return true
 	}
 	if len(args) > 1 && metaIsHelp(args[1]) {
 		if text, ok := sub[args[0]]; ok {
-			fmt.Fprint(os.Stdout, text)
+			fmt.Fprint(safeStdout, text)
 			return true
 		}
 	}
@@ -89,7 +89,7 @@ func metaServe(verb, sub string, args []string, fn func(stdout, stderr io.Writer
 	}
 	before := gatesBreadcrumbName(name)
 	stderr := &contextErrWriter{}
-	code := fn(os.Stdout, stderr)
+	code := fn(safeStdout, stderr)
 	if code != 0 {
 		var message any
 		if stderr.last != "" {
@@ -103,7 +103,7 @@ func metaServe(verb, sub string, args []string, fn func(stdout, stderr io.Writer
 func metaHandover(verb string, args []string, reason handoverReason) int {
 	code, err := handover(append([]string{verb}, args...), reason)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	return code
 }
@@ -114,11 +114,11 @@ func metaHandover(verb string, args []string, reason handoverReason) int {
 func runHelpVerb(args []string) int {
 	// B648: the maintainer's command reference generator (hidden).
 	if len(args) > 0 && args[0] == "--commands-doc" {
-		return runHelpDoc(args[1:], os.Stdout, os.Stderr)
+		return runHelpDoc(args[1:], safeStdout, safeStderr)
 	}
 	for _, arg := range args {
 		if metaIsHelp(arg) {
-			fmt.Fprint(os.Stdout, helpUsage)
+			fmt.Fprint(safeStdout, helpUsage)
 			return 0
 		}
 	}

@@ -40,7 +40,7 @@ const reviewWaitUsage = "usage: code-forge review-file [--cwd <dir>] <path> --bl
 func reviewWaitHandover(args []string, reason handoverReason) int {
 	code, err := handover(append([]string{"review-file"}, args...), reason)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
+		fmt.Fprintln(safeStderr, "code-forge-native:", err)
 	}
 	return code
 }
@@ -119,7 +119,7 @@ func runReviewFileWaitWith(args []string, poll func(context.Context, string, tim
 	args = decoded
 	// The router prints a verb's help before any breadcrumb or log.
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprint(os.Stdout, reviewWaitUsage)
+		fmt.Fprint(safeStdout, reviewWaitUsage)
 		return 0
 	}
 	flags, paths, usage := reviewEnqueueFlags(args)
@@ -133,7 +133,7 @@ func runReviewFileWaitWith(args []string, poll func(context.Context, string, tim
 			if arg != "--" && !reviewEnqueueSafeUnknown.MatchString(arg) {
 				before := reviewWaitBreadcrumb()
 				text := "review-file: " + usage + "\n" + reviewWaitUsage
-				fmt.Fprint(os.Stderr, text)
+				fmt.Fprint(safeStderr, text)
 				nativeVerbFailure("review-file", "", args, 2, text, before)
 				return 2
 			}
@@ -143,7 +143,7 @@ func runReviewFileWaitWith(args []string, poll func(context.Context, string, tim
 	cwd, err := os.Getwd()
 	if err != nil {
 		// Node fails before the verb runs (process.cwd() throws): exit 1.
-		fmt.Fprintln(os.Stderr, "review-file: the current directory cannot be read:", err)
+		fmt.Fprintln(safeStderr, "review-file: the current directory cannot be read:", err)
 		return 1
 	}
 	if dir, exists := flags["cwd"]; exists {
@@ -263,7 +263,7 @@ func reviewWaitTicketLoop(ctx context.Context, interrupted func() int, args []st
 			if _, err := os.Stat(marker); err != nil {
 				before := reviewWaitBreadcrumb()
 				data, _ := ledger.Stringify(ledger.Object{{Key: "ticket", Value: ticket}, {Key: "status", Value: "worker_down"}}, false)
-				fmt.Fprintln(os.Stdout, string(data))
+				fmt.Fprintln(safeStdout, string(data))
 				reviewWaitFailure(args, 3, nil, before)
 				return 3
 			}
@@ -658,7 +658,7 @@ func reviewWaitSay(out ledger.Object) int {
 		return 1
 	}
 	reviewWaitBreadcrumb()
-	fmt.Fprintln(os.Stdout, string(data))
+	fmt.Fprintln(safeStdout, string(data))
 	return 0
 }
 
@@ -705,7 +705,7 @@ func reviewWaitBreadcrumb() []any {
 func reviewWaitUsageError(args []string, message string) int {
 	before := reviewWaitBreadcrumb()
 	text := "review-file: " + message + "\n" + reviewWaitUsage
-	fmt.Fprint(os.Stderr, text)
+	fmt.Fprint(safeStderr, text)
 	reviewWaitFailure(args, 2, text, before)
 	return 2
 }

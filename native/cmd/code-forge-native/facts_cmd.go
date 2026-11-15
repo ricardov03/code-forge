@@ -49,7 +49,7 @@ func runFactsVerb(args []string) int {
 		crumbBytes, crumbErr := os.ReadFile(crumbFile)
 		before := gatesBreadcrumbName("facts")
 		stderr := &contextErrWriter{}
-		code, handover := fcRunFacts(plan, os.Stdout, stderr)
+		code, handover := fcRunFacts(plan, safeStdout, stderr)
 		if handover {
 			fcRestoreCrumbs(crumbBytes, crumbErr == nil)
 			return metaHandover("facts", args, hFactsSession)

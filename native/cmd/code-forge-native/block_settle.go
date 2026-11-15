@@ -100,7 +100,7 @@ func settleParse(args []string) (settleOptions, bool, string) {
 	return o, false, ""
 }
 
-func runBlockSettle(args []string) int { return blockSettle(args, os.Stdout, os.Stderr) }
+func runBlockSettle(args []string) int { return blockSettle(args, safeStdout, safeStderr) }
 
 // settleAction is one fix settle ran, as the block.settle row records it.
 type settleAction struct {

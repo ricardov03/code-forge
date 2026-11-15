@@ -118,11 +118,11 @@ func dryRunPrint(stdout io.Writer, verb, id string, formatted []any, jsonFlag bo
 // closeDryRun is block close <id> --run <r> --dry-run [--json] (args without
 // --dry-run). It runs the close's read-only boundary and never hands over.
 func closeDryRun(args []string) int {
-	id, rows, flags, code := closeDryRows(args, os.Stderr)
+	id, rows, flags, code := closeDryRows(args, safeStderr)
 	if code >= 0 {
 		return code
 	}
-	return dryRunPrint(os.Stdout, "close", id, rows, flags["json"] == true)
+	return dryRunPrint(safeStdout, "close", id, rows, flags["json"] == true)
 }
 
 // closeDryRows runs the close preview and returns its blocker rows (the
@@ -201,7 +201,7 @@ func dryRunEntry(run, id string) ledger.Object {
 // owner's terminal question, which a dry run never asks. --note is optional.
 func humanPassDryRun(args []string) int {
 	usage := func(text string) int {
-		fmt.Fprintln(os.Stderr, "block human-pass:", text)
+		fmt.Fprintln(safeStderr, "block human-pass:", text)
 		return 2
 	}
 	flags, pos, message := blockFlags(args)
@@ -245,7 +245,7 @@ func humanPassDryRun(args []string) int {
 		entry = blockObject(blockObject(record.Get("blocks")).Get(id))
 		blockers = humanPassDryBlockers(home, run, id, record, entry, blockString(flags["note"]))
 	}
-	return dryRunPrint(os.Stdout, "human-pass", id, closeBlockersRows(blockers, id, run, flags, entry, true), flags["json"] == true)
+	return dryRunPrint(safeStdout, "human-pass", id, closeBlockersRows(blockers, id, run, flags, entry, true), flags["json"] == true)
 }
 
 // humanPassDryBlockers mirrors blockHumanPass's checks in its order; the

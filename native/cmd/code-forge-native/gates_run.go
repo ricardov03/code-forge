@@ -41,7 +41,7 @@ func gatesErrf(format string, args ...any) {
 	if t := errorLogTrim(s); t != "" {
 		gatesLastMessage = t
 	}
-	fmt.Fprint(os.Stderr, s)
+	fmt.Fprint(safeStderr, s)
 }
 func gatesFinish(args []string, code int) {
 	before := gatesBreadcrumb()
@@ -257,7 +257,7 @@ func gatesAdd(o *ledger.Object, fields ledger.Object) {
 }
 func gatesSay(o ledger.Object, secrets []string) {
 	b, _ := ledger.Stringify(gates.Redact(o, secrets), false)
-	fmt.Fprintln(os.Stdout, gates.Mask(string(b), secrets))
+	fmt.Fprintln(safeStdout, gates.Mask(string(b), secrets))
 }
 func gatesError(e error) (int, bool) { gatesErrf("gates run: %s\n", e); return 1, true }
 func gatesNumber(v any) (float64, bool) {

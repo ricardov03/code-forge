@@ -154,7 +154,7 @@ func landBatchPush(flags map[string]any, home, run string, ids []string) (string
 	if err != nil {
 		return landed[0], err
 	}
-	_, err = landPush(home, run, landed, main, base, flags["watch-ci"] == true, os.Stderr)
+	_, err = landPush(home, run, landed, main, base, flags["watch-ci"] == true, safeStderr)
 	return landed[0], err
 }
 
@@ -172,9 +172,9 @@ func landPushOnly(flags map[string]any, home, run string, record ledger.Object, 
 			return false, 0
 		}
 	}
-	fmt.Fprintf(os.Stderr, "block land: %s already landed; pushing main only\n", strings.Join(ids, ","))
+	fmt.Fprintf(safeStderr, "block land: %s already landed; pushing main only\n", strings.Join(ids, ","))
 	if _, err := landBatchPush(flags, home, run, ids); err != nil {
-		fmt.Fprintln(os.Stderr, "block land: "+err.Error())
+		fmt.Fprintln(safeStderr, "block land: "+err.Error())
 		return true, 1
 	}
 	return true, 0
