@@ -215,6 +215,7 @@ func verifyLedger(home, runID string) (verification, error) {
 	if len(key) != 32 {
 		return result, fmt.Errorf("run signer key is not 32 bytes")
 	}
+	sign.KeyLoaded(key) // loadKey registers the key (B710)
 	data, err := os.ReadFile(filepath.Join(runs, runID+".json"))
 	if err != nil {
 		return result, fmt.Errorf("read run record: %w", err)

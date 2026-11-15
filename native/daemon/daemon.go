@@ -548,6 +548,7 @@ func (s *server) prune(block string) object {
 	if err != nil || len(key) != 32 {
 		return failure("run-key")
 	}
+	sign.KeyLoaded(key) // loadKey registers the key (B710)
 	closed := false
 	for _, value := range s.rows {
 		row := mapping(value)

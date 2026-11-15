@@ -34,6 +34,7 @@ import (
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/pkgroot"
 	"github.com/ricardov03/code-forge/native/session"
+	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/worker"
 )
@@ -484,6 +485,7 @@ func dfLoadKey(home, runID string) ([]byte, error) {
 	if len(key) != 32 {
 		return nil, errors.New("bad-key")
 	}
+	sign.KeyLoaded(key) // loadKey registers the key (B710)
 	return key, nil
 }
 

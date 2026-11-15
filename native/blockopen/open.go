@@ -89,6 +89,7 @@ func loadKey(home, run string) ([]byte, error) {
 	if len(key) != 32 {
 		return nil, refusal("bad-key", "run "+run+" signer key is not 32 bytes")
 	}
+	sign.KeyLoaded(key) // loadKey registers the key (B710)
 	return key, nil
 }
 
