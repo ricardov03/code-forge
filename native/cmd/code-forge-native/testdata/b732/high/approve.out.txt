@@ -1,0 +1,6 @@
+{
+ "code": 0,
+ "stdout": "autopilot approve run r-fix: project.name changed until 2026-11-11T11:00:00.000Z (approval apr-0000aaa1); the old value comes back then\n",
+ "stderr": "",
+ "prompt": "Approve project.name = \"x\\ud800y\" for run r-fix until 2026-11-11T11:00:00.000Z? The old value comes back then."
+}

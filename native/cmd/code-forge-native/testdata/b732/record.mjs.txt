@@ -1,0 +1,46 @@
+// B732: record Node's autopilot approve (and the restore at until) for one --value.
+// usage: node b732-record.mjs <outdir> <key> <valueJSON> <until> <startYml>
+import { mkdirSync, writeFileSync, readFileSync, existsSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+const [outRel, key, value, until, startYml] = process.argv.slice(2);
+mkdirSync(outRel, { recursive: true });
+const outDir = realpathSync(outRel);
+const WT = '/Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b732';
+const fx = path.join(WT, 'native/cmd/code-forge-native/testdata/b536');
+mkdirSync(outDir, { recursive: true });
+const home = path.join(outDir, 'home'), ws = path.join(outDir, 'ws');
+const runs = path.join(home, '.code-forge', 'runs');
+mkdirSync(runs, { recursive: true }); mkdirSync(ws, { recursive: true });
+execFileSync('git', ['init', '-q', ws]);
+writeFileSync(path.join(runs, 'r-fix.json'), readFileSync(path.join(fx, 'start.json'), 'utf8').replaceAll('@WORKSPACE@', ws), { mode: 0o600 });
+writeFileSync(path.join(runs, 'r-fix.key'), Buffer.alloc(32, 7), { mode: 0o600 });
+writeFileSync(path.join(ws, '.code-forge.yml'), readFileSync(startYml));
+process.env.HOME = home;
+process.env.CODE_FORGE_TMP_ROOT = path.join(outDir, 'tmp');
+process.chdir(ws);
+const { runAutopilot } = await import(path.join(WT, 'src/cli/autopilot.mjs'));
+const snap = (name, res) => {
+  const cfg = readFileSync(path.join(ws, '.code-forge.yml'), 'utf8');
+  const rec = readFileSync(path.join(runs, 'r-fix.json'), 'utf8').replaceAll(ws, '@WORKSPACE@');
+  const lf = path.join(home, '.code-forge', 'ledger', 'ws.jsonl');
+  const led = existsSync(lf) ? readFileSync(lf, 'utf8') : '';
+  writeFileSync(path.join(outDir, name + '.yml'), cfg);
+  writeFileSync(path.join(outDir, name + '.json'), rec);
+  writeFileSync(path.join(outDir, name + '.ledger.txt'), led);
+  writeFileSync(path.join(outDir, name + '.out.txt'), JSON.stringify(res, null, 1) + '\n');
+};
+const call = async (args, at) => {
+  let out = '', err = '', prompt = null;
+  const code = await runAutopilot(args, {
+    stdout: { write: (s) => { out += s; return true; } }, stderr: { write: (s) => { err += s; return true; } },
+    now: () => new Date(at), isTTY: true,
+    ui: { confirm: async (o) => { prompt = o.message; return true; }, isCancel: () => false },
+  });
+  return { code, stdout: out, stderr: err, prompt };
+};
+const a = await call(['approve', '--run', 'r-fix', '--key', key, '--value', value, '--until', until], '2026-11-11T10:00:00.000Z');
+snap('approve', a);
+const r = await call(['status', '--run', 'r-fix'], until);
+r.stdout = '(status text not kept)';
+snap('restore', r);

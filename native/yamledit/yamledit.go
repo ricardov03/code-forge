@@ -430,6 +430,9 @@ var reFlowChar = regexp.MustCompile(`[[\]{},]`)
 // position, block context).
 func createdString(v string) (string, error) {
 	if !safeText(v) {
+		if q, ok := surrogateQuoted(v); ok {
+			return q, nil // B732: stringifyString's QUOTE_DOUBLE for a lone surrogate
+		}
 		return "", refuse("a string with a character outside printable ASCII")
 	}
 	if rePlainBad.MatchString(v) {
@@ -1093,6 +1096,21 @@ func readQuoted(s string) (*node, int, error) {
 			return nil, 0, refuse("a quoted string over more than one line")
 		}
 		v := s[1 : 1+j]
+		if strings.Contains(v, `\`) && safeText(v) {
+			// B732: JSON.stringify's form of a string with a lone surrogate;
+			// an escaped quote never ends the scalar
+			for j > 0 && strings.HasSuffix(s[1:1+j], `\`) && (len(s[1:1+j])-len(strings.TrimRight(s[1:1+j], `\`)))%2 == 1 {
+				k := strings.IndexByte(s[2+j:], '"')
+				if k < 0 {
+					return nil, 0, refuse("a quoted string over more than one line")
+				}
+				j += 1 + k
+			}
+			if text, ok := surrogateUnquote(s[1 : 1+j]); ok {
+				return &node{kind: kScalar, out: s[:j+2], value: text}, j + 2, nil
+			}
+		}
+		v = s[1 : 1+j]
 		if strings.Contains(v, `\`) || !safeText(v) {
 			return nil, 0, refuse("a double-quoted string with an escape")
 		}

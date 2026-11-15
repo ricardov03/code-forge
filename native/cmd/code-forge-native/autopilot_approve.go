@@ -170,17 +170,11 @@ func autopilotPlainPrompt(key, runID string, value any) bool {
 	return true
 }
 
-// autopilotLoneSurrogate: a \uD800-\uDFFF escape, which JSON.parse keeps as a
-// lone UTF-16 unit and Go cannot hold in a string.
-var autopilotLoneSurrogate = regexp.MustCompile(`\\u[dD][89a-fA-F][0-9a-fA-F]{2}`)
-
 // autopilotJSONValue is JSON.parse of --value (already valid JSON), with
-// JSON.parse's property order.
+// JSON.parse's property order. A lone \uD800-\uDFFF escape stays a lone
+// surrogate (WTF-8), as JSON.parse keeps it a lone UTF-16 unit (B732).
 func autopilotJSONValue(text string) (any, bool) {
-	if autopilotLoneSurrogate.MatchString(text) {
-		return nil, false
-	}
-	obj, err := ledger.DecodeObject([]byte(`{"v":` + text + `}`))
+	obj, err := ledger.ParseObject([]byte(`{"v":` + text + `}`))
 	if err != nil {
 		return nil, false
 	}

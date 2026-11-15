@@ -1,0 +1,44 @@
+// B732: what the yaml package (editDoc, as limits.mjs) writes for strings
+// with a \uD800-\uDFFF escape. YAML_JS=<node_modules/yaml/dist/index.js>
+// node gen_b732.mjs.txt > b732.json (run as .mjs). value is the JSON text of the value.
+import { pathToFileURL } from 'node:url';
+const { parseDocument } = await import(pathToFileURL(process.env.YAML_JS).href);
+function edit(text, segs, change) {
+  const doc = parseDocument(text, { prettyErrors: false });
+  const js = doc.errors.length === 0 ? doc.toJS() : null;
+  if (js === null || typeof js !== 'object' || Array.isArray(js)) return { error: 'parse' };
+  try {
+    if ('set' in change) doc.setIn(segs, doc.createNode(change.set));
+    else doc.deleteIn(segs);
+  } catch { return { error: 'throw' }; }
+  try { return { out: String(doc) }; } catch { return { error: 'stringify' }; }
+}
+const cases = [];
+function add(name, text, key, op, json) {
+  const segs = key.split('.');
+  const c = { name, text, segs, op };
+  if (op === 'set') Object.assign(c, { value: json }, edit(text, segs, { set: JSON.parse(json) }));
+  else Object.assign(c, edit(text, segs, { remove: true }));
+  cases.push(c);
+}
+const BASE = 'version: 1\nproject:\n  slug: s # keep\n';
+add('high', BASE, 'project.name', 'set', '"x\\ud800y"');
+add('low upper', BASE, 'project.name', 'set', '"\\uDC00"');
+add('quote and backslash', BASE, 'project.name', 'set', '"a\\"\\ud800\\\\"');
+add('two lone', BASE, 'project.name', 'set', '"\\udc00\\ud800"');
+add('high then text then low', BASE, 'project.name', 'set', '"\\ud800-\\udc00"');
+add('looks plain', BASE, 'project.name', 'set', '"- \\ud800: #x"');
+add('long', BASE, 'project.name', 'set', JSON.stringify('w '.repeat(30)).slice(0, -1) + '\\ud800"');
+add('very long', BASE, 'project.name', 'set', JSON.stringify('w '.repeat(40)).slice(0, -1) + '\\ud800"');
+add('in a list', BASE, 'review.exclude', 'set', '["\\udbff","ok"]');
+add('in a map', BASE, 'project.meta', 'set', '{"a":"\\ud800","b":1}');
+const HAS = 'version: 1\nproject:\n  name: "x\\ud800y" # c\n  slug: s\n';
+add('read and replace', HAS, 'project.name', 'set', '"plain"');
+add('read and remove', HAS, 'project.name', 'remove');
+add('read and set sibling', HAS, 'project.slug', 'set', '"t"');
+add('read escaped quote', 'version: 1\nproject:\n  name: "a\\"\\ud800\\\\"\n', 'project.slug', 'set', '"t"');
+add('read in a list', 'version: 1\nreview:\n  exclude:\n    - "\\udbff"\n    - ok\n', 'project.slug', 'set', '"t"');
+add('read pair escape', 'version: 1\nproject:\n  name: "\\ud83d\\ude00"\n', 'project.slug', 'set', '"t"');
+add('read upper escape', 'version: 1\nproject:\n  name: "\\uD800"\n', 'project.slug', 'set', '"t"');
+add('read other escape', 'version: 1\nproject:\n  name: "\\ud800\\n"\n', 'project.slug', 'set', '"t"');
+process.stdout.write(JSON.stringify(cases, null, 2) + '\n');

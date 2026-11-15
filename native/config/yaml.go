@@ -72,7 +72,23 @@ func ParseOrdered(source string) (any, error) {
 	return value, err
 }
 
+// parseYAMLWith is parseYAMLSource; a source yaml.v3 refuses that holds a
+// \udXXX escape is read again as Node reads it (B732, surrogate.go). When
+// that read fails too, the first error stands.
 func parseYAMLWith(source string, ordered bool) (any, map[uintptr][]string, error) {
+	value, order, err := parseYAMLSource(source, ordered, nil)
+	if err == nil {
+		return value, order, nil
+	}
+	if swapped, slots, ok := substituteSurrogates(source); ok {
+		if again, againOrder, againErr := parseYAMLSource(swapped, ordered, slots); againErr == nil {
+			return again, againOrder, nil
+		}
+	}
+	return value, order, err
+}
+
+func parseYAMLSource(source string, ordered bool, slots *surrogateSlots) (any, map[uintptr][]string, error) {
 	order := map[uintptr][]string{}
 	var doc yaml.Node
 	decoder := yaml.NewDecoder(strings.NewReader(source))
@@ -96,7 +112,7 @@ func parseYAMLWith(source string, ordered bool) (any, map[uintptr][]string, erro
 	if len(doc.Content) == 0 {
 		return nil, order, nil
 	}
-	value, err := (&yamlReader{active: map[*yaml.Node]bool{}, anchors: map[*yaml.Node]*yamlAnchor{}, source: source, order: order, ordered: ordered}).value(doc.Content[0])
+	value, err := (&yamlReader{active: map[*yaml.Node]bool{}, anchors: map[*yaml.Node]*yamlAnchor{}, source: source, order: order, ordered: ordered, slots: slots}).value(doc.Content[0])
 	return value, order, err
 }
 
@@ -109,6 +125,7 @@ type yamlAnchor struct {
 type yamlReader struct {
 	active  map[*yaml.Node]bool
 	anchors map[*yaml.Node]*yamlAnchor
+	slots   *surrogateSlots // B732: the \udXXX texts of a substituted source
 	source  string
 	order   map[uintptr][]string
 	ordered bool
@@ -222,7 +239,11 @@ func (r *yamlReader) readValue(node *yaml.Node) (any, error) {
 		if node.Style&yaml.TaggedStyle != 0 && node.Tag == "!!timestamp" && !timestamp.MatchString(node.Value) {
 			return nil, yamlError("TAG_RESOLVE_FAILED", "!!timestamp expects a date, starting with yyyy-mm-dd", node.Line, node.Column)
 		}
-		return scalar(node), nil
+		value := scalar(node)
+		if text, isText := value.(string); isText && r.slots != nil {
+			return r.slots.restore(text), nil
+		}
+		return value, nil
 	}
 }
 

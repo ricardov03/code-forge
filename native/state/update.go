@@ -43,13 +43,14 @@ func BlockChanged(runID, blockID string) error {
 	return &Error{"block-changed", fmt.Sprintf("block-changed: block %s of run %s was changed by another verb while this one ran; nothing was saved for it; run the verb again", blockID, runID)}
 }
 
-// CloneObject is a deep copy of an ordered object (nested objects included).
+// CloneObject is a deep copy of an ordered object (nested objects included),
+// lone surrogates kept (B732).
 func CloneObject(o ledger.Object) ledger.Object {
 	data, err := ledger.Stringify(o, false)
 	if err != nil {
 		return o.Clone()
 	}
-	clone, err := ledger.DecodeObject(data)
+	clone, err := ledger.ParseObject(data)
 	if err != nil {
 		return o.Clone()
 	}

@@ -1,0 +1,199 @@
+[
+  {
+    "name": "high",
+    "text": "version: 1\nproject:\n  slug: s # keep\n",
+    "segs": [
+      "project",
+      "name"
+    ],
+    "op": "set",
+    "value": "\"x\\ud800y\"",
+    "out": "version: 1\nproject:\n  slug: s # keep\n  name: \"x\\ud800y\"\n"
+  },
+  {
+    "name": "low upper",
+    "text": "version: 1\nproject:\n  slug: s # keep\n",
+    "segs": [
+      "project",
+      "name"
+    ],
+    "op": "set",
+    "value": "\"\\uDC00\"",
+    "out": "version: 1\nproject:\n  slug: s # keep\n  name: \"\\udc00\"\n"
+  },
+  {
+    "name": "quote and backslash",
+    "text": "version: 1\nproject:\n  slug: s # keep\n",
+    "segs": [
+      "project",
+      "name"
+    ],
+    "op": "set",
+    "value": "\"a\\\"\\ud800\\\\\"",
+    "out": "version: 1\nproject:\n  slug: s # keep\n  name: \"a\\\"\\ud800\\\\\"\n"
+  },
+  {
+    "name": "two lone",
+    "text": "version: 1\nproject:\n  slug: s # keep\n",
+    "segs": [
+      "project",
+      "name"
+    ],
+    "op": "set",
+    "value": "\"\\udc00\\ud800\"",
+    "out": "version: 1\nproject:\n  slug: s # keep\n  name: \"\\udc00\\ud800\"\n"
+  },
+  {
+    "name": "high then text then low",
+    "text": "version: 1\nproject:\n  slug: s # keep\n",
+    "segs": [
+      "project",
+      "name"
+    ],
+    "op": "set",
+    "value": "\"\\ud800-\\udc00\"",
+    "out": "version: 1\nproject:\n  slug: s # keep\n  name: \"\\ud800-\\udc00\"\n"
+  },
+  {
+    "name": "looks plain",
+    "text": "version: 1\nproject:\n  slug: s # keep\n",
+    "segs": [
+      "project",
+      "name"
+    ],
+    "op": "set",
+    "value": "\"- \\ud800: #x\"",
+    "out": "version: 1\nproject:\n  slug: s # keep\n  name: \"- \\ud800: #x\"\n"
+  },
+  {
+    "name": "long",
+    "text": "version: 1\nproject:\n  slug: s # keep\n",
+    "segs": [
+      "project",
+      "name"
+    ],
+    "op": "set",
+    "value": "\"w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w \\ud800\"",
+    "out": "version: 1\nproject:\n  slug: s # keep\n  name: \"w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w \\ud800\"\n"
+  },
+  {
+    "name": "very long",
+    "text": "version: 1\nproject:\n  slug: s # keep\n",
+    "segs": [
+      "project",
+      "name"
+    ],
+    "op": "set",
+    "value": "\"w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w \\ud800\"",
+    "out": "version: 1\nproject:\n  slug: s # keep\n  name: \"w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w w\n    w w w \\ud800\"\n"
+  },
+  {
+    "name": "in a list",
+    "text": "version: 1\nproject:\n  slug: s # keep\n",
+    "segs": [
+      "review",
+      "exclude"
+    ],
+    "op": "set",
+    "value": "[\"\\udbff\",\"ok\"]",
+    "out": "version: 1\nproject:\n  slug: s # keep\nreview:\n  exclude:\n    - \"\\udbff\"\n    - ok\n"
+  },
+  {
+    "name": "in a map",
+    "text": "version: 1\nproject:\n  slug: s # keep\n",
+    "segs": [
+      "project",
+      "meta"
+    ],
+    "op": "set",
+    "value": "{\"a\":\"\\ud800\",\"b\":1}",
+    "out": "version: 1\nproject:\n  slug: s # keep\n  meta:\n    a: \"\\ud800\"\n    b: 1\n"
+  },
+  {
+    "name": "read and replace",
+    "text": "version: 1\nproject:\n  name: \"x\\ud800y\" # c\n  slug: s\n",
+    "segs": [
+      "project",
+      "name"
+    ],
+    "op": "set",
+    "value": "\"plain\"",
+    "out": "version: 1\nproject:\n  name: plain\n  slug: s\n"
+  },
+  {
+    "name": "read and remove",
+    "text": "version: 1\nproject:\n  name: \"x\\ud800y\" # c\n  slug: s\n",
+    "segs": [
+      "project",
+      "name"
+    ],
+    "op": "remove",
+    "out": "version: 1\nproject:\n  slug: s\n"
+  },
+  {
+    "name": "read and set sibling",
+    "text": "version: 1\nproject:\n  name: \"x\\ud800y\" # c\n  slug: s\n",
+    "segs": [
+      "project",
+      "slug"
+    ],
+    "op": "set",
+    "value": "\"t\"",
+    "out": "version: 1\nproject:\n  name: \"x\\ud800y\" # c\n  slug: t\n"
+  },
+  {
+    "name": "read escaped quote",
+    "text": "version: 1\nproject:\n  name: \"a\\\"\\ud800\\\\\"\n",
+    "segs": [
+      "project",
+      "slug"
+    ],
+    "op": "set",
+    "value": "\"t\"",
+    "out": "version: 1\nproject:\n  name: \"a\\\"\\ud800\\\\\"\n  slug: t\n"
+  },
+  {
+    "name": "read in a list",
+    "text": "version: 1\nreview:\n  exclude:\n    - \"\\udbff\"\n    - ok\n",
+    "segs": [
+      "project",
+      "slug"
+    ],
+    "op": "set",
+    "value": "\"t\"",
+    "out": "version: 1\nreview:\n  exclude:\n    - \"\\udbff\"\n    - ok\nproject:\n  slug: t\n"
+  },
+  {
+    "name": "read pair escape",
+    "text": "version: 1\nproject:\n  name: \"\\ud83d\\ude00\"\n",
+    "segs": [
+      "project",
+      "slug"
+    ],
+    "op": "set",
+    "value": "\"t\"",
+    "out": "version: 1\nproject:\n  name: \"😀\"\n  slug: t\n"
+  },
+  {
+    "name": "read upper escape",
+    "text": "version: 1\nproject:\n  name: \"\\uD800\"\n",
+    "segs": [
+      "project",
+      "slug"
+    ],
+    "op": "set",
+    "value": "\"t\"",
+    "out": "version: 1\nproject:\n  name: \"\\ud800\"\n  slug: t\n"
+  },
+  {
+    "name": "read other escape",
+    "text": "version: 1\nproject:\n  name: \"\\ud800\\n\"\n",
+    "segs": [
+      "project",
+      "slug"
+    ],
+    "op": "set",
+    "value": "\"t\"",
+    "out": "version: 1\nproject:\n  name: \"\\ud800\\n\"\n  slug: t\n"
+  }
+]

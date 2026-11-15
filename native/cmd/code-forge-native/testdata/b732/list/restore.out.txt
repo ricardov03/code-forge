@@ -1,0 +1,6 @@
+{
+ "code": 0,
+ "stdout": "(status text not kept)",
+ "stderr": "autopilot: approval apr-0000aaa1 expired; the old value is back\n",
+ "prompt": null
+}

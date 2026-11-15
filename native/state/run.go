@@ -80,6 +80,8 @@ func WithRunLock(home, runID string, fn func() error) (err error) {
 }
 
 // ReadRun reads the authoritative record, preserving every object's key order.
+// A lone surrogate escape stays a lone surrogate (WTF-8), as JSON.parse keeps
+// it (B732: a config snapshot of an approved \udXXX value).
 func ReadRun(home, runID string) (ledger.Object, error) {
 	file, err := recordPath(home, runID)
 	if err != nil {
@@ -92,7 +94,7 @@ func ReadRun(home, runID string) (ledger.Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ledger.DecodeObject(data)
+	return ledger.ParseObject(data)
 }
 
 // SaveRun atomically replaces the private authoritative record, then its mirror
