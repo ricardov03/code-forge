@@ -85,6 +85,10 @@ func b688Package(t *testing.T, name string) (root, binary string) {
 	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// A hard link costs no disk space; copy only when linking fails.
+	if os.Link(os.Args[0], binary) == nil {
+		return root, binary
+	}
 	src, err := os.Open(os.Args[0])
 	if err != nil {
 		t.Fatal(err)
