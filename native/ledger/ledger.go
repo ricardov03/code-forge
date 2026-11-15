@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/ricardov03/code-forge/native/jsonx"
 )
 
 // Index retains each inode's parsed lines and physical read offset. An unfinished
@@ -120,10 +122,29 @@ func (idx *Index) Refresh(dir, slug string) ([]Row, error) {
 }
 
 func parseLine(data []byte) parsedLine {
-	var row Row
-	err := json.Unmarshal(data, &row)
+	row, err := ParseRow(data)
 	return parsedLine{row: row, err: err}
 }
+
+// ParseRow is Node's JSON.parse of one ledger line. encoding/json reads a
+// lone surrogate escape (\ud800, which JSON.stringify writes for a lone
+// surrogate) as U+FFFD, so a signed row Node verifies would not verify in Go.
+// A line holding such an escape is read by jsonx, which keeps the surrogate
+// as WTF-8 (B716 fix1); gatecheck.Verified then checks it as Node does.
+func ParseRow(data []byte) (Row, error) {
+	var row Row
+	err := json.Unmarshal(data, &row)
+	if err != nil || !surrogateEscape.Match(data) {
+		return row, err
+	}
+	if v, xerr := jsonx.Parse(jsonx.DecodeUTF8(data)); xerr == nil && jsonx.ContainsLoneSurrogate(v) {
+		return v, nil
+	}
+	return row, nil
+}
+
+// surrogateEscape finds a \uD800-\uDFFF escape (or text that looks like one).
+var surrogateEscape = regexp.MustCompile(`\\u[dD][89a-fA-F]`)
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
@@ -207,8 +228,8 @@ func readFile(file string) ([]Row, error) {
 	}
 	rows := []Row{}
 	for i, line := range lines {
-		var row Row
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
+		row, err := ParseRow([]byte(line))
+		if err != nil {
 			if i == len(lines)-1 {
 				continue
 			}

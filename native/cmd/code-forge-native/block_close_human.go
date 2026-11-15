@@ -196,11 +196,14 @@ func closeClaimOf(mainTop, run, id string, rows []gatecheck.Row, key []byte) fun
 }
 
 // closeDecideSigned is a decision row as the preview's gate reads it: signed
-// with the run, through the ledger's JSON shape. B716: decision rows hold
-// only text and finite numbers, which canon.Marshal and ledger.Stringify always
-// encode (invalid UTF-8 becomes U+FFFD on both sides), so signing cannot fail
-// and the round trip always verifies (TestB716DecisionRowsAlwaysSign). A
-// failure is a broken invariant, not a case to hand to Node.
+// with the run, written in the ledger's JSON shape and read back with the
+// ledger reader the close gate uses (ledger.ParseRow, which keeps a lone
+// surrogate as Node's JSON.parse does). B716: decision rows hold only text and
+// finite numbers, which canon.Marshal and ledger.Stringify always encode
+// (invalid UTF-8 becomes U+FFFD on both sides, a lone surrogate \udXXX), so
+// signing cannot fail and the round trip always verifies
+// (TestB716DecisionRowsAlwaysSign). A failure is a broken invariant, not a
+// case to hand to Node.
 func closeDecideSigned(run string, row ledger.Object, key []byte) gatecheck.Row {
 	signed := row.Map()
 	signed["run"] = run
@@ -209,11 +212,12 @@ func closeDecideSigned(run string, row ledger.Object, key []byte) gatecheck.Row 
 	if err == nil {
 		data, err = ledger.Stringify(signed, false)
 	}
-	var r map[string]any
+	var parsed ledger.Row
 	if err == nil {
-		err = json.Unmarshal(data, &r)
+		parsed, err = ledger.ParseRow(data)
 	}
-	if err != nil || !gatecheck.Verified(r, key) {
+	r, _ := parsed.(map[string]any)
+	if err != nil || r == nil || !gatecheck.Verified(r, key) {
 		panic(fmt.Sprintf("B716: a decision row did not sign: %v", err))
 	}
 	return r
