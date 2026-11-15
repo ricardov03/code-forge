@@ -18,6 +18,12 @@ import (
 func init() {
 	keysSecurityBin = "/nonexistent-b610/security"
 	kcPackageRoot = func() string { return "" }
+	// B707: the default is macOS with no usable `security` on every host,
+	// so the keychain hand-overs the tests expect do not depend on the OS
+	// the tests run on (since B679 a Linux host without @napi-rs/keyring's
+	// binding is the file store alone, served in Go). Tests that need Linux
+	// say so (b679Linux, b707_keychain_host_test.go).
+	keysGOOS = "darwin"
 }
 
 // b610Script is `security` over a dir of items (<service>.<account>): help,
