@@ -251,8 +251,6 @@ const (
 	hAutopilotRestoreReloadShape
 	hInitWizardShape
 	hInitWizardEOF
-	hInitWizardTools
-	hInitWizardModels
 	hInitJevKeychain
 	hSpawnCoderRun
 	hSpawnBackgroundStart
@@ -556,8 +554,6 @@ var handoverReasons = [...]string{
 	hAutopilotRestoreReloadShape: "autopilot-restore-reload-shape",
 	hInitWizardShape:             "init-wizard-shape",
 	hInitWizardEOF:               "init-wizard-eof",
-	hInitWizardTools:             "init-wizard-tools",
-	hInitWizardModels:            "init-wizard-models",
 
 	// B548
 	hInitJevKeychain: "init-jev-keychain",

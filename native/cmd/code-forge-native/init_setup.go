@@ -1263,12 +1263,7 @@ func initSetupFinish(st initSetupState, parsed initParsed, jsonMode bool, wiz *i
 	}
 
 	// the steps after the write (B548): a cache Go cannot write like Node,
-	// or a doctor row Go cannot give like Node, hands over now; the wizard
-	// said its tool lines before its first prompt
-	var after []string
-	if v.tools == "recommended" && wiz != nil {
-		after = initWizToolLines(ctx)
-	}
+	// or a doctor row Go cannot give like Node, hands over now
 	if v.refreshModels && !modelsCacheWritable(home) {
 		return initSetupResult{}, hInitModels
 	}
@@ -1337,11 +1332,11 @@ func initSetupFinish(st initSetupState, parsed initParsed, jsonMode bool, wiz *i
 
 	return initSetupResult{
 		home: home, jsonMode: jsonMode, lines: lines, shown: len(summaryLines), printed: printed, settings: settings, blank: blank,
-		after: after, refreshModels: v.refreshModels, existingFile: existingFile, changeCount: changeCount,
+		refreshModels: v.refreshModels, existingFile: existingFile, changeCount: changeCount,
 		configFile: configFile, configText: text, writeConfig: writeConfig,
 		links: links, source: source, version: version, scope: v.scope, method: v.method, harnessCount: len(v.harnesses),
 		userFile: userFile, userText: userText, engineStop: engineStop, engine: merged.Get("engine"),
-		pre: pre, secrets: secrets, tools: v.tools == "recommended" && wiz == nil, solo: ctx.solo, yesTools: initYesTools(parsed),
+		pre: pre, secrets: secrets, tools: v.tools == "recommended", solo: ctx.solo, yesTools: initYesTools(parsed),
 		doctor: doctor,
 	}, 0
 }
@@ -1353,7 +1348,6 @@ type initSetupResult struct {
 	lines    []string
 	shown    int
 	printed  int
-	after    []string // tool lines, said after the config write (wizard)
 	// refreshModels: read the CLI model caches after the tools (wizard)
 	refreshModels bool
 	existingFile  bool
@@ -1432,9 +1426,6 @@ func initSetupRun(r initSetupResult) func(stdout, stderr io.Writer) int {
 					for _, line := range initToolLines(r.solo, r.yesTools) {
 						say(line)
 					}
-				}
-				for _, line := range r.after {
-					say(line)
 				}
 				if r.refreshModels {
 					line, err := initModelsLine(r.home)

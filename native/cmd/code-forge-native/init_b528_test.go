@@ -275,9 +275,9 @@ func TestB528InitWizardHandOvers(t *testing.T) {
 		env    map[string]string
 		reason string
 	}{
-		{"no colour", []string{"--skip-doctor", "--no-jev"}, map[string]string{"NO_COLOR": "1"}, "init-interactive"},
-		{"other terminal", []string{"--skip-doctor", "--no-jev"}, map[string]string{"TERM": "vt100"}, "init-interactive"},
-		{"tool installs", []string{"--skip-doctor", "--no-jev", "--yes-tool", "solo"}, nil, "init-wizard-tools"},
+		// B703: Node's colour warning carries its pid; clack's accessible mode
+		{"colour warning", []string{"--skip-doctor", "--no-jev"}, map[string]string{"FORCE_COLOR": "1", "NO_COLOR": "1"}, "init-interactive"},
+		{"accessible", []string{"--skip-doctor", "--no-jev"}, map[string]string{"ACCESSIBLE": "1"}, "init-interactive"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
