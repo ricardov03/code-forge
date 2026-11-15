@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-const mainUsage = "usage: cf-release <release|release-site|docs-block|changelog> [args...]"
+const mainUsage = "usage: cf-release <release|release-site|site-data|docs-block|changelog> [args...]"
 
 func run(a *app, args []string, root string) int {
 	if len(args) == 0 {
@@ -20,6 +20,8 @@ func run(a *app, args []string, root string) int {
 		return releaseMain(a, args[1:], root)
 	case "release-site":
 		return releaseSiteMain(a, args[1:], root)
+	case "site-data":
+		return siteDataMain(a, args[1:], root)
 	case "docs-block":
 		return docsBlockMain(a, args[1:], root)
 	case "changelog":

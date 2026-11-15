@@ -291,10 +291,10 @@ Release v0.22.0
 --- fake log
 <CASE>/repo npm view @example/pkg version
 <CASE>/repo go version
-<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/darwin-arm64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 GOTOOLCHAIN=local GOPROXY=off
-<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/darwin-x64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 GOTOOLCHAIN=local GOPROXY=off
-<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/linux-x64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOTOOLCHAIN=local GOPROXY=off
-<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/linux-arm64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=linux GOARCH=arm64 GOTOOLCHAIN=local GOPROXY=off
+<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -o <CASE>/repo/native/bin/darwin-arm64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 GOTOOLCHAIN=local GOPROXY=off
+<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -o <CASE>/repo/native/bin/darwin-x64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 GOTOOLCHAIN=local GOPROXY=off
+<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -o <CASE>/repo/native/bin/linux-x64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOTOOLCHAIN=local GOPROXY=off
+<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -o <CASE>/repo/native/bin/linux-arm64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=linux GOARCH=arm64 GOTOOLCHAIN=local GOPROXY=off
 <CASE>/repo/dist/npm/darwin-arm64 npm pack --dry-run --json
 <CASE>/repo/dist/npm/darwin-x64 npm pack --dry-run --json
 <CASE>/repo/dist/npm/linux-x64 npm pack --dry-run --json

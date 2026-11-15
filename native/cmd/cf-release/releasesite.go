@@ -477,9 +477,11 @@ func (a *app) releaseSite(argv []string, root string) (err error) {
 	if err := a.waitForNpm(root, name, version, opts.waitMin); err != nil {
 		return err
 	}
-	data, err := checked(root, []string{"node", "scripts/gen-site-data.mjs", "--tag", tag}, 0)
+	// B690d: the site data comes from Go (sitedata.go), not node scripts/gen-site-data.mjs.
+	home, _ := os.UserHomeDir()
+	data, err := siteDataJSON(root, tag, filepath.Join(home, ".code-forge", "ledger"))
 	if err != nil {
-		return err
+		return errors.New("site data: " + err.Error())
 	}
 	if _, err := jsParse(data); err != nil {
 		return errors.New("site data is not JSON: " + err.Error())
