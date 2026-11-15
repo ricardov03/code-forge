@@ -414,8 +414,29 @@ test('unsupported close cases hand over the original arguments before any state 
   }
   /** @type {Array<[string, Record<string, any>, string[]]>} */
   const delegated = [
-    ['grant', {}, []], ['approval', {}, []], ['stopped', {}, []],
+    ['grant', {}, []], ['approval', {}, []],
   ];
+  // B717/B735: a stopped review whose content did not restart (Node's requeueStoppedFiles
+  // restarts nothing here) closes in Go with no Node. Node's own result is the expectation:
+  // the same exit and the same review_cap blocker; Go's single close review wait (B339, Go
+  // only, review.close_wait_s) queues the unreviewed file and reports review_pending where
+  // Node reports unreviewed. The block stays open in both.
+  {
+    const config = { review: { close_wait_s: 1 } }, argv = [...args, '--json'];
+    const node = await launch(await fixture('stopped', config), argv, true);
+    const f = await fixture('stopped', config);
+    const result = await launch(f, argv);
+    assert.equal(node.code, 1, `stopped: Node refuses the close: ${node.stderr}`);
+    assert.equal(result.code, node.code, `stopped: Go exits as Node with Node unavailable: ${result.stderr}`);
+    const nodeOut = JSON.parse(node.stdout), goOut = JSON.parse(result.stdout);
+    assert.equal(goOut.ok, nodeOut.ok);
+    assert.deepEqual(goOut.blockers.filter((b) => b.code === 'review_cap'), nodeOut.blockers.filter((b) => b.code === 'review_cap'), 'stopped: the review_cap blocker is Node\'s');
+    assert.deepEqual(nodeOut.blockers.map((b) => [b.code, b.file]), [['unreviewed', 'sample.mjs'], ['review_cap', 'sample.mjs']]);
+    assert.deepEqual(goOut.blockers.map((b) => [b.code, b.file]), [['review_pending', 'sample.mjs'], ['review_cap', 'sample.mjs']]);
+    assert.match(result.stderr, /^close: queued review sample\.mjs ticket [0-9a-f]{24}\nblock B1 open: review_pending sample\.mjs; review_cap sample\.mjs F1\n$/);
+    const record = JSON.parse(await readFile(path.join(f.home, '.code-forge/runs', `${RUN}.json`), 'utf8'));
+    assert.equal(record.blocks.B1.status, 'open', 'stopped: the block stays open');
+  }
   for (const [kind, config, extra] of delegated) {
     const f = await fixture(kind, config), before = await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]);
     const result = await launch(f, [...args, ...extra, '--json']);
