@@ -215,7 +215,8 @@ func TestB703InitWizardMatchesNode(t *testing.T) {
 	}
 }
 
-// TestB703InitWizardHandOvers: what the wizard still hands to Node, decided
+// TestB703InitWizardHandOvers: what the wizard refuses in Go (it handed over
+// to Node before B690a), decided
 // before any prompt: a models cache Node cannot write (its refresh fails
 // with a stack after the prompts) and a hint state Go cannot judge.
 func TestB703InitWizardHandOvers(t *testing.T) {
@@ -239,8 +240,9 @@ func TestB703InitWizardHandOvers(t *testing.T) {
 			c.setup(t, home)
 			before := b528Tree(t, cwd, home, cwd)
 			code, transcript := b528Run(t, cwd, []string{"\r"}, "--skip-doctor", "--no-jev")
-			if code != 127 || !strings.HasPrefix(transcript, "code-forge-native: node executable") || strings.Count(transcript, "\n") != 1 {
-				t.Fatalf("code=%d transcript=%q; want the Node hand-over before any output", code, transcript)
+			// B690a (B756): the case is refused in Go, before any output.
+			if code != 1 || !b690aIsRefusal(transcript) {
+				t.Fatalf("code=%d transcript=%q; want the Go refusal before any output", code, transcript)
 			}
 			data, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
 			var row handoverRow
@@ -248,7 +250,7 @@ func TestB703InitWizardHandOvers(t *testing.T) {
 				t.Fatalf("handover row %q; want reason %q", data, c.reason)
 			}
 			if after := b528Tree(t, cwd, home, cwd); after != before {
-				t.Fatalf("Go wrote into the project before the hand-over:\n%s", after)
+				t.Fatalf("Go wrote into the project before the refusal:\n%s", after)
 			}
 		})
 	}

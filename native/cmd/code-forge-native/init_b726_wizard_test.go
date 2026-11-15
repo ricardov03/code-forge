@@ -146,8 +146,9 @@ func TestB726InitWizardMatchesNode(t *testing.T) {
 	}
 }
 
-// TestB726InitWizardShapeHandOver: what init-wizard-shape still hands to
-// Node, before any prompt and with nothing written: a level, Solo project
+// TestB726InitWizardShapeHandOver: what init-wizard-shape refuses in Go (it
+// handed over to Node before B690a), before any prompt and with nothing
+// written: a level, Solo project
 // or tools value whose type Node prints as JavaScript would (a number
 // effort, a list as a level, a map as the Solo project id).
 func TestB726InitWizardShapeHandOver(t *testing.T) {
@@ -168,8 +169,9 @@ func TestB726InitWizardShapeHandOver(t *testing.T) {
 			t.Setenv("SOLO_MCP_PATH", "/opt/solo-mcp")
 			before := b528Tree(t, cwd, home, cwd)
 			code, transcript := b528Run(t, cwd, []string{"\r"}, "--skip-doctor", "--no-jev")
-			if code != 127 || !strings.HasPrefix(transcript, "code-forge-native: node executable") || strings.Count(transcript, "\n") != 1 {
-				t.Fatalf("code=%d transcript=%q; want the Node hand-over before any output", code, transcript)
+			// B690a (B756): the case is refused in Go, before any output.
+			if code != 1 || !b690aIsRefusal(transcript) {
+				t.Fatalf("code=%d transcript=%q; want the Go refusal before any output", code, transcript)
 			}
 			data, _ := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
 			var row handoverRow
@@ -177,7 +179,7 @@ func TestB726InitWizardShapeHandOver(t *testing.T) {
 				t.Fatalf("handover row %q; want init-wizard-shape", data)
 			}
 			if after := b528Tree(t, cwd, home, cwd); after != before {
-				t.Fatalf("Go wrote into the project before the hand-over:\n%s", after)
+				t.Fatalf("Go wrote into the project before the refusal:\n%s", after)
 			}
 		})
 	}
