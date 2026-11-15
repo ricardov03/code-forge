@@ -13,6 +13,7 @@ const b456Now = 1_800_000_000_000.0
 
 func b456KeysHome(t *testing.T, index string, keys map[string]string) (string, string) {
 	t.Helper()
+	b715KeepSecrets(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "file")
@@ -45,6 +46,7 @@ func b456KeysHome(t *testing.T, index string, keys map[string]string) (string, s
 
 func b456Keys(t *testing.T, cwd string, args ...string) (int, string, string) {
 	t.Helper()
+	b715KeepSecrets(t)
 	plan := keysDecide(args, cwd)
 	if plan == nil {
 		t.Fatalf("keys %v handed over to Node; want Go", args)

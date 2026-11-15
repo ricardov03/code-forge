@@ -339,6 +339,7 @@ func b550JevKey(call *b550JevCall, cfg map[string]any, values map[string]string)
 	}
 	if value, ok := os.LookupEnv(envName); ok && value != "" {
 		call.key = value
+		autopilotRegisterSecret(value) // B715: resolveKey registers it with writeSafe
 		return true
 	}
 	if os.Getenv("CODE_FORGE_KEY_BACKEND") != "file" {
@@ -362,6 +363,7 @@ func b550JevKey(call *b550JevCall, cfg map[string]any, values map[string]string)
 				return false
 			}
 			call.key = value
+			autopilotRegisterSecret(value) // B715: resolveKey registers it with writeSafe
 			return true
 		}
 	}
@@ -384,6 +386,7 @@ func b550JevKey(call *b550JevCall, cfg map[string]any, values map[string]string)
 			return false
 		}
 		call.key = value
+		autopilotRegisterSecret(value) // B715: resolveKey registers it with writeSafe
 		return true
 	}
 	if opRef != "" {
@@ -536,13 +539,10 @@ func b550JevDecide(answer any, bands [3]float64) (ledger.Object, bool) {
 
 // run is runJev from the state file on. late != 0 hands the call to Node
 // (an answer Node's decide throws on: nothing is written by then).
+//
+// B715: stdout and stderr are metaServe's safe streams, which mask the Jev
+// key (registered when b550JevKey resolved it) once per write, as writeSafe.
 func (call *b550JevCall) run(stdout, stderr io.Writer) (int, handoverReason) {
-	redact := func(s string) string {
-		if call.key == "" {
-			return s
-		}
-		return redactSecret(s, call.key)
-	}
 	if call.early != "" {
 		fmt.Fprint(stderr, call.early)
 		return call.earlyCode, 0
@@ -550,15 +550,15 @@ func (call *b550JevCall) run(stdout, stderr io.Writer) (int, handoverReason) {
 	ledgerDir := filepath.Join(os.Getenv("HOME"), ".code-forge", "ledger")
 	write := func(row ledger.Object, out ledger.Object) int {
 		if _, err := ledger.AppendObject(ledgerDir, call.slug, row, ledger.DefaultRotateAtBytes); err != nil {
-			fmt.Fprintf(stderr, "code-forge: verb %q failed: Error: %s\n", "jev", redact(err.Error()))
+			fmt.Fprintf(stderr, "code-forge: verb %q failed: Error: %s\n", "jev", err.Error())
 			return 1
 		}
 		data, err := ledger.Stringify(out, true)
 		if err != nil {
-			fmt.Fprintf(stderr, "code-forge: verb %q failed: Error: %s\n", "jev", redact(err.Error()))
+			fmt.Fprintf(stderr, "code-forge: verb %q failed: Error: %s\n", "jev", err.Error())
 			return 1
 		}
-		fmt.Fprint(stdout, redact(string(data)+"\n"))
+		fmt.Fprint(stdout, string(data)+"\n")
 		return 0
 	}
 	if call.rules != nil {
@@ -583,7 +583,7 @@ func (call *b550JevCall) run(stdout, stderr io.Writer) (int, handoverReason) {
 		if res.Status != 0 {
 			line += ", status " + strconv.Itoa(res.Status)
 		}
-		fmt.Fprint(stderr, redact(line+")\n"))
+		fmt.Fprint(stderr, line+")\n")
 		return 1, 0
 	}
 	body, err := ledger.DecodeValue(res.Raw)

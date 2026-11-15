@@ -292,6 +292,14 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		gatesErrf("(node:%d) TimeoutOverflowWarning: %s does not fit into a 32-bit signed integer.\nTimeout duration was set to 1.\n(Use `node --trace-warnings ...` to show where the warning was created)\n", os.Getpid(), gatesJSString(ms))
 	}
 	gatesSay := func(o ledger.Object, secrets []string) {
+		if step == nil {
+			// B715: Node's out is writeSafe(stdout, redactJSON(value)):
+			// redactJSON with every registered secret (the gate env values
+			// runGates registered among them), then safeStdout's one pass.
+			b, _ := ledger.Stringify(gates.Redact(o, safeSecretList()), false)
+			fmt.Fprintln(stdout, string(b))
+			return
+		}
 		b, _ := ledger.Stringify(gates.Redact(o, secrets), false)
 		fmt.Fprintln(stdout, gates.Mask(string(b), secrets))
 	}
@@ -502,9 +510,18 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	}
 	secrets := gates.Masks(p)
 	started := false
+	// stepMask masks the gate env values in a land step's captured output;
+	// a gates run verb writes through safeStderr, which masks them (and every
+	// other registered secret) once, as Node's writeSafe (B715).
+	stepMask := func(s string) string {
+		if step == nil {
+			return s
+		}
+		return gates.Mask(s, secrets)
+	}
 	failure := func(e error) (int, bool) {
 		if started {
-			return gatesError(fmt.Errorf("%s", gates.Mask(e.Error(), secrets)))
+			return gatesError(fmt.Errorf("%s", stepMask(e.Error())))
 		}
 		return gatesError(e)
 	}
@@ -685,6 +702,12 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		}
 		var err error
 		started = true
+		// B715: runGates registers every gate env value of 8+ UTF-16 units
+		// (maskableEnvValues) with writeSafe before it plans a gate, so every
+		// later line of the verb masks it, the repeat skip line among them.
+		for _, value := range secrets {
+			autopilotRegisterSecret(value)
+		}
 		runPlan := p
 		// A B404 selection always runs scoped: a test command without
 		// {test_files} takes the selected files appended. An empty selection
@@ -789,7 +812,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	for _, v := range results {
 		r := v.(ledger.Object)
 		if !cancelled && r.Get("skipped") != true && r.Get("code") == nil {
-			gatesErrf("%s\n", gates.Mask(fmt.Sprintf("%s: %s", r.Get("gate"), r.Get("message")), secrets))
+			gatesErrf("%s\n", stepMask(fmt.Sprintf("%s: %s", r.Get("gate"), r.Get("message"))))
 		}
 	}
 	if flaky != nil && !gates.Has(args, "--json") {
