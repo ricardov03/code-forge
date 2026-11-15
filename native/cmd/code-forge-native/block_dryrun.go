@@ -255,7 +255,7 @@ func humanPassDryBlockers(home, run, id string, record, entry ledger.Object, not
 		return []gatecheck.Blocker{{Code: "not-awaiting", Detail: fmt.Sprintf("block %s is not awaiting a human check", id)}}
 	}
 	unsupported := []gatecheck.Blocker{{Code: "dry_run_unsupported_human", Detail: "the Go dry run cannot judge this human-pass (its run state is one the real verb hands to Node); the real block human-pass decides"}}
-	if !blockGrantEndSafe(record) || !blockStorageSafe(home, run, record) || !closeTextSafe(note) {
+	if !closeGrantEndSafe(record) || !blockStorageSafe(home, run, record) || !closeTextSafe(note) {
 		return unsupported
 	}
 	checks, ok := entry.Get("human_checks").([]any)
@@ -268,7 +268,7 @@ func humanPassDryBlockers(home, run, id string, record, entry ledger.Object, not
 		}
 	}
 	if grant := blockObject(record.Get("autopilot")); grant != nil {
-		s, err := autopilot.GrantState(grant, time.Now())
+		s, err := autopilot.GrantStateNode(grant, time.Now())
 		if err != nil || s == "active" {
 			return []gatecheck.Blocker{{Code: "autopilot-active", Detail: fmt.Sprintf("block human-pass is refused while an autopilot grant is active on run %s", run)}}
 		}

@@ -1,0 +1,53 @@
+asked=Confirm all device checks of block B1 (run r-b684) passed? Only the owner may say yes.
+exit=0
+--- stdout
+{"event":"block.human_pass","block":"B1","note":"checked on the phone","proof":null,"checks":["the screen shows the new name"],"by":"human","status":"closed"}
+--- stderr
+--- new rows
+{"run":"r-b684","event":"autopilot.expire","grant_id":"ag-unit","until":"Jan 2 2020","tokens_source":null,"cost_source":null}
+{"run":"r-b684","event":"block.human_pass","block":"B1","note":"checked on the phone","proof":null,"checks":["the screen shows the new name"],"by":"human","tokens_source":null,"cost_source":null}
+--- status closed
+--- ws/runs/r-b684.json
+{
+  "run_id": "r-b684",
+  "project": "fixture",
+  "workspace": "<WS>",
+  "status": "active",
+  "blocks": {
+    "B1": {
+      "status": "closed",
+      "owned_files": [
+        "sample.mjs"
+      ],
+      "base_sha": "<SHA>",
+      "base_branch": "main",
+      "tree_at_open": {},
+      "kind": "code",
+      "test_files": [],
+      "worktree": {
+        "path": "<WS>/.code-forge/worktrees/B1",
+        "branch": "block-B1",
+        "base_sha": "<SHA>"
+      },
+      "human_checks": [
+        "the screen shows the new name"
+      ]
+    }
+  },
+  "orphans": [],
+  "autopilot": {
+    "grant_id": "ag-unit",
+    "status": "expired",
+    "scopes": [
+      "waive:warning"
+    ],
+    "deny": [],
+    "delegate": "L2",
+    "until": "Jan 2 2020",
+    "caps": {},
+    "stop_at": 0.9,
+    "started_at": "<TS>",
+    "expired_at": "<TS>"
+  }
+}
+

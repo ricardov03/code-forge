@@ -141,7 +141,7 @@ func blockHumanPass(args []string, stdout, stderr io.Writer, delegated *bool, en
 	if entry.Get("status") != "awaiting_human_check" {
 		return fail(&state.Error{Code: "not-awaiting", Message: fmt.Sprintf("block %s is not awaiting a human check", id)})
 	}
-	if !blockGrantEndSafe(record) || !blockStorageSafe(home, run, record) || !closeTextSafe(note) {
+	if !closeGrantEndSafe(record) || !blockStorageSafe(home, run, record) || !closeTextSafe(note) {
 		return fallback()
 	}
 	checks, ok := entry.Get("human_checks").([]any)
@@ -153,7 +153,7 @@ func blockHumanPass(args []string, stdout, stderr io.Writer, delegated *bool, en
 			return fallback()
 		}
 	}
-	grant, err := autopilot.CheckExpiry(home, run, time.Now())
+	grant, err := autopilot.CheckExpiryNode(home, run, time.Now())
 	if err != nil {
 		fmt.Fprintln(stderr, "block human-pass:", blockIOMessage(err))
 		return 1
@@ -177,7 +177,7 @@ func blockHumanPass(args []string, stdout, stderr io.Writer, delegated *bool, en
 			}
 		}
 		if g := blockObject(current.Get("autopilot")); g != nil {
-			s, err := autopilot.GrantState(g, time.Now())
+			s, err := autopilot.GrantStateNode(g, time.Now())
 			if err != nil || s == "active" {
 				return nil, &state.Error{Code: "autopilot-active", Message: fmt.Sprintf("block human-pass is refused while an autopilot grant is active on run %s", run)}
 			}
