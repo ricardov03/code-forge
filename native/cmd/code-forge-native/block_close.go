@@ -165,7 +165,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	}
 	// This is the hand-over boundary. Everything through preflight is read-only;
 	// it must finish before a transcript warning or a stopped-block row is signed.
-	if !blockGrantEndSafe(record) || !blockStorageSafe(home, run, record) {
+	if !closeGrantEndSafe(record) || !blockStorageSafe(home, run, record) {
 		return fallback(blockStateHandoverReason(record, "close", hCloseStateStorage))
 	}
 	cfg, ok := blockSnapshot(record)
@@ -174,14 +174,14 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	}
 	requireHuman := blockMap(cfg["close"])["require_human"] == true
 	if autoDecide && requireHuman {
-		grant, _ := autopilot.Read(record, time.Now())
+		grant, _ := autopilot.ReadNode(record, time.Now())
 		if why := autopilot.RoutineRefusal(grant); why != "" {
 			return refuseAuto("close.require_human is set and the grant does not allow close:routine (" + why + ")")
 		}
 	}
 	// B684: Node's expiry check runs before every close, --no-require-reviews too.
 	if !deciding && !requireHuman && (step == nil || !step.preflight) {
-		expiryOnFailure = func() { blockGrantExpiry(home, run, stderr) }
+		expiryOnFailure = func() { closeGrantExpiry(home, run, stderr) }
 	}
 	var routineGrant ledger.Object
 	// B684: the owner's --no-require-reviews lifts the per-file review checks
@@ -279,10 +279,10 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		top, base, inTree = real, sha, true
 	}
 	if !deciding && requireHuman && flags["no-require-reviews"] != true {
-		grant, _ := autopilot.Read(record, time.Now())
+		grant, _ := autopilot.ReadNode(record, time.Now())
 		active := false
 		if grant.Grant != nil {
-			s, _ := autopilot.GrantState(grant.Grant, time.Now())
+			s, _ := autopilot.GrantStateNode(grant.Grant, time.Now())
 			active = s == "active"
 		}
 		if active {
@@ -715,7 +715,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 	}
 	if !deciding && !requireHuman {
-		blockGrantExpiry(home, run, stderr)
+		closeGrantExpiry(home, run, stderr)
 	}
 	if step == nil {
 		blockBreadcrumb("close")

@@ -1,0 +1,51 @@
+asked=Apply these decisions and close block B1 of run r-b684? Only the owner may say yes.
+exit=0
+--- stdout
+1. sample.mjs F1 warning: the name is unclear
+reviewed sample.mjs ticket <ID>
+block B1 closed
+--- stderr
+--- new rows
+{"run":"r-b684","event":"review.waived","block":"B1","file":"sample.mjs","finding":"F1","reason":"naming only","by":"human","tokens_source":null,"cost_source":null}
+{"run":"r-b684","event":"block.close","block":"B1","status":"complete","tokens_source":null,"cost_source":null}
+--- status closed
+--- ws/runs/r-b684.json
+{
+  "run_id": "r-b684",
+  "project": "fixture",
+  "workspace": "<WS>",
+  "status": "active",
+  "blocks": {
+    "B1": {
+      "status": "closed",
+      "owned_files": [
+        "sample.mjs"
+      ],
+      "base_sha": "<SHA>",
+      "base_branch": "main",
+      "tree_at_open": {},
+      "kind": "code",
+      "test_files": [],
+      "worktree": {
+        "path": "<WS>/.code-forge/worktrees/B1",
+        "branch": "block-B1",
+        "base_sha": "<SHA>"
+      }
+    }
+  },
+  "orphans": [],
+  "autopilot": {
+    "grant_id": "ag-unit",
+    "status": "active",
+    "scopes": [
+      "waive:warning"
+    ],
+    "deny": [],
+    "delegate": "L2",
+    "until": "1/2/2020 10:20",
+    "caps": {},
+    "stop_at": 0.9,
+    "started_at": "<TS>"
+  }
+}
+

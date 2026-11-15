@@ -297,10 +297,10 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 		asked = true
 	} else if flags["decide"] != true {
 		if cfg, ok := blockSnapshot(record); ok && blockMap(cfg["close"])["require_human"] == true {
-			grant, _ := autopilot.Read(record, time.Now())
+			grant, _ := autopilot.ReadNode(record, time.Now())
 			active := false
 			if grant.Grant != nil {
-				s, _ := autopilot.GrantState(grant.Grant, time.Now())
+				s, _ := autopilot.GrantStateNode(grant.Grant, time.Now())
 				active = s == "active"
 			}
 			if !active {
@@ -316,7 +316,7 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 	// close's own later check is then a no-op.
 	if record.Get("autopilot") != nil && flags["decide"] != true && !waived {
 		if cfg, ok := blockSnapshot(record); ok && blockMap(cfg["close"])["require_human"] != true {
-			blockGrantExpiry(home, run, stderr)
+			closeGrantExpiry(home, run, stderr)
 		}
 	}
 	if err := closeAutoClaim(home, run, id, top, record, files, print, false); err != nil {

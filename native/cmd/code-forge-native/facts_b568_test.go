@@ -226,12 +226,14 @@ func TestB568FactsGateDateParseHandsOverFirst(t *testing.T) {
 		return `{"run_id":"r9","status":"active","project":"unit","autopilot":{"grant_id":"g1","status":"active","until":"` + until +
 			`","started_at":"2026-01-01T00:00:00.000Z","caps":{"review":5}}}`
 	}
+	// B709: Go now reads "Nov 12 2099" as V8 does; a two-digit year is still
+	// a form Go leaves to Node.
 	cases := []struct {
 		name, record, ledger string
 	}{
-		{"an autopilot grant whose until Date.parse may read differently", grant("Nov 12 2099"), ""},
+		{"an autopilot grant whose until Date.parse may read differently", grant("Nov 12 99"), ""},
 		{"a counted ledger row whose ts Date.parse may read differently", grant("2099-01-01T00:00:00.000Z"),
-			`{"event":"session","role":"facts","run":"r9","usd":0.1,"ts":"Nov 12 2026"}` + "\n"},
+			`{"event":"session","role":"facts","run":"r9","usd":0.1,"ts":"12 Nov 26"}` + "\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

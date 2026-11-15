@@ -36,7 +36,7 @@ func closeDeferClearCommand(run, id, clause string) string {
 func closeDeferral(home, run, id string, row *ledger.Object) blockclose.Deferral {
 	return func(record, _ ledger.Object) ledger.Object {
 		now := closeDeferNow()
-		grant, err := autopilot.ReadGrant(record, now)
+		grant, err := autopilot.ReadGrantNode(record, now)
 		if err != nil || autopilot.ScopeRefusal(grant, autopilot.DeferHumanScope) != "" {
 			return nil
 		}

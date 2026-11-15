@@ -128,8 +128,10 @@ func (f *b489Fix) unported(t *testing.T) string {
 	// Written then renamed into the queue, as Node's enqueue does
 	// (writeAtomic): a worker already polling must never read it half
 	// written (B661: under load the Go worker refused it as bad-ticket).
+	// B709: Go reads "Nov 11 2026" as V8 does now; a two-digit year is
+	// still a reopened_at Go leaves to Node.
 	tmp := filepath.Join(filepath.Dir(worker.QueueDir(f.root)), id+".json.tmp")
-	b460Write(t, tmp, `{"ticket":"`+id+`","run":"r1","block":"B1","file":"a.txt","content_hash":"`+b489Sha("hello\nworld\n")+`","reopened_at":"Nov 11 2026","enqueued_at":"2026-11-11T09:00:00.000Z"}`+"\n")
+	b460Write(t, tmp, `{"ticket":"`+id+`","run":"r1","block":"B1","file":"a.txt","content_hash":"`+b489Sha("hello\nworld\n")+`","reopened_at":"11 Nov 26","enqueued_at":"2026-11-11T09:00:00.000Z"}`+"\n")
 	if err := os.MkdirAll(worker.QueueDir(f.root), 0o755); err != nil {
 		t.Fatal(err)
 	}

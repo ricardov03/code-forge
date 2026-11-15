@@ -56,9 +56,9 @@ func closeNoReviews(args []string, step *landStep, handover *handoverReason, req
 func closeNoReviewsAsk(home, run, id string, requireHuman bool, stderr io.Writer, fail func(error) int, usage func(string) int) int {
 	if !requireHuman {
 		// Node's per-command expiry check ran before the close handler.
-		blockGrantExpiry(home, run, stderr)
+		closeGrantExpiry(home, run, stderr)
 	}
-	grant, err := autopilot.CheckExpiry(home, run, time.Now())
+	grant, err := autopilot.CheckExpiryNode(home, run, time.Now())
 	if err != nil {
 		return fail(err)
 	}
@@ -352,4 +352,23 @@ func closeWaivePrecheck(in closeDecideInput, file, finding string) error {
 		}
 	}
 	return &state.Error{Code: "waive-unknown-finding", Message: fmt.Sprintf("waive-unknown-finding: no review row of block %s names finding %s in %s; nothing was recorded", in.id, finding, file)}
+}
+
+// closeGrantEndSafe is blockGrantEndSafe with the grant's until dated as
+// Node's grantState dates it (B709: a date-only until is UTC midnight, a
+// legacy form gatecheck.JSDateParse reads like V8 too).
+func closeGrantEndSafe(record ledger.Object) bool {
+	if !autopilot.SupportedNode(record) {
+		return false
+	}
+	without := record.Clone()
+	without.Delete("autopilot")
+	return blockEndSafe(without)
+}
+
+// closeGrantExpiry is blockGrantExpiry with the until dated like Node.
+func closeGrantExpiry(home, run string, stderr io.Writer) {
+	if _, err := autopilot.CheckExpiryNode(home, run, time.Now()); err != nil {
+		fmt.Fprintf(stderr, "autopilot: WARN the expiry check failed (%s)\n", blockIOMessage(err))
+	}
 }

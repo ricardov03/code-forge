@@ -4,6 +4,7 @@ import (
 	"math"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -142,7 +143,7 @@ func jsLegacyDate(value string) (ms float64, ok, known bool) {
 			offset = -offset
 		}
 	} else {
-		return math.NaN(), false, false
+		return jsLocalDate(value)
 	}
 	y, _ := strconv.Atoi(year)
 	d, _ := strconv.Atoi(day)
@@ -172,6 +173,96 @@ func jsLegacyDate(value string) (ms float64, ok, known bool) {
 		y += 1900
 	}
 	t := time.Date(y, time.Month(month), d, h, mi, sec, 0, time.FixedZone("", offset*60))
+	ms = float64(t.UnixMilli())
+	if math.Abs(ms) > maxDateMs {
+		return math.NaN(), false, true
+	}
+	return ms, true, true
+}
+
+// B709: the plain legacy forms people and scripts write for a date, read as
+// V8's legacy parser reads them (checked against testdata/b709_dates.json,
+// made by Node under three zones): a four-digit year with a dash or slash
+// date (YYYY-M-D with a space before the time, YYYY/M/D, M/D/YYYY) or an
+// English month name (Jan 2 2020, January 2, 2020, 2 Jan 2020, after an
+// optional weekday), then an optional H:mm[:ss[.fff]] and an optional Z (with
+// or without a space) or a space then GMT or UTC. With no zone the time is
+// local, the date alone local midnight. Other legacy forms stay unknown.
+const (
+	ldTime    = `(?: (\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?( ?Z| GMT| UTC)?)?$`
+	ldMonth   = `(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)`
+	ldWeekday = `(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Mon|Tue|Wed|Thu|Fri|Sat|Sun),? )?`
+)
+
+var (
+	ldDash  = regexp.MustCompile(`^(\d{4})-(\d{1,2})-(\d{1,2})` + ldTime)
+	ldYMD   = regexp.MustCompile(`^(\d{4})/(\d{1,2})/(\d{1,2})` + ldTime)
+	ldMDY   = regexp.MustCompile(`^(\d{1,2})/(\d{1,2})/(\d{4})` + ldTime)
+	ldNamed = regexp.MustCompile(`^` + ldWeekday + ldMonth + ` (\d{1,2}),? (\d{4})` + ldTime)
+	ldDMY   = regexp.MustCompile(`^` + ldWeekday + `(\d{1,2}) ` + ldMonth + ` (\d{4})` + ldTime)
+)
+
+func jsLocalDate(value string) (ms float64, ok, known bool) {
+	var y, mo, d string
+	var rest []string
+	if m := ldDash.FindStringSubmatch(value); m != nil {
+		y, mo, d, rest = m[1], m[2], m[3], m[4:]
+	} else if m := ldYMD.FindStringSubmatch(value); m != nil {
+		y, mo, d, rest = m[1], m[2], m[3], m[4:]
+	} else if m := ldMDY.FindStringSubmatch(value); m != nil {
+		mo, d, y, rest = m[1], m[2], m[3], m[4:]
+	} else if m := ldNamed.FindStringSubmatch(value); m != nil {
+		mo, d, y, rest = m[1], m[2], m[3], m[4:]
+	} else if m := ldDMY.FindStringSubmatch(value); m != nil {
+		d, mo, y, rest = m[1], m[2], m[3], m[4:]
+	} else {
+		return math.NaN(), false, false
+	}
+	month, err := strconv.Atoi(mo)
+	if err != nil {
+		month = strings.Index(monthNames, mo[:3])/3 + 1
+	}
+	year, _ := strconv.Atoi(y)
+	day, _ := strconv.Atoi(d)
+	// A year below 1000 (V8 reads 0099 as 1999), a month or day out of range
+	// (V8 may read the numbers in another order) stay unknown.
+	if year < 1000 || month < 1 || month > 12 || day < 1 || day > 31 {
+		return math.NaN(), false, false
+	}
+	hour, minute, second, milli := 0, 0, 0, 0
+	if rest[0] != "" {
+		hour, _ = strconv.Atoi(rest[0])
+		minute, _ = strconv.Atoi(rest[1])
+		if rest[2] != "" {
+			second, _ = strconv.Atoi(rest[2])
+		}
+		if rest[3] != "" {
+			frac := rest[3]
+			if len(frac) > 3 {
+				frac = frac[:3]
+			}
+			for len(frac) < 3 {
+				frac += "0"
+			}
+			milli, _ = strconv.Atoi(frac)
+		}
+		if hour > 24 || minute > 59 || second > 59 || hour == 24 && (minute != 0 || second != 0 || milli != 0) {
+			return math.NaN(), false, false
+		}
+	}
+	zone := dateLocal
+	if rest[4] != "" {
+		zone = time.UTC
+	}
+	t := time.Date(year, time.Month(month), day, hour, minute, second, milli*int(time.Millisecond), zone)
+	if zone != time.UTC {
+		_, offset := t.Zone()
+		for _, h := range []time.Duration{-26, 26} {
+			if _, near := t.Add(h * time.Hour).Zone(); near != offset {
+				return math.NaN(), false, false
+			}
+		}
+	}
 	ms = float64(t.UnixMilli())
 	if math.Abs(ms) > maxDateMs {
 		return math.NaN(), false, true

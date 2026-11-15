@@ -40,10 +40,12 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	return l.w.Write(p)
 }
 
+// B709: Go reads "Nov 11 2026" as V8 does now; a two-digit year is still a
+// reopened_at Go leaves to Node.
 func b489Unported(t *testing.T, fx *b488Fix, n int) string {
 	t.Helper()
 	id := strings.Repeat(string(rune('c'+n)), 24)
-	writeJSON(t, filepath.Join(QueueDir(fx.root), id+".json"), `{"ticket":"`+id+`","run":"r1","block":"B1","file":"a.txt","content_hash":"`+sha("hello\nworld\n")+`","reopened_at":"Nov 11 2026","enqueued_at":"2026-11-11T09:00:00.000Z"}`+"\n")
+	writeJSON(t, filepath.Join(QueueDir(fx.root), id+".json"), `{"ticket":"`+id+`","run":"r1","block":"B1","file":"a.txt","content_hash":"`+sha("hello\nworld\n")+`","reopened_at":"11 Nov 26","enqueued_at":"2026-11-11T09:00:00.000Z"}`+"\n")
 	return id
 }
 

@@ -43,7 +43,7 @@ func substCloseCheck(record ledger.Object, run, id string, rows []gatecheck.Row,
 		return closeCheck{}
 	}
 	shared := []string{}
-	grant, err := autopilot.Read(record, now)
+	grant, err := autopilot.ReadNode(record, now)
 	if err != nil {
 		shared = append(shared, "the autopilot grant cannot be read")
 	} else if why := autopilot.ScopeRefusal(grant, autopilot.SubstituteScope); why != "" {

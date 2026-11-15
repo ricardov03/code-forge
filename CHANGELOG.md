@@ -30,6 +30,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - `block close --no-require-reviews` and `block close --decide` at a terminal run in Go: the owner's question and answers, the autopilot grant refusal, the signed `gate.reviews_waived` (by human) and `agent_waivers.acked` rows, the scope warnings and the close output match Node; they no longer hand over to Node. B684
 - `init` reads and rewrites a `.code-forge.yml` or user config with YAML anchors, aliases, `<<` keys and the standard tags in Go, byte-equal to Node: a shared object is written once with `&a1` and then as `*a1`, a merged one is written out; custom or unfitting tags, anchors on keys, aliases to empty collections and `%` directives still hand over to Node. B686
 - `block close` runs more owner cases in Go: `--auto-claim --no-require-reviews` at a terminal; `--decide` waivers for review caps, late findings and invalid autopilot waivers, claims from a signed ticket result, accepted transcript hits and Node's waive prechecks; and `human_checks` of any shape (a string, a number, an object, mixed values) as Node judges it. B697
+- `block close` dates an autopilot grant `until` as Node does in Go: a date-only `until` (UTC midnight) and the plain legacy forms V8's `Date.parse` reads (`Jan 2 2020`, `January 2, 2099`, `2020/01/02 10:20:30`, `1/2/2020 10:20`, `2099-06-01 10:00`, local time with no zone) no longer hand over (`close-autopilot-grant`); the shared Go date reader now reads these forms everywhere, matching Node in UTC, New York and Kathmandu. B709
 
 ## [0.24.0] — 2026-11-14
 

@@ -1,0 +1,83 @@
+asked=
+exit=1
+--- stdout
+--- stderr
+block close: close-not-routine: not-allowed
+--- new rows
+--- status open
+--- ws/runs/r-b684.json
+{
+  "run_id": "r-b684",
+  "project": "fixture",
+  "workspace": "<WS>",
+  "status": "active",
+  "blocks": {
+    "B1": {
+      "status": "open",
+      "owned_files": [
+        "sample.mjs"
+      ],
+      "base_sha": "<SHA>",
+      "base_branch": "main",
+      "tree_at_open": {},
+      "kind": "code",
+      "test_files": [],
+      "worktree": {
+        "path": "<WS>/.code-forge/worktrees/B1",
+        "branch": "block-B1",
+        "base_sha": "<SHA>"
+      }
+    }
+  },
+  "orphans": [],
+  "config": {
+    "hash": "9ffc9e0dee941c130fd2f50ce5906346015770342cb84b301f3ef5e634275e29",
+    "snapshots": {
+      "9ffc9e0dee941c130fd2f50ce5906346015770342cb84b301f3ef5e634275e29": {
+        "close": {
+          "require_human": true
+        },
+        "engine": "harness",
+        "gates": {
+          "format": null,
+          "lint": null,
+          "test": null,
+          "types": null
+        },
+        "levels": {
+          "L0": {
+            "model": "claude-haiku-4-5-20251001"
+          },
+          "L1": {
+            "model": "claude-sonnet-5"
+          },
+          "L2": {
+            "model": "claude-opus-5-5"
+          },
+          "L3": {
+            "model": "claude-fable-5-1"
+          }
+        },
+        "project": {
+          "slug": "fixture"
+        },
+        "provider": "anthropic",
+        "version": 1
+      }
+    }
+  },
+  "autopilot": {
+    "grant_id": "ag-unit",
+    "status": "active",
+    "scopes": [
+      "waive:warning"
+    ],
+    "deny": [],
+    "delegate": "L2",
+    "until": "2099-01-01",
+    "caps": {},
+    "stop_at": 0.9,
+    "started_at": "<TS>"
+  }
+}
+

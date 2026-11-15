@@ -286,7 +286,7 @@ func TestB380JSDateParseMatchesNode(t *testing.T) {
 	if ms, ok, known := jsDateParse("2000-02-30", true); !ok || !known || ms != 951868800000 {
 		t.Errorf("jsDateParse(2000-02-30) = %v %v %v; Node says 951868800000", ms, ok, known)
 	}
-	for _, in := range []string{"Nov 10 2026", "2000-01-01T00:00:00+24:00"} {
+	for _, in := range []string{"10 Nov 26", "2000-01-01T00:00:00+24:00"} {
 		if _, _, known := jsDateParse(in, true); known {
 			t.Errorf("jsDateParse(%q) must be unknown", in)
 		}
@@ -513,7 +513,7 @@ func TestB466JSDateParseFullISOFormat(t *testing.T) {
 	if ms, ok, known := jsDateParse("2026-02-29", true); !ok || !known || ms != 1772323200000 {
 		t.Errorf("jsDateParse(2026-02-29) = %v %v %v; Node says 1772323200000", ms, ok, known)
 	}
-	for _, in := range []string{"2026-11-11t10:00Z", "2026-11-11 10:00Z", "2026-11-11T10:00:00+0100", "2026-1", "999", "2026-11-11T24:00:01Z", "2026-11-11T10:00:00z"} {
+	for _, in := range []string{"2026-11-11t10:00Z", "2026-11-11 10:00GMT", "2026-11-11T10:00:00+0100", "2026-1", "999", "2026-11-11T24:00:01Z", "2026-11-11T10:00:00z"} {
 		if _, _, known := jsDateParse(in, true); known {
 			t.Errorf("jsDateParse(%q) must be unknown", in)
 		}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/blockops"
+	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -37,15 +38,35 @@ func timestamp(v any) (time.Time, bool) {
 
 // GrantState is pure, matching Node's stopped-before-expired precedence.
 func GrantState(grant ledger.Object, now time.Time) (string, error) {
-	if !valid(grant) {
+	return grantState(grant, now, false)
+}
+
+// GrantStateNode (B709) is GrantState with the grant's until read as Node's
+// grantState reads it: Date.parse(until), as gatecheck.JSDateParse
+// reproduces it (a date-only until is UTC midnight; a NaN until, such as an
+// absent or null one, never expires). An until whose Date.parse Go cannot
+// reproduce stays unsupported.
+func GrantStateNode(grant ledger.Object, now time.Time) (string, error) {
+	return grantState(grant, now, true)
+}
+
+func grantState(grant ledger.Object, now time.Time, node bool) (string, error) {
+	if !validMode(grant, node) {
 		return "", ErrUnsupported
 	}
 	status := text(grant.Get("status"))
 	if status == "stopped" || status == "expired" {
 		return status, nil
 	}
-	if grant.Get("until") == nil {
+	if UntilDone(grant) && grant.Get("until") == nil || !node && grant.Get("until") == nil {
 		return "active", nil // B634: an until-done grant with no deadline has no clock end
+	}
+	if node {
+		ms, finite, _ := nodeUntil(grant)
+		if finite && float64(now.UnixMilli()) >= ms {
+			return "expired", nil
+		}
+		return "active", nil
 	}
 	until, _ := timestamp(grant.Get("until"))
 	if !now.Before(until) {
@@ -54,7 +75,22 @@ func GrantState(grant ledger.Object, now time.Time) (string, error) {
 	return "active", nil
 }
 
-func valid(g ledger.Object) bool {
+// nodeUntil is Date.parse(grant.until) in milliseconds; finite is false for
+// NaN; known is false when Go cannot prove V8 reads it the same way.
+func nodeUntil(g ledger.Object) (ms float64, finite, known bool) {
+	until, has := g.Get("until"), false
+	for _, f := range g {
+		has = has || f.Key == "until"
+	}
+	if _, object := until.(ledger.Object); object {
+		until = map[string]any{} // String({...}) is "[object Object]": NaN
+	}
+	return gatecheck.JSDateParse(until, has)
+}
+
+func valid(g ledger.Object) bool { return validMode(g, false) }
+
+func validMode(g ledger.Object, node bool) bool {
 	if g == nil || text(g.Get("grant_id")) == "" || !slices.Contains([]string{"active", "stopped", "expired"}, text(g.Get("status"))) {
 		return false
 	}
@@ -69,7 +105,11 @@ func valid(g ledger.Object) bool {
 	if _, ok := timestamp(g.Get("started_at")); !ok {
 		return false
 	}
-	if _, ok := timestamp(g.Get("until")); !ok && !(UntilDone(g) && g.Get("until") == nil) {
+	if node {
+		if _, _, known := nodeUntil(g); !known && !(UntilDone(g) && g.Get("until") == nil) {
+			return false
+		}
+	} else if _, ok := timestamp(g.Get("until")); !ok && !(UntilDone(g) && g.Get("until") == nil) {
 		return false
 	}
 	for _, name := range []string{"stopped_at", "expired_at", "done_at"} {
@@ -228,12 +268,21 @@ func RunDone(record, grant ledger.Object) bool {
 
 // Read also proves approvals are quiet: their restore path remains with Node.
 func Read(record ledger.Object, now time.Time) (Result, error) {
+	return read(record, now, false)
+}
+
+// ReadNode (B709) is Read with the until dated as GrantStateNode dates it.
+func ReadNode(record ledger.Object, now time.Time) (Result, error) {
+	return read(record, now, true)
+}
+
+func read(record ledger.Object, now time.Time, node bool) (Result, error) {
 	without := record.Clone()
 	without.Delete("autopilot")
 	if !blockops.QuietExpiry(without) {
 		return Result{}, ErrUnsupported
 	}
-	return ReadGrant(record, now)
+	return readGrant(record, now, node)
 }
 
 // ErrApprovalDue: an active approval whose window is over; checkApprovals
@@ -293,6 +342,15 @@ func ApprovalDue(a ledger.Object, now time.Time) (due, ok bool) {
 // ReadGrant is Read without the approvals check: Node's checkExpiry never
 // reads approvals (checkApprovals ran once, at the start of the command).
 func ReadGrant(record ledger.Object, now time.Time) (Result, error) {
+	return readGrant(record, now, false)
+}
+
+// ReadGrantNode is ReadGrant with the until dated as GrantStateNode dates it.
+func ReadGrantNode(record ledger.Object, now time.Time) (Result, error) {
+	return readGrant(record, now, true)
+}
+
+func readGrant(record ledger.Object, now time.Time, node bool) (Result, error) {
 	if record.Get("autopilot") == nil {
 		return Result{State: "none"}, nil
 	}
@@ -300,7 +358,7 @@ func ReadGrant(record ledger.Object, now time.Time) (Result, error) {
 	if !ok {
 		return Result{}, ErrUnsupported
 	}
-	s, err := GrantState(g, now)
+	s, err := grantState(g, now, node)
 	if err != nil {
 		return Result{}, err
 	}
@@ -319,6 +377,12 @@ func Supported(record ledger.Object) bool {
 	return err == nil
 }
 
+// SupportedNode is Supported for a reader that dates the until like Node.
+func SupportedNode(record ledger.Object) bool {
+	_, err := ReadNode(record, time.Now())
+	return err == nil
+}
+
 // CheckExpiry re-reads under Node's shared run lock. Publish the signed row
 // before saving the expired state, with the original check time in both.
 func CheckExpiry(home, run string, now time.Time) (Result, error) {
@@ -328,6 +392,11 @@ func CheckExpiry(home, run string, now time.Time) (Result, error) {
 // CheckGrantExpiry is CheckExpiry that reads the grant only (ReadGrant).
 func CheckGrantExpiry(home, run string, now time.Time) (Result, error) {
 	return checkExpiry(home, run, now, ReadGrant)
+}
+
+// CheckExpiryNode is CheckExpiry with ReadNode (B709).
+func CheckExpiryNode(home, run string, now time.Time) (Result, error) {
+	return checkExpiry(home, run, now, ReadNode)
 }
 
 func checkExpiry(home, run string, now time.Time, reader func(ledger.Object, time.Time) (Result, error)) (Result, error) {

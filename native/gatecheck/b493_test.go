@@ -73,7 +73,7 @@ func TestB493JSDateParseLegacyForms(t *testing.T) {
 	}
 	// V8 reads other spellings; Go does not guess them. (B498 reads the
 	// roll-overs, short years, 24:00 and no-seconds forms; see b498_test.go.)
-	for _, in := range []string{"tue, 11 nov 2026 10:00:00 gmt", "Nov 11 2026 10:00:00 GMT+2400", "Wed Nov 11 2026 10:00:00 GMT+0100 (CET) extra", "Nov 10 2026"} {
+	for _, in := range []string{"tue, 11 nov 2026 10:00:00 gmt", "Nov 11 2026 10:00:00 GMT+2400", "Wed Nov 11 2026 10:00:00 GMT+0100 (CET) extra", "10 Nov 26"} {
 		if _, _, known := jsDateParse(in, true); known {
 			t.Errorf("jsDateParse(%q) must be unknown", in)
 		}
