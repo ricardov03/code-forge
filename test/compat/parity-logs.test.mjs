@@ -163,8 +163,9 @@ test('B247 boundary: empty/missing logs match; unsupported arguments and legacy 
     await parity(['logs', 'summary'], true);
     assert.equal(invoke(['logs', 'summary']).code, 127, 'nonportable dates, collation, or JSON hand over without partial output');
   }
-  // An installed package with known-fix data must delegate the text listing.
-  // The symlink uses the unmodified real Node entry as the fallback reference.
+  // B688: Go uses the known-fix table built into it; a table under the
+  // package's src/util no longer sends the text listing to Node.
+  // The symlink uses the unmodified real Node entry as the reference.
   const pkg = path.join(scratch, 'installed');
   const native = path.join(pkg, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
   await mkdir(path.dirname(native), { recursive: true });
@@ -177,11 +178,11 @@ test('B247 boundary: empty/missing logs match; unsupported arguments and legacy 
   ]));
   await seed(JSON.stringify(entries[1]));
   await parity(['logs'], true, native);
-  assert.equal(invoke(['logs'], { native }).code, 127, 'nonempty known-fix table requires Node');
+  assert.equal(invoke(['logs'], { native }).code, 0, 'B688: a src/util known-fix table is not read by Go');
   assert.equal(invoke(['logs', '--json'], { native }).code, 0, 'known-fix table does not prevent native JSON listing');
   await writeFile(path.join(pkg, 'src/util/known-fixes.json'), '{corrupt');
   await parity(['logs'], true, native);
   assert.deepEqual(invoke(['logs'], { native, nodePath: process.execPath }),
-    invoke(['logs'], { node: true }), 'corrupt known-fix table preserves Node exit code and both streams');
-  assert.equal(invoke(['logs'], { native }).code, 127, 'corrupt known-fix table requires Node');
+    invoke(['logs'], { node: true }), 'B688: Go lists like Node next to a corrupt src/util table');
+  assert.equal(invoke(['logs'], { native }).code, 0, 'B688: a corrupt src/util known-fix table is not read by Go');
 });

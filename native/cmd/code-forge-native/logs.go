@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +17,6 @@ import (
 
 	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
-	"github.com/ricardov03/code-forge/native/pkgroot"
 )
 
 func init() { routes["logs"] = runLogs }
@@ -430,24 +430,16 @@ func logsList(entries []ledger.Object, asJSON bool) (string, bool) {
 	return out.String(), true
 }
 
-// Resolve from the installed executable, just as handover resolves the Node
-// entry. A nonempty table is delegated so its full validation stays authoritative.
+// logsKnownFixes is src/util/known-fixes.json built into the binary (B688),
+// so Go needs no src/ folder next to it.
+//
+//go:embed data/known-fixes.json
+var logsKnownFixes []byte
+
+// A nonempty table is delegated so its full validation stays authoritative.
 func logsEmptyFixes() bool {
-	exe, err := os.Executable()
-	if err != nil {
-		return false
-	}
-	exe, err = filepath.EvalSymlinks(exe)
-	if err != nil {
-		return false
-	}
-	file := filepath.Join(pkgroot.FromExecutable(exe), "src", "util", "known-fixes.json")
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return errors.Is(err, fs.ErrNotExist) // Node treats a missing table as empty.
-	}
 	var table any
-	if json.Unmarshal(data, &table) != nil {
+	if json.Unmarshal(logsKnownFixes, &table) != nil {
 		return false
 	}
 	rows, ok := table.([]any)

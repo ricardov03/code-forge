@@ -14,6 +14,7 @@ package session
 import (
 	"bytes"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -30,7 +31,6 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/ricardov03/code-forge/native/docsync"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/review"
 )
@@ -50,14 +50,16 @@ const ClosedBookRefusal = "codex cannot run closed-book yet: it always has a she
 // FindingSchemaID is finding.schema.json's $id.
 const FindingSchemaID = "https://code-forge.local/schema/review/finding.schema.json"
 
-// FindingSchemaPath names src/review/finding.schema.json; tests point it at the repository copy.
-var FindingSchemaPath = func() (string, error) {
-	root, err := docsync.PackageRoot()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(root, "src", "review", "finding.schema.json"), nil
-}
+// findingSchema is src/review/finding.schema.json built into the binary
+// (B688), so Go needs no src/ folder next to it.
+//
+//go:embed finding.schema.json
+var findingSchema []byte
+
+// FindingSchemaPath names a finding schema file that replaces the built-in
+// one; "" (the default) means the schema built into the binary. Tests point
+// it at a fixture.
+var FindingSchemaPath = func() (string, error) { return "", nil }
 
 // LoadFindingSchema reads finding.schema.json in its own key order.
 func LoadFindingSchema() (ledger.Object, error) {
@@ -65,9 +67,11 @@ func LoadFindingSchema() (ledger.Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return nil, err
+	data := findingSchema
+	if p != "" {
+		if data, err = os.ReadFile(p); err != nil {
+			return nil, err
+		}
 	}
 	return ledger.DecodeObject(data)
 }

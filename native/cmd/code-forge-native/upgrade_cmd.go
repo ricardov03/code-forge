@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -42,10 +43,11 @@ func upgradeRealDocsSync(home, root, version string) string {
 	return docsync.Sync(context.Background(), docsync.URL(), home, root, version).Line()
 }
 
-// upgradeRealPackageRoot is the root Node's upgrade.mjs runs from: this
-// binary's <root>/native/bin/<platform>-<arch>/, with <root>/src/cli/upgrade.mjs
-// there unmoved by a symlink (Node takes its root from that module's real
-// path) and the docs-sync child Node would spawn being this same binary.
+// upgradeRealPackageRoot is the package root upgrade runs from: this
+// binary's <root>/native/bin/<platform>-<arch>/ (or its platform package),
+// where <root>/package.json names the main package (B688: a file that stays
+// after Node removal, not src/cli/upgrade.mjs) and the docs-sync child Node
+// would spawn is this same binary.
 func upgradeRealPackageRoot() (string, bool) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -54,9 +56,20 @@ func upgradeRealPackageRoot() (string, bool) {
 	if exe, err = filepath.EvalSymlinks(exe); err != nil {
 		return "", false
 	}
+	return upgradePackageRootFor(exe)
+}
+
+// upgradePackageRootFor is upgradeRealPackageRoot for a resolved executable path.
+func upgradePackageRootFor(exe string) (string, bool) {
 	root := pkgroot.FromExecutable(exe)
-	module := filepath.Join(root, "src", "cli", "upgrade.mjs")
-	if real, err := filepath.EvalSymlinks(module); err != nil || real != module {
+	data, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if err != nil {
+		return "", false
+	}
+	var manifest struct {
+		Name string `json:"name"`
+	}
+	if json.Unmarshal(data, &manifest) != nil || manifest.Name != pkgroot.MainName {
 		return "", false
 	}
 	arch := map[string]string{"arm64": "arm64", "amd64": "x64"}[runtime.GOARCH]
