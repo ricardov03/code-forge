@@ -153,23 +153,24 @@ func TestB727UntilDoneGuardReadsWorkerWithLoneSurrogate(t *testing.T) {
 	}
 }
 
-// Kept on Node: a worker run with a lone surrogate reaches stderr text, and a
-// run record's values reach paths, git argv and ledger names.
+// Not served in Go: a worker run with a lone surrogate reaches stderr text,
+// and a run record's values reach paths, git argv and ledger names. These
+// cases handed over to Node before B690a; now Go refuses them (B756).
 func TestB727KeptCasesStillHandOver(t *testing.T) {
 	t.Run("worker run", func(t *testing.T) {
 		home := t.TempDir()
 		repo := reviewFileRepo(t, home)
 		b727LiveWorker(t, repo, `r\ud800`, "")
-		if got := reviewFileExec(t, repo, home, false, "--rebase-check", "--block", "B1", "--run", "r2"); got.code != 127 {
-			t.Fatalf("got %+v, want the hand-over (127)", got)
+		if got := reviewFileExec(t, repo, home, false, "--rebase-check", "--block", "B1", "--run", "r2"); got.code != 1 || got.stdout != "" || !b690aIsRefusal(got.stderr) {
+			t.Fatalf("got %+v, want the Go refusal", got)
 		}
 	})
 	t.Run("run record", func(t *testing.T) {
 		home := t.TempDir()
 		repo := reviewFileRepo(t, home)
 		b727Write(t, filepath.Join(repo, ".code-forge", "runs", "r1.json"), `{"run_id":"r1","project":"p\ud800","blocks":{"B1":{"owned_files":["a.go"]}}}`)
-		if got := reviewFileExec(t, repo, home, false, "--wait-block", "B1", "--run", "r1", "--max=0ms"); got.code != 127 {
-			t.Fatalf("got %+v, want the hand-over (127)", got)
+		if got := reviewFileExec(t, repo, home, false, "--wait-block", "B1", "--run", "r1", "--max=0ms"); got.code != 1 || got.stdout != "" || !b690aIsRefusal(got.stderr) {
+			t.Fatalf("got %+v, want the Go refusal", got)
 		}
 	})
 }

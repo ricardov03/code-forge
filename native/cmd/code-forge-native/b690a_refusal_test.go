@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -139,23 +140,61 @@ func TestB690aUnknownVerbRedactsLikeNode(t *testing.T) {
 		}
 	})
 	t.Run("a registered secret is masked", func(t *testing.T) {
-		b690aWithSecrets(t, token)
-		res, _ := b690aInRepo(t, token)
+		// B756: each verb starts with no secret registered (B715), so the
+		// secret is registered inside the command, before the line prints.
+		code, stderr := b756WithStderr(t, func() int {
+			b690aWithSecrets(t, token)
+			return unknownVerb(token)
+		})
 		// Recorded: redact() of the same text after registerSecret(token).
 		want := "code-forge: unknown verb \"[REDACTED]\"\nVerbs:\n"
-		if res.code != 1 || !strings.HasPrefix(res.stderr, want) || strings.Contains(res.stderr, token) {
-			t.Fatalf("code=%d stderr=%q; want exit 1, prefix %q and no raw token", res.code, res.stderr, want)
+		if code != 1 || !strings.HasPrefix(stderr, want) || strings.Contains(stderr, token) {
+			t.Fatalf("code=%d stderr=%q; want exit 1, prefix %q and no raw token", code, stderr, want)
 		}
 	})
+}
+
+// b756WithStderr runs fn from an empty temp folder with a temp HOME (as
+// b508Run sets up) and returns its exit code and what it wrote to stderr.
+func b756WithStderr(t *testing.T, fn func() int) (int, string) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
+	t.Setenv("CODE_FORGE_NATIVE", "1")
+	t.Setenv("CODE_FORGE_NO_ERROR_LOG", "1")
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(cwd) }()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stderr
+	os.Stderr = w
+	done := make(chan string)
+	go func() { data, _ := io.ReadAll(r); done <- string(data) }()
+	code := fn()
+	os.Stderr = saved
+	_ = w.Close()
+	return code, <-done
 }
 
 // The refusal line goes through the same redaction (recorded from Node's
 // redact() after registerSecret("close")).
 func TestB690aRefusalLineRedacts(t *testing.T) {
-	b690aWithSecrets(t, "close")
-	res, _ := b690aInRepo(t, "block", "close", "B1", "--run", "r1", "--reason=sk-private")
+	// B756: the secret is registered inside the command (B715: each verb
+	// starts with none), then the block close refusal prints.
+	code, stderr := b756WithStderr(t, func() int {
+		b690aWithSecrets(t, "close")
+		return refuseUnported([]string{"block", "close", "B1", "--run", "r1", "--reason=sk-private"}, hCloseUnsupportedFlag)
+	})
 	want := "code-forge: block [REDACTED] is not supported in this case yet ([REDACTED]-unsupported-flag). Please report it: code-forge logs report\n"
-	if res.code != 1 || res.stderr != want {
-		t.Fatalf("code=%d stderr=%q; want exit 1 and %q", res.code, res.stderr, want)
+	if code != 1 || stderr != want {
+		t.Fatalf("code=%d stderr=%q; want exit 1 and %q", code, stderr, want)
 	}
 }
