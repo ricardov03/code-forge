@@ -76,7 +76,6 @@ const (
 	hReviewRoot
 	hEnqueueEncoding
 	hEnqueuePathError
-	hEnqueueFlagRedaction
 	hEnqueueRepo
 	hEnqueueWorker
 	hEnqueueHome
@@ -376,7 +375,6 @@ var handoverReasons = [...]string{
 	hReviewRoot:               "review-root",
 	hEnqueueEncoding:          "enqueue-encoding",
 	hEnqueuePathError:         "enqueue-path-error",
-	hEnqueueFlagRedaction:     "enqueue-flag-redaction",
 	hEnqueueRepo:              "enqueue-repo",
 	hEnqueueWorker:            "enqueue-worker",
 	hEnqueueHome:              "enqueue-home",

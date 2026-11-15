@@ -512,6 +512,32 @@ func TestBlockAcceptHitCodexGo(t *testing.T) {
 		transcript := write(t, "thread.started\ngit reset --hard\ngit reset --hard\n")
 		f.run("TestBlockAcceptHitCodexGo", "yes", "block|accept-hit|B1|--run|r-test|--line|2|--transcript|"+transcript+"|--reason|ok").want(t, 0, "block B1 accepted git-reset-hard transcript line 2 (by: human)\n", "")
 	})
+	// B706: lone surrogate ids compare as Node's JSON.parse strings do (goldens
+	// from Node's pairing code: line 2 pairs 4, not 3), and a 20000-deep line
+	// parses like Node's JSON.parse (line 2 pairs 3); neither hands over.
+	t.Run("lone surrogate ids pair only the same surrogate", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		transcript := write(t, strings.Join([]string{
+			`{"type":"thread.started","thread_id":"t"}`,
+			`{"type":"item.started","item":{"id":"\ud800","command":"git stash"}}`,
+			`{"type":"item.completed","item":{"id":"\udbff","command":"git stash"}}`,
+			`{"type":"item.completed","item":{"id":"\ud800","command":"git stash"}}`,
+		}, "\n")+"\n")
+		f.run("TestBlockAcceptHitCodexGo", "yes", "block|accept-hit|B1|--run|r-test|--line|2|--transcript|"+transcript+"|--reason|ok").want(t, 0, "block B1 accepted git-stash transcript line 2 (by: human)\nblock B1 accepted git-stash transcript line 4 (by: human)\n", "")
+		if rows := f.ledger(); len(rows) != 2 || rows[0]["line"] != float64(2) || rows[1]["line"] != float64(4) {
+			t.Fatalf("rows %#v", rows)
+		}
+	})
+	t.Run("a 20000-deep line still pairs", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		deep := strings.Repeat("[", 20000) + strings.Repeat("]", 20000)
+		transcript := write(t, strings.Join([]string{
+			`{"type":"thread.started","thread_id":"t"}`,
+			`{"type":"item.started","item":{"id":"i1","command":"git stash"}}`,
+			`{"type":"item.completed","item":{"id":"i1","command":"git stash"},"deep":` + deep + `}`,
+		}, "\n")+"\n")
+		f.run("TestBlockAcceptHitCodexGo", "yes", "block|accept-hit|B1|--run|r-test|--line|2|--transcript|"+transcript+"|--reason|ok").want(t, 0, "block B1 accepted git-stash transcript line 2 (by: human)\nblock B1 accepted git-stash transcript line 3 (by: human)\n", "")
+	})
 	t.Run("a log that does not open with thread.started pairs nothing", func(t *testing.T) {
 		f := newHVFixture(t, nil, nil)
 		transcript := write(t, strings.Join(lines[1:], "\n"))
@@ -570,11 +596,34 @@ func TestBlockHumanVerbsNonASCIILogGo(t *testing.T) {
 		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "no", "block|accept-hit|Bñ'é😀|--run|r-test|--line|2|--transcript|"+transcript+"|--reason|ok").want(t, 1, "", "block Bñ'é😀 accept-hit: cancelled — nothing was recorded\n")
 		check(t, entry(t, f), nil, 1, "error", "block Bñ'é😀 accept-hit: cancelled — nothing was recorded", "1dda577516ad")
 	})
-	t.Run("a no-break space still goes to Node", func(t *testing.T) {
-		f := newHVFixture(t, nil, nil)
-		r := f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--x\u00a0y=1")
-		if !strings.Contains(r.stderr, "code-forge-native:") {
-			t.Fatalf("NBSP text did not hand over: exit %d stderr %q", r.code, r.stderr)
+	// B706: JavaScript-only spaces are served by Go with Node's message,
+	// flags, cleaned counts and fingerprint (goldens from Node's buildEntry).
+	flagsOf := func(t *testing.T, row map[string]any, want string) {
+		t.Helper()
+		got, _ := json.Marshal(map[string]any{"flags": row["flags"], "cleaned": row["cleaned"]})
+		if string(got) != want {
+			t.Fatalf("flags/cleaned %s; want %s", got, want)
 		}
+	}
+	t.Run("a no-break space in a flag name is logged by Go", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--x\u00a0y=1").want(t, 2, "", "block accept-hit: unknown flag \"--x\u00a0y=1\"\n")
+		row := entry(t, f)
+		check(t, row, nil, 2, "usage", "block accept-hit: unknown flag \"--x\u00a0y=1\"", "6c9b55a865f6")
+		flagsOf(t, row, `{"cleaned":[],"flags":["--run"]}`)
+	})
+	t.Run("an op ref ending in a no-break space is scrubbed like Node", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--x=op://v/i/f\u00a0tail_abcdefghijklmnopqrstuvwxyz").want(t, 2, "", "block accept-hit: unknown flag \"--x=op://v/i/f\u00a0tail_abcdefghijklmnopqrstuvwxyz\"\n")
+		row := entry(t, f)
+		check(t, row, nil, 2, "usage", "block accept-hit: unknown flag \"--x=op://<ref>\u00a0tail_<item-id>\"", "6c9b55a865f6")
+		flagsOf(t, row, `{"cleaned":[{"count":1,"rule":"op_ref"},{"count":1,"rule":"item_id"}],"flags":["--run","--x"]}`)
+	})
+	t.Run("an op ref with a vertical tab is scrubbed like Node", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--x=op://v/i/f\u000btail_abcdefghijklmnopqrstuvwxyz").want(t, 2, "", "block accept-hit: unknown flag \"--x=op://v/i/f\\u000btail_abcdefghijklmnopqrstuvwxyz\"\n")
+		row := entry(t, f)
+		check(t, row, nil, 2, "usage", "block accept-hit: unknown flag \"--x=op://<ref>\"", "6c9b55a865f6")
+		flagsOf(t, row, `{"cleaned":[{"count":1,"rule":"op_ref"}],"flags":["--x"]}`)
 	})
 }

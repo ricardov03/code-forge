@@ -93,7 +93,7 @@ async function snapshot(f) {
   return files;
 }
 
-test('help runs in Go and an unported flag records exactly one hand-over with its reason', async () => {
+test('help runs in Go and an unknown flag holding a value is served and logged in Go like Node', async () => {
   const f = await fixture();
   for (const args of [['review-file', '--help'], ['review-file', '-h', '--wait-block', 'B1']]) {
     const expected = execute(f, args, true);
@@ -103,15 +103,18 @@ test('help runs in Go and an unported flag records exactly one hand-over with it
     assert.deepEqual(execute(f, args, false, { CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1' }), { ...expected, stdout: goHelpPage(expected.stdout, REVIEW_FILE_PAGE) }, `${args.join(' ')}: Go help page holds Node's usage bytes, without Node`);
   }
   await assert.rejects(readFile(path.join(f.home, '.code-forge/native/handovers.jsonl')), { code: 'ENOENT' }, 'native help records zero hand-overs');
+  // B706: an unknown flag holding a value no longer hands over (it was enqueue-flag-redaction):
+  // Go prints Node's output and exit without Node and logs Node's error-log entry.
   const args = ['review-file', '--x=/private/value'];
-  const env = { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: process.execPath, CODE_FORGE_HANDOVER_LOG: '1', CODE_FORGE_NO_ERROR_LOG: '0' };
+  const env = { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: NO_NODE, CODE_FORGE_HANDOVER_LOG: '1', CODE_FORGE_NO_ERROR_LOG: '0' };
   const expected = execute(f, args, true, { CODE_FORGE_NO_ERROR_LOG: '0' });
-  assert.deepEqual(execute(f, args, false, env), expected, 'recording preserves Node output and exit');
-  const rows = (await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
-  assert.equal(rows.length, 1, 'one hand-over writes exactly one JSONL row');
-  const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
-  assert.deepEqual({ ...rows[0], at: '<time>' }, { at: '<time>', verb: 'review-file', sub: 'unknown', reason: 'enqueue-flag-redaction', version }, 'the redaction case keeps its reason and only safe telemetry fields');
-  assert.equal(Number.isNaN(Date.parse(rows[0].at)), false, 'row has a valid timestamp');
+  assert.equal(expected.code, 2, 'Node exits 2 on the unknown flag');
+  assert.deepEqual(execute(f, args, false, env), expected, 'Go prints Node output and exit without Node');
+  await assert.rejects(readFile(path.join(f.home, '.code-forge/native/handovers.jsonl')), { code: 'ENOENT' }, 'the unknown flag records zero hand-overs');
+  const entries = (await readFile(path.join(f.home, '.code-forge/logs/errors.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(entries.length, 2, 'Node and Go each log one entry');
+  const [nodeEntry, goEntry] = entries.map(({ ts, before, ...rest }) => rest);
+  assert.deepEqual(goEntry, nodeEntry, 'Go logs the entry Node logs (message, flags, cleaned, fingerprint)');
 });
 
 test('enqueue flag modes and cache retries run in Go with zero Node parity differences', async () => {

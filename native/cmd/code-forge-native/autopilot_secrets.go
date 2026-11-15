@@ -93,3 +93,8 @@ func autopilotWriteSigned(home, runID string, row ledger.Object) (ledger.Object,
 	autopilotRegisterKey(home, runID)
 	return written, err
 }
+
+// errorLogRedact is the redact() buildEntry runs before its scrubber: the
+// process's registered secrets (autopilotSecrets is Node's one module-level
+// set; a Go verb registers what Node's registers) become [REDACTED] (B706).
+func errorLogRedact(text string) string { return autopilotRedact(text) }
