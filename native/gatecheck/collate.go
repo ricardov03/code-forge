@@ -1,11 +1,16 @@
 package gatecheck
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
 
 // collationOrder is the ICU root order of printable ASCII, the order Node's
 // String.prototype.localeCompare uses: punctuation is not ignorable, letters
-// compare without case first and lower case wins the tie.
-const collationOrder = " _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$0123456789abcdefghijklmnopqrstuvwxyz"
+// compare without case first and lower case wins the tie. B720: the
+// whitespace controls TAB to CR come first; the other C0 controls and DEL
+// are completely ignorable (both measured with Node v24.22.1, ICU 78.3).
+const collationOrder = "\t\n\v\f\r _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$0123456789abcdefghijklmnopqrstuvwxyz"
 
 // collationElement is one ICU collation element: a primary weight (0 for a
 // combining mark), a secondary weight (0 is the common weight of a base
@@ -28,8 +33,10 @@ func collationElements(s string) ([]collationElement, bool) {
 	}
 	for _, r := range s {
 		switch {
-		case r >= 0x20 && r <= 0x7e:
+		case r >= 0x09 && r <= 0x0d || r >= 0x20 && r <= 0x7e:
 			out = append(out, base(byte(r)))
+		case r < 0x20 || r == 0x7f:
+			// completely ignorable
 		case latinLetters[r] != "":
 			for i, m := range latinLetters[r] {
 				if i == 0 {
@@ -93,4 +100,77 @@ func localeCompare(a, b string) (int, bool) {
 func localeLess(a, b string) (less, ok bool) {
 	c, ok := localeCompare(a, b)
 	return c < 0, ok
+}
+
+// B720: rootLikeLanguages are the languages whose ICU collation orders every
+// ASCII string as the root order does (measured with Node v24.22.1, ICU 78.3,
+// over all two-character ASCII strings and 20000 random ones, with and
+// without a region). Danish, Norwegian, Turkish, Czech and others differ.
+var rootLikeLanguages = map[string]bool{}
+
+func init() {
+	for _, l := range strings.Fields("af ar be bg bn ca de el en eo es fa fi fr ga gl gu he hi hy id is it ja ka kk km kn ko ky lo mk ml mn mr ms my ne nl or pa pl ps pt ro ru si sl sr sv sw ta te tk uk ur vi zh zu") {
+		rootLikeLanguages[l] = true
+	}
+}
+
+// collationEnv is the environment Node's default locale comes from; tests
+// replace it.
+var collationEnv = os.LookupEnv
+
+// defaultCollation reads Node's default locale as ICU does on POSIX: the
+// first of LC_ALL, LC_MESSAGES and LANG that is set (LC_COLLATE and
+// LANGUAGE play no part). root is true for an unset or empty value, C,
+// POSIX and their .codeset forms (ICU's en-US or und, both the root order);
+// ascii is true when the language orders ASCII as root does.
+func defaultCollation() (root, ascii bool) {
+	value, set := "", false
+	for _, name := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
+		if v, ok := collationEnv(name); ok {
+			value, set = v, true
+			break
+		}
+	}
+	if !set || value == "" {
+		return true, true
+	}
+	if strings.Contains(value, "@") {
+		return false, false
+	}
+	lang := value
+	if i := strings.IndexAny(lang, "_.-"); i >= 0 {
+		lang = lang[:i]
+	}
+	if lang == "C" || lang == "POSIX" {
+		return true, true
+	}
+	return lang == "en", rootLikeLanguages[lang]
+}
+
+// LocaleCompare is a.localeCompare(b) in Node's default locale: -1, 0 or 1.
+// ok is false when Go cannot prove the answer: a character collationElements
+// does not read, a precomposed Latin letter under a locale other than English
+// or root, or ASCII under a locale not measured to order it as root does.
+// Equal strings always compare 0.
+func LocaleCompare(a, b string) (int, bool) {
+	if a == b {
+		return 0, true
+	}
+	root, ascii := defaultCollation()
+	if !ascii {
+		return 0, false
+	}
+	if !root && (!isASCII(a) || !isASCII(b)) {
+		return 0, false
+	}
+	return localeCompare(a, b)
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
 }

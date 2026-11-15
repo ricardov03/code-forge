@@ -237,6 +237,7 @@ type v8Error struct {
 	plain string
 	at    int
 	eos   bool
+	full  string // B720: V8's whole message (JSONParseMessage)
 }
 
 type v8Parser struct {
@@ -248,11 +249,12 @@ type v8Parser struct {
 func (p *v8Parser) pos(at int) int { return utf16Len(p.src[:at]) }
 
 func (p *v8Parser) eosErr() *v8Error {
-	return &v8Error{plain: "Unexpected end of JSON input", at: -1, eos: true}
+	return &v8Error{plain: "Unexpected end of JSON input", at: -1, eos: true, full: "Unexpected end of JSON input"}
 }
 
 func (p *v8Parser) positioned(msg string, at int) *v8Error {
-	return &v8Error{plain: msg + " in JSON at position " + strconv.Itoa(p.pos(at)), at: at}
+	plain := msg + " in JSON at position " + strconv.Itoa(p.pos(at))
+	return &v8Error{plain: plain, at: at, full: plain + p.location(at)}
 }
 
 var v8Special = map[string]bool{"NaN": true, "Infinity": true, "undefined": true, "[object Object]": true}
@@ -270,7 +272,7 @@ func (p *v8Parser) unexpected(at int) *v8Error {
 		return p.positioned("Unexpected string", at)
 	}
 	if v8Special[p.src] {
-		return &v8Error{plain: "", at: -1}
+		return &v8Error{plain: "", at: -1, full: `"` + p.src + `" is not valid JSON`}
 	}
 	r, _ := utf8.DecodeRuneInString(p.src[at:])
 	msg := "Unexpected token"
@@ -283,7 +285,7 @@ func (p *v8Parser) unexpected(at int) *v8Error {
 	if p.units > 20 && p.pos(at) >= 10 {
 		msg += ", ..."
 	}
-	return &v8Error{plain: msg, at: -1}
+	return &v8Error{plain: msg, at: -1, full: p.tokenMessage(at)}
 }
 
 func (p *v8Parser) skipWS() {
@@ -314,7 +316,8 @@ func parseV8(src string) (any, *v8Error) {
 	}
 	p.skipWS()
 	if p.i < len(src) {
-		return nil, &v8Error{plain: "Unexpected non-whitespace character after JSON at position " + strconv.Itoa(p.pos(p.i)), at: p.i}
+		plain := "Unexpected non-whitespace character after JSON at position " + strconv.Itoa(p.pos(p.i))
+		return nil, &v8Error{plain: plain, at: p.i, full: plain + p.location(p.i)}
 	}
 	return v, nil
 }

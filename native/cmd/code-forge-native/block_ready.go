@@ -146,9 +146,9 @@ func runBlockReady(args []string) int {
 	}
 	blockers := []gatecheck.Blocker{}
 	event, why := blockclose.Pin(current, live, statusStart)
-	// A ticket Node's readTicket throws on stays with Node here (B718 ported
-	// that message for block close only).
-	if ok, err := closeQueuePins(p.home, p.run, p.id, current, rows, &event, &why, mainTop); !ok || err != nil {
+	// What Node's pin check throws stays with Node here (B718 and B720 ported
+	// those messages for block close only).
+	if err := closeQueuePins(p.home, p.run, p.id, current, rows, &event, &why, mainTop); err != nil {
 		return p.fallback()
 	}
 	if event != "" {

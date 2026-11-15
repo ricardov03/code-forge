@@ -1,0 +1,40 @@
+asked=
+exit=0
+--- stdout
+block B1 closed
+--- stderr
+WARN no ticket for sample.mjs
+--- new rows
+{"run":"r-b684","event":"block.close","block":"B1","status":"complete","tokens_source":null,"cost_source":null}
+--- status closed
+--- ws/queue/<ID>.json
+{"ticket":"<ID>","run":"r-b684","block":"B1","file":"sample.mjs","content_hash":"7aa7a5359173d05b63cfd682e3c38487f3cb4f7f1d60659fe59fab1505977d4c","tree":"<WS>/.code-forge/worktrees/B1","enqueued_at":5,"reopened_at":"<TS>"}
+--- ws/queue/<ID>.json
+{"ticket":"<ID>","run":"r-b684","block":"B1","file":"sample.mjs","content_hash":"7aa7a5359173d05b63cfd682e3c38487f3cb4f7f1d60659fe59fab1505977d4c","tree":"<WS>/.code-forge/worktrees/B1","enqueued_at":6,"reopened_at":"<TS>"}
+--- ws/runs/r-b684.json
+{
+  "run_id": "r-b684",
+  "project": "fixture",
+  "workspace": "<WS>",
+  "status": "active",
+  "blocks": {
+    "B1": {
+      "status": "closed",
+      "owned_files": [
+        "sample.mjs"
+      ],
+      "base_sha": "<SHA>",
+      "base_branch": "main",
+      "tree_at_open": {},
+      "kind": "code",
+      "test_files": [],
+      "worktree": {
+        "path": "<WS>/.code-forge/worktrees/B1",
+        "branch": "block-B1",
+        "base_sha": "<SHA>"
+      }
+    }
+  },
+  "orphans": []
+}
+

@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf16"
 
 	"github.com/ricardov03/code-forge/native/autopilot"
 	"github.com/ricardov03/code-forge/native/blockclose"
@@ -23,8 +26,10 @@ import (
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/humancheck"
+	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/queue"
+	"github.com/ricardov03/code-forge/native/review"
 	"github.com/ricardov03/code-forge/native/runstatus"
 	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/ticket"
@@ -419,8 +424,11 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		if rev, ok := entry.Get("acceptance_revision").(string); ok {
 			p.AcceptanceRevision = &rev
 		}
-		// toolLines prints "no ticket" for any other error, as Node does.
-		if _, e := queue.Identity(qdir, p); errors.Is(e, queue.ErrUnsupported) {
+		// toolLines prints "no ticket" for any other error, as Node does,
+		// a TypeError of reviewIdentity's sort included (B720). Only an
+		// attempt order Go cannot prove (localeCompare of text outside the
+		// measured collation) hands over.
+		if _, e := queue.Identity(qdir, p); errors.Is(e, queue.ErrUnsupported) && !errors.Is(e, queue.ErrScript) {
 			return fallback(hCloseQueueIdentity)
 		}
 	}
@@ -620,16 +628,18 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 	}
 	event, reason := blockclose.Pin(record, live, statusStart)
-	if ok, err := closeQueuePins(home, run, id, record, rows, &event, &reason, mainTop); !ok {
-		return fallback(hCloseQueuePins)
-	} else if err != nil {
-		// B718: Node's closeBlock throws readTicket's WorkerError or the raw
-		// scandir error here; with --decide it would have printed the gate's
-		// load warnings first, which Go reads later. A preflight (block
-		// land, --auto-claim, the human close) wraps close in its own
-		// output, so it keeps handing over.
-		if (deciding && !confirmed) || (step != nil && step.preflight && step.dry == nil) {
-			return fallback(hCloseQueuePins)
+	if err := closeQueuePins(home, run, id, record, rows, &event, &reason, mainTop); err != nil {
+		// B718/B720: Node's closeBlock throws readTicket's WorkerError, the
+		// raw scandir error, a claim file's read or JSON.parse error or a
+		// pin TypeError here. With --decide its preview throws it after the
+		// decide's own gate load (warnings) and waivePrecheck. A preflight
+		// (land, --auto-claim, the human close) fails the same way: its
+		// caller goes on as Node's does and the real close throws again.
+		if deciding && !confirmed && (step == nil || !step.preflight) && !autoDecide {
+			loadWarnings()
+			if decidePrecheck != nil {
+				return fail(decidePrecheck)
+			}
 		}
 		var te *queue.TicketError
 		if errors.As(err, &te) {
@@ -1195,74 +1205,324 @@ func closeExcluded(cfg map[string]any, file string) bool {
 }
 
 // closeQueuePins is closeBlock's pin check over the counted rows and the
-// queued tickets' claims. ok false hands over; err is what Node throws.
-func closeQueuePins(home, run, id string, record ledger.Object, rows []gatecheck.Row, event, reason *string, top string) (ok bool, err error) {
-	pins, _ := record.Get("workers").([]any)
-	if pins == nil {
-		if p := record.Get("worker"); p != nil {
-			pins = []any{p}
+// queued tickets' claims (src/state/block.mjs). err is what Node throws there:
+// readTicket's WorkerError, a read or JSON.parse error of a claim file, or a
+// TypeError of the run record's worker pins (B720).
+func closeQueuePins(home, run, id string, record ledger.Object, rows []gatecheck.Row, event, reason *string, top string) error {
+	if err := cqpCheckWorkerPinThrow(record); err != nil {
+		return err
+	}
+	var pins []any
+	pinsIsText := false
+	if workers, has := cqpGet(record, "workers"); has && workers != nil {
+		switch x := workers.(type) {
+		case []any:
+			pins = x
+		case string:
+			pinsIsText = true
+			pins = cqpChars(x)
+		default:
+			return errors.New("pins is not iterable")
+		}
+	} else if w := record.Get("worker"); cqpTruthy(w) {
+		pins = []any{w}
+	}
+	reviewPins := slices.Clone(pins)
+	if history, has := cqpGet(record, "worker_history"); has && history != nil {
+		switch x := history.(type) {
+		case []any:
+			reviewPins = append(reviewPins, x...)
+		case string:
+			reviewPins = append(reviewPins, cqpChars(x)...)
+		default:
+			return errors.New("(record.worker_history ?? []) is not iterable")
 		}
 	}
-	history, _ := record.Get("worker_history").([]any)
 	for _, r := range rows {
-		if r["block"] == id && r["event"] == "review.result" && !gatecheck.NeverReviewed(r) && r["worker"] != nil {
-			worker, _ := r["worker"].(map[string]any)
-			matched := false
-			for _, v := range append(slices.Clone(pins), history...) {
-				p := blockObject(v)
-				if p.Get("pid") == worker["pid"] && p.Get("started_at") == worker["started_at"] {
-					matched = true
+		worker, has := r["worker"]
+		if r["block"] != id || r["event"] != "review.result" || gatecheck.NeverReviewed(r) || !has {
+			continue
+		}
+		pid, started := cqpOptional(worker, "pid"), cqpOptional(worker, "started_at")
+		named := false
+		for _, p := range reviewPins {
+			got, err := cqpProp(p, "pid")
+			if err != nil {
+				return err
+			}
+			if cqpStrictEq(got, pid) {
+				at, _ := cqpProp(p, "started_at")
+				if cqpStrictEq(at, started) {
+					named = true
+					break
 				}
 			}
-			if !matched {
-				*event, *reason = "worker.replaced", "a counted review result does not name a pinned worker"
-			}
+		}
+		if !named {
+			*event, *reason = "worker.replaced", "a counted review result does not name a pinned worker"
+			break
 		}
 	}
 	if *event != "" {
-		return true, nil
+		return nil
 	}
 	dir := filepath.Join(top, ".code-forge/queue")
 	names, err := queue.TicketNames(dir)
 	if err != nil {
-		return true, err
+		return err
 	}
 	for _, name := range names {
 		ticket := strings.TrimSuffix(name, ".json")
 		queued, err := queue.ReadTicket(dir, ticket)
-		if errors.Is(err, queue.ErrUnsupported) {
-			return false, nil
-		}
 		if err != nil {
-			return true, err
+			return err
 		}
 		if queued["run"] != run || queued["block"] != id {
 			continue
 		}
 		sum := sha256.Sum256([]byte("ticket\x00" + run + "\x00" + ticket))
 		data, e := os.ReadFile(filepath.Join(home, ".code-forge/locks", hex.EncodeToString(sum[:])+".lock"))
-		if os.IsNotExist(e) {
+		if errors.Is(e, fs.ErrNotExist) {
 			continue
 		}
 		if e != nil {
-			return false, nil
+			return errors.New(blockIOMessage(e))
 		}
-		var claim map[string]any
-		if json.Unmarshal(data, &claim) != nil {
-			return false, nil
+		text := jsonx.DecodeUTF8(data)
+		if message, bad := review.JSONParseMessage(text); bad {
+			return errors.New(message)
 		}
-		for _, v := range pins {
-			p := blockObject(v)
-			if p.Get("pid") == claim["pid"] && p.Get("started_at") == claim["start"] {
-				_, why := blockclose.Pin(ledger.Object{{Key: "worker", Value: p}}, nil, statusStart)
-				if why != "" {
-					*event, *reason = "worker.down", fmt.Sprintf("dead pinned worker pid %v holds ticket %s", p.Get("pid"), ticket)
-					return true, nil
-				}
+		claim, e := jsonx.Parse(text)
+		if e != nil {
+			return e
+		}
+		if pinsIsText {
+			return errors.New("pins.find is not a function")
+		}
+		var owner any
+		for _, p := range pins {
+			pid, err := cqpProp(p, "pid")
+			if err != nil {
+				return err
+			}
+			claimPid, err := cqpProp(claim, "pid")
+			if err != nil {
+				return err
+			}
+			if !cqpStrictEq(pid, claimPid) {
+				continue
+			}
+			at, _ := cqpProp(p, "started_at")
+			start, _ := cqpProp(claim, "start")
+			if cqpStrictEq(at, start) {
+				owner = p
+				break
 			}
 		}
+		if !cqpTruthy(owner) {
+			continue
+		}
+		if _, why := blockclose.Pin(ledger.Object{{Key: "worker", Value: owner}}, nil, statusStart); why != "" {
+			pid, _ := cqpProp(owner, "pid")
+			*event, *reason = "worker.down", fmt.Sprintf("dead pinned worker pid %s holds ticket %s", cqpString(pid), ticket)
+			return nil
+		}
 	}
-	return true, nil
+	return nil
+}
+
+// cqpUndefined is a property JavaScript reads as undefined.
+type cqpUndefined struct{}
+
+// cqpGet is a run record property and whether the record has it.
+func cqpGet(o ledger.Object, key string) (any, bool) {
+	for _, f := range o {
+		if f.Key == key {
+			return f.Value, true
+		}
+	}
+	return cqpUndefined{}, false
+}
+
+// cqpProp is v[key] for a JSON value: undefined when v has no such own
+// property, the TypeError when v is null or undefined.
+func cqpProp(v any, key string) (any, error) {
+	switch x := v.(type) {
+	case cqpUndefined:
+		return nil, fmt.Errorf("Cannot read properties of undefined (reading '%s')", key)
+	case nil:
+		return nil, fmt.Errorf("Cannot read properties of null (reading '%s')", key)
+	case ledger.Object:
+		val, _ := cqpGet(x, key)
+		return val, nil
+	case map[string]any:
+		if val, has := x[key]; has {
+			return val, nil
+		}
+	}
+	return cqpUndefined{}, nil
+}
+
+// cqpOptional is v?.[key].
+func cqpOptional(v any, key string) any {
+	val, err := cqpProp(v, key)
+	if err != nil {
+		return cqpUndefined{}
+	}
+	return val
+}
+
+// cqpStrictEq is ===; two parsed objects or arrays are never the same object.
+func cqpStrictEq(a, b any) bool {
+	switch x := a.(type) {
+	case cqpUndefined:
+		_, ok := b.(cqpUndefined)
+		return ok
+	case nil:
+		return b == nil
+	case bool:
+		y, ok := b.(bool)
+		return ok && x == y
+	case float64:
+		y, ok := b.(float64)
+		return ok && x == y
+	case string:
+		y, ok := b.(string)
+		return ok && x == y
+	}
+	return false
+}
+
+// cqpTruthy is JavaScript's Boolean(v) for a JSON value.
+func cqpTruthy(v any) bool {
+	switch x := v.(type) {
+	case cqpUndefined, nil:
+		return false
+	case bool:
+		return x
+	case float64:
+		return x != 0 && !math.IsNaN(x)
+	case string:
+		return x != ""
+	}
+	return true
+}
+
+// cqpString is String(v) for a primitive (the pid in the dead worker reason
+// equals the claim's, so it is never an object).
+func cqpString(v any) string {
+	switch x := v.(type) {
+	case cqpUndefined:
+		return "undefined"
+	case nil:
+		return "null"
+	case bool:
+		return strconv.FormatBool(x)
+	case float64:
+		return jsonx.Number(x)
+	case string:
+		return x
+	}
+	return "[object Object]"
+}
+
+// cqpChars is [...s]: one string per code point (a lone surrogate alone).
+func cqpChars(s string) []any {
+	out := []any{}
+	units := jsonx.Units(s)
+	for i := 0; i < len(units); i++ {
+		n := 1
+		if units[i] >= 0xD800 && units[i] < 0xDC00 && i+1 < len(units) && units[i+1] >= 0xDC00 && units[i+1] < 0xE000 {
+			n = 2
+		}
+		out = append(out, string(utf16.Decode(units[i:i+n])))
+		i += n - 1
+	}
+	return out
+}
+
+// cqpCheckWorkerPinThrow is the TypeError checkWorkerPin throws before its
+// result: record.workers?.length > 1 on a value with no .some (a string, or
+// an object whose length reads above 1), or an array whose null entry comes
+// before any entry with an invalid pid (pins.some reads null.pid).
+func cqpCheckWorkerPinThrow(record ledger.Object) error {
+	workers, _ := cqpGet(record, "workers")
+	switch x := workers.(type) {
+	case []any:
+		if len(x) <= 1 {
+			return nil
+		}
+		for _, p := range x {
+			pid, err := cqpProp(p, "pid")
+			if err != nil {
+				return err
+			}
+			n, ok := pid.(float64)
+			if !ok || n != math.Trunc(n) || math.IsInf(n, 0) || n <= 1 {
+				return nil
+			}
+		}
+	case string:
+		if len(jsonx.Units(x)) > 1 {
+			return errors.New("pins.some is not a function")
+		}
+	case ledger.Object:
+		length, has := cqpGet(x, "length")
+		if !has {
+			return nil
+		}
+		n, err := cqpNumber(length)
+		if err != nil {
+			return err
+		}
+		if n > 1 {
+			return errors.New("pins.some is not a function")
+		}
+	}
+	return nil
+}
+
+// cqpNumber is Number(v) for a JSON value: an object or array through its
+// string form, an object with its own toString key throws.
+func cqpNumber(v any) (float64, error) {
+	switch x := v.(type) {
+	case cqpUndefined:
+		return math.NaN(), nil
+	case nil, bool, float64, string:
+		return apJSNumber(x), nil
+	}
+	s, err := cqpObjectString(v)
+	if err != nil {
+		return 0, err
+	}
+	return apJSNumber(s), nil
+}
+
+func cqpObjectString(v any) (string, error) {
+	switch x := v.(type) {
+	case ledger.Object:
+		if _, own := cqpGet(x, "toString"); own {
+			return "", errors.New("Cannot convert object to primitive value")
+		}
+		return "[object Object]", nil
+	case []any:
+		parts := make([]string, len(x))
+		for i, e := range x {
+			switch y := e.(type) {
+			case nil:
+			case ledger.Object, []any:
+				s, err := cqpObjectString(y)
+				if err != nil {
+					return "", err
+				}
+				parts[i] = s
+			default:
+				parts[i] = cqpString(y)
+			}
+		}
+		return strings.Join(parts, ","), nil
+	}
+	return cqpString(v), nil
 }
 
 func closeReviewedLines(run, id, top, qdir string, entry ledger.Object, files []gatecheck.File, waived []gatecheck.Waived, inTree, passed bool) ([]any, []string) {

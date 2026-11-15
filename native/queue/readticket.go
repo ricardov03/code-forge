@@ -24,9 +24,9 @@ type TicketError struct {
 
 func (e *TicketError) Error() string { return e.Message }
 
-// ErrUnsupported marks a ticket Go cannot judge as Node does (a reopen stamp
-// whose Date.parse result Go cannot prove, or an attempt order that needs
-// localeCompare); callers hand those over instead of guessing.
+// ErrUnsupported marks an attempt order Go cannot judge as Node does (a
+// localeCompare of text outside the collation measured against Node's ICU);
+// callers hand those over instead of guessing.
 var ErrUnsupported = errors.New("unsupported ticket")
 
 type unsupported string
@@ -47,7 +47,7 @@ func parseTicketJSON(data []byte) any {
 
 // ReadTicket is Node's readTicket(repoRoot, id) over dir (the queue directory):
 // any read or parse failure is "not readable JSON", then the id must match the
-// content. The error is a *TicketError with Node's message, or ErrUnsupported.
+// content. The error is a *TicketError with Node's message.
 func ReadTicket(dir, id string) (Object, error) {
 	file := filepath.Join(dir, id+".json")
 	// A FIFO would block readFileSync forever; Go refuses it as unreadable.
@@ -231,11 +231,7 @@ func checkTicket(id string, v any) (Object, error) {
 		if !ok {
 			return nil, badTicket(id, "has an invalid reopen timestamp")
 		}
-		_, finite, known := gatecheck.JSDateParse(s, true)
-		if !known {
-			return nil, unsupported("unsupported reopen time")
-		}
-		if !finite {
+		if !gatecheck.V8DateFinite(s) {
 			return nil, badTicket(id, "has an invalid reopen timestamp")
 		}
 		p.ReopenedAt = &s

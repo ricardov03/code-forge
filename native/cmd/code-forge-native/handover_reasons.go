@@ -54,7 +54,6 @@ const (
 	hCloseCoderTests
 	hCloseTestGate
 	hCloseExcludedFile
-	hCloseQueuePins
 	hLandHome
 	hLandReadRun
 	hLandEntryShape
@@ -355,7 +354,6 @@ var handoverReasons = [...]string{
 	hCloseCoderTests:          "close-coder-tests",
 	hCloseTestGate:            "close-test-gate",
 	hCloseExcludedFile:        "close-excluded-file",
-	hCloseQueuePins:           "close-queue-pins",
 	hLandHome:                 "land-home",
 	hLandReadRun:              "land-read-run",
 	hLandEntryShape:           "land-entry-shape",
