@@ -110,9 +110,10 @@ func b525Setup(t *testing.T, c b525Case, version string) *b525Env {
 }
 
 // b525FakeWorker is B524's fake worker plus B525_BAD_ENTRY: it also leaves a
-// registry entry with a lone surrogate escape (a registry Go cannot judge).
+// registry entry whose started_at is a lone surrogate escape (a date only
+// Date.parse could judge, so a registry Go cannot judge; B727).
 var b525FakeWorker = strings.Replace(b524FakeWorker, "exec sleep 30\n",
-	"if [ -n \"$B525_BAD_ENTRY\" ]; then printf '%s' '{\"x\":\"\\ud800\"}' > .code-forge/workers/bad.json; fi\nexec sleep 30\n", 1)
+	"if [ -n \"$B525_BAD_ENTRY\" ]; then printf '%s' '{\"started_at\":\"\\ud800\"}' > .code-forge/workers/bad.json; fi\nexec sleep 30\n", 1)
 
 func (e *b525Env) launched() []int {
 	data, _ := os.ReadFile(e.pids)

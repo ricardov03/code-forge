@@ -98,7 +98,7 @@ func reviewEnqueueWorker(root string) (ledger.Object, bool) {
 		if !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		w, matched := reviewWaitJSON(filepath.Join(dir, entry.Name()))
+		w, matched := reviewWaitWorkerJSON(filepath.Join(dir, entry.Name()))
 		if !matched {
 			return nil, false
 		}
@@ -122,7 +122,7 @@ func reviewEnqueueWorker(root string) (ledger.Object, bool) {
 			return w, true
 		}
 	}
-	w, matched := reviewWaitJSON(filepath.Join(root, ".code-forge", "queue", "worker.json"))
+	w, matched := reviewWaitWorkerJSON(filepath.Join(root, ".code-forge", "queue", "worker.json"))
 	if !matched {
 		return nil, false
 	}
@@ -152,7 +152,7 @@ func reviewEnqueueRecord(home, root, run string) (ledger.Object, bool) {
 				return nil, false
 			}
 		}
-		record, ok := reviewWaitJSON(file)
+		record, ok := reviewWaitJSONPlain(file)
 		if !ok {
 			return nil, false
 		}
@@ -355,7 +355,7 @@ func reviewEnqueueWith(args []string, step *landStep, pre *reviewFileScope) int 
 	}
 	// Only a missing/inaccessible authoritative record falls back to cwd's
 	// content tree. An existing record with no worktree selects the main tree.
-	private, matched := reviewWaitJSON(filepath.Join(home, ".code-forge", "runs", run+".json"))
+	private, matched := reviewWaitJSONPlain(filepath.Join(home, ".code-forge", "runs", run+".json"))
 	if !matched {
 		return reviewWaitHandover(args, hEnqueuePrivateRecord)
 	}

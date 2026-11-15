@@ -21,6 +21,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/gosafe"
+	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"gopkg.in/yaml.v3"
 )
@@ -29,7 +30,6 @@ func init() { routes["review-file"] = runReviewFileWait }
 
 var reviewWaitTicket = regexp.MustCompile(`^[0-9a-f]{24}$`)
 var reviewWaitMax = regexp.MustCompile(`^(\d{1,7})(ms|s)?$`)
-var reviewWaitSurrogate = regexp.MustCompile(`(?i)\\ud[89a-f][0-9a-f]{2}`)
 
 const reviewWaitUsage = "usage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]\n" +
 	"       code-forge review-file --wait-block <id> --run <id> [--max <seconds>s]\n" +
@@ -415,9 +415,14 @@ func reviewMainRoot(ctx context.Context, cwd string) (string, ledger.Object, boo
 	return resolved, nil, true
 }
 
-// The existing ledger encoder preserves JS property order and scalar bytes.
-// Unpaired UTF-16 surrogates and numbers outside its decoder's range stay on
-// Node; silently replacing either would break JSON.parse/stringify parity.
+// reviewWaitJSON is readJSON for an object: JSON.parse of the file read as
+// UTF-8. The ledger encoder keeps JS property order and scalar bytes, and a
+// lone surrogate escape (\ud800) stays a lone surrogate (WTF-8, as
+// ledger.ParseObject reads it, B704/B727), so values Node only compares or
+// writes back with JSON.stringify read the same in Go. Bytes Node decodes
+// with replacements and numbers outside the decoder's range stay on Node
+// (false). A caller that puts a value into a path, argv or plain text uses
+// jsonx.WellFormed (Node's U+FFFD form) or reviewWaitJSONPlain.
 func reviewWaitJSON(file string) (ledger.Object, bool) {
 	data, err := os.ReadFile(file)
 	if err != nil {
@@ -426,7 +431,7 @@ func reviewWaitJSON(file string) (ledger.Object, bool) {
 	if !json.Valid(data) {
 		return nil, true
 	}
-	if !utf8.Valid(data) || reviewWaitSurrogate.Match(data) {
+	if !utf8.Valid(data) {
 		return nil, false
 	}
 	obj, err := ledger.DecodeObject(data)
@@ -436,7 +441,33 @@ func reviewWaitJSON(file string) (ledger.Object, bool) {
 		}
 		return nil, true
 	}
+	if kept, err := ledger.ParseObject(data); err == nil {
+		obj = kept
+	}
 	return obj, true
+}
+
+// reviewWaitJSONPlain is reviewWaitJSON for a run record whose values reach
+// paths, git argv, ledger file names and report text: a lone surrogate there
+// still hands over to Node (B727).
+func reviewWaitJSONPlain(file string) (ledger.Object, bool) {
+	obj, ok := reviewWaitJSON(file)
+	if ok && ledger.HasLoneSurrogate(obj) {
+		return nil, false
+	}
+	return obj, ok
+}
+
+// reviewWaitWorkerJSON is reviewWaitJSON for a worker registry entry or
+// worker.json. Go only compares pid, start_time and the dates; the worker's
+// run also reaches stderr text ("the live worker serves run ..."), so a run
+// with a lone surrogate stays on Node (B727).
+func reviewWaitWorkerJSON(file string) (ledger.Object, bool) {
+	obj, ok := reviewWaitJSON(file)
+	if run, isString := obj.Get("run").(string); ok && isString && jsonx.HasLoneSurrogate(run) {
+		return nil, false
+	}
+	return obj, ok
 }
 
 func reviewWaitResult(root, marker string) (any, bool) {
@@ -453,7 +484,8 @@ func reviewWaitResult(root, marker string) (any, bool) {
 			return nil, true
 		}
 	}
-	obj, ok := reviewWaitJSON(filepath.Join(root, rel))
+	// Node's fs writes a lone surrogate in the path as U+FFFD (B727).
+	obj, ok := reviewWaitJSON(filepath.Join(root, jsonx.WellFormed(rel)))
 	if obj == nil {
 		return nil, ok
 	}
@@ -552,7 +584,7 @@ func reviewWaitLive(ctx context.Context, root string, deadline time.Time) (bool,
 		if !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		w, matched := reviewWaitJSON(filepath.Join(dir, entry.Name()))
+		w, matched := reviewWaitWorkerJSON(filepath.Join(dir, entry.Name()))
 		if !matched {
 			return false, false
 		}
@@ -571,7 +603,7 @@ func reviewWaitLive(ctx context.Context, root string, deadline time.Time) (bool,
 			return live, ok
 		}
 	}
-	w, matched := reviewWaitJSON(filepath.Join(root, ".code-forge", "queue", "worker.json"))
+	w, matched := reviewWaitWorkerJSON(filepath.Join(root, ".code-forge", "queue", "worker.json"))
 	if !matched {
 		return false, false
 	}
