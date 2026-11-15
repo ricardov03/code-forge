@@ -273,8 +273,10 @@ func landFirst(values ...string) string {
 type landErrorStream struct{ last string }
 
 func (s *landErrorStream) Write(data []byte) (int, error) {
-	if text := string(data); errorLogTrim(text) != "" {
-		s.last = text // buildEntry trims it (JavaScript's trim)
+	// Kept JS-trimmed like closeErrorBuffer (B706); buildEntry's own trim
+	// (errorLogTrim, B699) then changes nothing.
+	if text := errorLogTrim(string(data)); text != "" {
+		s.last = text
 	}
 	return os.Stderr.Write(data)
 }

@@ -115,7 +115,7 @@ func runBlockLand(args []string) int {
 		before := gatesBreadcrumbName("block")
 		text := "block land: " + message + "\n"
 		fmt.Fprint(os.Stderr, text)
-		nativeVerbFailure("block", "", append([]string{"land"}, args...), code, strings.TrimSpace(text), before)
+		nativeVerbFailure("block", "", append([]string{"land"}, args...), code, jsTrim(text), before)
 		return code
 	}
 	for _, arg := range args {

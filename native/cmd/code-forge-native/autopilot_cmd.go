@@ -214,7 +214,7 @@ func runAutopilot(args []string) int {
 	if code != 0 {
 		var message any
 		if o.last != "" {
-			message = strings.TrimSpace(o.last)
+			message = jsTrim(o.last)
 		}
 		nativeVerbFailure("autopilot", logSub, args, code, message, before)
 	}
