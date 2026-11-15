@@ -27,9 +27,6 @@ func androidLand(t *testing.T) androidLandFixture {
 	t.Setenv("CODE_FORGE_NATIVE", "1")
 	t.Setenv("CODE_FORGE_NODE", "/nonexistent")
 	t.Setenv("CODE_FORGE_NO_ERROR_LOG", "1")
-	old := reviewWaitNodeVersion
-	reviewWaitNodeVersion = "v24.22.1"
-	t.Cleanup(func() { reviewWaitNodeVersion = old })
 	bin := t.TempDir()
 	landWrite(t, filepath.Join(bin, "gradle"), "#!/bin/sh\n[ -f local.properties ] || { echo 'Android SDK not found'; exit 1; }\n[ -f app/google-services.json ] || { echo 'google-services.json not found'; exit 1; }\n[ -f prepared ] || { echo 'setup did not run'; exit 1; }\n[ -L local.properties ] && kind=link || kind=copy\nprintf '%s %s\\n' \"$PWD\" \"$kind\" >> \"$HOME/suite-calls\"\n")
 	if err := os.Chmod(filepath.Join(bin, "gradle"), 0700); err != nil {

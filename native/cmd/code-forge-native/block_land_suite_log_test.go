@@ -59,9 +59,6 @@ func newLandSuiteLogFixture(t *testing.T, bad int, output string) *landBatchFixt
 	t.Setenv("HOME", f.home)
 	t.Setenv("CODE_FORGE_NODE", "/nonexistent")
 	t.Setenv("CODE_FORGE_NO_ERROR_LOG", "1")
-	oldVersion := reviewWaitNodeVersion
-	reviewWaitNodeVersion = "v24.22.1"
-	t.Cleanup(func() { reviewWaitNodeVersion = oldVersion })
 	f.write(f.home, "suite-output", output)
 	f.git(f.repo, "init", "-qb", "main")
 	f.git(f.repo, "config", "user.name", "Fixture")

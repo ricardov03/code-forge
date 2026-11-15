@@ -73,6 +73,9 @@ func TestB572ContextPackWithoutNodeNamesLauncher(t *testing.T) {
 // command to name; the pack refuses and writes nothing.
 func TestB572ContextPackWithoutNodeOrLauncherRefuses(t *testing.T) {
 	f := newContextFixture(t, b572Blocks, b572Config)
+	if err := os.Remove(filepath.Join(filepath.Dir(f.home), "pkg", "bin", "code-forge")); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("CODE_FORGE_NODE", "/nonexistent-b572-node")
 	t.Setenv("PATH", b572PathWithoutNode(t))
 	code, out, errText := runCaptured(t, "context", "pack", "--run", "r-ctx", "--block", "B1")
@@ -84,23 +87,28 @@ func TestB572ContextPackWithoutNodeOrLauncherRefuses(t *testing.T) {
 	}
 }
 
-// B572: with node found, the pack bytes are the ones main wrote (golden made
-// on main before B572): node and bin/code-forge.mjs, as Node's own pack.
-func TestB572ContextPackWithNodeUnchanged(t *testing.T) {
+// B690d: with a node on CODE_FORGE_NODE and on PATH and no
+// bin/code-forge.mjs in the install, the pack is the same as with no node:
+// the launcher and the Go version, no Node entry; the node never runs.
+func TestB690dContextPackNamesLauncherNotNode(t *testing.T) {
 	f := newContextFixture(t, b572Blocks, b572Config)
-	got := b572Pack(t, f)
-	want, err := os.ReadFile(filepath.Join("testdata", "b572", "pack-node.golden.txt"))
-	if os.Getenv("B572_WRITE_GOLDEN") == "1" {
-		_ = os.MkdirAll(filepath.Join("testdata", "b572"), 0o755)
-		if err := os.WriteFile(filepath.Join("testdata", "b572", "pack-node.golden.txt"), []byte(got), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return
+	dir := t.TempDir()
+	if err := os.Symlink(f.node, filepath.Join(dir, "node")); err != nil {
+		t.Fatal(err)
 	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+b572PathWithoutNode(t))
+	if _, err := os.Stat(filepath.Join(filepath.Dir(f.home), "pkg", "bin", "code-forge.mjs")); !os.IsNotExist(err) {
+		t.Fatalf("fixture has a Node entry: %v", err)
+	}
+	got := b572Pack(t, f)
+	want, err := os.ReadFile(filepath.Join("testdata", "b572", "pack-no-node.golden.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != string(want) {
 		t.Fatalf("pack =\n%s\nwant\n%s", got, want)
+	}
+	if _, err := os.Stat(f.nodeMarker); !os.IsNotExist(err) {
+		t.Fatalf("node ran: %v", err)
 	}
 }

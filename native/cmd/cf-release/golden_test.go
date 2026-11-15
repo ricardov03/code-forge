@@ -107,7 +107,7 @@ var parityCases = []parityCase{
 	{name: "site-deploy-dir-missing", opts: fixtureOpts{site: true}, args: []string{"release-site", "--deploy-dir", "out/site"}},
 	{name: "site-branch-exists", opts: fixtureOpts{site: true},
 		prep: func(f *fixture) { f.git(f.site, "branch", "release-site/v0.21.0") }, args: []string{"release-site"}},
-	{name: "site-missing", args: []string{"release-site", "--site", "../nowhere"}},
+	{name: "site-missing", opts: fixtureOpts{site: true}, args: []string{"release-site", "--site", "../nowhere"}},
 	{name: "site-no-tag", opts: fixtureOpts{site: true}, prep: func(f *fixture) { f.git(f.repo, "tag", "-d", "v0.21.0") },
 		args: []string{"release-site"}},
 	{name: "site-usage", args: []string{"release-site", "--wait-min", "0"}},

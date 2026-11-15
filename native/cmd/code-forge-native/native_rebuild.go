@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,11 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/ricardov03/code-forge/native/gitx"
 )
@@ -101,30 +98,6 @@ func nativeBuild(root string) error {
 // Node's platform-arch names.
 var nativeBuildTargets = []string{"darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"}
 
-var nbNodeVersionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$`)
-
-// nbNodeVersion is the version the script stamped into
-// main.reviewWaitNodeVersion (its own process.version): the Node a hand-over
-// uses (contextNode), asked with --version. With no usable node it is "", and
-// the build leaves the variable at its "unknown" default.
-func nbNodeVersion() string {
-	node, err := contextNode()
-	if err != nil {
-		return ""
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, node, "--version").Output()
-	if err != nil {
-		return ""
-	}
-	v := strings.TrimSpace(string(out))
-	if !nbNodeVersionPattern.MatchString(v) {
-		return ""
-	}
-	return v
-}
-
 // nbPackageVersion reads package.json's version as the script's template
 // string shows it.
 func nbPackageVersion(root string) (string, error) {
@@ -203,10 +176,8 @@ func nativeBuildHost(root string) (string, error) {
 	binary := filepath.Join(dir, "code-forge-native")
 	pending := fmt.Sprintf("%s.%d.tmp", binary, os.Getpid())
 	defer os.Remove(pending)
+	// B690d: no Node version stamp; the binary never starts Node.
 	ldflags := "-s -w -X main.version=" + version
-	if node := nbNodeVersion(); node != "" {
-		ldflags += " -X main.reviewWaitNodeVersion=" + node
-	}
 	var buildErr bytes.Buffer
 	build := exec.Command("go", "build", "-trimpath", "-ldflags", ldflags, "-o", pending, "./cmd/code-forge-native")
 	build.Dir = filepath.Join(root, "native")
