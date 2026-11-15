@@ -370,11 +370,13 @@ func TestAutopilotApproveAtTerminalInGo(t *testing.T) {
 	}
 	during = func() {}
 	asked = nil
-	// B536: a change Go cannot reload like Node (the invalid config above),
-	// and a value Go cannot hold, go to Node before any prompt
+	// B536: a change Go cannot reload like Node (the invalid config above)
+	// goes to Node before any prompt
 	if code, _, _ = approve("5"); code != 127 {
 		t.Fatalf("write = %d", code)
 	}
+	// B732: a lone surrogate is a value Go holds now; this invalid config
+	// still goes to Node at the reload check, before any prompt
 	if code, _, _ = approve(`"\ud800"`); code != 127 {
 		t.Fatalf("surrogate = %d", code)
 	}
@@ -385,7 +387,7 @@ func TestAutopilotApproveAtTerminalInGo(t *testing.T) {
 	if len(asked) != 0 {
 		t.Fatalf("asked = %q", asked)
 	}
-	want := []string{"autopilot-approve-reload-shape", "autopilot-approve-reload-shape", "autopilot-approve-value", "autopilot-approve-value"}
+	want := []string{"autopilot-approve-reload-shape", "autopilot-approve-reload-shape", "autopilot-approve-reload-shape", "autopilot-approve-value"}
 	if got := apHandoverReasons(t, f); strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("reasons = %v, want %v", got, want)
 	}
