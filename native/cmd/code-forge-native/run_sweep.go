@@ -72,7 +72,10 @@ var (
 		}
 		return runParseProcesses(out)
 	}
-	runReadEnv = runProcessEnv
+	// runReadEnv reads one process's markers. nil (the default) reads them
+	// for every candidate at once (runProcessEnvs: one ps -E call on darwin,
+	// B748); a test that sets it is asked per process.
+	runReadEnv func(runProc) map[string]string
 )
 
 func runParseProcesses(text string) []runProc {
@@ -125,7 +128,6 @@ var (
 
 // runProcessEnv is readProcessEnv: only the ownership markers, nil when unreadable.
 func runProcessEnv(p runProc) map[string]string {
-	var text string
 	switch runtime.GOOS {
 	case "linux":
 		data, err := os.ReadFile("/proc/" + strconv.Itoa(p.pid) + "/environ")
@@ -147,18 +149,24 @@ func runProcessEnv(p runProc) map[string]string {
 		if !ok {
 			return nil
 		}
-		m := runPsEnvHead.FindStringSubmatch(out)
-		if m == nil || m[1] != strconv.Itoa(p.pid) || m[2] != strconv.Itoa(p.ppid) || strings.Join(strings.Fields(m[3]), " ") != p.start {
-			return nil
-		}
-		text = out[len(m[0]):]
-		if !strings.HasPrefix(text, p.command+" ") {
-			return nil
-		}
-		text = text[len(p.command)+1:]
+		return runEnvFromPs(p, out)
 	default:
 		return nil
 	}
+}
+
+// runEnvFromPs reads the markers from `ps -E` output for p alone: the row
+// must still be p (pid, ppid, start time, command) as in readProcessEnv.
+func runEnvFromPs(p runProc, out string) map[string]string {
+	m := runPsEnvHead.FindStringSubmatch(out)
+	if m == nil || m[1] != strconv.Itoa(p.pid) || m[2] != strconv.Itoa(p.ppid) || strings.Join(strings.Fields(m[3]), " ") != p.start {
+		return nil
+	}
+	text := out[len(m[0]):]
+	if !strings.HasPrefix(text, p.command+" ") {
+		return nil
+	}
+	text = text[len(p.command)+1:]
 	markers := map[string]string{}
 	for _, name := range runEnvMarkers {
 		if value, ok := runEnvMarker(text, name); ok {
@@ -166,6 +174,104 @@ func runProcessEnv(p runProc) map[string]string {
 		}
 	}
 	return markers
+}
+
+// runPsEnvCall is the batched `ps -E` call (a seam for tests).
+var runPsEnvCall = func(pids []string) (string, bool) {
+	return runPsOutput("-E", "-ww", "-o", "pid=,ppid=,lstart=,command=", "-p", strings.Join(pids, ","))
+}
+
+// runProcessEnvs is runProcessEnv for many processes (B748): on darwin one
+// `ps -E` call for all of them instead of one per process, cut into each
+// process's own output. A missing row is a process that has gone (nil, as a
+// per-process call reads). When the call fails, or a row cannot be told apart
+// (a candidate's header seen twice), every process is read on its own.
+func runProcessEnvs(cands []runProc) map[runProc]map[string]string {
+	envs := map[runProc]map[string]string{}
+	if len(cands) == 0 {
+		return envs
+	}
+	perProcess := func() map[runProc]map[string]string {
+		for _, p := range cands {
+			envs[p] = runProcessEnv(p)
+		}
+		return envs
+	}
+	if runtime.GOOS != "darwin" {
+		return perProcess()
+	}
+	want := map[string]bool{}
+	pids := []string{}
+	for _, p := range cands {
+		id := strconv.Itoa(p.pid)
+		if !want[id] {
+			want[id] = true
+			pids = append(pids, id)
+		}
+	}
+	out, ok := runPsEnvCall(pids)
+	if !ok {
+		return perProcess()
+	}
+	blocks := map[string]string{}
+	cur, start := "", -1
+	for at := 0; at < len(out); {
+		next := len(out)
+		if end := strings.IndexByte(out[at:], '\n'); end >= 0 {
+			next = at + end + 1
+		}
+		if m := runPsEnvHead.FindStringSubmatch(out[at:next]); m != nil && want[m[1]] {
+			if start >= 0 {
+				blocks[cur] = out[start:at]
+			}
+			if _, seen := blocks[m[1]]; seen {
+				return perProcess()
+			}
+			cur, start = m[1], at
+		}
+		at = next
+	}
+	if start >= 0 {
+		blocks[cur] = out[start:]
+	}
+	for _, p := range cands {
+		if text, found := blocks[strconv.Itoa(p.pid)]; found {
+			envs[p] = runEnvFromPs(p, text)
+		} else {
+			envs[p] = nil
+		}
+	}
+	return envs
+}
+
+// runEnvReader returns the marker reader for cands: the test seam when set,
+// else the markers read for all candidates at once.
+func runEnvReader(cands []runProc) func(runProc) map[string]string {
+	if runReadEnv != nil {
+		return runReadEnv
+	}
+	envs := runProcessEnvs(cands)
+	return func(p runProc) map[string]string {
+		if env, ok := envs[p]; ok {
+			return env
+		}
+		return runProcessEnv(p)
+	}
+}
+
+// runEnvCandidates: the processes the worker/orphan search reads markers of
+// (a worker command, or a child of pid 1), in table order.
+func runEnvCandidates(own []runProc, blocked map[int]bool) []runProc {
+	cands := []runProc{}
+	for _, p := range own {
+		if p.pid <= 1 || blocked[p.pid] {
+			continue
+		}
+		if runWorkerCommand.MatchString(p.command) || p.ppid == 1 {
+			cands = append(cands, p)
+		}
+	}
+	return cands
 }
 
 func runJSSpace(r rune) bool {
@@ -266,6 +372,7 @@ func runSweepItems(home string) []runProc {
 		}
 	}
 	blocked := runProtected(rows)
+	readEnv := runEnvReader(runEnvCandidates(own, blocked))
 	items := []runProc{}
 	listed := func(pid int) bool {
 		for _, item := range items {
@@ -280,7 +387,7 @@ func runSweepItems(home string) []runProc {
 			continue
 		}
 		if m := runWorkerCommand.FindStringSubmatch(p.command); m != nil {
-			env := runReadEnv(p)
+			env := readEnv(p)
 			if env == nil || env["HOME"] != home {
 				continue
 			}
@@ -292,7 +399,7 @@ func runSweepItems(home string) []runProc {
 		if p.ppid != 1 || listed(p.pid) {
 			continue
 		}
-		env := runReadEnv(p)
+		env := readEnv(p)
 		owner := env["CODE_FORGE_OWNER_PID"]
 		if env == nil || !runOwnerPid.MatchString(owner) {
 			continue
@@ -701,11 +808,15 @@ func runSweepRoots(base string) {
 // time still matches is stopped (its group when every member is ours), a dead
 // pid's entry is dropped, anything unproven is left alone.
 func runSweepPids(dir string) {
+	entries := runListEntries(dir)
+	if len(entries) == 0 {
+		return // B748: nothing registered, nothing to check (no ps call)
+	}
 	rows := runReadProcesses()
 	blocked := runProtected(rows)
 	uid := os.Getuid()
 	unregister := func(pid int) { _ = os.Remove(filepath.Join(dir, strconv.Itoa(pid)+".json")) }
-	for _, e := range runListEntries(dir) {
+	for _, e := range entries {
 		if blocked[e.pid] {
 			continue
 		}

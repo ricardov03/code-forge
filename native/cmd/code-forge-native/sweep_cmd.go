@@ -195,6 +195,7 @@ func sweepScan(home, base string) (*sweepReport, handoverReason) {
 		}
 		group.pids = append(group.pids, p.pid)
 	}
+	readEnv := runEnvReader(runEnvCandidates(own, blocked))
 	listed := func(pid int) bool {
 		for _, item := range r.items {
 			if item.p.pid == pid {
@@ -208,7 +209,7 @@ func sweepScan(home, base string) (*sweepReport, handoverReason) {
 			continue
 		}
 		if m := runWorkerCommand.FindStringSubmatch(p.command); m != nil {
-			env := runReadEnv(p)
+			env := readEnv(p)
 			if env == nil || env["HOME"] != home {
 				continue
 			}
@@ -224,7 +225,7 @@ func sweepScan(home, base string) (*sweepReport, handoverReason) {
 		if p.ppid != 1 || listed(p.pid) {
 			continue
 		}
-		env := runReadEnv(p)
+		env := readEnv(p)
 		owner := env["CODE_FORGE_OWNER_PID"]
 		if env == nil || !runOwnerPid.MatchString(owner) {
 			continue
