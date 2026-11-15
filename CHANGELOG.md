@@ -9,6 +9,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - Tests: the native-install, entry and config-golden Node tests give their private package copies a node_modules without the `@codedology` platform packages, so CI (which installs the published `@codedology/code-forge-<target>` binary) no longer finds the release binary in place of the test's own. B701
 - `tools install` and `logs clear` with stdin at a terminal and stdout piped (for example `| tee`) ask their question in Go: clack's frames on the pipe at 80 columns, colored only by `FORCE_COLOR`, with the same answers, output, exit codes and error-log row as Node; they no longer hand over to Node (`tools-confirm`, `logs-clear-prompt`). B698
 - `tools install` at a terminal asks its one question in Go (`Run <n> install command(s)?`, default no): yes runs the installs, any other answer prints "cancelled — nothing installed" and exits 1, as in Node; it no longer hands over to Node. B682
+- `block accept-hit` without `--rule` on a Codex `exec --json` transcript runs in Go: the named item line is paired with its `item.completed` lines and each hit gets its own signed row, as in Node; refusals of the human block verbs whose text has accents, emoji or quotes are printed and logged in Go with Node's message and fingerprint instead of handing over to Node. B685
 - `block reopen` at a terminal runs in Go: the owner's question, the answers, the signed human `review.reopened` row, the cleared done marker and the reopened review ticket match Node; it no longer hands over to Node. B680
 ### Changed
 

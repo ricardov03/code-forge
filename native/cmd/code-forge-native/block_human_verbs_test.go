@@ -139,9 +139,21 @@ type hvResult struct {
 
 func (f *hvFixture) run(test, ask, args string) hvResult {
 	f.t.Helper()
+	return f.runEnv(test, ask, args, "CODE_FORGE_NO_ERROR_LOG=1")
+}
+
+// runLogged runs with the error log on (B685): the entry lands in the temp
+// HOME's ~/.code-forge/logs/errors.jsonl.
+func (f *hvFixture) runLogged(test, ask, args string) hvResult {
+	f.t.Helper()
+	return f.runEnv(test, ask, args, "CODE_FORGE_NO_ERROR_LOG=0")
+}
+
+func (f *hvFixture) runEnv(test, ask, args, logEnv string) hvResult {
+	f.t.Helper()
 	asked := filepath.Join(f.t.TempDir(), "asked")
 	cmd := exec.Command(os.Args[0], "-test.run=^"+test+"$")
-	cmd.Env = append(os.Environ(), "HOME="+f.home, "BLOCK_HV_CHILD=1", "BLOCK_HV_ASK="+ask, "BLOCK_HV_ASKED="+asked, "BLOCK_HV_ARGS="+args, "CODE_FORGE_NODE=/nonexistent", "CODE_FORGE_NO_ERROR_LOG=1")
+	cmd.Env = append(os.Environ(), "HOME="+f.home, "BLOCK_HV_CHILD=1", "BLOCK_HV_ASK="+ask, "BLOCK_HV_ASKED="+asked, "BLOCK_HV_ARGS="+args, "CODE_FORGE_NODE=/nonexistent", "CODE_FORGE_HANDOVER_LOG=0", logEnv)
 	var out, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &stderr
 	err := cmd.Run()
@@ -428,6 +440,141 @@ func TestBlockWaiveHumanGo(t *testing.T) {
 		f.run("TestBlockWaiveHumanGo", "no", "block|waive|B1|F1|--run|r-test|--file|src/a.go|--reason|ok").want(t, 1, "", "block B1 waive: cancelled — nothing was recorded\n")
 		if len(f.ledger()) != 1 {
 			t.Fatal("cancel wrote rows")
+		}
+	})
+}
+
+// B685: without --rule a Codex exec --json log pairs the named item line with
+// its item.completed lines, as Node's prepareAcceptHit does (the B135 log of
+// test/cli/block-accept-hit.test.mjs); every row is signed and verifies.
+func TestBlockAcceptHitCodexGo(t *testing.T) {
+	if os.Getenv("BLOCK_HV_CHILD") == "1" {
+		blockHVChild()
+	}
+	codex := strings.Join([]string{
+		`{"type":"thread.started","thread_id":"t"}`,
+		`{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"git reset --hard; git clean -fd; git clean -fd"}}`,
+		`{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"git stash"}}`,
+		`{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"git reset --hard; git clean -fd; git clean -fd","aggregated_output":"ignored"}}`,
+		`{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"git stash"}}`,
+	}, "\n") + "\n"
+	write := func(t *testing.T, text string) string {
+		path := filepath.Join(t.TempDir(), "codex.jsonl")
+		if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	lines := strings.Split(codex, "\n")
+	digest := func(n int) string {
+		sum := sha256.Sum256([]byte(lines[n-1]))
+		return hex.EncodeToString(sum[:])
+	}
+	t.Run("item line pairs with its item.completed line", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		transcript := write(t, codex)
+		r := f.run("TestBlockAcceptHitCodexGo", "yes", "block|accept-hit|B1|--run|r-test|--line|2|--transcript|"+transcript+"|--reason|falso positivo ñ 'x' 😀")
+		r.want(t, 0, "block B1 accepted git-reset-hard transcript line 2 (by: human)\nblock B1 accepted git-clean transcript line 2 (by: human)\nblock B1 accepted git-reset-hard transcript line 4 (by: human)\nblock B1 accepted git-clean transcript line 4 (by: human)\n", "")
+		if want := "Accept false transcript hits git-reset-hard at line 2, git-clean at line 2, git-reset-hard at line 4, git-clean at line 4 in " + transcript + " of block B1 (run r-test)? Only the owner may say yes."; r.asked != want {
+			t.Fatalf("question %q; want %q", r.asked, want)
+		}
+		rows := f.ledger()
+		want := []struct {
+			rule string
+			line int
+		}{{"git-reset-hard", 2}, {"git-clean", 2}, {"git-reset-hard", 4}, {"git-clean", 4}}
+		if len(rows) != len(want) {
+			t.Fatalf("rows %#v", rows)
+		}
+		for i, w := range want {
+			row := rows[i]
+			if row["event"] != "rule_break.accepted" || row["rule"] != w.rule || row["line"] != float64(w.line) || row["line_sha256"] != digest(w.line) || row["reason"] != "falso positivo ñ 'x' 😀" || row["by"] != "human" {
+				t.Fatalf("row %d %#v", i, row)
+			}
+			f.verified(row)
+		}
+	})
+	t.Run("--rule names one hit on one line", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		transcript := write(t, codex)
+		f.run("TestBlockAcceptHitCodexGo", "yes", "block|accept-hit|B1|--run|r-test|--rule|git-clean|--line|2|--transcript|"+transcript+"|--reason|ok").want(t, 0, "block B1 accepted git-clean transcript line 2 (by: human)\n", "")
+		if rows := f.ledger(); len(rows) != 1 || rows[0]["line"] != float64(2) || rows[0]["rule"] != "git-clean" {
+			t.Fatalf("rows %#v", rows)
+		}
+	})
+	t.Run("the item.completed line pairs with itself only", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		transcript := write(t, codex)
+		f.run("TestBlockAcceptHitCodexGo", "yes", "block|accept-hit|B1|--run|r-test|--line|3|--transcript|"+transcript+"|--reason|ok").want(t, 0, "block B1 accepted git-stash transcript line 3 (by: human)\nblock B1 accepted git-stash transcript line 5 (by: human)\n", "")
+	})
+	t.Run("plain text naming thread.started pairs nothing", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		transcript := write(t, "thread.started\ngit reset --hard\ngit reset --hard\n")
+		f.run("TestBlockAcceptHitCodexGo", "yes", "block|accept-hit|B1|--run|r-test|--line|2|--transcript|"+transcript+"|--reason|ok").want(t, 0, "block B1 accepted git-reset-hard transcript line 2 (by: human)\n", "")
+	})
+	t.Run("a log that does not open with thread.started pairs nothing", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		transcript := write(t, strings.Join(lines[1:], "\n"))
+		f.run("TestBlockAcceptHitCodexGo", "yes", "block|accept-hit|B1|--run|r-test|--line|1|--transcript|"+transcript+"|--reason|ok").want(t, 0, "block B1 accepted git-reset-hard transcript line 1 (by: human)\nblock B1 accepted git-clean transcript line 1 (by: human)\n", "")
+	})
+}
+
+// B685: accents, emoji and quotes in a human verb's refusal are logged by Go
+// with Node's message and fingerprint (goldens recorded from the Node CLI);
+// a JavaScript-only space (NBSP) still hands over.
+func TestBlockHumanVerbsNonASCIILogGo(t *testing.T) {
+	if os.Getenv("BLOCK_HV_CHILD") == "1" {
+		blockHVChild()
+	}
+	entry := func(t *testing.T, f *hvFixture) map[string]any {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(f.home, ".code-forge", "logs", "errors.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := bytes.Split(bytes.TrimSpace(data), []byte{'\n'})
+		var row map[string]any
+		if len(lines) != 1 || json.Unmarshal(lines[0], &row) != nil {
+			t.Fatalf("log %s", data)
+		}
+		return row
+	}
+	check := func(t *testing.T, row map[string]any, sub any, exit float64, kind, message, fp string) {
+		t.Helper()
+		if row["verb"] != "block" || row["sub"] != sub || row["exit"] != exit || row["kind"] != kind || row["message"] != message || row["fp"] != fp {
+			t.Fatalf("entry %#v; want sub %v exit %v kind %s message %q fp %s", row, sub, exit, kind, message, fp)
+		}
+	}
+	t.Run("attempt on a missing block", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "notty", "block|attempt|Bñ😀|--run|r-test").want(t, 1, "", "block attempt: block Bñ😀 is not open in run r-test\n")
+		check(t, entry(t, f), "attempt", 1, "error", "block attempt: block Bñ😀 is not open in run r-test", "b73005519184")
+	})
+	t.Run("waive of a file with an accent and a quote", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|waive|B1|F1|--run|r-test|--file|src/é'.go|--reason|ok").want(t, 1, "", "block waive: waive-not-owned: block B1 does not own src/é'.go; nothing was recorded\n")
+		check(t, entry(t, f), "waive", 1, "error", "block waive: waive-not-owned: block B1 does not own src/é'.go; nothing was recorded", "b9d00119bed5")
+	})
+	t.Run("accept-hit unknown flag", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--line|2|--transcript|t.txt|--reason|ok|--ñandú'x=1").want(t, 2, "", "block accept-hit: unknown flag \"--ñandú'x=1\"\n")
+		check(t, entry(t, f), nil, 2, "usage", "block accept-hit: unknown flag \"--ñandú'x=1\"", "6c9b55a865f6")
+	})
+	t.Run("accept-hit cancelled on a block with accents, a quote and emoji", func(t *testing.T) {
+		b := map[string]any{"status": "open", "owned_files": []any{"src/a.go"}, "owned_kinds": map[string]any{}, "attempt": 1}
+		f := newHVFixture(t, nil, map[string]any{"blocks": map[string]any{"Bñ'é😀": b}})
+		transcript := filepath.Join(t.TempDir(), "t.txt")
+		if err := os.WriteFile(transcript, []byte("hello\nrm -rf build\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "no", "block|accept-hit|Bñ'é😀|--run|r-test|--line|2|--transcript|"+transcript+"|--reason|ok").want(t, 1, "", "block Bñ'é😀 accept-hit: cancelled — nothing was recorded\n")
+		check(t, entry(t, f), nil, 1, "error", "block Bñ'é😀 accept-hit: cancelled — nothing was recorded", "1dda577516ad")
+	})
+	t.Run("a no-break space still goes to Node", func(t *testing.T) {
+		f := newHVFixture(t, nil, nil)
+		r := f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--x\u00a0y=1")
+		if !strings.Contains(r.stderr, "code-forge-native:") {
+			t.Fatalf("NBSP text did not hand over: exit %d stderr %q", r.code, r.stderr)
 		}
 	})
 }

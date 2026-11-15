@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -81,13 +82,22 @@ func (h *humanVerb) fallback() int {
 	return blockHandover(h.original(), hBlockUnportedSubcommand)
 }
 func (h *humanVerb) text(code int, text string) int {
-	if !h.marked && (!closeTextSafe(text) || reviewWaitLogging() && (strings.ContainsFunc(text, func(r rune) bool { return r > 127 }) || h.sub == "waive" && strings.Contains(text, "'"))) {
+	if !h.marked && (!closeTextSafe(text) || reviewWaitLogging() && strings.ContainsFunc(text, humanLogSpace)) {
 		return h.fallback()
 	}
 	h.mark()
 	fmt.Fprint(os.Stderr, text)
-	nativeVerbFailure("block", h.crumbSub, h.original(), code, strings.TrimSpace(text), h.before)
+	// B685: writeVerbFailure logs clean(stderrText.trim()) with JavaScript's
+	// trim, so accents, emoji and quotes are logged as Node logs them.
+	nativeVerbFailure("block", h.crumbSub, h.original(), code, humanTrim(text), h.before)
 	return code
+}
+
+// humanLogSpace (B685): a JavaScript \s character Go's regexp \s does not
+// match (\v and the Unicode spaces). The error log's scrubber and fingerprint
+// split on \s, so such text stays with Node.
+func humanLogSpace(r rune) bool {
+	return errorLogSpace(r) && !strings.ContainsRune("\t\n\f\r ", r)
 }
 func (h *humanVerb) fail(err error) int {
 	var se *state.Error
@@ -264,8 +274,7 @@ func runBlockAcceptHit(args []string) int {
 	}
 	text := string(data)
 	hits, ok := gatecheck.Transcript(text)
-	// Node pairs Codex item lines without --rule; Go leaves Codex logs to Node.
-	if !ok || !hasRule && strings.Contains(text, "thread.started") || !blockStorageSafe(home, run, record) {
+	if !ok || !blockStorageSafe(home, run, record) {
 		return h.fallback()
 	}
 	lines := strings.Split(text, "\n")
@@ -273,19 +282,37 @@ func runBlockAcceptHit(args []string) int {
 		rule string
 		line int64
 	}
-	selected := []hit{}
+	all := []hit{}
+	named := false
 	for _, b := range hits {
 		m := acceptHitLine.FindStringSubmatch(b.Detail)
 		if m == nil {
 			return h.fallback()
 		}
 		n, _ := strconv.ParseInt(m[1], 10, 64)
-		if n == line && (!hasRule || m[2] == rule) {
-			selected = append(selected, hit{m[2], n})
+		all = append(all, hit{m[2], n})
+		named = named || n == line && (!hasRule || m[2] == rule)
+	}
+	if line < 1 || line > int64(len(lines)) || !named {
+		return noSuchHit()
+	}
+	// B685: without --rule, a Codex exec --json log also accepts the hits on
+	// the item.completed lines of the named line's item (accept-hit.mjs).
+	lineSet := map[int64]bool{line: true}
+	if !hasRule {
+		paired, ok := acceptHitCodexPairs(lines, line)
+		if !ok {
+			return h.fallback()
+		}
+		for _, n := range paired {
+			lineSet[n] = true
 		}
 	}
-	if line < 1 || line > int64(len(lines)) || len(selected) == 0 {
-		return noSuchHit()
+	selected := []hit{}
+	for _, s := range all {
+		if lineSet[s.line] && (!hasRule || s.rule == rule) {
+			selected = append(selected, s)
+		}
 	}
 	reason := humanTrim(blockString(flags["reason"]))
 	rows := []ledger.Object{}
@@ -320,6 +347,57 @@ func runBlockAcceptHit(args []string) int {
 		h.emit(out)
 	}
 	return 0
+}
+
+// acceptHitLoneSurrogate: a JSON \u escape of a UTF-16 surrogate. Go decodes a
+// lone one to U+FFFD, so two different item ids could compare equal.
+var acceptHitLoneSurrogate = regexp.MustCompile(`(?i)\\ud[89a-f][0-9a-f]{2}`)
+
+// acceptHitCodexPairs is prepareAcceptHit's Codex pairing: when every
+// nonblank line parses as a JSON object with a string type, the first is
+// thread.started and the named line is an item.* event with a string item.id,
+// the lines of that id's item.completed events. Anything else (a line JSON.parse
+// refuses, plain text) pairs nothing. ok is false where Go could read a line
+// differently from JSON.parse (nesting past Go's depth limit, a surrogate escape).
+func acceptHitCodexPairs(lines []string, line int64) (paired []int64, ok bool) {
+	events := make([]map[string]any, len(lines))
+	first := true
+	for i, s := range lines {
+		if humanTrim(s) == "" {
+			continue
+		}
+		var v any
+		dec := json.NewDecoder(strings.NewReader(s))
+		dec.UseNumber()
+		if !json.Valid([]byte(s)) || dec.Decode(&v) != nil {
+			var probe any
+			if err := json.Unmarshal([]byte(s), &probe); err != nil && strings.Contains(err.Error(), "exceeded max depth") {
+				return nil, false
+			}
+			return nil, true // JSON.parse throws: plain text
+		}
+		obj, isObj := v.(map[string]any)
+		if _, isText := obj["type"].(string); !isObj || !isText || first && obj["type"] != "thread.started" {
+			return nil, true
+		}
+		first = false
+		events[i] = obj
+	}
+	kind, _ := events[line-1]["type"].(string)
+	item, _ := events[line-1]["item"].(map[string]any)
+	id, isText := item["id"].(string)
+	if !strings.HasPrefix(kind, "item.") || !isText {
+		return nil, true
+	}
+	if acceptHitLoneSurrogate.MatchString(strings.Join(lines, "\n")) {
+		return nil, false
+	}
+	for i, event := range events {
+		if item, _ := event["item"].(map[string]any); event["type"] == "item.completed" && item != nil && item["id"] == id {
+			paired = append(paired, int64(i+1))
+		}
+	}
+	return paired, true
 }
 
 // ---- amend-acceptance ----
