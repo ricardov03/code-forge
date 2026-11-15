@@ -53,8 +53,11 @@ var (
 	}
 	// workerServing runs once the Go loop serves (tests stop it from here).
 	workerServing = func(*worker.Loop) {}
-	// workerOrphans is the orphan clean-up after a drain (reaper sweep).
-	workerOrphans = func(run string) func() { return (&worker.OrphanSweep{RunID: run}).Sweep }
+	// workerOrphans is the orphan clean-up after a drain (reaper sweep); it
+	// ends early once stopping reports the worker's stop (B734).
+	workerOrphans = func(run string, stopping func() bool) func() {
+		return (&worker.OrphanSweep{RunID: run, Stopping: stopping}).Sweep
+	}
 	// workerNow is the key resolver's clock; workerJevOpts are askJev's
 	// options other than the key (B533 tests point URL at a fake Jev).
 	workerNow     = time.Now
@@ -296,7 +299,7 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 		GuardPath: filepath.Join(home, ".code-forge", "runs", a.runID+".json")}
 	runner.Pool = pool
 	loop := &worker.Loop{Worker: wk, Pool: pool, Runner: runner, PollMs: a.pollMs,
-		CleanOrphans: workerOrphans(a.runID)}
+		CleanOrphans: workerOrphans(a.runID, wk.Stopping)}
 	pool.RunOne = loop.RunOne
 	pool.Stop = loop.Stop
 	loop.ApprovalsServed = workerApprovalsServed(home, a.runID)

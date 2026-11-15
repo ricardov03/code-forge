@@ -85,7 +85,7 @@ func b616Setup(t *testing.T, c string) string {
 	t.Setenv("PATH", "/usr/bin:/bin")
 	oldDaemon, oldOrphans := workerStartDaemon, workerOrphans
 	workerStartDaemon = func(string, map[string]any) (func(), error) { return func() {}, nil }
-	workerOrphans = func(string) func() { return func() {} }
+	workerOrphans = func(string, func() bool) func() { return func() {} }
 	t.Cleanup(func() { workerStartDaemon, workerOrphans = oldDaemon, oldOrphans })
 	return base
 }

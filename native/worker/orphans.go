@@ -156,7 +156,15 @@ type OrphanSweep struct {
 	GraceMs   int
 	Sleep     func(time.Duration)
 	Now       func() time.Time
+	// Stopping is the worker's stop flag (nil: never). B734: a stopping
+	// worker reads no further environment and signals no further process,
+	// so a SIGTERM that lands in the sweep is not held up by one `ps -E` per
+	// init-parented process; a skipped orphan is left to the next sweep.
+	// Node's sweep is synchronous and runs to its end before its handler.
+	Stopping func() bool
 }
+
+func (s *OrphanSweep) stopped() bool { return s.Stopping != nil && s.Stopping() }
 
 func (s *OrphanSweep) defaults() {
 	if s.Processes == nil {
@@ -219,6 +227,9 @@ func (s *OrphanSweep) Orphans() []ProcInfo {
 	for _, p := range rows {
 		if p.UID != s.UID || p.PID <= 1 || blocked[p.PID] || p.PPID != 1 {
 			continue
+		}
+		if s.stopped() {
+			return nil
 		}
 		env := s.ReadEnv(p)
 		owner := env["CODE_FORGE_OWNER_PID"]
@@ -299,6 +310,9 @@ func (s *OrphanSweep) stop(p ProcInfo) {
 func (s *OrphanSweep) Sweep() {
 	defer func() { _ = recover() }()
 	for _, p := range s.Orphans() {
+		if s.stopped() {
+			return
+		}
 		s.stop(p)
 	}
 }

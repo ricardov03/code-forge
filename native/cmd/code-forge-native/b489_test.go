@@ -91,7 +91,7 @@ func newB489Fix(t *testing.T) *b489Fix {
 	review.LensDir = func() (string, error) { return lenses, nil }
 	oldDaemon, oldOrphans, oldSignals := workerStartDaemon, workerOrphans, workerSignals
 	workerStartDaemon = func(string, map[string]any) (func(), error) { return func() {}, nil }
-	workerOrphans = func(string) func() { return func() { f.sweeps++ } }
+	workerOrphans = func(string, func() bool) func() { return func() { f.sweeps++ } }
 	t.Cleanup(func() {
 		session.FindingSchemaPath, review.LensDir = oldSchema, oldLenses
 		workerStartDaemon, workerOrphans, workerSignals = oldDaemon, oldOrphans, oldSignals
