@@ -701,7 +701,7 @@ func reviewWaitUsageError(args []string, message string) int {
 	before := reviewWaitBreadcrumb()
 	text := "review-file: " + message + "\n" + reviewWaitUsage
 	fmt.Fprint(os.Stderr, text)
-	reviewWaitFailure(args, 2, strings.TrimSpace(text), before)
+	reviewWaitFailure(args, 2, text, before)
 	return 2
 }
 
@@ -711,10 +711,6 @@ var reviewWaitNodeVersion = "unknown"
 
 var reviewWaitLogFlag = regexp.MustCompile(`^--([A-Za-z][A-Za-z0-9-]{0,39})(=|$)`)
 var reviewWaitLogShort = regexp.MustCompile(`^-([A-Za-z])`)
-var reviewWaitLogWords = regexp.MustCompile(`\s+`)
-var reviewWaitLogQuotes = regexp.MustCompile("\"[^\"\n]*\"|'[^'\n]*'|`[^`\n]*`")
-var reviewWaitLogPlaceholders = regexp.MustCompile(`<[^<>\n]*>`)
-var reviewWaitLogPaths = regexp.MustCompile(`\S*/\S*`)
 
 // Native failures contain only fixed messages and flag names, never user values
 // or stacks. Match buildEntry/appendLine in src/util/error-log.mjs for this shape.
@@ -732,30 +728,9 @@ func reviewWaitFailure(args []string, code int, message any, before []any) {
 			}
 		}
 	}
-	slugCount := 0
-	clean := func(s string) string {
-		if slug == "" {
-			return s
-		}
-		// The fixed fields have no home paths, emails, op refs or item IDs.
-		// A configured project slug can still occur in a message or flag name.
-		pattern := regexp.MustCompile(regexp.QuoteMeta(slug))
-		matches := pattern.FindAllStringIndex(s, -1)
-		word := func(c byte) bool {
-			return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
-		}
-		for i := len(matches) - 1; i >= 0; i-- {
-			start, end := matches[i][0], matches[i][1]
-			if start > 0 && (word(s[start-1]) || s[start-1] == '<') || end < len(s) && (word(s[end]) || s[end] == '>') || strings.HasPrefix(s[end:], "://") {
-				continue
-			}
-			s = s[:start] + "<slug>" + s[end:]
-			slugCount++
-		}
-		return s
-	}
+	clean, counts := gatesScrubber(slug)
 	if text, ok := message.(string); ok {
-		text = clean(text)
+		text = clean(errorLogTrim(text))
 		if len(text) > 2048 {
 			end := 2048
 			for !utf8.RuneStart(text[end]) {
@@ -782,18 +757,13 @@ func reviewWaitFailure(args []string, code int, message any, before []any) {
 		afterLong = false
 	}
 	verb := clean("review-file")
-	if slugCount > 0 {
-		cleaned = append(cleaned, ledger.Object{{Key: "rule", Value: "project_name"}, {Key: "count", Value: slugCount}})
-	}
+	cleaned = counts()
 	kind := "error"
 	if code == 2 {
 		kind = "usage"
 	}
 	normalized, _ := message.(string)
-	normalized = reviewWaitLogQuotes.ReplaceAllString(normalized, " ")
-	normalized = reviewWaitLogPlaceholders.ReplaceAllString(normalized, " ")
-	normalized = reviewWaitLogPaths.ReplaceAllString(normalized, " ")
-	normalized = strings.TrimSpace(reviewWaitLogWords.ReplaceAllString(normalized, " "))
+	normalized = errorLogNormalize(normalized)
 	fp := sha256.Sum256([]byte(verb + "\n\n" + kind + "\n" + normalized))
 	arch := runtime.GOARCH
 	if arch == "amd64" {

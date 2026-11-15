@@ -1,9 +1,14 @@
 package main
 
 import (
+	"path/filepath"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/ricardov03/code-forge/native/ledger"
 )
 
 // errorLogNormalize is Node's normalizeMessage (src/util/error-log.mjs): the
@@ -151,4 +156,135 @@ func errorLogDropNumbers(s string) string {
 		i = end
 	}
 	return out.String()
+}
+
+// errorLogTrim is String.prototype.trim: JavaScript's \s set from both ends
+// (U+FEFF, NBSP and \v go; U+0085 stays).
+func errorLogTrim(s string) string { return strings.TrimFunc(s, errorLogSpace) }
+
+// errorLogSpaceClass is JavaScript's \s inside a character class (RE2's \s
+// is ASCII only).
+const errorLogSpaceClass = `\t\n\x{0B}\f\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}`
+
+// errorLogScrubRules is SCRUB_RULES' order: the order counts() lists rules in.
+var errorLogScrubRules = []string{"home", "project_path", "project_name", "email", "op_ref", "item_id"}
+
+var errorLogOpRef = regexp.MustCompile("op://(?:[^/\\r\\n\"'`<>]+/[^/\\r\\n\"'`<>]+/)?[^" + errorLogSpaceClass + "\"'`<>)\\]]+")
+var errorLogEmail = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)
+var errorLogItemID = regexp.MustCompile(`[a-z0-9]{26}`)
+
+// errorLogJSLen is a string's JavaScript length (UTF-16 code units).
+func errorLogJSLen(s string) int {
+	n := 0
+	for _, r := range s {
+		n++
+		if r > 0xFFFF {
+			n++ // a surrogate pair
+		}
+	}
+	return n
+}
+
+// errorLogPathVariants is pathVariants: the path without trailing slashes or
+// backslashes, plus its real path when realpathSync succeeds; 2+ characters,
+// longest first.
+func errorLogPathVariants(p string) []string {
+	if errorLogJSLen(p) < 2 {
+		return nil
+	}
+	out := []string{strings.TrimRight(p, "/\\")}
+	if abs, err := filepath.Abs(p); err == nil {
+		if real, err := filepath.EvalSymlinks(abs); err == nil && real != out[0] {
+			out = append(out, real)
+		}
+	}
+	kept := out[:0]
+	for _, v := range out {
+		if errorLogJSLen(v) >= 2 {
+			kept = append(kept, v)
+		}
+	}
+	sort.SliceStable(kept, func(i, j int) bool { return errorLogJSLen(kept[i]) > errorLogJSLen(kept[j]) })
+	return kept
+}
+
+// errorLogScrubber is createScrubber in src/util/error-log.mjs: op:// refs,
+// the working directory (when not a home form), the home directory, emails,
+// the project slug as a whole word and 26-character item IDs, each pass a
+// global JavaScript replace (a match a lookaround refuses is retried one
+// character on). counts() lists the replacements in SCRUB_RULES order.
+func errorLogScrubber(home, cwd, slug string) (func(string) string, func() []any) {
+	type step struct {
+		rule, to string
+		re       *regexp.Regexp
+		behind   func(byte) bool   // (?<![...]): the byte before the match
+		ahead    func(string) bool // (?!...): the text after the match
+	}
+	alnum := func(c byte) bool { return errorLogAlnum(c) }
+	homes := errorLogPathVariants(home)
+	type pathForm struct{ rule, path, to string }
+	paths := []pathForm{}
+	for _, c := range errorLogPathVariants(cwd) {
+		if !slices.Contains(homes, c) {
+			paths = append(paths, pathForm{"project_path", c, "<project>"})
+		}
+	}
+	for _, h := range homes {
+		paths = append(paths, pathForm{"home", h, "~"})
+	}
+	sort.SliceStable(paths, func(i, j int) bool { return errorLogJSLen(paths[i].path) > errorLogJSLen(paths[j].path) })
+	steps := []step{{rule: "op_ref", to: "op://<ref>", re: errorLogOpRef}}
+	for _, p := range paths {
+		steps = append(steps, step{rule: p.rule, to: p.to, re: regexp.MustCompile(regexp.QuoteMeta(p.path)), ahead: func(rest string) bool {
+			return rest != "" && (alnum(rest[0]) || rest[0] == '_' || rest[0] == '-')
+		}})
+	}
+	steps = append(steps, step{rule: "email", to: "<email>", re: errorLogEmail})
+	if slug != "" {
+		steps = append(steps, step{rule: "project_name", to: "<slug>", re: regexp.MustCompile(regexp.QuoteMeta(slug)),
+			behind: func(c byte) bool { return alnum(c) || c == '_' || c == '<' || c == '-' },
+			ahead: func(rest string) bool {
+				return rest != "" && (alnum(rest[0]) || rest[0] == '_' || rest[0] == '>' || rest[0] == '-') || strings.HasPrefix(rest, "://")
+			}})
+	}
+	steps = append(steps, step{rule: "item_id", to: "<item-id>", re: errorLogItemID, behind: alnum, ahead: func(rest string) bool {
+		return rest != "" && alnum(rest[0])
+	}})
+	tally := map[string]int{}
+	clean := func(s string) string {
+		for _, st := range steps {
+			var out strings.Builder
+			copied, at := 0, 0
+			for at <= len(s) {
+				loc := st.re.FindStringIndex(s[at:])
+				if loc == nil {
+					break
+				}
+				a, b := at+loc[0], at+loc[1]
+				if st.behind != nil && a > 0 && st.behind(s[a-1]) || st.ahead != nil && st.ahead(s[b:]) {
+					at = a + 1
+					continue
+				}
+				out.WriteString(s[copied:a])
+				out.WriteString(st.to)
+				tally[st.rule]++
+				copied, at = b, b
+			}
+			if copied > 0 {
+				out.WriteString(s[copied:])
+				s = out.String()
+			}
+		}
+		return s
+	}
+	counts := func() []any {
+		out := []any{}
+		for _, rule := range errorLogScrubRules {
+			if tally[rule] > 0 {
+				out = append(out, ledger.Object{{Key: "rule", Value: rule}, {Key: "count", Value: tally[rule]}})
+			}
+		}
+		return out
+	}
+	return clean, counts
 }

@@ -218,12 +218,16 @@ func logNativeWarning(verb, warning, message string) {
 		}
 	}
 	clean, counts := gatesScrubber(slug)
-	message = strings.TrimSpace(clean(message))
-	normalized := reviewWaitLogQuotes.ReplaceAllString(message, " ")
-	normalized = reviewWaitLogPlaceholders.ReplaceAllString(normalized, " ")
-	normalized = reviewWaitLogPaths.ReplaceAllString(normalized, " ")
-	normalized = strings.TrimSpace(reviewWaitLogWords.ReplaceAllString(normalized, " "))
-	fp := sha256.Sum256([]byte(verb + "\n\nwarning\n" + normalized + "\n" + warning))
+	message = clean(errorLogTrim(message))
+	if len(message) > 2048 {
+		end := 2048
+		for !utf8.RuneStart(message[end]) {
+			end--
+		}
+		message = message[:end]
+	}
+	verb = clean(verb)
+	fp := sha256.Sum256([]byte(verb + "\n\nwarning\n" + errorLogNormalize(message) + "\n" + warning))
 	arch := runtime.GOARCH
 	if arch == "amd64" {
 		arch = "x64"
@@ -232,7 +236,7 @@ func logNativeWarning(verb, warning, message string) {
 		{Key: "ts", Value: time.Now().UTC().Format("2006-01-02T15:04:05.000Z")},
 		{Key: "version", Value: version}, {Key: "node", Value: nodeRunVersion()},
 		{Key: "platform", Value: runtime.GOOS}, {Key: "arch", Value: arch},
-		{Key: "verb", Value: clean(verb)}, {Key: "sub", Value: nil}, {Key: "flags", Value: []any{}},
+		{Key: "verb", Value: verb}, {Key: "sub", Value: nil}, {Key: "flags", Value: []any{}},
 		{Key: "exit", Value: 0}, {Key: "kind", Value: "warning"}, {Key: "warning", Value: warning},
 		{Key: "message", Value: message}, {Key: "stack", Value: nil}, {Key: "cleaned", Value: counts()},
 		{Key: "fp", Value: fmt.Sprintf("%x", fp[:6])}, {Key: "before", Value: smallVerbBefore},

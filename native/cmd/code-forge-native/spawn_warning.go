@@ -42,7 +42,7 @@ func spawnLogWarning(warning, message string) {
 		}
 	}
 	clean, counts := gatesScrubber(slug)
-	text := clean(strings.TrimSpace(message))
+	text := clean(errorLogTrim(message))
 	if len(text) > 2048 {
 		end := 2048
 		for !utf8.RuneStart(text[end]) {
@@ -51,11 +51,7 @@ func spawnLogWarning(warning, message string) {
 		text = text[:end]
 	}
 	verb := clean(spawnWarnVerb)
-	normalized := reviewWaitLogQuotes.ReplaceAllString(text, " ")
-	normalized = reviewWaitLogPlaceholders.ReplaceAllString(normalized, " ")
-	normalized = reviewWaitLogPaths.ReplaceAllString(normalized, " ")
-	normalized = strings.TrimSpace(reviewWaitLogWords.ReplaceAllString(normalized, " "))
-	sum := sha256.Sum256([]byte(verb + "\n\nwarning\n" + normalized + "\n" + warning))
+	sum := sha256.Sum256([]byte(verb + "\n\nwarning\n" + errorLogNormalize(text) + "\n" + warning))
 	fp := fmt.Sprintf("%x", sum[:6])
 	spawnWarnMu.Lock()
 	defer spawnWarnMu.Unlock()

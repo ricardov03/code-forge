@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/ricardov03/code-forge/native/autopilot"
@@ -54,13 +53,13 @@ func (p *blockPreview) crumb() (name, sub string) {
 	return "block", ""
 }
 func (p *blockPreview) errorText(code int, text string) int {
-	if !closeTextSafe(text) || reviewWaitLogging() && (strings.ContainsFunc(text, func(r rune) bool { return r > 127 }) || p.sub == "waive" && strings.Contains(text, "'")) {
+	if !closeTextSafe(text) {
 		return p.fallback()
 	}
 	name, sub := p.crumb()
 	before := gatesBreadcrumbName(name)
 	fmt.Fprint(os.Stderr, text)
-	nativeVerbFailure("block", sub, append([]string{p.sub}, p.args...), code, strings.TrimSpace(text), before)
+	nativeVerbFailure("block", sub, append([]string{p.sub}, p.args...), code, text, before)
 	return code
 }
 func (p *blockPreview) refusal(code, detail string) int {

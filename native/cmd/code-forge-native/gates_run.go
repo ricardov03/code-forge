@@ -20,7 +20,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -36,8 +35,8 @@ var gatesLastMessage any
 
 func gatesErrf(format string, args ...any) {
 	s := fmt.Sprintf(format, args...)
-	if strings.TrimSpace(s) != "" {
-		gatesLastMessage = strings.TrimSpace(s)
+	if errorLogTrim(s) != "" {
+		gatesLastMessage = s // captureStderr keeps the write; buildEntry trims it
 	}
 	fmt.Fprint(os.Stderr, s)
 }
@@ -47,73 +46,17 @@ func gatesFinish(args []string, code int) {
 		gatesFailure(args, code, gatesLastMessage, before)
 	}
 }
+
+// gatesScrubber is createScrubber in src/util/error-log.mjs for this process:
+// HOME, the real working directory (process.cwd()) and the project slug.
 func gatesScrubber(slug string) (func(string) string, func() []any) {
-	tally := map[string]int{}
-	type step struct {
-		rule, from, to string
-		re             *regexp.Regexp
-		left, right    bool
+	cwd, err := syscall.Getwd()
+	if err != nil {
+		cwd, _ = os.Getwd()
 	}
-	steps := []step{{rule: "op_ref", to: "op://<ref>", re: regexp.MustCompile("op://(?:[^/\\r\\n\"'`<>]+/[^/\\r\\n\"'`<>]+/)?[^\\s\"'`<>)\\]]+")}}
-	cwd, _ := os.Getwd()
-	home := os.Getenv("HOME")
-	paths := []step{}
-	seen := map[string]bool{}
-	for _, p := range []struct{ rule, path, to string }{{"project_path", cwd, "<project>"}, {"home", home, "~"}} {
-		for _, v := range []string{p.path, proof.Real(p.path)} {
-			v = strings.TrimRight(v, "/\\")
-			if len(v) < 2 || seen[v] || (p.rule == "project_path" && proof.Real(cwd) == proof.Real(home)) {
-				continue
-			}
-			seen[v] = true
-			paths = append(paths, step{rule: p.rule, from: v, to: p.to, right: true})
-		}
-	}
-	sort.SliceStable(paths, func(i, j int) bool { return len(paths[i].from) > len(paths[j].from) })
-	steps = append(steps, paths...)
-	steps = append(steps, step{rule: "email", to: "<email>", re: regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)})
-	if slug != "" {
-		steps = append(steps, step{rule: "project_name", from: slug, to: "<slug>", left: true, right: true})
-	}
-	steps = append(steps, step{rule: "item_id", to: "<item-id>", re: regexp.MustCompile(`[a-z0-9]{26}`), left: true, right: true})
-	word := func(c byte) bool {
-		return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
-	}
-	clean := func(s string) string {
-		for _, step := range steps {
-			r := step.re
-			if r == nil {
-				r = regexp.MustCompile(regexp.QuoteMeta(step.from))
-			}
-			matches := r.FindAllStringIndex(s, -1)
-			for i := len(matches) - 1; i >= 0; i-- {
-				a, b := matches[i][0], matches[i][1]
-				if step.left && a > 0 && (word(s[a-1]) || step.rule == "project_name" && s[a-1] == '<') {
-					continue
-				}
-				if step.right && b < len(s) && (word(s[b]) || step.rule == "project_name" && s[b] == '>') {
-					continue
-				}
-				if step.rule == "project_name" && strings.HasPrefix(s[b:], "://") {
-					continue
-				}
-				s = s[:a] + step.to + s[b:]
-				tally[step.rule]++
-			}
-		}
-		return s
-	}
-	counts := func() []any {
-		out := []any{}
-		for _, rule := range []string{"home", "project_path", "project_name", "email", "op_ref", "item_id"} {
-			if tally[rule] > 0 {
-				out = append(out, ledger.Object{{Key: "rule", Value: rule}, {Key: "count", Value: tally[rule]}})
-			}
-		}
-		return out
-	}
-	return clean, counts
+	return errorLogScrubber(os.Getenv("HOME"), cwd, slug)
 }
+
 func gatesBreadcrumb() []any { return gatesBreadcrumbName("gates run") }
 
 func gatesBreadcrumbName(name string) []any {
@@ -176,7 +119,7 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 	}
 	clean, counts := gatesScrubber(slug)
 	if text, ok := message.(string); ok {
-		text = clean(text)
+		text = clean(errorLogTrim(text))
 		if len(text) > 2048 {
 			end := 2048
 			for !utf8.RuneStart(text[end]) {
@@ -219,9 +162,6 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 	nativeReportedKind = ""
 	normalized, _ := message.(string)
 	normalized = errorLogNormalize(normalized)
-	if verbName == "block" && subName == "" {
-		normalized = landFingerprintMessage(blockString(message))
-	}
 	fp := sha256.Sum256([]byte(verb + "\n" + subName + "\n" + kind + "\n" + normalized))
 	var sub any
 	if subName != "" {
