@@ -196,23 +196,27 @@ func closeClaimOf(mainTop, run, id string, rows []gatecheck.Row, key []byte) fun
 }
 
 // closeDecideSigned is a decision row as the preview's gate reads it: signed
-// with the run, through the ledger's JSON shape.
-func closeDecideSigned(run string, row ledger.Object, key []byte) (gatecheck.Row, bool) {
+// with the run, through the ledger's JSON shape. B716: decision rows hold
+// only text and finite numbers, which canon.Marshal and ledger.Stringify always
+// encode (invalid UTF-8 becomes U+FFFD on both sides), so signing cannot fail
+// and the round trip always verifies (TestB716DecisionRowsAlwaysSign). A
+// failure is a broken invariant, not a case to hand to Node.
+func closeDecideSigned(run string, row ledger.Object, key []byte) gatecheck.Row {
 	signed := row.Map()
 	signed["run"] = run
 	signed, err := sign.SignRow(signed, key)
-	if err != nil {
-		return nil, false
-	}
-	data, err := ledger.Stringify(signed, false)
-	if err != nil {
-		return nil, false
+	var data []byte
+	if err == nil {
+		data, err = ledger.Stringify(signed, false)
 	}
 	var r map[string]any
-	if json.Unmarshal(data, &r) != nil || !gatecheck.Verified(r, key) {
-		return nil, false
+	if err == nil {
+		err = json.Unmarshal(data, &r)
 	}
-	return r, true
+	if err != nil || !gatecheck.Verified(r, key) {
+		panic(fmt.Sprintf("B716: a decision row did not sign: %v", err))
+	}
+	return r
 }
 
 // closeDecideInput is what the owner's --decide preview reads.
@@ -294,11 +298,7 @@ func closeHumanDecisions(in closeDecideInput) (actions []humanDecision, preview 
 			return nil, nil, nil, false
 		}
 		row := ledger.Object{{Key: "event", Value: "review.waived"}, {Key: "block", Value: in.id}, {Key: "file", Value: b.File}, {Key: "finding", Value: b.Finding}, {Key: "reason", Value: reason}, {Key: "by", Value: "human"}}
-		signed, ok := closeDecideSigned(in.run, row, in.key)
-		if !ok {
-			return nil, nil, nil, false
-		}
-		preview = append(preview, signed)
+		preview = append(preview, closeDecideSigned(in.run, row, in.key))
 		actions = append(actions, humanDecision{label, row})
 	}
 	if in.ack != nil {
@@ -332,11 +332,7 @@ func closeHumanDecisions(in closeDecideInput) (actions []humanDecision, preview 
 			return nil, nil, nil, false
 		}
 		row := ledger.Object{{Key: "event", Value: "rule_break.accepted"}, {Key: "block", Value: in.id}, {Key: "rule", Value: m[2]}, {Key: "line", Value: float64(line)}, {Key: "line_sha256", Value: blockSHA([]byte(lines[line-1]))}, {Key: "reason", Value: reason}, {Key: "by", Value: "human"}}
-		signed, ok := closeDecideSigned(in.run, row, in.key)
-		if !ok {
-			return nil, nil, nil, false
-		}
-		preview = append(preview, signed)
+		preview = append(preview, closeDecideSigned(in.run, row, in.key))
 		actions = append(actions, humanDecision{label, row})
 	}
 	return actions, preview, nil, true
