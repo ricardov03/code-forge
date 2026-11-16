@@ -352,7 +352,12 @@ func keysIndex(file string) (ledger.Object, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return ledger.Object{}, nil
 		}
-		return nil, err
+		var errno syscall.Errno
+		if !errors.As(err, &errno) {
+			return nil, errKeysUnsure
+		}
+		// B759: readIndex rethrows the fs error (a folder, no permission)
+		return nil, &keysIndexReadError{err}
 	}
 	if !json.Valid(data) {
 		// a SyntaxError in JSON.parse reads as empty
@@ -370,6 +375,35 @@ func keysIndex(file string) (ledger.Object, error) {
 }
 
 var errKeysUnsure = errors.New("keys: unsure of Node parity")
+
+// keysIndexReadError is the fs error readIndex rethrows; Node's thrown message
+// is its libuv text (B759).
+type keysIndexReadError struct{ err error }
+
+func (e *keysIndexReadError) Error() string { return blockIOMessage(e.err) }
+func (e *keysIndexReadError) Unwrap() error { return e.err }
+
+// keysIndexHandOver is true when index.json reads in a way Go does not know
+// Node's answer for; a missing, corrupt or unreadable index runs in Go.
+func keysIndexHandOver(file string) bool {
+	_, err := keysIndex(file)
+	return errors.Is(err, errKeysUnsure)
+}
+
+// keysThrown is the message of the error Node's store call throws: the fs
+// text for an unreadable index, else the reason as before.
+func keysThrown(err error) string {
+	var readErr *keysIndexReadError
+	if errors.As(err, &readErr) {
+		return readErr.Error()
+	}
+	return keysReason(err)
+}
+
+// keysCrash is the verb's thrown-error line (Node adds the stack).
+func keysCrash(message string) string {
+	return "code-forge: verb \"keys\" failed: Error: " + message + "\n"
+}
 
 // keysField is a property with its presence: String(undefined) differs from
 // String(null).
@@ -576,8 +610,15 @@ func keysDecide(args []string, cwd string) keysRun {
 			return nil
 		}
 		index, err := keysIndex(indexFile)
-		if err != nil {
+		if errors.Is(err, errKeysUnsure) {
 			return nil
+		}
+		if err != nil {
+			return func(_, stderr io.Writer) int {
+				r.write(stderr, storeWarning)
+				r.write(stderr, keysCrash(keysThrown(err)))
+				return 1
+			}
 		}
 		type row struct {
 			name, source, backend string
@@ -622,7 +663,7 @@ func keysDecide(args []string, cwd string) keysRun {
 		if !ok {
 			return nil
 		}
-		if _, err := keysIndex(indexFile); err != nil {
+		if keysIndexHandOver(indexFile) {
 			return nil
 		}
 		return func(stdout, stderr io.Writer) int {
@@ -637,7 +678,7 @@ func keysDecide(args []string, cwd string) keysRun {
 				removed++
 			}
 			if err := keysUpdateIndex(indexFile, func(o *ledger.Object) { o.Delete(p.name) }); err != nil {
-				r.write(stderr, "code-forge: verb \"keys\" failed: Error: "+keysReason(err)+"\n")
+				r.write(stderr, keysCrash(keysThrown(err)))
 				return 1
 			}
 			plural := "s"
@@ -654,7 +695,7 @@ func keysDecide(args []string, cwd string) keysRun {
 		if w.kc, ok = chain(); !ok {
 			return nil
 		}
-		if _, err := keysIndex(indexFile); err != nil {
+		if keysIndexHandOver(indexFile) {
 			return nil
 		}
 		if !p.hasFlag {
@@ -798,7 +839,7 @@ func keysDecide(args []string, cwd string) keysRun {
 		}
 		if opRef != "" || itemID != "" {
 			// a store miss caches the 1Password value: the index must be readable
-			if _, err := keysIndex(indexFile); err != nil {
+			if keysIndexHandOver(indexFile) {
 				return nil
 			}
 		}
@@ -809,7 +850,7 @@ func keysDecide(args []string, cwd string) keysRun {
 				return nil
 			}
 			if found {
-				if _, err := keysIndex(indexFile); err != nil {
+				if keysIndexHandOver(indexFile) {
 					return nil
 				}
 				return func(stdout, stderr io.Writer) int {
@@ -837,7 +878,7 @@ func keysDecide(args []string, cwd string) keysRun {
 			}
 		}
 		if readErr == nil {
-			if _, err := keysIndex(indexFile); err != nil {
+			if keysIndexHandOver(indexFile) {
 				return nil
 			}
 		}

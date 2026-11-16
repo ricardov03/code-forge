@@ -26,18 +26,23 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 
 // B690a: Go never starts Node. A case Go does not serve gets one refusal line, exit 1,
 // and still writes its hand-over row; an unknown verb gets Node's unknown-verb text and
-// writes nothing. These tests use a block attempt case Go does not serve: a run file that is
-// a directory (B690a fix1: an unknown block subcommand is now Node's usage error, exit 2;
-// B744: a secret-like --run value now runs in Go with Node's "no run record" text).
+// writes nothing. These tests use a block attempt case Go does not serve: an open block whose
+// owned_files is not a list (B690a fix1: an unknown block subcommand is now Node's usage error,
+// exit 2; B744: a secret-like --run value now runs in Go with Node's "no run record" text;
+// B759: a run file that is a directory now runs in Go with Node's "block attempt: EISDIR" text).
 const runId = 'private-run';
 const unported = ['block', 'attempt', 'B1', '--run', runId];
-// B744: keys list with a store index that is a directory is a second case Go does not serve.
+// keys list with an index row that is not an object is a second case Go does not serve
+// (B759: a store index that is a directory now runs in Go with Node's EISDIR text).
 const keysUnported = ['keys', 'list'];
 const refusal = 'code-forge: block attempt is not supported in this case yet (block-unported-subcommand). Please report it: code-forge logs report\n';
 function fixture() {
   const home = mkdtempSync(path.join(scratch, 'home-'));
-  mkdirSync(path.join(home, '.code-forge/runs', runId + '.json'), { recursive: true });
-  mkdirSync(path.join(home, '.code-forge/store/index.json'), { recursive: true });
+  mkdirSync(path.join(home, '.code-forge/runs'), { recursive: true });
+  const block = { status: 'open', owned_files: 'x' };
+  writeFileSync(path.join(home, '.code-forge/runs', runId + '.json'), JSON.stringify({ run_id: runId, blocks: { B1: block, 'secret-id': block } }));
+  mkdirSync(path.join(home, '.code-forge/store'), { recursive: true });
+  writeFileSync(path.join(home, '.code-forge/store/index.json'), '{"foo":5}');
   return { home, repo: home, file: path.join(home, '.code-forge/native/handovers.jsonl') };
 }
 function env(f, extra = {}) {

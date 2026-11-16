@@ -1,0 +1,6 @@
+exit 1
+-- stdout
+-- stderr
+WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store
+foo: index: removal of the expired entry failed (EACCES)
+foo: not found

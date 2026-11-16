@@ -1,0 +1,4 @@
+exit 0
+-- stdout
+exported 18 section file(s) to d
+-- stderr

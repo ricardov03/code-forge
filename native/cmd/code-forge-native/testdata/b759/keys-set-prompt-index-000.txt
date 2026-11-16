@@ -1,0 +1,1 @@
+code-forge: verb "keys" failed: Error: EACCES: permission denied, open '<H>/.code-forge/store/index.json'

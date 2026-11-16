@@ -1,0 +1,11 @@
+exit 1
+-- stdout
+-- stderr
+WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store
+code-forge: verb "keys" failed: Error: EISDIR: illegal operation on a directory, read
+    at async readFileHandle (node:internal/fs/promises:1261:24)
+    at async readIndex (file://<REPO>/src/keys/store.mjs:213:33)
+    at async Object.list (file://<REPO>/src/keys/store.mjs:333:21)
+    at async runKeys (file://<REPO>/src/cli/keys.mjs:275:18)
+    at async run (file://<REPO>/bin/code-forge.mjs:149:24)
+    at async file://<REPO>/bin/code-forge.mjs:212:16

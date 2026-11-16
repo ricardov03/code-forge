@@ -212,9 +212,9 @@ func keysPromptDecide(name string, w keysWriter, storeWarning string, r *keysRed
 			return 1
 		}
 		r.register(typed)
-		if reason := w.put(name, typed, "user", nil, ""); reason != "" {
+		if reason, thrown := w.put(name, typed, "user", nil, ""); reason != "" {
 			// Node's put throws: the verb fails (Node adds the stack)
-			r.write(stderr, "code-forge: verb \"keys\" failed: Error: "+reason+"\n")
+			r.write(stderr, keysCrash(thrown))
 			return 1
 		}
 		r.write(stdout, "stored "+name+" in "+w.name()+" (source=user, expires=never)\n")

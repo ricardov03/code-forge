@@ -1,0 +1,5 @@
+exit 0
+-- stdout
+foo: ok source=file expires=never
+-- stderr
+WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store
