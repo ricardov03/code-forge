@@ -26,18 +26,18 @@ func TestB489ParseProcesses(t *testing.T) {
 }
 
 // Only this user's init-parented process of this run whose owner is proven
-// dead is stopped: SIGTERM, then SIGKILL after the grace when it lives on.
+// dead (and, B767, whose HOME is the sweep's) is stopped: SIGTERM, then SIGKILL after the grace when it lives on.
 func TestB489OrphanSweepStopsOnlyProvenOrphans(t *testing.T) {
 	envs := map[int]map[string]string{
-		100: {"CODE_FORGE_OWNER_PID": "900", "CODE_FORGE_RUN_ID": "r1", "CODE_FORGE_OWNER_START_TIME": "Wed Nov 11 08:00:00 2026"},
-		101: {"CODE_FORGE_OWNER_PID": "900", "CODE_FORGE_RUN_ID": "r2"},
-		102: {"CODE_FORGE_OWNER_PID": "500", "CODE_FORGE_RUN_ID": "r1", "CODE_FORGE_OWNER_START_TIME": "Wed Nov 11 08:00:00 2026"},
-		103: {"CODE_FORGE_OWNER_PID": "900", "CODE_FORGE_RUN_ID": "r1"},
-		104: {"CODE_FORGE_OWNER_PID": "900", "CODE_FORGE_RUN_ID": "r1"},
+		100: {"HOME": "/h/run", "CODE_FORGE_OWNER_PID": "900", "CODE_FORGE_RUN_ID": "r1", "CODE_FORGE_OWNER_START_TIME": "Wed Nov 11 08:00:00 2026"},
+		101: {"HOME": "/h/run", "CODE_FORGE_OWNER_PID": "900", "CODE_FORGE_RUN_ID": "r2"},
+		102: {"HOME": "/h/run", "CODE_FORGE_OWNER_PID": "500", "CODE_FORGE_RUN_ID": "r1", "CODE_FORGE_OWNER_START_TIME": "Wed Nov 11 08:00:00 2026"},
+		103: {"HOME": "/h/run", "CODE_FORGE_OWNER_PID": "900", "CODE_FORGE_RUN_ID": "r1"},
+		104: {"HOME": "/h/run", "CODE_FORGE_OWNER_PID": "900", "CODE_FORGE_RUN_ID": "r1"},
 	}
 	var kills []string
 	clock := fixedNow
-	s := &OrphanSweep{RunID: "r1", UID: 501, Self: 600, Parent: 601, GraceMs: 100,
+	s := &OrphanSweep{RunID: "r1", Home: "/h/run", UID: 501, Self: 600, Parent: 601, GraceMs: 100,
 		Processes: func() []ProcInfo { return ParseProcesses(psFixture) },
 		ReadEnv:   func(p ProcInfo) map[string]string { return envs[p.PID] },
 		Alive:     func(pid int) bool { return pid != 900 },

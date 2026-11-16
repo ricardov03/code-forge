@@ -63,6 +63,10 @@ func TestB736KeptRunWorkerIsNoOrphanOfItsDeadCaller(t *testing.T) {
 	if len(rows) != 1 || rows[0].PPID != 1 {
 		t.Fatalf("worker %d rows %+v: want one row whose parent is init", pid, rows)
 	}
+	// B767: a sweep of the worker's own HOME, so the owner rule decides
+	if sweep.Home = worker.ReadProcessEnv(rows[0])["HOME"]; sweep.Home == "" {
+		t.Fatalf("worker %d shows no HOME", pid)
+	}
 	if orphans := sweep.Orphans(); len(orphans) != 0 {
 		t.Errorf("the live worker %d of the kept run is a proven orphan (owner %q): %+v", pid, worker.ReadProcessEnv(rows[0])["CODE_FORGE_OWNER_PID"], orphans)
 	}

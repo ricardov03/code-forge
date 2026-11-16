@@ -83,6 +83,7 @@ func TestB747RunIDSweepFindsLastVarOrphan(t *testing.T) {
 	shown.PPID = 1
 	s := &OrphanSweep{
 		RunID:     "r-b747-sweep",
+		Home:      "/h/orphan",
 		Processes: func() []ProcInfo { return []ProcInfo{shown} },
 		ReadEnv: func(p ProcInfo) map[string]string {
 			p.PPID = real.PPID
