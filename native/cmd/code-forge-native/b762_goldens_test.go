@@ -86,7 +86,18 @@ func b762JSON(t *testing.T, v any) string {
 // b762Field is one golden file of a case.
 type b762Field struct{ name, value string }
 
-// b762Golden compares the Go side's fields of one case with its goldens.
+var b762HostField = regexp.MustCompile(`("(?:arch|platform)"\s*:\s*)"[^"\\]*"`)
+
+// b762HostNorm masks the host's values in an error-log row: the goldens were
+// recorded on a Mac ("arch":"arm64", "platform":"darwin") and Linux CI writes
+// "arch":"x64", "platform":"linux" (B766). The key and its spacing stay, so
+// the compact and the indented JSON forms both keep their shape.
+func b762HostNorm(s string) string {
+	return b762HostField.ReplaceAllString(s, `${1}"<HOST>"`)
+}
+
+// b762Golden compares the Go side's fields of one case with its goldens. Both
+// sides go through b762HostNorm first.
 func b762Golden(t *testing.T, test, name string, got []b762Field) {
 	t.Helper()
 	dir := filepath.Join(b762Dir, test)
@@ -97,8 +108,8 @@ func b762Golden(t *testing.T, test, name string, got []b762Field) {
 			t.Errorf("%s: no golden: %v", file, err)
 			continue
 		}
-		if string(want) != f.value {
-			t.Errorf("%s differs\n go:     %q\n golden: %q", file, f.value, want)
+		if value, golden := b762HostNorm(f.value), b762HostNorm(string(want)); golden != value {
+			t.Errorf("%s differs\n go:     %q\n golden: %q", file, value, golden)
 		}
 	}
 }
@@ -512,7 +523,23 @@ func TestB762B527InitSetupGolden(t *testing.T) {
 	b762NoStrays(t, "B527InitSetupMatchesNode", names, b762Fields527)
 }
 
+// b762MacTools pins the tools step to the host the B548 goldens were recorded
+// on (B766): a Mac (toolOS darwin: grok and op hint "install Homebrew first",
+// as no brew is on the test PATH) with Solo.app in the system app folder (a
+// temp folder here, never /Applications). Linux CI otherwise prints the
+// manual URL hints and "tool solo: missing".
+func b762MacTools(t *testing.T) {
+	t.Helper()
+	savedOS, savedApps := toolOS, toolSystemApps
+	toolOS, toolSystemApps = "darwin", filepath.Join(t.TempDir(), "Applications")
+	t.Cleanup(func() { toolOS, toolSystemApps = savedOS, savedApps })
+	if err := os.MkdirAll(filepath.Join(toolSystemApps, "Solo.app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestB762B548InitStepsGolden(t *testing.T) {
+	b762MacTools(t)
 	names := map[string]bool{}
 	for _, c := range b548Shapes {
 		name := b762Names(t, names, b762Slug(c.name))
