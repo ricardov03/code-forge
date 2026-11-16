@@ -1,0 +1,4 @@
+exit 1
+-- stdout
+-- stderr
+report: ELOOP: too many symbolic links encountered, mkdir 'loop/sub'
