@@ -55,6 +55,9 @@ type server struct {
 	lastSweep                                    time.Time
 	// sweepKeys keeps each run's verified key file across sweeps (B755).
 	sweepKeys map[string]sweepKeyEntry
+	// sweepKeyHits and sweepKeyMisses count key files served from sweepKeys
+	// and key files read from disk, so a test proves the cache (B763).
+	sweepKeyHits, sweepKeyMisses int
 	// A local join (Join) has no socket: it reads the scope mirror the CLI
 	// found, asks the CLI's liveness probe and never sweeps the queue.
 	local bool

@@ -110,9 +110,11 @@ func (s *server) sweepKey(run string) []byte {
 	stamp := sweepStamp(info)
 	if cached, ok := s.sweepKeys[run]; ok && cached.stamp == stamp {
 		sign.KeyLoaded(cached.key) // loadKey registers the key (B710)
+		s.sweepKeyHits++
 		return cached.key
 	}
 	delete(s.sweepKeys, run)
+	s.sweepKeyMisses++
 	key, err := os.ReadFile(file)
 	if err != nil || len(key) != 32 {
 		return nil

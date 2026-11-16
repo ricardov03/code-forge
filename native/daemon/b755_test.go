@@ -54,7 +54,9 @@ func TestB755SecondSweepFast(t *testing.T) {
 	for _, run := range []string{ended, forged, "r-none"} {
 		b755Ticket(t, s, run, "B1")
 	}
+	h0, m0 := s.sweepKeyHits, s.sweepKeyMisses
 	first := b755Sweep(t, s)
+	firstHits, firstMisses := s.sweepKeyHits-h0, s.sweepKeyMisses-m0
 	want := map[string]int{ended: 0, forged: 1, "r-none": 1}
 	for run, count := range want {
 		if got := len(s.queue.Block(run, "B1", nil, nil)); got != count {
@@ -64,22 +66,29 @@ func TestB755SecondSweepFast(t *testing.T) {
 	// New tickets for the same runs: the second sweep prunes the same runs.
 	b755Ticket(t, s, ended, "B2")
 	b755Ticket(t, s, forged, "B2")
+	h1, m1 := s.sweepKeyHits, s.sweepKeyMisses
 	second := b755Sweep(t, s)
+	secondHits, secondMisses := s.sweepKeyHits-h1, s.sweepKeyMisses-m1
 	for run, count := range map[string]int{ended: 0, forged: 1} {
 		if got := len(s.queue.Block(run, "B2", nil, nil)); got != count {
 			t.Errorf("second sweep: %s B2 tickets = %d, want %d", run, got, count)
 		}
 	}
-	t.Logf("rows=%d ended-runs=%d first-sweep=%v second-sweep=%v", n, len(f.ended), first.Round(time.Millisecond), second.Round(time.Millisecond))
-	if budget := b755Budget(n); second > budget {
-		t.Fatalf("second sweep over %d keyed ended runs took %v, budget %v (first %v)", len(f.ended), second, budget, first)
+	t.Logf("rows=%d ended-runs=%d first-sweep=%v (key hits=%d reads=%d) second-sweep=%v (key hits=%d reads=%d)", n, len(f.ended), first.Round(time.Millisecond), firstHits, firstMisses, second.Round(time.Millisecond), secondHits, secondMisses)
+	// B763: the cache proof is the count, on every OS and under -race: the
+	// first sweep reads every ended run's key, the second reads none and
+	// serves each from the cache. A wall-clock budget broke on Linux CI under
+	// -race (second sweep 5-9 s of key file stats), so time is only compared
+	// with the first sweep of the same process.
+	if firstHits != 0 || firstMisses < len(f.ended) {
+		t.Fatalf("first sweep: key hits=%d reads=%d, want 0 hits and at least %d reads", firstHits, firstMisses, len(f.ended))
 	}
-}
-
-// b755Budget is the second-sweep budget: 3 s per 100k rows, room for a
-// loaded machine (B755 measured the numbers in the report).
-func b755Budget(n int) time.Duration {
-	return time.Duration(n) * 3 * time.Second / 100000
+	if secondMisses != 0 || secondHits != firstMisses {
+		t.Fatalf("second sweep over unchanged keys: key hits=%d reads=%d, want %d hits and 0 reads", secondHits, secondMisses, firstMisses)
+	}
+	if second >= first/2 {
+		t.Fatalf("second sweep over %d keyed ended runs took %v, want under half of the first sweep's %v", len(f.ended), second, first)
+	}
 }
 
 // b755Rewrite writes data into file in place (same inode, same size) and
