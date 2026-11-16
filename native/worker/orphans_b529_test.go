@@ -39,9 +39,10 @@ func TestB529OrphanSweepLeavesForeignProcess(t *testing.T) {
 	row := ProcInfo{UID: os.Getuid(), PID: pid, PPID: 1, State: "S", Start: start, Command: "sleep 30"}
 	s := &OrphanSweep{
 		RunID:     "r-b529",
+		Home:      "/h/b529",
 		Processes: func() []ProcInfo { return []ProcInfo{row} },
 		ReadEnv: func(ProcInfo) map[string]string {
-			return map[string]string{"CODE_FORGE_OWNER_PID": "999999", "CODE_FORGE_RUN_ID": "r-b529"}
+			return map[string]string{"HOME": "/h/b529", "CODE_FORGE_OWNER_PID": "999999", "CODE_FORGE_RUN_ID": "r-b529"}
 		},
 		Alive:   func(int) bool { return false },
 		GraceMs: 1,

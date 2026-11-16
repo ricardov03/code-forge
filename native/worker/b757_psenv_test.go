@@ -90,6 +90,7 @@ func TestB757RunIDSweepKeepsLiveOwnersChild(t *testing.T) {
 		b757PS(t, b757Read(t, name))
 		s := &OrphanSweep{
 			RunID:     "r-b757",
+			Home:      "/h/b757", // B767: the orphan's HOME, so the owner rule decides
 			Processes: func() []ProcInfo { return rows },
 			Alive:     func(int) bool { return true },
 			Kill:      func(int, syscall.Signal) error { t.Fatal("signal sent"); return nil },

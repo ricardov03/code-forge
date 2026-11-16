@@ -191,6 +191,7 @@ func TestB486SweepDryRunReport(t *testing.T) {
 	}
 	home, base := b486Env(t, rows, envs)
 	homeEnv["HOME"] = home
+	envs[900005]["HOME"] = home // B767: an orphan of this HOME
 	workspace := t.TempDir()
 	b486Record(t, home, "r-old", `{"run_id":"r-old","status":"ended"}`)
 	b486Record(t, home, "r-live", fmt.Sprintf(`{"run_id":"r-live","status":"active","workspace":%q}`, workspace))
@@ -342,7 +343,10 @@ func TestB486SweepApply(t *testing.T) {
 	b486Record(t, home, "r-old", `{"run_id":"r-old","status":"ended"}`)
 	w := &sweepWorld{}
 	worker := w.spawn(t, false, 4242, "node /x/bin/code-forge.mjs worker --run r-old", map[string]string{"HOME": home})
-	orphan := w.spawn(t, true, 1, "sh -c long-task", map[string]string{"CODE_FORGE_OWNER_PID": strconv.Itoa(deadPid(t))})
+	orphan := w.spawn(t, true, 1, "sh -c long-task", map[string]string{"HOME": home, "CODE_FORGE_OWNER_PID": strconv.Itoa(deadPid(t))})
+	// B767: an orphan of another HOME, or with no HOME, is not this sweep's
+	otherHomeOrphan := w.spawn(t, false, 1, "sh -c long-task", map[string]string{"HOME": t.TempDir(), "CODE_FORGE_OWNER_PID": strconv.Itoa(deadPid(t))})
+	noHomeOrphan := w.spawn(t, false, 1, "sh -c long-task", map[string]string{"CODE_FORGE_OWNER_PID": strconv.Itoa(deadPid(t))})
 	registered := w.spawn(t, false, 4242, "sh -c registered", nil)
 	live := w.spawn(t, false, 4242, "sh -c unrelated", nil)
 	b486DeadRoot(t, base, "r-dead", runProc{pid: registered.pid, start: registered.start})
@@ -356,12 +360,14 @@ func TestB486SweepApply(t *testing.T) {
 	for _, c := range []*sweepChild{worker, orphan, registered} {
 		waitGone(t, c)
 	}
-	if !w.alive(live) {
-		t.Fatal("an unrelated process was stopped")
-	}
-	for _, s := range w.sent() {
-		if strings.Contains(s, strconv.Itoa(live.pid)) {
-			t.Fatalf("signal to the unrelated process: %v", w.sent())
+	for _, c := range []*sweepChild{live, otherHomeOrphan, noHomeOrphan} {
+		if !w.alive(c) {
+			t.Fatalf("pid %d (%s) was stopped", c.pid, c.command)
+		}
+		for _, s := range w.sent() {
+			if strings.HasPrefix(s, strconv.Itoa(c.pid)+":") {
+				t.Fatalf("signal to pid %d: %v", c.pid, w.sent())
+			}
 		}
 	}
 	if _, err := os.Stat(filepath.Join(base, "r-dead")); !os.IsNotExist(err) {

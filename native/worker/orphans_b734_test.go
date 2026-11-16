@@ -21,17 +21,17 @@ func b734Rows(n int) []ProcInfo {
 	return rows
 }
 
-// every row is an orphan of run r1 whose owner 900 is dead
+// every row is an orphan of run r1 (HOME /h/run) whose owner 900 is dead
 func b734Sweep(rows []ProcInfo, reads *int, kills *[]int, stopping func() bool, onRead func(int)) *OrphanSweep {
 	clock := fixedNow
-	return &OrphanSweep{RunID: "r1", UID: 501, Self: 600, Parent: 601, GraceMs: 1,
+	return &OrphanSweep{RunID: "r1", Home: "/h/run", UID: 501, Self: 600, Parent: 601, GraceMs: 1,
 		Processes: func() []ProcInfo { return rows },
 		ReadEnv: func(ProcInfo) map[string]string {
 			*reads++
 			if onRead != nil {
 				onRead(*reads)
 			}
-			return map[string]string{"CODE_FORGE_OWNER_PID": "900", "CODE_FORGE_RUN_ID": "r1"}
+			return map[string]string{"HOME": "/h/run", "CODE_FORGE_OWNER_PID": "900", "CODE_FORGE_RUN_ID": "r1"}
 		},
 		Alive: func(int) bool { return false },
 		Kill: func(pid int, sig syscall.Signal) error {

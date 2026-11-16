@@ -31,6 +31,21 @@ var psRow = regexp.MustCompile(`^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\S+
 var spaces = regexp.MustCompile(`\s+`)
 var ownerPid = regexp.MustCompile(`^[1-9]\d*$`)
 
+// OrphanOwner (B767) is the one orphan rule of every Go sweep (the worker's
+// orphan sweep, the sweep verb, run start's sweep): an init-parented
+// process's markers make it a candidate only when its HOME is home (the
+// sweeping process's own HOME, the home whose ~/.code-forge it uses) and
+// they name an owner pid. It returns that owner pid's text. A live process
+// of another HOME (a test temp HOME, a second setup) or of no HOME is not
+// this sweep's to stop; with no home of its own the sweep takes nothing.
+func OrphanOwner(env map[string]string, home string) (string, bool) {
+	owner := env["CODE_FORGE_OWNER_PID"]
+	if env == nil || home == "" || env["HOME"] != home || !ownerPid.MatchString(owner) {
+		return "", false
+	}
+	return owner, true
+}
+
 // ParseProcesses is parseProcesses: malformed rows are dropped.
 func ParseProcesses(text string) []ProcInfo {
 	out := []ProcInfo{}
@@ -108,6 +123,9 @@ func ReadProcessEnv(p ProcInfo) map[string]string {
 // OrphanSweep holds the seams of SweepOrphans.
 type OrphanSweep struct {
 	RunID string
+	// Home is the HOME whose orphans the sweep may stop (B767; "" is this
+	// process's HOME). An orphan of another HOME or of none is left alone.
+	Home string
 	// Processes is readProcesses; ReadEnv is readProcessEnv.
 	Processes func() []ProcInfo
 	ReadEnv   func(ProcInfo) map[string]string
@@ -132,6 +150,9 @@ func (s *OrphanSweep) stopped() bool { return s.Stopping != nil && s.Stopping() 
 func (s *OrphanSweep) defaults() {
 	if s.Processes == nil {
 		s.Processes = readProcessesPS
+	}
+	if s.Home == "" {
+		s.Home = os.Getenv("HOME")
 	}
 	if s.ReadEnv == nil {
 		s.ReadEnv = ReadProcessEnv
@@ -181,7 +202,8 @@ func (s *OrphanSweep) protected(rows []ProcInfo) map[int]bool {
 	return blocked
 }
 
-// Orphans lists the proven orphans (sweepProcesses' orphan items).
+// Orphans lists the proven orphans (sweepProcesses' orphan items) of the
+// sweep's HOME (B767).
 func (s *OrphanSweep) Orphans() []ProcInfo {
 	s.defaults()
 	rows := s.Processes()
@@ -195,8 +217,8 @@ func (s *OrphanSweep) Orphans() []ProcInfo {
 			return nil
 		}
 		env := s.ReadEnv(p)
-		owner := env["CODE_FORGE_OWNER_PID"]
-		if env == nil || !ownerPid.MatchString(owner) {
+		owner, ok := OrphanOwner(env, s.Home)
+		if !ok {
 			continue
 		}
 		n, err := strconv.Atoi(owner)

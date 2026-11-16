@@ -22,6 +22,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
+	"github.com/ricardov03/code-forge/native/worker"
 )
 
 // B486: `code-forge sweep [--apply] [--json]` in Go (src/cli/sweep.mjs with
@@ -222,8 +223,9 @@ func sweepScan(home, base string) (*sweepReport, handoverReason) {
 			continue
 		}
 		env := readEnv(p)
-		owner := env["CODE_FORGE_OWNER_PID"]
-		if env == nil || !runOwnerPid.MatchString(owner) {
+		// B767: as for workers, only an orphan of this HOME (worker.OrphanOwner).
+		owner, ok := worker.OrphanOwner(env, home)
+		if !ok {
 			continue
 		}
 		ownerPid, err := strconv.ParseFloat(owner, 64)
