@@ -238,6 +238,7 @@ func TestB611InitWizardKeychain(t *testing.T) {
 // above. It runs only with B611_NODE_RUNS=<dir> holding n-<case>/{h,p} and
 // B611_NODE_OUT=<dir> holding n-<case>.out (raw pty bytes, then "\nEXIT <code>\n").
 func TestB611WriteNodeGoldens(t *testing.T) {
+	b760NoNodeRecorder(t, "B611_NODE_RUNS")
 	dir := os.Getenv("B611_NODE_RUNS")
 	if dir == "" {
 		t.Skip("B611_NODE_RUNS is not set")

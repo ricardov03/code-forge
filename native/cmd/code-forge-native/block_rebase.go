@@ -87,7 +87,7 @@ func blockRebaseRebuild(id, tree, before string) int {
 	}
 	rebuilt, err := nativeRebuildAfterMove(tree, before, strings.TrimSpace(after))
 	if err != nil {
-		fmt.Fprintf(safeStderr, "block rebase: block %s: %s; the rebase stands; rebuild by hand: node scripts/build-native.mjs --host in %s\n", id, strings.ReplaceAll(err.Error(), "\n", " "), tree)
+		fmt.Fprintf(safeStderr, "block rebase: block %s: %s; the rebase stands; rebuild by hand: sh scripts/cf-release.sh build-native --host in %s\n", id, strings.ReplaceAll(err.Error(), "\n", " "), tree)
 		return 1
 	}
 	if rebuilt {

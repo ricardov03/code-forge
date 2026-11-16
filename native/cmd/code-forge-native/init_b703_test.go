@@ -138,6 +138,7 @@ func b703GoldenFile(name string) string {
 // TestB703RecordNode records each case from Node on a pseudo-terminal into
 // testdata/b703. It runs only with B703_RECORD=1.
 func TestB703RecordNode(t *testing.T) {
+	b760NoNodeRecorder(t, "B703_RECORD")
 	if os.Getenv("B703_RECORD") != "1" {
 		t.Skip("B703_RECORD is not 1")
 	}

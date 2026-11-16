@@ -128,6 +128,7 @@ func TestB718CloseQueueMatchesNode(t *testing.T) {
 	if os.Getenv("BLOCK_HV_CHILD") == "1" {
 		b684Child()
 	}
+	b760NoNodeRecorder(t, "B718_RECORD_NODE")
 	record := os.Getenv("B718_RECORD_NODE")
 	for _, c := range b718Cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -225,7 +225,7 @@ func TestB569InstallVersionMismatch(t *testing.T) {
 	b569Expect(t, "mismatch", p.install(), 1, "", "code-forge install: Go binary reports v1.0.0, package is v"+b569Version+": "+p.binary+"\nfix: npm i -g @codedology/code-forge@"+b569Version+"\n")
 	// A source checkout (native/go.mod) names the maintainer build instead.
 	b569Write(t, filepath.Join(p.pkg, "native", "go.mod"), "module x\n", 0o644)
-	b569Expect(t, "mismatch source", p.install(), 1, "", "code-forge install: Go binary reports v1.0.0, package is v"+b569Version+": "+p.binary+"\nfix: node scripts/build-native.mjs --host\n")
+	b569Expect(t, "mismatch source", p.install(), 1, "", "code-forge install: Go binary reports v1.0.0, package is v"+b569Version+": "+p.binary+"\nfix: sh scripts/cf-release.sh build-native --host\n")
 }
 
 func TestB569InstallRepairsExecBit(t *testing.T) {

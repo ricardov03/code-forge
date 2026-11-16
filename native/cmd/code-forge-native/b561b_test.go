@@ -54,6 +54,7 @@ func TestB561bReviewSeveralAndTestLikeFilesGo(t *testing.T) {
 		{"test-like-file", "approve", true, []string{"--files", "src/a.test.mjs", "--max", "60", "--keep-run"}},
 		{"test-like-and-other", "approve", true, []string{"--files", "src/a.txt", "src/a.test.mjs", "--max", "60", "--keep-run"}},
 	}
+	b760NoNodeRecorder(t, "B561B_WRITE_GOLDEN")
 	write := os.Getenv("B561B_WRITE_GOLDEN") == "1"
 	var bin string
 	if !write {

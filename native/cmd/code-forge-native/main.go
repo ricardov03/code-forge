@@ -22,7 +22,7 @@ import (
 	"github.com/ricardov03/code-forge/native/state"
 )
 
-// Set from package.json by scripts/build-native.mjs.
+// Set from package.json by `cf-release build-native` (B760; scripts/build-native.mjs before).
 var version = "dev"
 
 type failure struct {

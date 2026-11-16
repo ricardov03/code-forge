@@ -75,9 +75,10 @@ func b726YAMLJS(t *testing.T) string {
 // TestB726RecordPlainWide writes Node's stringify(value, {lineWidth: 0})
 // for each value. It runs only with B726_RECORD=1.
 func TestB726RecordPlainWide(t *testing.T) {
-	if os.Getenv("B726_RECORD") != "1" {
-		t.Skip("B726_RECORD is not 1")
+	if os.Getenv("B726_RECORD") != "" {
+		t.Skip("B726_RECORD is set, but Node was removed (B690b): the Node recorder cannot run and the goldens in testdata are never re-recorded (B760); unset B726_RECORD")
 	}
+	t.Skip("B726_RECORD is not set")
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is not on PATH")

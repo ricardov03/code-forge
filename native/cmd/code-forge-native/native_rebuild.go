@@ -21,9 +21,10 @@ import (
 // native sources leaves that binary stale, so rebase and gates rebuild it.
 
 // nativeRepo reports whether root is a code-forge checkout that builds its own
-// native binary (native/go.mod and scripts/build-native.mjs both present).
+// native binary (native/go.mod and scripts/cf-release.sh both present; B760: the Node
+// scripts/build-native.mjs is gone, and cf-release.sh has been in every checkout since B570).
 func nativeRepo(root string) bool {
-	for _, file := range []string{filepath.Join("native", "go.mod"), filepath.Join("scripts", "build-native.mjs")} {
+	for _, file := range []string{filepath.Join("native", "go.mod"), filepath.Join("scripts", "cf-release.sh")} {
 		if st, err := os.Stat(filepath.Join(root, file)); err != nil || !st.Mode().IsRegular() {
 			return false
 		}
@@ -31,7 +32,7 @@ func nativeRepo(root string) bool {
 	return true
 }
 
-// nativeHostBinary is the path scripts/build-native.mjs --host writes.
+// nativeHostBinary is the path `cf-release build-native --host` writes.
 func nativeHostBinary(root string) string {
 	arch := runtime.GOARCH
 	if arch == "amd64" {
@@ -84,17 +85,17 @@ func nativeStale(root string) (bool, error) {
 }
 
 // nativeBuild rebuilds the host binary of root in Go, the way
-// scripts/build-native.mjs --host does (B575: no Node needed). A failure keeps
+// `cf-release build-native --host` does (B575: no Node needed). A failure keeps
 // the text callers showed when Node ran the script.
 func nativeBuild(root string) error {
 	if _, err := nativeBuildHost(root); err != nil {
 		text := strings.Join(strings.Fields("build-native: "+err.Error()), " ")
-		return fmt.Errorf("native-rebuild-failed: node scripts/build-native.mjs --host in %s: %s", root, text)
+		return fmt.Errorf("native-rebuild-failed: sh scripts/cf-release.sh build-native --host in %s: %s", root, text)
 	}
 	return nil
 }
 
-// nativeBuildTargets are the release targets of scripts/build-native.mjs, in
+// nativeBuildTargets are the release targets of `cf-release build-native`, in
 // Node's platform-arch names.
 var nativeBuildTargets = []string{"darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"}
 
@@ -139,7 +140,7 @@ func nbEnv(goos, goarch string) []string {
 	return env
 }
 
-// nativeBuildHost is scripts/build-native.mjs --host in Go: go version check,
+// nativeBuildHost is `cf-release build-native --host`: go version check,
 // go build to <binary>.<pid>.tmp, chmod 755, rename, and the script's line.
 func nativeBuildHost(root string) (string, error) {
 	goarch := runtime.GOARCH

@@ -12,8 +12,8 @@ permissions:
 
 jobs:
   # B690b: the product is the Go binary; Node is gone from it. This job checks what npm ships and the
-  # generated docs. npm itself needs Node, so setup-node stays here only to run npm and the
-  # maintainer doc generator (scripts/gen-config-doc.mjs, not shipped).
+  # generated docs. npm itself needs Node, so setup-node stays here only to run npm and the pack
+  # check (B760: the config doc generator is Go, `sh scripts/cf-release.sh config-doc`).
   package:
     name: package
     runs-on: ubuntu-latest
@@ -46,8 +46,8 @@ jobs:
       - name: npm audit (high severity)
         run: npm audit --audit-level=high
 
-      - name: gen-config-doc --check
-        run: node scripts/gen-config-doc.mjs --check
+      - name: config-doc --check
+        run: sh scripts/cf-release.sh config-doc --check
 
       - name: gen-commands-doc --check
         run: sh scripts/gen-commands-doc.sh --check

@@ -35,6 +35,7 @@ func TestB709GrantUntilCloseMatchesNode(t *testing.T) {
 	if os.Getenv("BLOCK_HV_CHILD") == "1" {
 		b684Child()
 	}
+	b760NoNodeRecorder(t, "B709_RECORD_NODE")
 	record := os.Getenv("B709_RECORD_NODE")
 	for _, c := range b709Cases {
 		t.Run(c.name, func(t *testing.T) {
