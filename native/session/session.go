@@ -178,6 +178,9 @@ type Deps struct {
 	// Warn is the error log's warning line (logWarning) of the budget.usd 80 %
 	// warning. Every run-pinned caller sets it (B689); nil = no error-log line.
 	Warn func(warning, message string)
+	// HardTimer starts the foreground session's hard timeout (Opts.TimeoutMs);
+	// nil = a wall-clock timer (B771).
+	HardTimer HardTimer
 }
 
 func (d Deps) now() float64 {
@@ -971,7 +974,7 @@ func foreground(b built, o Opts, deps Deps) (ledger.Object, error) {
 	if environ == nil {
 		environ = os.Environ()
 	}
-	eo := execOpts{Argv: b.argv, Cwd: b.cwd, Env: childEnv(environ, b.env), Input: input, TimeoutMs: timeoutMs, RunIDFromParent: deps.RunID}
+	eo := execOpts{Argv: b.argv, Cwd: b.cwd, Env: childEnv(environ, b.env), Input: input, TimeoutMs: timeoutMs, RunIDFromParent: deps.RunID, HardTimer: deps.HardTimer}
 	if o.Role == "reviewer" || o.Role == "judge" {
 		eo.SilenceMs = silenceMs
 	}
