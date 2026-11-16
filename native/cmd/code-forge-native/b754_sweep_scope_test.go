@@ -22,10 +22,11 @@ func TestB754Sleeper(t *testing.T) {
 }
 
 // b754Orphan starts a real orphan of this uid (parent init) whose
-// CODE_FORGE_OWNER_PID names a dead process: the kind run start's sweep
-// stops. The test does not own it as a descendant, so a binary built for a
-// test may not signal it.
-func b754Orphan(t *testing.T) int {
+// CODE_FORGE_OWNER_PID names a dead process and whose HOME is home ("" for
+// no HOME, B746): the kind run start's sweep in that home stops. The test
+// does not own it as a descendant, so a binary built for a test may not
+// signal it.
+func b754Orphan(t *testing.T, home string) int {
 	t.Helper()
 	gone := exec.Command("/usr/bin/true")
 	if err := gone.Run(); err != nil {
@@ -33,6 +34,9 @@ func b754Orphan(t *testing.T) int {
 	}
 	cmd := exec.Command("/bin/sh", "-c", `"$B754_SELF" -test.run='^TestB754Sleeper$' >/dev/null 2>&1 </dev/null & echo $!`)
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "B754_SELF=" + os.Args[0], "B754_SLEEPER=1", "CODE_FORGE_OWNER_PID=" + strconv.Itoa(gone.Process.Pid), "CODE_FORGE_OWNER_START_TIME=unknown"}
+	if home != "" {
+		cmd.Env = append(cmd.Env, "HOME="+home)
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +91,7 @@ func b754Worker(t *testing.T, home string) int {
 // orphan whose owner died.
 func TestB754SweepScopedToTestDescendants(t *testing.T) {
 	home := t.TempDir()
-	orphan := b754Orphan(t)
+	orphan := b754Orphan(t, home)
 	worker := b754Worker(t, home)
 	before, beforeScoped := runReadEnv, runSweepScoped
 	t.Cleanup(func() { runReadEnv, runSweepScoped = before, beforeScoped })

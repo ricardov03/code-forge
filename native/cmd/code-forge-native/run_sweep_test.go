@@ -200,9 +200,12 @@ func TestRunStartSweepStops(t *testing.T) {
 		unreadable := w.spawn(t, false, 4242, worker("r-bad"), home)
 		otherHome := w.spawn(t, false, 4242, worker("r-old"), map[string]string{"HOME": t.TempDir()})
 		noEnv := w.spawn(t, false, 4242, worker("r-old"), nil)
-		orphan := w.spawn(t, false, 1, "sh -c long-task", map[string]string{"CODE_FORGE_OWNER_PID": strconv.Itoa(deadPid(t))})
-		owned := w.spawn(t, false, 1, "sh -c long-task", map[string]string{"CODE_FORGE_OWNER_PID": strconv.Itoa(os.Getpid())})
-		notOrphan := w.spawn(t, false, 4242, "sh -c long-task", map[string]string{"CODE_FORGE_OWNER_PID": strconv.Itoa(deadPid(t))})
+		orphan := w.spawn(t, false, 1, "sh -c long-task", map[string]string{"HOME": f.home, "CODE_FORGE_OWNER_PID": strconv.Itoa(deadPid(t))})
+		owned := w.spawn(t, false, 1, "sh -c long-task", map[string]string{"HOME": f.home, "CODE_FORGE_OWNER_PID": strconv.Itoa(os.Getpid())})
+		notOrphan := w.spawn(t, false, 4242, "sh -c long-task", map[string]string{"HOME": f.home, "CODE_FORGE_OWNER_PID": strconv.Itoa(deadPid(t))})
+		// B746: an orphan of another HOME, or with no HOME, is not this run start's
+		otherHomeOrphan := w.spawn(t, false, 1, "sh -c long-task", map[string]string{"HOME": t.TempDir(), "CODE_FORGE_OWNER_PID": strconv.Itoa(deadPid(t))})
+		noHomeOrphan := w.spawn(t, false, 1, "sh -c long-task", map[string]string{"CODE_FORGE_OWNER_PID": strconv.Itoa(deadPid(t))})
 		w.install(t)
 		start(t, f)
 		for _, c := range []*sweepChild{ended, missing, orphan} {
@@ -216,7 +219,7 @@ func TestRunStartSweepStops(t *testing.T) {
 		if got := w.sent(); fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Fatalf("signals = %v, want %v", got, want)
 		}
-		for _, c := range []*sweepChild{active, unreadable, otherHome, noEnv, owned, notOrphan} {
+		for _, c := range []*sweepChild{active, unreadable, otherHome, noEnv, owned, notOrphan, otherHomeOrphan, noHomeOrphan} {
 			if !w.alive(c) {
 				t.Fatalf("pid %d (%s) was stopped", c.pid, c.command)
 			}
@@ -226,7 +229,7 @@ func TestRunStartSweepStops(t *testing.T) {
 	t.Run("SIGKILL after the grace when SIGTERM is ignored", func(t *testing.T) {
 		f := newStartFixture(t, config)
 		w := &sweepWorld{}
-		stubborn := w.spawn(t, true, 1, "sh -c long-task", map[string]string{"CODE_FORGE_OWNER_PID": strconv.Itoa(deadPid(t))})
+		stubborn := w.spawn(t, true, 1, "sh -c long-task", map[string]string{"HOME": f.home, "CODE_FORGE_OWNER_PID": strconv.Itoa(deadPid(t))})
 		w.install(t)
 		start(t, f)
 		waitGone(t, stubborn)

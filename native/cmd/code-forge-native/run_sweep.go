@@ -349,7 +349,10 @@ func runSweepItems(home string) []runProc {
 		}
 		env := readEnv(p)
 		owner := env["CODE_FORGE_OWNER_PID"]
-		if env == nil || !runOwnerPid.MatchString(owner) {
+		// B746: as for workers, only an orphan of this run start's HOME (the
+		// home whose ~/.code-forge it uses). A live process of another HOME
+		// (a test temp HOME, a second setup) or of no HOME is not ours to stop.
+		if env == nil || env["HOME"] != home || !runOwnerPid.MatchString(owner) {
 			continue
 		}
 		ownerPid, err := strconv.ParseFloat(owner, 64)

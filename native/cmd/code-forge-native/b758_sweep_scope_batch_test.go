@@ -16,7 +16,7 @@ func TestB758ScopedSweepOneBatchedEnvRead(t *testing.T) {
 		t.Skip("ps -E batching is darwin only")
 	}
 	home := t.TempDir()
-	orphan := b754Orphan(t)
+	orphan := b754Orphan(t, home)
 	worker := b754Worker(t, home)
 	beforeRead, beforeScoped, beforeCall := runReadEnv, runSweepScoped, runPsEnvCall
 	t.Cleanup(func() { runReadEnv, runSweepScoped, runPsEnvCall = beforeRead, beforeScoped, beforeCall })
