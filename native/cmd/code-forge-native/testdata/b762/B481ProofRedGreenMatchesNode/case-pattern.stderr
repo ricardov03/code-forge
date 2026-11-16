@@ -1,0 +1,2 @@
+RED t/x.test.mjs::a.b(c)
+GREEN t/x.test.mjs::a.b(c)

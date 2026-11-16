@@ -1,0 +1,1 @@
+proof red-green: only node:test files (.mjs, .cjs, .js) have a filtered test command in this version — add a proof.runners entry for it (see proof.md §2)

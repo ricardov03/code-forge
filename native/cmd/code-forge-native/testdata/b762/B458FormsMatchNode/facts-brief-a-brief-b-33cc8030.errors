@@ -1,0 +1,19 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--brief",
+   "--brief"
+  ],
+  "fp": "4782adb0b811",
+  "kind": "usage",
+  "message": "facts: --brief given more than once",
+  "platform": "darwin",
+  "stack": null,
+  "sub": null,
+  "verb": "facts"
+ }
+]

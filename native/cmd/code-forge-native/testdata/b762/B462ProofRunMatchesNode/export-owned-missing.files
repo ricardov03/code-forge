@@ -1,0 +1,22 @@
+{
+ ".code-forge.yml": "600 version: 1\nprovider: anthropic\nlevels:\n  L0: {model: a}\n  L1: {model: b}\n  L2: {model: c}\n  L3: {model: d}\n",
+ ".code-forge/runs/r-b462-proof.json": "644 {\n  \"run_id\": \"r-b462-proof\",\n  \"project\": \"fixture\",\n  \"workspace\": \"<REPO>\",\n  \"status\": \"active\",\n  \"orphans\": [],\n  \"config\": {\n    \"hash\": \"2430f1a2ad2982d0067885488a4c89e21ad1d7c83b115ba8f1b20acc88dfaea8\",\n    \"snapshots\": {\n      \"2430f1a2ad2982d0067885488a4c89e21ad1d7c83b115ba8f1b20acc88dfaea8\": {\n        \"version\": 1\n      }\n    }\n  },\n  \"blocks\": {\n    \"B1\": {\n      \"status\": \"open\",\n      \"base_sha\": \"main\"\n    }\n  }\n}\n",
+ ".env": "600 APP=1\n",
+ ".gitattributes": "644 docs/ export-ignore\nsecret.txt export-ignore\n",
+ ".gitignore": "644 .code-forge/\n.env\nnode_modules/\nvendor/\n",
+ "README.md": "644 changed but not owned\n",
+ "docs/a.md": "644 doc\n",
+ "node_modules/pkg/index.js": "644 module\n",
+ "packages/pkg/src.php": "644 <?php\n",
+ "secret.txt": "644 kept\n",
+ "src/new.js": "644 new\n",
+ "src/x.js": "755 tree x\n",
+ "src/y.js": "644 base y\n",
+ "vendor/acme/beyond": "link /usr",
+ "vendor/acme/pkg": "link <REPO>/packages/pkg",
+ "vendor/acme/root": "link <REPO>",
+ "vendor/acme/state": "link <REPO>/.code-forge/runs",
+ "vendor/bin/tool": "link ../pkg/tool",
+ "vendor/composer/autoload_real.php": "644 <?php\n",
+ "vendor/pkg/tool": "755 #!/bin/sh\n"
+}

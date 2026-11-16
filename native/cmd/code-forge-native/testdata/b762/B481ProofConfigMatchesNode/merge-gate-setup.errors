@@ -1,0 +1,20 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 1,
+  "flags": [
+   "--file",
+   "--risk",
+   "--cwd"
+  ],
+  "fp": "43fe70da72ed",
+  "kind": "error",
+  "message": "proof tier: .code-forge.yml is invalid (3 error(s) at /gates/merge_gate_setup) — run code-forge validate",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "tier",
+  "verb": "proof"
+ }
+]

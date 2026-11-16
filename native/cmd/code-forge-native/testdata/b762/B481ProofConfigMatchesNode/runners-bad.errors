@@ -1,0 +1,20 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 1,
+  "flags": [
+   "--file",
+   "--risk",
+   "--cwd"
+  ],
+  "fp": "15de5a358235",
+  "kind": "error",
+  "message": "proof tier: .code-forge.yml is invalid (64 error(s) at /proof/runners/0, /proof/runners/1, /proof/runners/1/match, /proof/runners/1/adapter, /proof/runners/1/env, /proof/runners/1/env/OK, /proof/runners/1/timeout_s, /proof/runners/2, /proof/runners/2/match/1, /proof/runners/2/xcode, /proof/runners/3/xcode, /proof/runners/3/xcode/scheme, /proof/runners/3/xcode/destination, /proof/runners/3/xcode/test_target, /proof/runners/4, /proof/runners/5/xcode, /proof/runners/6/argv, /proof/runners/6/timeout_s, proof-runners-invalid) — run code-forge validate",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "tier",
+  "verb": "proof"
+ }
+]

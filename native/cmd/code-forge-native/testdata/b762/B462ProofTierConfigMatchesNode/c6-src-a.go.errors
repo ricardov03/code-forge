@@ -1,0 +1,20 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 1,
+  "flags": [
+   "--file",
+   "--risk",
+   "--cwd"
+  ],
+  "fp": "e38e9cd2b1a6",
+  "kind": "error",
+  "message": "proof tier: .code-forge.yml does not load (parse-error) — run code-forge validate",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "tier",
+  "verb": "proof"
+ }
+]

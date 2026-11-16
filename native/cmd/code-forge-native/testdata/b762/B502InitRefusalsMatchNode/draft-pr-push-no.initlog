@@ -1,0 +1,1 @@
+init-<TS>.log:error: --coder-may-open-draft-pr yes needs autonomy.coder_may_push yes — a draft PR needs a push; pass --coder-may-push yes or drop the flag. Nothing written.

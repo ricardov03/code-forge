@@ -1,0 +1,19 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--run",
+   "--remove"
+  ],
+  "fp": "952de6fe7adf",
+  "kind": "usage",
+  "message": "proof export: --remove takes no value",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "export",
+  "verb": "proof"
+ }
+]

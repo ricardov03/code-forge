@@ -1,0 +1,20 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 1,
+  "flags": [
+   "--file",
+   "--risk",
+   "--cwd"
+  ],
+  "fp": "4e84ffc8f404",
+  "kind": "error",
+  "message": "proof tier: tierFor: file must be a non-empty repo-relative path",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "tier",
+  "verb": "proof"
+ }
+]

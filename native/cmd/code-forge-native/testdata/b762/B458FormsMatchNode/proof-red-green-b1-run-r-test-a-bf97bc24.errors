@@ -1,0 +1,19 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--run",
+   "--test"
+  ],
+  "fp": "f402c081ba20",
+  "kind": "usage",
+  "message": "proof red-green: --test must stay inside the repository (no .. escape)",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "red-green",
+  "verb": "proof"
+ }
+]

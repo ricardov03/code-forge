@@ -1,0 +1,19 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--state",
+   "--bogus"
+  ],
+  "fp": "600fa8ecf8d0",
+  "kind": "usage",
+  "message": "usage: code-forge jev ask <question-id> --state <file> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "ask",
+  "verb": "jev"
+ }
+]

@@ -1,0 +1,1 @@
+usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]

@@ -1,0 +1,20 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--run",
+   "--test",
+   "--mechanism"
+  ],
+  "fp": "8f2f96d8ee09",
+  "kind": "usage",
+  "message": "proof red-green: --mechanism must be one of revert, assertion-deletion",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "red-green",
+  "verb": "proof"
+ }
+]

@@ -1,0 +1,19 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--state",
+   "--block"
+  ],
+  "fp": "411b45e56786",
+  "kind": "usage",
+  "message": "jev ask: --block must be a block id (letters, digits, . _ -; at most 32 characters)",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "ask",
+  "verb": "jev"
+ }
+]

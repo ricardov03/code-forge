@@ -1,0 +1,18 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--job"
+  ],
+  "fp": "7daf9833eac4",
+  "kind": "usage",
+  "message": "author: --job needs a value",
+  "platform": "darwin",
+  "stack": null,
+  "sub": null,
+  "verb": "author"
+ }
+]

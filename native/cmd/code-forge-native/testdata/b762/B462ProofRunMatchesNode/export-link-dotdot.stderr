@@ -1,0 +1,1 @@
+proof export: proof.export.link_dirs: no ".", ".." or empty segments

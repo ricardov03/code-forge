@@ -1,0 +1,19 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--packet",
+   "--json"
+  ],
+  "fp": "e5b38cbc958a",
+  "kind": "usage",
+  "message": "s2: unknown flag \"--json\"",
+  "platform": "darwin",
+  "stack": null,
+  "sub": null,
+  "verb": "s2"
+ }
+]

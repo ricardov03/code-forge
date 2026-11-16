@@ -1,0 +1,8 @@
+{
+ ".code-forge.yml": "644 version: 1\nprovider: anthropic\nlevels:\n  L0: {model: a}\n  L1: {model: b}\n  L2: {model: c}\n  L3: {model: d}\n",
+ ".code-forge/runs/r-b462-proof.json": "644 {\n  \"run_id\": \"r-b462-proof\",\n  \"project\": \"fixture\",\n  \"workspace\": \"<REPO>\",\n  \"status\": \"active\",\n  \"orphans\": [],\n  \"config\": {\n    \"hash\": \"2430f1a2ad2982d0067885488a4c89e21ad1d7c83b115ba8f1b20acc88dfaea8\",\n    \"snapshots\": {\n      \"2430f1a2ad2982d0067885488a4c89e21ad1d7c83b115ba8f1b20acc88dfaea8\": {\n        \"version\": 1\n      }\n    }\n  },\n  \"blocks\": {\n    \"B1\": {\n      \"status\": \"open\",\n      \"base_sha\": \"0e0cf92283a4e5fb7929f9ffe9f10c2e9325956d\",\n      \"owned_files\": [\n        \"t/**\"\n      ],\n      \"owned_kinds\": {}\n    }\n  }\n}\n",
+ ".gitignore": "644 .code-forge/\n",
+ "src/x.js": "644 export const x = 'fixed';\n",
+ "t/x.py": "644 pass\n",
+ "t/x.test.mjs": "644 import assert from 'node:assert/strict';\nimport test from 'node:test';\nimport { x } from '../src/x.js';\ntest('a.b(c)', () => {\n  assert.equal(x, 'fixed');\n});\n"
+}

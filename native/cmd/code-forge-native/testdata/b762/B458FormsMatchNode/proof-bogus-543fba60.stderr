@@ -1,0 +1,4 @@
+usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]
+       code-forge proof export <block> --run <r> [--remove] · proof lock|unlock <block> --run <r>
+       code-forge proof restore <block> --run <r>
+       code-forge proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert|assertion-deletion]

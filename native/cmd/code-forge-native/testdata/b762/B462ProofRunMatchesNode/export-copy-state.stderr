@@ -1,0 +1,1 @@
+proof export: proof.export.copy_untracked: nothing under .code-forge/ is ever exported

@@ -1,0 +1,18 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--brief"
+  ],
+  "fp": "92425a94e305",
+  "kind": "usage",
+  "message": "usage: code-forge facts --brief <file> [--sources <path>...] [--out <file>] [--run <id>] [--timeout <seconds>]",
+  "platform": "darwin",
+  "stack": null,
+  "sub": null,
+  "verb": "facts"
+ }
+]

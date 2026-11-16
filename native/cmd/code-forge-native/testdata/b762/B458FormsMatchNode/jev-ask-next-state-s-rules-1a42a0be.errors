@@ -1,0 +1,19 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--state",
+   "--rules"
+  ],
+  "fp": "543760f6e85d",
+  "kind": "usage",
+  "message": "jev ask: no rule answers \"next\" (--rules covers lane, risk, security_sensitive)",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "ask",
+  "verb": "jev"
+ }
+]

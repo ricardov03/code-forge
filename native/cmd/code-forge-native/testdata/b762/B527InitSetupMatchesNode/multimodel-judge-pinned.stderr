@@ -1,0 +1,1 @@
+init: --level L3 pins the judge to openai, a reviewer's provider — the consensus judge must come from a third provider (xai); change or drop --level L3. Nothing written.

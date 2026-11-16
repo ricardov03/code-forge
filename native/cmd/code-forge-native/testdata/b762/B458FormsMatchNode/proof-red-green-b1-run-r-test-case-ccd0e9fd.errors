@@ -1,0 +1,19 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--run",
+   "--test"
+  ],
+  "fp": "91146af8f662",
+  "kind": "usage",
+  "message": "proof red-green: --test must be a repo-relative path",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "red-green",
+  "verb": "proof"
+ }
+]

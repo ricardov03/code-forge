@@ -1,0 +1,22 @@
+{
+  "run_id": "r-b462-proof",
+  "project": "fixture",
+  "workspace": "<REPO>",
+  "status": "ended",
+  "orphans": [],
+  "config": {
+    "hash": "2430f1a2ad2982d0067885488a4c89e21ad1d7c83b115ba8f1b20acc88dfaea8",
+    "snapshots": {
+      "2430f1a2ad2982d0067885488a4c89e21ad1d7c83b115ba8f1b20acc88dfaea8": {
+        "version": 1
+      }
+    }
+  },
+  "blocks": {
+    "B1": {
+      "status": "open",
+      "owned_files": [],
+      "owned_kinds": {}
+    }
+  }
+}

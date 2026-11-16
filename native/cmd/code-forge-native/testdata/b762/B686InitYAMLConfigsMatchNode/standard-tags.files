@@ -1,0 +1,59 @@
+project:
+.code-forge.yml -rw-r--r--
+version: 1
+engine: auto
+review:
+  workers: 2
+  exclude:
+    - "12"
+    - "true"
+    - a
+  multimodel: false
+thresholds:
+  default:
+    act: 0.75
+known_extra:
+  claude:
+    - x
+gates:
+  test: null
+  lint: null
+  types: null
+  format: null
+project:
+  name: myproj
+  slug: myproj
+provider: anthropic
+levels:
+  L0:
+    model: claude-haiku-4-5-20251001
+  L1:
+    model: claude-sonnet-5
+  L2:
+    model: claude-opus-5-5
+  L3:
+    model: claude-fable-5-2
+caps:
+  coders: 1
+harnesses: []
+system1:
+  fallback: rules
+proof:
+  tiers:
+    high:
+      paths: []
+  isolation: export
+  export:
+    link_dirs: []
+    copy_untracked: []
+autonomy:
+  coder_may_push: false
+  coder_may_open_draft_pr: false
+
+home:
+.code-forge drwx------
+.code-forge/config.yml -rw-r--r--
+tools: current
+keys:
+  jev:
+    source: none

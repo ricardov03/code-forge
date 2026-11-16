@@ -1,0 +1,1 @@
+proof red-green: proof.isolation is lock — run code-forge proof lock B1 --run r-b462-proof first

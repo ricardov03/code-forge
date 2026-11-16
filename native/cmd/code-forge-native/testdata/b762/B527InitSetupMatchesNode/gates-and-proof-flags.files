@@ -1,0 +1,63 @@
+project:
+.code-forge.yml -rw-r--r--
+version: 1
+project:
+  name: myproj
+  slug: myproj
+provider: anthropic
+levels:
+  L0:
+    model: claude-haiku-4-5-20251001
+  L1:
+    model: claude-sonnet-5
+  L2:
+    model: claude-opus-5-5
+  L3:
+    model: claude-fable-5-2
+caps:
+  coders: 1
+review:
+  multimodel: false
+engine: auto
+harnesses: []
+system1:
+  fallback: rules
+gates:
+  test:
+    - make
+    - unit tests
+  lint:
+    - go
+    - vet
+    - ./...
+  types: null
+  format:
+    - gofmt
+    - -l
+    - .
+proof:
+  tiers:
+    high:
+      paths:
+        - src/auth
+        - db
+  isolation: lock
+  export:
+    link_dirs:
+      - vendor
+    copy_untracked:
+      - .env.local
+autonomy:
+  coder_may_push: false
+  coder_may_open_draft_pr: false
+
+go.mod -rw-r--r--
+module x
+
+home:
+.code-forge drwx------
+.code-forge/config.yml -rw-r--r--
+tools: current
+keys:
+  jev:
+    source: none
