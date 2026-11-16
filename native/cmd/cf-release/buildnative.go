@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -18,6 +19,11 @@ var bnTargets = [][3]string{
 // bnBuild builds the four release targets of root. It returns the lines the script printed, or
 // the script's error message (without its "build-native: " prefix).
 func (a *app) bnBuild(root string) (string, string) {
+	return a.bnBuildTargets(root, bnTargets)
+}
+
+// bnBuildTargets builds the given targets of root (bnBuild's steps).
+func (a *app) bnBuildTargets(root string, targets [][3]string) (string, string) {
 	check := spawn(root, []string{"go", "version"}, 0, nil)
 	switch {
 	case check.errMsg == "spawnSync go ENOENT":
@@ -36,7 +42,7 @@ func (a *app) bnBuild(root string) (string, string) {
 	// B690d: no Node version stamp; the binary never starts Node.
 	ldflags := "-s -w -X main.version=" + version
 	var printed strings.Builder
-	for _, t := range bnTargets {
+	for _, t := range targets {
 		target := t[0] + "-" + t[1]
 		dir := filepath.Join(root, "native", "bin", target)
 		if err := os.MkdirAll(dir, 0o777); err != nil {
@@ -74,4 +80,35 @@ func (a *app) bnBuild(root string) (string, string) {
 		}
 	}
 	return printed.String(), ""
+}
+
+// buildNativeMain is `cf-release build-native [--host]` (B760): the maintainer build that
+// scripts/build-native.mjs did, with no Node. No argument builds the four release targets;
+// --host builds only this machine's target into native/bin/<platform>-<arch>.
+func buildNativeMain(a *app, args []string, root string) int {
+	targets := bnTargets
+	switch {
+	case len(args) == 0:
+	case len(args) == 1 && args[0] == "--host":
+		targets = nil
+		for _, t := range bnTargets {
+			if t[0] == runtime.GOOS && t[2] == runtime.GOARCH {
+				targets = append(targets, t)
+			}
+		}
+		if len(targets) == 0 {
+			a.err("build-native: unsupported native host: " + runtime.GOOS + "-" + runtime.GOARCH + "\n")
+			return 1
+		}
+	default:
+		a.err("build-native: usage: cf-release build-native [--host]\n")
+		return 1
+	}
+	printed, failure := a.bnBuildTargets(root, targets)
+	if failure != "" {
+		a.err("build-native: " + failure + "\n")
+		return 1
+	}
+	a.out(printed)
+	return 0
 }

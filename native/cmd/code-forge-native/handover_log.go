@@ -121,7 +121,7 @@ func handoverCommand(args []string) (string, string) {
 // Best effort only: no diagnostics, no changes to process inputs. A separate
 // inode protects append AND rename, so concurrent trimming cannot lose a row.
 func recordHandover(args []string, reason string) {
-	if os.Getenv("CODE_FORGE_HANDOVER_LOG") == "0" || os.Getenv("CODE_FORGE_NATIVE") == "0" {
+	if os.Getenv("CODE_FORGE_HANDOVER_LOG") == "0" {
 		return
 	}
 	file := handoverLogPath()

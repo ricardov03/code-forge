@@ -201,8 +201,8 @@ func TestB504InvalidConfigKeepsHandover(t *testing.T) {
 
 func TestB504NativeAndDaemonRows(t *testing.T) {
 	_, repo := b474Project(t, "", 0)
-	t.Setenv("CODE_FORGE_NATIVE", "0")
-	if got, reason := dfNativeRow(); reason != 0 || got.status != "INFO" || got.detail != "not found, using Node" {
+	t.Setenv("CODE_FORGE_NATIVE", "0") // B760: no longer an off switch; the test binary is in no package
+	if got, reason := dfNativeRow(); reason != 0 || got.status != "INFO" || got.detail != "not found" {
 		t.Errorf("native: %+v %v", got, reason)
 	}
 	if got, reason := dfDaemonRow(repo, os.Getenv("HOME")); reason != 0 || got.detail != "off" || got.label != "native daemon" {

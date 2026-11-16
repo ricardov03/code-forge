@@ -16,7 +16,8 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO = path.resolve(HERE, '..', '..');
-export const BIN = path.join(REPO, 'bin', 'code-forge.mjs');
+// B760: the sh launcher that runs the Go binary (bin/code-forge.mjs was removed in B690b).
+export const BIN = path.join(REPO, 'bin', 'code-forge');
 
 const { exec } = await import(path.join(REPO, 'src', 'util', 'exec.mjs'));
 const { gitChildEnv } = await import(path.join(REPO, 'src', 'worker', 'ticket.mjs'));
@@ -64,11 +65,11 @@ export function makeHarness(label) {
   }
 
   /**
-   * Run `bin/code-forge.mjs <args>` as a real subprocess (argv array, never a shell).
+   * Run `bin/code-forge <args>` (the Go binary's launcher) as a real subprocess (argv array, never a shell).
    * @param {string[]} args @param {string} cwd @param {NodeJS.ProcessEnv} env
    */
   async function cli(args, cwd, env) {
-    const res = await exec([process.execPath, BIN, ...args], { cwd, env, timeoutMs: 60000 });
+    const res = await exec([BIN, ...args], { cwd, env, timeoutMs: 60000 });
     return { code: res.code, stdout: res.stdout, stderr: res.stderr, json: parseLast(res.stdout) };
   }
 

@@ -16,7 +16,7 @@ import (
 )
 
 // b408Fixture is a code-forge-shaped repo (native/go.mod and
-// scripts/build-native.mjs) with one open worktree block B1. A fake go on PATH
+// scripts/cf-release.sh) with one open worktree block B1. A fake go on PATH
 // logs every build as "build <cwd> <argv> | <env>" (the -o temp name with its
 // pid as PID) and writes the -o file; a fake Node answers --version, logs a CLI
 // call as "node <verb> <sub>" and, for block rebase, rebases the worktree onto
@@ -35,7 +35,8 @@ func newB408Fixture(t *testing.T) *b408Fixture {
 	f.write(f.repo, ".code-forge.yml", config)
 	f.write(f.repo, ".gitignore", "native/bin/\n")
 	f.write(f.repo, "README.md", "readme\n")
-	f.write(f.repo, "scripts/build-native.mjs", "// fixture\n")
+	f.write(f.repo, "scripts/cf-release.sh", "# fixture\n")
+	f.write(f.repo, "scripts/build-native.mjs", "// fixture: an older tree still has it, and a change to it rebuilds\n")
 	f.write(f.repo, "package.json", `{"name":"fixture","version":"9.8.7"}`+"\n")
 	f.write(f.repo, "native/go.mod", "module fixture\n")
 	f.write(f.repo, "native/x.go", "package fixture\n")

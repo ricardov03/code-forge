@@ -23,25 +23,23 @@ system1:
   fallback: rules
 gates:
   timeout_s: 3600
+  # B760: Go only. The test gate runs `go test` on the packages of the selected Go files
+  # (native/cmd/cf-gotest; no file is every package); types is go vet.
   test:
-    - sh
-    - test/helpers/run-suite.sh
+    - go
+    - -C
+    - native
+    - run
+    - ./cmd/cf-gotest
     - "{test_files}"
   lint: null
   types:
-    - npm
-    - run
-    - typecheck
+    - go
+    - -C
+    - native
+    - vet
+    - ./...
   format: null
-  # B427: hubs measured on the B362b+B402 batch (most tests reach a change
-  # through them); their own tests still run when the closure reaches them.
-  import_graph:
-    stop:
-      - src/session/spawn.mjs
-      - src/config/validate.mjs
-      - src/worker/loop.mjs
-      - src/context/pack.mjs
-      - src/cli/block.mjs
 proof:
   tiers:
     high:

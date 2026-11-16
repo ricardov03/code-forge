@@ -80,7 +80,7 @@ func b525Setup(t *testing.T, c b525Case, version string) *b525Env {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", e.bin+":/usr/bin:/bin")
-	t.Setenv("CODE_FORGE_NATIVE", "0") // Node's golden run says "native binary: not found" too
+	t.Setenv("CODE_FORGE_NATIVE", "0") // B760: no effect any more (the daemon row of a live worker is "fallback")
 	t.Setenv("CODE_FORGE_HANDOVER_LOG", e.handoverLog)
 	t.Setenv("FAKE_MODE", c.mode)
 	t.Setenv("FAKE_LOG", e.argvLog)

@@ -137,6 +137,7 @@ func TestB697HumanCloseMatchesNode(t *testing.T) {
 	if os.Getenv("BLOCK_HV_CHILD") == "1" {
 		b684Child()
 	}
+	b760NoNodeRecorder(t, "B697_RECORD_NODE")
 	record := os.Getenv("B697_RECORD_NODE")
 	for _, c := range b697Cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -241,6 +242,7 @@ func b697ClaimReport(t *testing.T, f *closeReviewFixture, r hvResult, before int
 }
 
 func TestB697AutoClaimCloseMatchesNode(t *testing.T) {
+	b760NoNodeRecorder(t, "B697_RECORD_NODE")
 	record := os.Getenv("B697_RECORD_NODE")
 	for _, c := range b697ClaimCases {
 		t.Run(c.name, func(t *testing.T) {

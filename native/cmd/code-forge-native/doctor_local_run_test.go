@@ -28,7 +28,7 @@ func b504NoConfigRows(home string) []string {
 		"INFO review concurrency: 6 tickets at once; provider slots anthropic 4 · openai 2 · xai 2",
 		"FAIL probes: skipped: no valid config",
 		"INFO signer: same-user boundary only",
-		"INFO native binary: not found, using Node",
+		"INFO native binary: not found",
 		"INFO native daemon: off",
 	}
 }
@@ -55,7 +55,7 @@ func b504CheckRows(t *testing.T, got string, want []string) {
 func b504NoConfig(t *testing.T) (home, repo string) {
 	t.Helper()
 	home, repo = b474Project(t, "", 0)
-	t.Setenv("CODE_FORGE_NATIVE", "0") // Node's own run says "not found" too
+	t.Setenv("CODE_FORGE_NATIVE", "0") // B760: no effect any more; the test binary is in no package, so "not found"
 	// B552: no provider CLI and no app of this machine shows in the rows.
 	t.Setenv("PATH", "/usr/bin:/bin")
 	b552SealApps(t)

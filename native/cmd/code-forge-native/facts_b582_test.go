@@ -145,6 +145,7 @@ func TestB582FactsCodexStepMatchesNode(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}
+	b760NoNodeRecorder(t, "B582_RECORD")
 	record := os.Getenv("B582_RECORD") == "1"
 	for _, c := range b582Cases {
 		t.Run(c.name, func(t *testing.T) {

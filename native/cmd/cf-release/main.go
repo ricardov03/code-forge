@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-const mainUsage = "usage: cf-release <release|release-site|site-data|docs-block|changelog> [args...]"
+const mainUsage = "usage: cf-release <release|release-site|site-data|docs-block|changelog|config-doc|build-native> [args...]"
 
 func run(a *app, args []string, root string) int {
 	if len(args) == 0 {
@@ -26,6 +26,10 @@ func run(a *app, args []string, root string) int {
 		return docsBlockMain(a, args[1:], root)
 	case "changelog":
 		return changelogMain(a, args[1:], root)
+	case "config-doc":
+		return configDocMain(a, args[1:], root)
+	case "build-native":
+		return buildNativeMain(a, args[1:], root)
 	}
 	a.err(mainUsage + "\n")
 	return 2

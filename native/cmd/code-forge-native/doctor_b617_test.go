@@ -192,8 +192,9 @@ func TestB617SandboxedCodexCoderHandsOver(t *testing.T) {
 }
 
 // The live worker's daemon: a socket that answers the version-negotiated
-// ping is "live", a run with no socket is "fallback" (daemonRequest). The
-// goldens cannot show it: Node's golden run sets CODE_FORGE_NATIVE=0.
+// ping is "live", a run with no socket is "fallback" (daemonRequest). Node's
+// golden run set CODE_FORGE_NATIVE=0 ("off"); since B760 that switch is gone
+// and the goldens' live-worker rows say "fallback".
 func TestB617LiveWorkerDaemonRow(t *testing.T) {
 	_, repo := b474Project(t, "", 0)
 	t.Setenv("CODE_FORGE_NATIVE", "")

@@ -129,7 +129,7 @@ func (a *app) brief(root, tag string) error {
 	}
 	docs = append(docs, filesWithExtension(root, "docs", ".md")...)
 	a.section("Docs", bullets(docs))
-	a.section("Generated-doc checks", []string{"- node scripts/gen-config-doc.mjs --check", "- sh scripts/gen-commands-doc.sh --check"})
+	a.section("Generated-doc checks", []string{"- sh scripts/cf-release.sh config-doc --check", "- sh scripts/gen-commands-doc.sh --check"})
 	siteDir := os.Getenv("CODE_FORGE_SITE_DIR")
 	if siteDir == "" {
 		siteDir = "../code-forge-site"
