@@ -242,11 +242,34 @@ func TestB765LandCIRunningRefused(t *testing.T) {
 
 func TestB765LandCIGhMissingRefused(t *testing.T) {
 	f := landCIBatch(t, landCIOn, "", "")
-	t.Setenv("PATH", "/usr/bin"+string(os.PathListSeparator)+"/bin")
+	t.Setenv("PATH", landCIToolsPath(t, landCITools...))
 	if _, err := exec.LookPath("gh"); err == nil {
-		t.Fatal("gh is on /usr/bin:/bin; this test needs a PATH without gh")
+		t.Fatal("gh is on the tools-only PATH; this test needs a PATH without gh")
 	}
 	landCIRefused(t, f, "gh is not on PATH; install gh and run gh auth login")
+}
+
+// landCITools is the measured set of programs block land runs before the CI
+// gate: with an empty tools PATH the land fails on git rev-parse; with git
+// alone it reaches the gate.
+var landCITools = []string{"git"}
+
+// landCIToolsPath builds a PATH of one temp dir holding only symlinks to the
+// named tools (found on the current PATH), so gh is never found on any host,
+// even where gh ships in /usr/bin.
+func landCIToolsPath(t *testing.T, tools ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, tool := range tools {
+		real, err := exec.LookPath(tool)
+		if err != nil {
+			t.Fatalf("%s not found on PATH: %v", tool, err)
+		}
+		if err := os.Symlink(real, filepath.Join(dir, tool)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
 }
 
 // Default off: without land.require_ci the land never asks gh.
