@@ -36,10 +36,16 @@ type execOpts struct {
 	Env             []string // the child's environment before the owner fields
 	Input           []byte   // nil: stdin is /dev/null
 	TimeoutMs       float64
-	SilenceMs       float64 // 0: none
-	PidsDir         string  // "" = no registry entry
-	RunIDFromParent string  // process.env.CODE_FORGE_RUN_ID (or the run root's r-* name)
+	SilenceMs       float64   // 0: none
+	PidsDir         string    // "" = no registry entry
+	RunIDFromParent string    // process.env.CODE_FORGE_RUN_ID (or the run root's r-* name)
+	HardTimer       HardTimer // nil = a wall-clock timer of TimeoutMs
 }
+
+// HardTimer starts a session's hard timeout of d: the channel fires when the
+// session times out, stop ends the timer once the child has exited. Tests use
+// it to time a session out on a signal instead of a real-time race (B771).
+type HardTimer func(d time.Duration) (fire <-chan time.Time, stop func())
 
 type execResult struct {
 	OK              bool
@@ -252,8 +258,16 @@ func run(o execOpts) execResult {
 			}
 		}()
 	}
-	hard := time.NewTimer(msDuration(o.TimeoutMs))
-	defer hard.Stop()
+	var hardC <-chan time.Time
+	if o.HardTimer != nil {
+		c, stop := o.HardTimer(msDuration(o.TimeoutMs))
+		defer stop()
+		hardC = c
+	} else {
+		hard := time.NewTimer(msDuration(o.TimeoutMs))
+		defer hard.Stop()
+		hardC = hard.C
+	}
 	var silence <-chan time.Time
 	if o.SilenceMs > 0 {
 		t := time.NewTimer(msDuration(o.SilenceMs))
@@ -264,7 +278,7 @@ func run(o execOpts) execResult {
 		select {
 		case <-done:
 			waiting = false
-		case <-hard.C:
+		case <-hardC:
 			timeOut(false)
 		case <-silence:
 			silence = nil

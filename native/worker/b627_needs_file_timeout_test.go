@@ -5,8 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/ricardov03/code-forge/native/session"
 	"github.com/ricardov03/code-forge/native/sign"
 )
 
@@ -16,9 +19,10 @@ import (
 // own (a fresh clock). One retry: a second timeout is today's unavailable.
 
 // b627Claude is the fake `claude` CLI: it logs each call (attached or plain);
-// a packet with b.txt attached sleeps past the timeout while $SLOW exists;
+// a packet with b.txt attached hangs while $SLOW exists, after it leaves the
+// $SLEEPING marker that times the session out (b627Timer);
 // a plain packet asks for b.txt (plus $EXTRA when set), an attached one passes.
-func b627Claude(calls, slow string, extra string) string {
+func b627Claude(calls, slow, sleeping string, extra string) string {
 	needs := `"needs_file":["b.txt"` + extra + `]`
 	return `#!/bin/sh
 in=$(cat)
@@ -27,7 +31,7 @@ case "$in" in
 *'## attached files'*'### b.txt'*)
   case "$in" in *'OUTSIDE-SECRET'*) echo leaked >> ` + calls + ` ;; esac
   echo attached >> ` + calls + `
-  if [ -f ` + slow + ` ]; then exec sleep 30; fi
+  if [ -f ` + slow + ` ]; then : > ` + sleeping + `; exec sleep 300; fi
   printf '%s' '{"type":"result","is_error":false,"result":"done","structured_output":{"passed":true,"summary":"with b","reviewed_hunks":['"$heads"'],"findings":[]},"usage":{"input_tokens":1000,"output_tokens":300}}' ;;
 *)
   echo plain >> ` + calls + `
@@ -40,6 +44,7 @@ type b627Env struct {
 	fx           *b488Fix
 	w            *TicketRunner
 	calls, slow  string
+	sleeping     string
 	contentCount int
 }
 
@@ -49,13 +54,47 @@ func b627Setup(t *testing.T, extra string) *b627Env {
 	fx, w, _ := b497Fixture(t, &clock)
 	w.Cfg = b492Cfg(t, `{"levels":{"L2":{"model":"claude-x","provider":"anthropic"}},"review":{"session_timeout_s":3}}`)
 	dir := t.TempDir()
-	e := &b627Env{fx: fx, w: w, calls: filepath.Join(dir, "calls"), slow: filepath.Join(dir, "slow")}
+	e := &b627Env{fx: fx, w: w, calls: filepath.Join(dir, "calls"), slow: filepath.Join(dir, "slow"), sleeping: filepath.Join(dir, "sleeping")}
 	bin := filepath.Join(dir, "claude")
-	if err := os.WriteFile(bin, []byte(b627Claude(e.calls, e.slow, extra)), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte(b627Claude(e.calls, e.slow, e.sleeping, extra)), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	w.SessionDeps.Bins = map[string]string{"claude": bin}
+	w.SessionDeps.HardTimer = b627Timer(e.sleeping)
 	return e
+}
+
+// b627Timer is the sessions' hard timeout (B771): it fires when the fake
+// leaves its sleeping marker (taken, so a retry needs its own), not when 3 s
+// of wall clock run out, so a session that is slow to start under load is
+// never cut before it logs its call. A stuck session still ends after a
+// generous real deadline.
+func b627Timer(sleeping string) session.HardTimer {
+	return func(time.Duration) (<-chan time.Time, func()) {
+		fire, done := make(chan time.Time, 1), make(chan struct{})
+		go func() {
+			deadline := time.NewTimer(2 * time.Minute)
+			defer deadline.Stop()
+			tick := time.NewTicker(10 * time.Millisecond)
+			defer tick.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case now := <-deadline.C:
+					fire <- now
+					return
+				case now := <-tick.C:
+					if os.Remove(sleeping) == nil {
+						fire <- now
+						return
+					}
+				}
+			}
+		}()
+		var once sync.Once
+		return fire, func() { once.Do(func() { close(done) }) }
+	}
 }
 
 // next writes new content to a.txt and runs one ticket for it; it returns the
@@ -67,6 +106,9 @@ func (e *b627Env) next(t *testing.T, slow bool) (string, string, string) {
 			t.Fatal(err)
 		}
 	} else if err := os.Remove(e.slow); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if err := os.Remove(e.sleeping); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	e.contentCount++
