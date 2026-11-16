@@ -152,6 +152,35 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		return fallback(hLandConfigDaemon)
 	}
 	mergeGate := merge && !skip && blockMap(cfg["gates"])["merge_gate"] != false
+	// B765: land.require_ci refuses before any write when the block tip's CI
+	// is not green; it runs ahead of every Node hand-over below.
+	if merge {
+		provider, bad := landCIRequired(cfg)
+		if bad != "" {
+			step = "ci"
+			return stop(bad)
+		}
+		if provider != "" {
+			branch := blockString(blockObject(entry.Get("worktree")).Get("branch"))
+			sha, err := gitx.Run(main, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch+"^{commit}")
+			if branch == "" || err != nil || strings.TrimSpace(sha) == "" {
+				step = "ci"
+				return stop("cannot resolve the tip of block branch " + branch)
+			}
+			notes, refusal, ciNext := landCIGate(cfg, main, id, strings.TrimSpace(sha))
+			if refusal != "" {
+				step, next = "ci", landFirst(ciNext, next)
+				return stop(refusal)
+			}
+			out := io.Writer(safeStdout)
+			if json {
+				out = stderr
+			}
+			for _, line := range notes {
+				fmt.Fprintln(out, line)
+			}
+		}
+	}
 	if retry {
 		begin()
 		defer finish()

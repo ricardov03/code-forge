@@ -678,6 +678,35 @@ starts `code-forge ci watch --sha <sha> --run <run>` as a detached child, loggin
 `~/.code-forge/heal/ci-<sha>.log`, prints `ci watch: started for <sha>; log <path>` and returns at
 once; land never waits for CI.
 
+**Require green CI (B765).** Opt in with `land.require_ci: github` in the run-start config (default
+`off`: nothing changes). Then `block land --merge` and a batch land merge a block only when GitHub
+CI is green for the block branch's own tip sha. Before anything is merged or written (a batch: for
+each block, before any rebase), land runs `gh run list --commit <sha> --limit 100 --json
+databaseId,status,conclusion,name` with `gh` from `PATH` and its existing login (no new token; none
+is printed); `land.ci_workflow: ci.yml` adds `--workflow ci.yml`. Each workflow passes when one of
+its completed runs concluded `success`, `skipped` or `neutral`; the land needs every workflow to
+pass and prints `ci: tip <sha8> green (<n> runs)`. No run, a run still going, a red run, a failing
+`gh` call or no `gh` on `PATH` stops the land at step `ci` with exit 1 (`--json`: `event: refused`,
+`step: ci`) and next command `code-forge ci watch --sha <sha> --cwd <main>`; nothing is merged and no
+state is written.
+A red run can still land when it is red only on known main reds: set `CODE_FORGE_CI_RED_BLOCKS` to
+the comma-separated fix blocks and `land.ci_red_list` to a list file (relative to the main
+checkout). Each line is `<block> <regexp>` (Go regexp, matched against a failing test name); blank
+lines and `#` lines are skipped:
+
+```
+# known reds on main
+B705 ^test timed out$
+B763 ^TestB755SecondSweepFast$
+```
+
+Land reads `gh run view <id> --log-failed` of the newest failed run of each red workflow and takes
+the top-level failing tests (`--- FAIL: <name>`, `✖ <name> (<n>ms)`, `not ok <n> - <name>`, `panic:
+test timed out`; indented subtests are dropped). It prints each as `<name> -> <block>` or `<name> ->
+NO BLOCK`; one `NO BLOCK`, or a failed log with no test name (a setup or build step red), refuses.
+The landing block is always dropped from `CODE_FORGE_CI_RED_BLOCKS`: a block never covers its own
+red.
+
 `code-forge ci watch --sha <sha> [--run <r>] [--timeout 30m] [--cwd <dir>] [--json]` polls
 `gh run list --commit <sha> --json databaseId,status,conclusion,name` every 30 s, with `gh` from
 `PATH`. When every run is completed and each concluded `success`, `skipped` or `neutral`, it exits 0.

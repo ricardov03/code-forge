@@ -144,6 +144,21 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if err != nil {
 				return err
 			}
+			// B765: land.require_ci checks each block's own tip before any
+			// rebase, gate or write.
+			cfg, _ := blockSnapshot(record)
+			notes, refusal, _ := landCIGate(cfg, main, id, strings.TrimSpace(head))
+			if refusal != "" {
+				step = "ci"
+				return fmt.Errorf("%s", refusal)
+			}
+			for _, line := range notes {
+				if json {
+					fmt.Fprintln(safeStderr, line)
+				} else {
+					fmt.Fprintln(safeStdout, line)
+				}
+			}
 			node, err := landBatchNodeProduct(tree.Path, blockString(wt.Get("base_sha")), entry)
 			if err != nil {
 				return err

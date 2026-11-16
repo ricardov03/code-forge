@@ -171,6 +171,13 @@ reset (one `ci watch: GitHub API rate limit; retry at HH:MM UTC` line per wait) 
 is past `--timeout`, exits 4 with `rate limit, gave up` and no heal item. One watch per repo and
 commit: a second start says another ci watch is already watching and exits 0.
 
+**Require green CI (B765).** `land.require_ci: github` (default `off`) makes `--merge` and a batch
+land merge a block only when GitHub CI is green for the block's own tip (`gh run list --commit
+<sha>`, `gh` from `PATH`; `land.ci_workflow` limits it to one workflow). No run, a running or red
+run, or no `gh` stops at step `ci` with exit 1; nothing is merged or written. A red run lands only
+when every failing test matches a `<block> <regexp>` line of `land.ci_red_list` for a block named in
+`CODE_FORGE_CI_RED_BLOCKS`; a block never covers its own red.
+
 **Heal queue (B429).** `gates run --run --block`, `block rebase` and `block land` still fail on a
 held lock or a transient git error, but also queue the problem and print `heal: queued <id>` as the
 last stderr line. Retry with `forge heal run --run <r>` (`--once` for one pass, `--watch` to keep
