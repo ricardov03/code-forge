@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/ricardov03/code-forge/native/autopilot"
@@ -741,6 +742,13 @@ func runBlockAttempt(args []string) int {
 		return h.fallback()
 	}
 	record, err := state.ReadRun(home, run)
+	var readErrno syscall.Errno
+	var readPath *os.PathError
+	if err != nil && errors.As(err, &readPath) && errors.As(err, &readErrno) {
+		// B759: Node's first readRun rethrows the fs error (a folder, no
+		// permission) before anything else runs: "block attempt: <libuv text>"
+		h.mark()
+	}
 	if err != nil {
 		return h.fail(err)
 	}

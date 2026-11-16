@@ -1,0 +1,12 @@
+exit 1
+-- stdout
+-- stderr
+WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store
+code-forge: verb "keys" failed: Error: EACCES: permission denied, open '<H>/.code-forge/store/index.json'
+    at async open (node:internal/fs/promises:1345:25)
+    at async readFile (node:internal/fs/promises:2003:14)
+    at async readIndex (file://<REPO>/src/keys/store.mjs:213:33)
+    at async Object.list (file://<REPO>/src/keys/store.mjs:333:21)
+    at async runKeys (file://<REPO>/src/cli/keys.mjs:275:18)
+    at async run (file://<REPO>/bin/code-forge.mjs:149:24)
+    at async file://<REPO>/bin/code-forge.mjs:212:16

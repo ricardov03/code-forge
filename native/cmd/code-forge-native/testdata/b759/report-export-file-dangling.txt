@@ -1,0 +1,4 @@
+exit 1
+-- stdout
+-- stderr
+report: ENOENT: no such file or directory, open 'd/agent_waivers.json'

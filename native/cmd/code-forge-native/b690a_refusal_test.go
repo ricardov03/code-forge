@@ -47,11 +47,17 @@ func b690aInRepo(t *testing.T, args ...string) (b508Result, string) {
 	return b508Run(t, nil, args...), repo
 }
 
-// b690aRunDirSeam makes ~/.code-forge/runs/r1.json a directory in the fresh
-// HOME b508Run sets, before dispatch: block attempt then hits a read error
-// Go does not serve yet (B744: Node exits 1 with "block attempt: EISDIR").
+// b690aRunDirSeam writes ~/.code-forge/runs/r1.json in the fresh HOME
+// b508Run sets, before dispatch, with an open block whose owned_files is not
+// a list: a registry shape block attempt still leaves to Node. (It was a
+// run-file folder until B759 ported that read error.)
 func b690aRunDirSeam([]string) {
-	if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), ".code-forge", "runs", "r1.json"), 0o700); err != nil {
+	runs := filepath.Join(os.Getenv("HOME"), ".code-forge", "runs")
+	if err := os.MkdirAll(runs, 0o700); err != nil {
+		panic(err)
+	}
+	record := `{"run_id":"r1","blocks":{"B1":{"status":"open","owned_files":"x"}}}`
+	if err := os.WriteFile(filepath.Join(runs, "r1.json"), []byte(record), 0o600); err != nil {
 		panic(err)
 	}
 }
@@ -70,8 +76,8 @@ func b690aInRepoSeam(t *testing.T, seam func([]string), args ...string) (b508Res
 	return b508Run(t, seam, args...), repo
 }
 
-// A case that used to start Node (block attempt whose run file cannot be
-// read; B744 ported the secret-like argv case it used before) now gets the Go refusal: one stderr line, exit 1, empty stdout, and the
+// A case that used to start Node (block attempt on a registry shape Go does
+// not serve; B744 and B759 ported the cases it used before) now gets the Go refusal: one stderr line, exit 1, empty stdout, and the
 // only file written is the handovers.jsonl row (with its lock file).
 func TestB690aFormerHandOverRefuses(t *testing.T) {
 	res, repo := b690aInRepoSeam(t, b690aRunDirSeam, "block", "attempt", "B1", "--run", "r1")
@@ -83,8 +89,8 @@ func TestB690aFormerHandOverRefuses(t *testing.T) {
 		t.Errorf("repo files %q; want none", files)
 	}
 	home := b690aFiles(t, res.home)
-	if strings.Join(home, ",") != ".code-forge/native/handovers.jsonl,.code-forge/native/handovers.jsonl.lock" {
-		t.Errorf("HOME files %q; want only the handovers log and its lock", home)
+	if strings.Join(home, ",") != ".code-forge/native/handovers.jsonl,.code-forge/native/handovers.jsonl.lock,.code-forge/runs/r1.json" {
+		t.Errorf("HOME files %q; want only the run record, the handovers log and its lock", home)
 	}
 }
 
@@ -214,9 +220,9 @@ func TestB690aRefusalLineRedacts(t *testing.T) {
 	// starts with none), then the block close refusal prints.
 	code, stderr := b756WithStderr(t, func() int {
 		b690aWithSecrets(t, "close")
-		return refuseUnported([]string{"block", "close", "B1", "--run", "r1", "--reason=sk-private"}, hCloseUnsupportedFlag)
+		return refuseUnported([]string{"block", "close", "B1", "--run", "r1", "--reason=sk-private"}, hCloseGatesFormat)
 	})
-	want := "code-forge: block [REDACTED] is not supported in this case yet ([REDACTED]-unsupported-flag). Please report it: code-forge logs report\n"
+	want := "code-forge: block [REDACTED] is not supported in this case yet ([REDACTED]-gates-format). Please report it: code-forge logs report\n"
 	if code != 1 || stderr != want {
 		t.Fatalf("code=%d stderr=%q; want exit 1 and %q", code, stderr, want)
 	}

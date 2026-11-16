@@ -79,27 +79,29 @@ func (w keysWriter) name() string {
 }
 
 // put is store.put: the {"v","exp"} entry to the writer, then the index
-// row; "" or the reason Node's reasonOf gives for the failed step.
-func (w keysWriter) put(name, value, source string, exp any, ref string) string {
+// row; "" or the reason Node's reasonOf gives for the failed step, and the
+// message of the error Node's put throws there (B759: an unreadable index
+// prints its fs text).
+func (w keysWriter) put(name, value, source string, exp any, ref string) (string, string) {
 	entry, err := ledger.Stringify(ledger.Object{{Key: "v", Value: value}, {Key: "exp", Value: exp}}, false)
 	if err != nil {
-		return "Error"
+		return "Error", "Error"
 	}
 	if w.kc != nil {
 		if reason := w.kc.set(name, string(entry)); reason != "" {
-			return reason
+			return reason, reason
 		}
 	} else if err := keysWritePrivate(filepath.Join(w.dir, name+".key"), entry); err != nil {
-		return keysReason(err)
+		return keysReason(err), keysReason(err)
 	}
 	row := ledger.Object{{Key: "source", Value: source}, {Key: "backend", Value: w.name()}, {Key: "exp", Value: exp}}
 	if ref != "" {
 		row = append(row, ledger.Field{Key: "ref", Value: ref})
 	}
 	if err := keysUpdateIndex(w.indexFile, func(o *ledger.Object) { o.Set(name, row) }); err != nil {
-		return keysReason(err)
+		return keysReason(err), keysThrown(err)
 	}
-	return ""
+	return "", ""
 }
 
 // keysReadOpAndCache is readOpAndCache: the value read from 1Password,
@@ -113,7 +115,7 @@ func keysReadOpAndCache(w keysWriter, storeName, opRef string, now float64, hour
 	r.register(value)
 	exp := now + float64(hours)*keysHourMS
 	errs := []string{}
-	if reason := w.put(storeName, value, "op", exp, opRef); reason != "" {
+	if reason, _ := w.put(storeName, value, "op", exp, opRef); reason != "" {
 		errs = append(errs, "cache write failed ("+reason+")")
 	}
 	return value, exp, errs

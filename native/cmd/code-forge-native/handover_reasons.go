@@ -32,7 +32,6 @@ const (
 	hClaimStopStorage
 	hStopDoneFacts
 	hCloseError
-	hCloseUnsupportedFlag
 	hCloseHome
 	hCloseStateStorage
 	hCloseConfig
@@ -50,7 +49,6 @@ const (
 	hCloseFileSet
 	hCloseRequeue
 	hCloseQueueIdentity
-	hCloseReportRedaction
 	hCloseCoderTests
 	hCloseTestGate
 	hCloseExcludedFile
@@ -329,7 +327,6 @@ var handoverReasons = [...]string{
 	hClaimStopStorage:         "claim-stop-storage",
 	hStopDoneFacts:            "stop-done-facts",
 	hCloseError:               "close-error",
-	hCloseUnsupportedFlag:     "close-unsupported-flag",
 	hCloseHome:                "close-home",
 	hCloseStateStorage:        "close-state-storage",
 	hCloseConfig:              "close-config",
@@ -347,7 +344,6 @@ var handoverReasons = [...]string{
 	hCloseFileSet:             "close-file-set",
 	hCloseRequeue:             "close-requeue",
 	hCloseQueueIdentity:       "close-queue-identity",
-	hCloseReportRedaction:     "close-report-redaction",
 	hCloseCoderTests:          "close-coder-tests",
 	hCloseTestGate:            "close-test-gate",
 	hCloseExcludedFile:        "close-excluded-file",
