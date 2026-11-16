@@ -31,7 +31,7 @@ Docs:
 - docs/step-by-step.md
 
 Generated-doc checks:
-- node scripts/gen-config-doc.mjs --check
+- sh scripts/cf-release.sh config-doc --check
 - sh scripts/gen-commands-doc.sh --check
 
 Site pages a person must check:

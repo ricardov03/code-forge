@@ -75,14 +75,25 @@ func TestHandoverTelemetry(t *testing.T) {
 			t.Fatalf("private argument treated as subcommand for %q: %q", args, sub)
 		}
 	}
-	for _, flag := range []string{"CODE_FORGE_HANDOVER_LOG", "CODE_FORGE_NATIVE"} {
-		t.Setenv(flag, "0")
-		recordHandover([]string{"doctor"}, "unrouted")
-		after, _ := os.ReadFile(handoverLogPath())
-		if !bytes.Equal(after, data) {
-			t.Fatalf("%s=0 changed log", flag)
-		}
-		t.Setenv(flag, "1")
+	t.Setenv("CODE_FORGE_HANDOVER_LOG", "0")
+	recordHandover([]string{"doctor"}, "unrouted")
+	after, _ := os.ReadFile(handoverLogPath())
+	if !bytes.Equal(after, data) {
+		t.Fatal("CODE_FORGE_HANDOVER_LOG=0 changed log")
+	}
+	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
+}
+
+// TestB760NativeZeroStillLogsHandover: CODE_FORGE_NATIVE=0 was Node's switch;
+// with Node gone it no longer turns the handover log off.
+func TestB760NativeZeroStillLogsHandover(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
+	t.Setenv("CODE_FORGE_NATIVE", "0")
+	recordHandover([]string{"doctor"}, "unrouted")
+	data, err := os.ReadFile(handoverLogPath())
+	if err != nil || !bytes.Contains(data, []byte(`"doctor"`)) {
+		t.Fatalf("CODE_FORGE_NATIVE=0 dropped the handover row: %q %v", data, err)
 	}
 }
 

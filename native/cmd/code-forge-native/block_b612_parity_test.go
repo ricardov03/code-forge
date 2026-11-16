@@ -212,6 +212,7 @@ func TestB612JudgeMatchesNode(t *testing.T) {
 	if os.Getenv("BLOCK_HV_CHILD") == "1" {
 		blockHVChild()
 	}
+	b760NoNodeRecorder(t, "B612_RECORD_NODE")
 	record := os.Getenv("B612_RECORD_NODE")
 	for _, c := range b612Cases {
 		t.Run(c.name, func(t *testing.T) {

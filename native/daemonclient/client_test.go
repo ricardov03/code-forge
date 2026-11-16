@@ -149,7 +149,8 @@ func TestRequest(t *testing.T) {
 		config map[string]any
 		want   bool
 	}{
-		{"", nil, true}, {"1", nil, true}, {"false", nil, true}, {"0", nil, false},
+		{"", nil, true}, {"1", nil, true}, {"false", nil, true}, {"0", nil, true}, // B760: CODE_FORGE_NATIVE=0 no longer turns it off
+		{"0", map[string]any{"native": map[string]any{"daemon": false}}, false},
 		{"1", map[string]any{"native": map[string]any{"daemon": false}}, false},
 		{"1", map[string]any{"native": map[string]any{"daemon": "false"}}, true},
 	} {

@@ -575,10 +575,11 @@ longer satisfy close. A block without a recorded base branch cannot rebase. A tr
 or its directory deleted by hand) is added back at the same path on the same branch; a tree left on
 another branch or a detached HEAD refuses the re-open.
 
-In a worktree of code-forge itself (a tree with `native/go.mod` and `scripts/build-native.mjs`), a
-`block rebase` that moves the tree's HEAD across a change to `native/**` or `scripts/build-native.mjs`
-then rebuilds the tree's native binary with `node scripts/build-native.mjs --host` (B408), because the
-Node compat tests run that binary. A failed build exits 1 with one line naming `native-rebuild-failed`;
+In a worktree of code-forge itself (a tree with `native/go.mod` and `scripts/cf-release.sh`; B760), a
+`block rebase` that moves the tree's HEAD across a change to `native/**` (or, in an older tree,
+`scripts/build-native.mjs`) then rebuilds the tree's native binary in Go, as
+`sh scripts/cf-release.sh build-native --host` does (B408, B575), because the tree's
+`./bin/code-forge` runs that binary. A failed build exits 1 with one line naming `native-rebuild-failed`;
 the rebase stands, and the line gives the command to rebuild by hand.
 
 `block open <id> --attempt N` (N > 1) restores paths from the block's earlier signed
@@ -731,7 +732,7 @@ Gates, reviews and the close check of a worktree block run in its tree (B62b):
   full-suite threshold count the files there. Its rows name the tree (`worktree: <path>`). A `--cwd`
   other than the tree is refused (exit 2) and no gate runs. In a worktree of code-forge itself, when
   `native/bin/<os>-<arch>/code-forge-native` is missing or older than `native/go.mod` or any non-test
-  `native/**/*.go` file, the gates first rebuild it with `node scripts/build-native.mjs --host`; the gate
+  `native/**/*.go` file, the gates first rebuild it in Go (as `sh scripts/cf-release.sh build-native --host` does); the gate
   JSON then carries `native_rebuilt: true`. A failed build exits 1 naming `native-rebuild-failed`, and no
   gate runs (B408).
 - `review-file` queues in the main tree, where the worker runs, but the worker reads the file and

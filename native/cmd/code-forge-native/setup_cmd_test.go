@@ -110,7 +110,7 @@ func TestSetupRouteSourceCheckoutFix(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, _, errOut := f.call("1.0.0")
-	want := "code-forge setup: Go binary reports v1.0.0, package is v9.8.7: " + f.exe + "\nfix: node scripts/build-native.mjs --host\n"
+	want := "code-forge setup: Go binary reports v1.0.0, package is v9.8.7: " + f.exe + "\nfix: sh scripts/cf-release.sh build-native --host\n"
 	if code != 1 || errOut != want {
 		t.Fatalf("setup = %d %q; want 1 and %q", code, errOut, want)
 	}

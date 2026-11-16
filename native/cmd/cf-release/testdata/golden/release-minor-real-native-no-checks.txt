@@ -87,7 +87,7 @@ ok    package size: @example/pkg-linux-arm64 7654321 bytes (7.65 MB; limit <35 M
 ok    npm pack --dry-run: @example/pkg-linux-arm64@0.22.0, 7 files
 ok    package size: @example/pkg 1234567 bytes (1.23 MB; limit <5 MB)
 ok    npm pack --dry-run: @example/pkg@0.22.0, 7 files
-WARN  !!! --no-checks: the CI run for HEAD (npm test, typecheck, gen-config-doc and gen-commands-doc --check), npm ls and plugin validate were NOT checked; native build and package size checked !!!
+WARN  !!! --no-checks: the CI run for HEAD (go test, vet, gofmt, npm pack check, config-doc and gen-commands-doc --check), npm ls and plugin validate were NOT checked; native build and package size checked !!!
 
 == 5. commit + tag ==
 ok    committed "Release v0.22.0" (7 files)

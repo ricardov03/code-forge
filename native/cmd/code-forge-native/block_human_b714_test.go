@@ -49,6 +49,7 @@ func TestB714HumanPassGrantMatchesNode(t *testing.T) {
 	if os.Getenv("BLOCK_HV_CHILD") == "1" {
 		b684Child()
 	}
+	b760NoNodeRecorder(t, "B714_RECORD_NODE")
 	record := os.Getenv("B714_RECORD_NODE")
 	for _, c := range b714HumanPassCases {
 		t.Run(c.name, func(t *testing.T) {

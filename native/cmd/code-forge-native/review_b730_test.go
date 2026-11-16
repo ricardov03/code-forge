@@ -155,6 +155,7 @@ func TestB730IdentityTypeErrorMatchesNode(t *testing.T) {
 		blockHVChild()
 	}
 	const test = "TestB730IdentityTypeErrorMatchesNode"
+	b760NoNodeRecorder(t, "B730_RECORD_NODE")
 	record := os.Getenv("B730_RECORD_NODE")
 	for _, c := range b730Cases {
 		t.Run(c.name, func(t *testing.T) {

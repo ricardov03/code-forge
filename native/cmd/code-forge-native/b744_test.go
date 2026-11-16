@@ -212,6 +212,7 @@ const b744ClosedOut = "reviewed file0.txt ticket b82733d3089a96c3991c870e\nblock
 // B744_NODE_GOLDEN=1 (how the bytes above were recorded); a no-op otherwise.
 func b744CloseNode(t *testing.T, f *closeReviewFixture) {
 	t.Helper()
+	b760NoNodeRecorder(t, "B744_NODE_GOLDEN")
 	if os.Getenv("B744_NODE_GOLDEN") != "1" {
 		return
 	}

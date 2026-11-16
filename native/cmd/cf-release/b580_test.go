@@ -210,7 +210,7 @@ func TestB580ReleaseNeedsGreenCI(t *testing.T) {
 		if r.code != 0 {
 			t.Fatalf("exit %d\nstdout %s\nstderr %s", r.code, r.stdout, r.stderr)
 		}
-		ok := "ok    CI for HEAD " + head + ": completed, success (npm test, npm run typecheck, gen-config-doc and gen-commands-doc --check)\n"
+		ok := "ok    CI for HEAD " + head + ": completed, success (go test, go vet, gofmt, npm pack check, config-doc and gen-commands-doc --check)\n"
 		if !strings.Contains(r.stdout, "== 4. checks ==\n"+ok) {
 			t.Fatalf("stdout lacks %q:\n%s", ok, r.stdout)
 		}
@@ -227,7 +227,7 @@ func TestB580NoChecksSkipsCI(t *testing.T) {
 	if r.code != 0 {
 		t.Fatalf("exit %d\nstderr %s", r.code, r.stderr)
 	}
-	warn := "WARN  !!! --no-checks: the CI run for HEAD (npm test, typecheck, gen-config-doc and gen-commands-doc --check), npm pack, npm ls and plugin validate were NOT checked !!!\n"
+	warn := "WARN  !!! --no-checks: the CI run for HEAD (go test, vet, gofmt, npm pack check, config-doc and gen-commands-doc --check), npm pack, npm ls and plugin validate were NOT checked !!!\n"
 	if !strings.Contains(r.stdout, warn) {
 		t.Fatalf("stdout lacks %q:\n%s", warn, r.stdout)
 	}

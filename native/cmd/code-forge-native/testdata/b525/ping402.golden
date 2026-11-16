@@ -25,7 +25,7 @@ WARN path deny: probe=skipped(402)
 OK   signer key: generated; a signed row verifies, a changed one is refused
 OK   worker: pid N started, announced itself and stopped on SIGTERM
 INFO signer: same-user boundary only
-INFO native binary: not found, using Node
-INFO native daemon: off
+INFO native binary: not found
+INFO native daemon: fallback
 --- stderr
 doctor: 9 ok, 10 warn, 0 fail

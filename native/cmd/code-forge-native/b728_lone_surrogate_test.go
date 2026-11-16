@@ -33,6 +33,7 @@ func b728Dir(t *testing.T) string {
 // false when golden mode is off.
 func b728NodeGolden(t *testing.T, extraEnv []string, args ...string) (code int, out, errText string, ran bool) {
 	t.Helper()
+	b760NoNodeRecorder(t, "B728_NODE_GOLDEN")
 	if os.Getenv("B728_NODE_GOLDEN") != "1" {
 		return 0, "", "", false
 	}
@@ -225,6 +226,7 @@ func TestB728AcceptHitCodexLoneSurrogateIDs(t *testing.T) {
 				t.Fatal(err)
 			}
 			record := ""
+			b760NoNodeRecorder(t, "B728_NODE_GOLDEN")
 			if os.Getenv("B728_NODE_GOLDEN") == "1" {
 				src := filepath.Join(b728Dir(t), "..", "..", "..", "src", "review", "accept-hit.mjs")
 				script := `const { prepareAcceptHit } = await import(process.argv[1]);

@@ -109,8 +109,8 @@ the Node scripts they replaced (B570); parity tests in `native/cmd/cf-release` c
 single runs and multi-step flows, with a golden recorded from the Node script. The Node scripts
 `scripts/release.mjs`, `release-site.mjs`, `docs-block.mjs` and `changelog.mjs` and their Node
 tests are gone (B574): the release workflow runs the Go tool. Since B690d the site data comes
-from the Go tool too (`cf-release site-data`), so no release step starts Node. To record a new golden from Node, use a checkout that still has the
-scripts (commit `5c2510a7`). Neither the Go tool nor `scripts/cf-release.sh` ships in the npm
+from the Go tool too (`cf-release site-data`), so no release step starts Node. The goldens are never re-recorded: the Node recorders skip with a
+message since Node was removed (B760); a checkout that still has the scripts is commit `5c2510a7`. Neither the Go tool nor `scripts/cf-release.sh` ships in the npm
 package.
 
 ## The docs block
@@ -135,7 +135,7 @@ Remove stale instructions. Keep version history in CHANGELOG, not README.
 Run both generated-doc checks:
 
 ```sh
-node scripts/gen-config-doc.mjs --check
+sh scripts/cf-release.sh config-doc --check
 sh scripts/gen-commands-doc.sh --check
 ```
 
@@ -160,8 +160,8 @@ With no ancestor `v*` tag, release preflight skips the docs check with a warning
 
 ## Releasing checklist
 
-Build the optional native binaries with `node scripts/build-native.mjs` (`--host` for local
-testing); the release builds the four release targets itself in Go, with no Node (B580).
+Build the native binaries with `sh scripts/cf-release.sh build-native` (`--host` for local
+testing; Go, no Node, B760); the release builds the four release targets itself in Go (B580).
 The native code is pure Go and standard library only; builds and compatibility tests
 force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller configuration.
 
@@ -209,12 +209,12 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
 4. **Checks.** The release runs no Node suite on the laptop (B580). Before it writes any file it
    reads the latest `CI` workflow run for HEAD (`gh run list --commit <HEAD> --workflow CI
    --limit 1`). CI runs the Go suite, the package check (no Node product file is packed) and the
-   `gen-config-doc --check` and `gen-commands-doc --check` doc checks, so the run must be `completed` with
+   `config-doc --check` and `gen-commands-doc --check` doc checks, so the run must be `completed` with
    conclusion `success` for that exact HEAD. A missing, running or failed run, or a `gh` error,
    refuses with exit 1 and one line that names HEAD and the run state, for example
    `CI for HEAD <sha> is not green: run status in_progress; push HEAD and wait for a green CI run`.
    Nothing is written or tagged. After the version edits it builds the four native targets with
-   `go build` (the same targets, flags and output lines as `scripts/build-native.mjs`, run from Go;
+   `go build` (the same targets, flags and output lines as `sh scripts/cf-release.sh build-native`;
    no Node version is stamped and no `node --version` runs (B690d)), then writes one platform package per target to
    `dist/npm/<target>/` (`package.json` with `os`, `cpu`, `files: ["bin"]` and the same version,
    README, LICENSE, `bin/code-forge-native`; `dist/npm/` is git-ignored) (B606), then runs
@@ -257,8 +257,7 @@ that exact version. `--wait-min` defaults to 20 minutes; a timeout exits 1 with 
 changes nothing in the site repository.
 
 Once npm serves the version, it generates the site data in Go, the same JSON as
-`cf-release site-data --tag vX.Y.Z` with the ledger at `~/.code-forge/ledger` (B690d; it ran
-`node scripts/gen-site-data.mjs` before).
+`cf-release site-data --tag vX.Y.Z` with the ledger at `~/.code-forge/ledger` (B690d).
 The site defaults to `../code-forge-site`. A clean detached worktree of the site's HEAD is
 created at `<site>/.code-forge-tmp/release-site-X.Y.Z`; the main site's files, staging index,
 branch and open work stay untouched. The command writes `src/data/site-data.json` there,
@@ -293,8 +292,7 @@ local website update. It does not edit or publish the site. No CI job or token i
 sh scripts/cf-release.sh site-data --tag vX.Y.Z --out site-data.json
 ```
 
-This is the Go tool (B690d); it writes the same JSON, byte for byte, as the older
-`node scripts/gen-site-data.mjs`. `--ledger-dir <dir>` reads another ledger folder than
+This is the Go tool (B690d); the older Node script it replaced is deleted (B760). `--ledger-dir <dir>` reads another ledger folder than
 `~/.code-forge/ledger`.
 
 Omit `--out` to print JSON to stdout. Version, date, released changelog entries and commands
