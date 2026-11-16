@@ -281,9 +281,6 @@ func newB667BatchFixture(t *testing.T) (*landBatchFixture, string) {
 	t.Setenv("CODE_FORGE_TEST_QUEUE", "off")
 	goBin, log := b667FakeGoBin(t, f.home)
 	t.Setenv("B667_GO_LOG", log)
-	oldVersion := reviewWaitNodeVersion
-	reviewWaitNodeVersion = "v24.22.1"
-	t.Cleanup(func() { reviewWaitNodeVersion = oldVersion })
 	f.git(f.repo, "init", "-qb", "main")
 	f.git(f.repo, "config", "user.name", "Fixture")
 	f.git(f.repo, "config", "user.email", "f@example.invalid")
