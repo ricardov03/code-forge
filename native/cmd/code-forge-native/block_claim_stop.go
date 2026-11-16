@@ -355,19 +355,8 @@ func blockIOMessage(err error) string {
 	if !errors.As(err, &errno) {
 		return err.Error()
 	}
-	code := blockErrno(errno)
-	why := errno.Error()
-	switch errno {
-	case syscall.EEXIST:
-		why = "file already exists"
-	case syscall.EISDIR:
-		why = "illegal operation on a directory"
-	case syscall.ENAMETOOLONG:
-		// libuv's text, as Node prints it (B581).
-		why = "name too long"
-	case syscall.ELOOP:
-		why = "too many symbolic links encountered"
-	}
+	// Node's fs error is libuv's uv_err_name + uv_strerror for any errno (B764).
+	code, why := dwpErrnoName(errno), uvStrerror(errno)
 	if errors.As(err, &pathErr) {
 		if pathErr.Op == "read" {
 			// B584: Node reads through an open fd; its read errors name no path.

@@ -1766,11 +1766,9 @@ func reportDecide(args []string) reportRun {
 	}
 	if exportDir := rpFlagValue(args, "--export"); exportDir != "" {
 		return func(stdout, stderr io.Writer) int {
-			if failed, known := rpExportMkdir(exportDir); failed != "" {
+			if failed := rpExportMkdir(exportDir); failed != "" {
 				fmt.Fprint(stderr, "report: "+failed+"\n")
 				return 1
-			} else if !known {
-				return -1
 			}
 			for _, field := range reported {
 				if err := os.WriteFile(filepath.Join(exportDir, field.Key+".json"), []byte(rpPretty(field.Value)), 0666); err != nil {
@@ -1873,28 +1871,82 @@ func rpIOMessage(err error, op string) string {
 	return blockIOMessage(err)
 }
 
-// rpExportMkdir is Node's mkdir(dir, {recursive: true}) error text, measured
-// against Node (B744): an existing non-directory dir is EEXIST and a file on
-// the way is ENOTDIR, both naming dir as given; EACCES names the directory
-// that could not be made. known=false: an error whose Node text is not
-// measured, which hands over.
-func rpExportMkdir(dir string) (failed string, known bool) {
-	if info, err := os.Stat(dir); err == nil && !info.IsDir() {
-		return blockIOMessage(&os.PathError{Op: "mkdir", Path: dir, Err: syscall.EEXIST}), true
+// rpExportMkdir is the error text of Node's mkdir(dir, {recursive: true})
+// ("" when it succeeds): the errno and path rpNodeMkdirp ends on, in libuv's
+// text, so each OS prints what Node prints there (B764).
+func rpExportMkdir(dir string) string {
+	path, errno := rpNodeMkdirp(dir)
+	if errno == 0 {
+		return ""
 	}
-	err := os.MkdirAll(dir, 0777)
-	if err == nil {
-		return "", true
-	}
+	return blockIOMessage(&os.PathError{Op: "mkdir", Path: path, Err: errno})
+}
+
+// rpMkdirpSys are the two calls Node's recursive mkdir makes (uv_fs_mkdir and
+// uv_fs_stat on the path as given); tests replay another OS's errnos.
+var rpMkdirpSys = struct {
+	mkdir func(path string) error
+	stat  func(path string) (isDir bool, err error)
+}{
+	mkdir: func(path string) error { return syscall.Mkdir(path, 0o777) },
+	stat: func(path string) (bool, error) {
+		var st syscall.Stat_t
+		if err := syscall.Stat(path, &st); err != nil {
+			return false, err
+		}
+		return st.Mode&syscall.S_IFMT == syscall.S_IFDIR, nil
+	},
+}
+
+func rpErrno(err error) syscall.Errno {
 	var errno syscall.Errno
-	if !errors.As(err, &errno) {
-		return "", false
+	if err == nil || !errors.As(err, &errno) {
+		return 0
 	}
-	switch errno {
-	case syscall.ENOTDIR:
-		return blockIOMessage(&os.PathError{Op: "mkdir", Path: dir, Err: errno}), true
-	case syscall.EACCES:
-		return blockIOMessage(err), true
+	return errno
+}
+
+// rpNodeMkdirp is MKDirpAsync (src/node_file.cc, Node v24.22.1): it returns
+// the errno Node rejects with (0: done) and the path of the last call, which
+// Node's error names. On Linux mkdir("f/") of a regular file f is EEXIST and
+// the stat that follows is ENOTDIR; on macOS mkdir itself is ENOTDIR.
+func rpNodeMkdirp(dir string) (string, syscall.Errno) {
+	stack := []string{dir}
+	path := dir
+	for len(stack) > 0 {
+		path = stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		err := rpErrno(rpMkdirpSys.mkdir(path))
+	again:
+		switch err {
+		case 0:
+		case syscall.EACCES, syscall.ENOSPC, syscall.ENOTDIR, syscall.EPERM:
+			return path, err
+		case syscall.ENOENT:
+			dirname := path
+			if i := strings.LastIndex(path, "/"); i >= 0 {
+				dirname = path[:i]
+			}
+			if dirname != path {
+				stack = append(stack, path, dirname)
+			} else if len(stack) == 0 {
+				err = syscall.EEXIST
+				goto again
+			}
+		default:
+			isDir, statErr := rpMkdirpSys.stat(path)
+			serr := rpErrno(statErr)
+			if err == syscall.EEXIST && len(stack) > 0 {
+				if serr == 0 && isDir {
+					continue
+				}
+				return path, syscall.ENOTDIR
+			}
+			if serr == 0 && !isDir {
+				return path, syscall.EEXIST
+			}
+			return path, serr
+		}
 	}
-	return "", false
+	return path, 0
 }
