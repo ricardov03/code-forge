@@ -280,7 +280,6 @@ var (
 	// Node's worker, and (B511) the Go worker run start launches:
 	// `<dir>/code-forge-native worker --run <id>`.
 	runWorkerCommand = regexp.MustCompile(`^(?:(?:\S*/)?node(?:js)?\s+(?:\S*/)?code-forge\.mjs|(?:\S*/)?code-forge-native)\s+worker\s+--run(?:=|\s+)([a-z0-9][a-z0-9-]{0,63})(?:\s|$)`)
-	runOwnerPid      = regexp.MustCompile(`^[1-9]\d*$`)
 )
 
 // runSweepRootUnreadable: sweepProcesses reads the trusted temp base with
@@ -348,11 +347,11 @@ func runSweepItems(home string) []runProc {
 			continue
 		}
 		env := readEnv(p)
-		owner := env["CODE_FORGE_OWNER_PID"]
-		// B746: as for workers, only an orphan of this run start's HOME (the
-		// home whose ~/.code-forge it uses). A live process of another HOME
-		// (a test temp HOME, a second setup) or of no HOME is not ours to stop.
-		if env == nil || env["HOME"] != home || !runOwnerPid.MatchString(owner) {
+		// B746/B768: as for workers, only an orphan of this run start's HOME
+		// (the home whose ~/.code-forge it uses), by the one Go orphan rule
+		// worker.OrphanOwner that the worker sweep and the sweep verb share.
+		owner, ok := worker.OrphanOwner(env, home)
+		if !ok {
 			continue
 		}
 		ownerPid, err := strconv.ParseFloat(owner, 64)
