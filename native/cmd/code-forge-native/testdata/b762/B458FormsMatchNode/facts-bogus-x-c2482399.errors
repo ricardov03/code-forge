@@ -1,0 +1,18 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--bogus"
+  ],
+  "fp": "76bbd30fa537",
+  "kind": "usage",
+  "message": "facts: unknown flag \"--bogus\"",
+  "platform": "darwin",
+  "stack": null,
+  "sub": null,
+  "verb": "facts"
+ }
+]

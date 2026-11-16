@@ -1,0 +1,1 @@
+{"dir":"<REPO>/.code-forge/export/B1","base":"c45267fa0712962b4d79f59962fd6b74c76dde0c","restored":["docs/a.md","secret.txt"],"untracked":[".env"],"owned":["src/new.js","src/x.js","src/y.js"],"removed":["old.js"],"linked":["node_modules"],"copied":[]}

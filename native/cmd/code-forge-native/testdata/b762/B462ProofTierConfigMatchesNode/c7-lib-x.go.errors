@@ -1,0 +1,20 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 1,
+  "flags": [
+   "--file",
+   "--risk",
+   "--cwd"
+  ],
+  "fp": "ef69ba090e65",
+  "kind": "error",
+  "message": "proof tier: .code-forge.yml does not load (migrate-error) — run code-forge validate",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "tier",
+  "verb": "proof"
+ }
+]

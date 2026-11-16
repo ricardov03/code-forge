@@ -1,0 +1,4 @@
+{
+ ".code-forge.yml": "600 {\"version\":1}",
+ ".code-forge/runs/r-b462-proof.json": "644 {\n  \"run_id\": \"r-b462-proof\",\n  \"project\": \"fixture\",\n  \"workspace\": \"<REPO>\",\n  \"status\": \"active\",\n  \"orphans\": [],\n  \"config\": {\n    \"hash\": \"2430f1a2ad2982d0067885488a4c89e21ad1d7c83b115ba8f1b20acc88dfaea8\",\n    \"snapshots\": {\n      \"2430f1a2ad2982d0067885488a4c89e21ad1d7c83b115ba8f1b20acc88dfaea8\": {\n        \"version\": 1\n      }\n    }\n  },\n  \"blocks\": {\n    \"B1\": {\n      \"status\": \"open\",\n      \"owned_files\": [],\n      \"owned_kinds\": {}\n    },\n    \"B2\": {\n      \"status\": \"open\",\n      \"owned_files\": [],\n      \"owned_kinds\": {}\n    }\n  },\n  \"proof_lock\": {\n    \"block\": \"B2\",\n    \"acquired_at\": \"<T>\"\n  }\n}\n"
+}

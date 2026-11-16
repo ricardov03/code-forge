@@ -1,0 +1,1 @@
+{"block":"B1","test":"t/x.test.mjs::a.b(c)","mechanism":"revert","isolation":"export","red":"RED","red_kind":"assertion","green":"GREEN","proven":true,"export":{"dir":"<REPO>/.code-forge/export/B1","restored":[],"untracked":[]}}

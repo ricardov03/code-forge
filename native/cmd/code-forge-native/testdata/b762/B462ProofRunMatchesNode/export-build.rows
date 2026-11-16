@@ -1,0 +1,3 @@
+[
+ "{\"run\":\"r-b462-proof\",\"step\":\"export\",\"base_sha\":\"00ce280b2b598102bee22c112bb233fd24614df0\",\"restored\":[\"docs/a.md\",\"secret.txt\"],\"untracked\":[\".env\"],\"event\":\"proof\",\"block\":\"B1\",\"isolation\":\"export\",\"tokens_source\":null,\"cost_source\":null}"
+]

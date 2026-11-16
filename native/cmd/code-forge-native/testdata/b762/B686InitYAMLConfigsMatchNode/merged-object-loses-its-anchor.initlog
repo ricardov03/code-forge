@@ -1,0 +1,14 @@
+init-<TS>.log:Project settings (detected)
+  test: blank — no test command found
+  lint: blank — no linter found
+  types: blank — no type checker found
+  format: blank — no formatter found
+  high-risk paths: src/auth (from .code-forge.yml)
+  isolation: export (from default)
+  link dirs: blank — no dependency manifest found
+  copy untracked: blank — none for this stack
+Set the blanks later: edit .code-forge.yml (gates.test, gates.lint, gates.types, gates.format, proof.export.link_dirs, proof.export.copy_untracked), then run `code-forge validate`.
+keys: jev from none
+.code-forge.yml: changes proof.isolation, proof.export, project, provider, levels, caps, review, engine, harnesses, system1, gates, autonomy
+.code-forge.yml: written
+engine: auto

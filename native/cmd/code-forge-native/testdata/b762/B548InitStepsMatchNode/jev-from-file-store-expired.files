@@ -1,0 +1,11 @@
+project:
+
+home:
+.code-forge drwxr-xr-x
+.code-forge/store drwx------
+.code-forge/store/index.json -rw-------
+{
+  "other": {
+    "backend": "file"
+  }
+}

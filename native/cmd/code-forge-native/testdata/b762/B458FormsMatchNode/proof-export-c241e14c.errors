@@ -1,0 +1,16 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [],
+  "fp": "57cc64e3dd35",
+  "kind": "usage",
+  "message": "proof export: proof export needs one block id and --run",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "export",
+  "verb": "proof"
+ }
+]

@@ -1,0 +1,13 @@
+init-<TS>.log:Project settings (detected)
+  test: npm test (from package.json)
+  lint: npm run lint (from package.json)
+  types: npx tsc --noEmit (from tsconfig.json)
+  format: blank — no formatter found
+  high-risk paths: blank — none set (all files light tier by path)
+  isolation: export (from default)
+  link dirs: node_modules (from package.json)
+  copy untracked: .env (found in the project)
+Set the blanks later: edit .code-forge.yml (gates.format, proof.tiers.high.paths), then run `code-forge validate`.
+keys: jev from none
+.code-forge.yml: written
+engine: auto

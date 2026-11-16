@@ -1,0 +1,2 @@
+init: the resulting config is invalid, nothing written:
+  duplicate-level-tuple: levels.L1 and levels.L2 resolve to the same (provider, model, effort)

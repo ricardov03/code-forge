@@ -1,0 +1,18 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--brief"
+  ],
+  "fp": "af7e50ca12b5",
+  "kind": "usage",
+  "message": "usage: code-forge author --job plan|harden --brief <file> [--facts <file>] [--draft <file>] [--answers <file>] [--out <file>] [--run <id>] [--timeout <seconds>]",
+  "platform": "darwin",
+  "stack": null,
+  "sub": null,
+  "verb": "author"
+ }
+]

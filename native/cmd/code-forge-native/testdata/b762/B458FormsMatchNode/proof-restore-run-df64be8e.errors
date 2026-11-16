@@ -1,0 +1,18 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--run"
+  ],
+  "fp": "58be82930f17",
+  "kind": "usage",
+  "message": "proof restore: --run needs a value",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "restore",
+  "verb": "proof"
+ }
+]

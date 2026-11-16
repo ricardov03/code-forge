@@ -1,0 +1,13 @@
+init-<TS>.log:Project settings (detected)
+  test: make "unit tests" (from --gate)
+  lint: go vet ./... (from go.mod)
+  types: blank — no type checker found
+  format: gofmt -l . (from --gate)
+  high-risk paths: src/auth, db (from --proof)
+  isolation: lock (from --proof)
+  link dirs: vendor (from go.mod)
+  copy untracked: .env.local (from --proof)
+Set the blanks later: edit .code-forge.yml (gates.types), then run `code-forge validate`.
+keys: jev from none
+.code-forge.yml: written
+engine: auto

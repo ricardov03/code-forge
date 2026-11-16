@@ -1,0 +1,19 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--run",
+   "--remove"
+  ],
+  "fp": "7680b18dfd00",
+  "kind": "usage",
+  "message": "proof lock: unknown flag \"--remove\"",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "lock",
+  "verb": "proof"
+ }
+]

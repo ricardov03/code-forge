@@ -1,0 +1,2 @@
+usage: code-forge native-status
+  Internal daemon companion: reads JSON records and rows from standard input.

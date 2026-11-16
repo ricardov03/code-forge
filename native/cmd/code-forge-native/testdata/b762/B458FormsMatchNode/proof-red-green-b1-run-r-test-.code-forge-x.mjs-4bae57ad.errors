@@ -1,0 +1,19 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--run",
+   "--test"
+  ],
+  "fp": "0f7953791661",
+  "kind": "usage",
+  "message": "proof red-green: --test cannot be under .code-forge/",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "red-green",
+  "verb": "proof"
+ }
+]

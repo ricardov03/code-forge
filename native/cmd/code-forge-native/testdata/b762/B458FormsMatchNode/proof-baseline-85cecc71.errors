@@ -1,0 +1,16 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [],
+  "fp": "a2cd42ef22b5",
+  "kind": "usage",
+  "message": "proof baseline: held on Q16 (block B10c) — the gate enforces red→green only",
+  "platform": "darwin",
+  "stack": null,
+  "sub": null,
+  "verb": "proof"
+ }
+]

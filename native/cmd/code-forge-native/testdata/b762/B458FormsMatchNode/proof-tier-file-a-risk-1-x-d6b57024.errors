@@ -1,0 +1,19 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--file",
+   "--risk"
+  ],
+  "fp": "bf12c65f29cb",
+  "kind": "usage",
+  "message": "proof tier: proof tier needs --file and --risk",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "tier",
+  "verb": "proof"
+ }
+]

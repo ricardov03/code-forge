@@ -1,0 +1,18 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--brief"
+  ],
+  "fp": "ca19fdc50889",
+  "kind": "usage",
+  "message": "facts: --brief needs a value",
+  "platform": "darwin",
+  "stack": null,
+  "sub": null,
+  "verb": "facts"
+ }
+]

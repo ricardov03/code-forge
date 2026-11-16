@@ -1,0 +1,1 @@
+[{"arch":"arm64","before":[],"cleaned":[],"exit":1,"flags":[],"fp":"6bb54ee69f44","kind":"error","message":"init: .code-forge.yml exists but cannot be loaded (parse-error); fix or move it, then re-run","platform":"darwin","stack":null,"sub":null,"verb":"init"}]

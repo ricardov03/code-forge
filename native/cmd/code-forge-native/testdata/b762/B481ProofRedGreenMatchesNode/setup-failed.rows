@@ -1,0 +1,4 @@
+[
+ "{\"run\":\"r-b462-proof\",\"step\":\"export\",\"base_sha\":\"8920eadd052e74f1db8c180104535dd580b6a53a\",\"restored\":[],\"untracked\":[],\"event\":\"proof\",\"block\":\"B1\",\"isolation\":\"export\",\"tokens_source\":null,\"cost_source\":null}",
+ "{\"run\":\"r-b462-proof\",\"step\":\"red-green\",\"test\":\"t/x.test.mjs\",\"mechanism\":\"revert\",\"red_kind\":null,\"red\":null,\"green\":null,\"proven\":false,\"failed\":null,\"covers\":[\"src/x.js\"],\"reason\":\"setup\",\"output_tail\":\"prepared\\n\\nbroke\",\"event\":\"proof\",\"block\":\"B1\",\"isolation\":\"export\",\"tokens_source\":null,\"cost_source\":null}"
+]

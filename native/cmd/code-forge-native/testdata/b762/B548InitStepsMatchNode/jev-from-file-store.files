@@ -1,0 +1,54 @@
+project:
+.code-forge.yml -rw-r--r--
+version: 1
+project:
+  name: myproj
+  slug: myproj
+provider: anthropic
+levels:
+  L0:
+    model: claude-haiku-4-5-20251001
+  L1:
+    model: claude-sonnet-5
+  L2:
+    model: claude-opus-5-5
+  L3:
+    model: claude-fable-5-2
+caps:
+  coders: 1
+review:
+  multimodel: false
+engine: auto
+harnesses: []
+keys:
+  jev: user
+gates:
+  test: null
+  lint: null
+  types: null
+  format: null
+proof:
+  tiers:
+    high:
+      paths: []
+  isolation: export
+  export:
+    link_dirs: []
+    copy_untracked: []
+autonomy:
+  coder_may_push: false
+  coder_may_open_draft_pr: false
+
+home:
+.code-forge drwxr-xr-x
+.code-forge/config.yml -rw-r--r--
+tools: current
+keys:
+  jev:
+    source: file
+
+.code-forge/store drwx------
+.code-forge/store/index.json -rw-------
+{}
+.code-forge/store/jev.key -rw-------
+{"v":"sk-b548-file-secret","exp":<MS>}

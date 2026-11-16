@@ -1,0 +1,1 @@
+init: review.second_provider equals the effective L2 provider (anthropic) — multimodel needs two providers; pass --second-provider with another one. Nothing written.

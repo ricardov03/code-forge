@@ -1,0 +1,1 @@
+{"block":"B1","test":"t/x.test.mjs","mechanism":"revert","isolation":"lock","red":"RED","red_kind":"assertion","green":"GREEN","proven":true}

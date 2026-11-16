@@ -1,0 +1,30 @@
+{
+  "run_id": "r-b462-proof",
+  "project": "fixture",
+  "workspace": "<REPO>",
+  "status": "active",
+  "orphans": [],
+  "config": {
+    "hash": "2430f1a2ad2982d0067885488a4c89e21ad1d7c83b115ba8f1b20acc88dfaea8",
+    "snapshots": {
+      "2430f1a2ad2982d0067885488a4c89e21ad1d7c83b115ba8f1b20acc88dfaea8": {
+        "version": 1
+      }
+    }
+  },
+  "blocks": {
+    "B1": {
+      "status": "open",
+      "base_sha": "e900442d9447bedaa1f26d02a5b2f0f4be091098",
+      "owned_files": [
+        "src/**",
+        "t/**"
+      ],
+      "owned_kinds": {}
+    }
+  },
+  "proof_lock": {
+    "block": "B1",
+    "acquired_at": "<T>"
+  }
+}

@@ -1,0 +1,18 @@
+[
+ {
+  "arch": "arm64",
+  "before": [],
+  "cleaned": [],
+  "exit": 2,
+  "flags": [
+   "--run"
+  ],
+  "fp": "def48b8323ca",
+  "kind": "usage",
+  "message": "proof lock: proof lock needs one block id and --run",
+  "platform": "darwin",
+  "stack": null,
+  "sub": "lock",
+  "verb": "proof"
+ }
+]

@@ -1,0 +1,14 @@
+init-<TS>.log:Project settings (detected)
+  test: npm test (from .code-forge.yml)
+  lint: npx eslint "src dir" (env: A, Z) (from .code-forge.yml)
+  types: blank — no type checker found
+  format: blank — no formatter found
+  high-risk paths: src/auth (from .code-forge.yml)
+  isolation: lock (from .code-forge.yml)
+  link dirs: node_modules (from package.json)
+  copy untracked: blank — none for this stack
+Set the blanks later: edit .code-forge.yml (gates.types, gates.format, proof.export.copy_untracked), then run `code-forge validate`.
+keys: jev from none
+.code-forge.yml: changes gates.types, gates.format, proof.export, project, provider, levels, caps, review, engine, harnesses, system1, autonomy
+.code-forge.yml: written
+engine: auto

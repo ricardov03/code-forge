@@ -1,0 +1,1 @@
+{"ok":false,"error":".code-forge.yml exists but cannot be loaded (migrate-error); fix or move it, then re-run","wrote":[],"log":"<HOME>/.code-forge/logs/init-<TS>.log","log_tail":["error: .code-forge.yml exists but cannot be loaded (migrate-error); fix or move it, then re-run"]}

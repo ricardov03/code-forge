@@ -1,0 +1,19 @@
+init-<TS>.log:Project settings (detected)
+  test: blank — no test command found
+  lint: blank — no linter found
+  types: blank — no type checker found
+  format: blank — no formatter found
+  high-risk paths: blank — none set (all files light tier by path)
+  isolation: export (from default)
+  link dirs: blank — no dependency manifest found
+  copy untracked: blank — none for this stack
+Set the blanks later: edit .code-forge.yml (gates.test, gates.lint, gates.types, gates.format, proof.tiers.high.paths, proof.export.link_dirs, proof.export.copy_untracked), then run `code-forge validate`.
+keys: jev from none
+.code-forge.yml: written
+tool claude: missing — install Node.js/npm first, then: npm install -g @anthropic-ai/claude-code (or: code-forge tools install)
+tool codex: missing — install Node.js/npm first, then: npm install -g @openai/codex (or: code-forge tools install)
+tool gemini: missing — install Node.js/npm first, then: npm install -g @google/gemini-cli (or: code-forge tools install)
+tool grok: missing — install Homebrew first: https://brew.sh (or: code-forge tools install)
+tool op: missing — install Homebrew first: https://brew.sh (or: code-forge tools install)
+tool solo: present
+engine: auto

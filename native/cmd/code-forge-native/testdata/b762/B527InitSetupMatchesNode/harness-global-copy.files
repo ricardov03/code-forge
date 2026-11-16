@@ -1,0 +1,74 @@
+project:
+.code-forge.yml -rw-r--r--
+version: 1
+project:
+  name: myproj
+  slug: myproj
+provider: anthropic
+levels:
+  L0:
+    model: claude-haiku-4-5-20251001
+  L1:
+    model: claude-sonnet-5
+  L2:
+    model: claude-opus-5-5
+  L3:
+    model: claude-fable-5-2
+caps:
+  coders: 1
+review:
+  multimodel: false
+engine: auto
+harnesses:
+  - cursor
+system1:
+  fallback: rules
+gates:
+  test: null
+  lint: null
+  types: null
+  format: null
+proof:
+  tiers:
+    high:
+      paths: []
+  isolation: export
+  export:
+    link_dirs: []
+    copy_untracked: []
+autonomy:
+  coder_may_push: false
+  coder_may_open_draft_pr: false
+
+.git drwxr-xr-x
+.git/HEAD -rw-r--r--
+x
+
+home:
+.code-forge drwx------
+.code-forge/config.yml -rw-r--r--
+tools: current
+keys:
+  jev:
+    source: none
+
+.code-forge/installs.json -rw-r--r--
+{
+  "version": 1,
+  "installs": [
+    {
+      "harness": "cursor",
+      "scope": "global",
+      "method": "copy",
+      "source": "<PKG>/skill",
+      "target": "<HOME>/.cursor/skills/code-forge",
+      "linked_at": "<ISO>",
+      "version": "<VERSION>"
+    }
+  ]
+}
+
+.cursor drwxr-xr-x
+.cursor/skills drwxr-xr-x
+.cursor/skills/code-forge drwxr-xr-x
+.cursor/skills/code-forge/** = <PKG>/skill
