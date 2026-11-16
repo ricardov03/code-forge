@@ -292,6 +292,7 @@ func TestB684HumanCloseMatchesNode(t *testing.T) {
 	if os.Getenv("BLOCK_HV_CHILD") == "1" {
 		b684Child()
 	}
+	b760NoNodeRecorder(t, "B684_RECORD_NODE")
 	record := os.Getenv("B684_RECORD_NODE")
 	for _, c := range b684Cases {
 		t.Run(c.name, func(t *testing.T) {

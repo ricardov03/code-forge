@@ -21,11 +21,11 @@ const maxAnswer = 8 * 1024 * 1024
 
 var runPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
-// Enabled matches daemonEnabled: only the exact environment value "0" or a
-// literal false at native.daemon disables the daemon.
+// Enabled: only a literal false at native.daemon disables the daemon. B760:
+// CODE_FORGE_NATIVE=0 (Node's off switch) no longer does; Node is gone.
 func Enabled(config map[string]any) bool {
 	native, _ := config["native"].(map[string]any)
-	return os.Getenv("CODE_FORGE_NATIVE") != "0" && native["daemon"] != false
+	return native["daemon"] != false
 }
 
 // Request uses one Unix connection, negotiates ping, then returns the answer

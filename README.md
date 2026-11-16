@@ -136,7 +136,7 @@ review risk, multimodel, concurrency, and timeout settings.
 See the [routing and fallback examples](docs/how-it-works.md) for a long-context reviewer above
 400 lines and fallback lists of `{provider, model}` objects (optional `effort`, never strings).
 `block open --kind code|docs|contract` overrides the kind inferred from filenames.
-Regenerate the reference with `node scripts/gen-config-doc.mjs`; add `--check` to check it.
+Regenerate the reference with `sh scripts/cf-release.sh config-doc`; add `--check` to check it.
 
 ## Supported agents
 

@@ -500,14 +500,12 @@ func dfNativeArch() string {
 	return runtime.GOARCH
 }
 
-// dfNativeRow is the CLI's `native binary` row: Node runs the package's
-// native binary with `internal version`. When that binary is this one, its
-// answer is this build's version.
+// dfNativeRow is the CLI's `native binary` row: the package's native binary
+// for this platform. When that binary is this one, its answer is this build's
+// version. B760: CODE_FORGE_NATIVE=0 no longer hides it (there is no Node to
+// use instead), and a missing binary says "not found".
 func dfNativeRow() (doctorRow, handoverReason) {
-	missing := doctorRow{"native", "INFO", "native binary", "not found, using Node"}
-	if os.Getenv("CODE_FORGE_NATIVE") == "0" {
-		return missing, 0
-	}
+	missing := doctorRow{"native", "INFO", "native binary", "not found"}
 	exe, err := os.Executable()
 	if err == nil {
 		exe, err = filepath.EvalSymlinks(exe)
@@ -535,7 +533,7 @@ func dfDaemonRow(cwd, home string) (doctorRow, handoverReason) {
 	if errors.Is(err, worker.ErrUndecided) {
 		return doctorRow{}, hDoctorWorkerRegistry
 	}
-	if err != nil || w == nil || os.Getenv("CODE_FORGE_NATIVE") == "0" {
+	if err != nil || w == nil {
 		return row, 0 // an unreadable registry leaves native acceleration off
 	}
 	run, snapshot, ok := drunLiveConfig(home, w)

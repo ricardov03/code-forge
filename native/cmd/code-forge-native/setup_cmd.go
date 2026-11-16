@@ -72,7 +72,7 @@ func setupCheck(args []string, pkg, target, binaryVersion string, stdout, stderr
 	binary, _ := pkgroot.Find(pkg, target) // B606: platform package, then the dev build
 	reinstall := fmt.Sprintf("npm install -g %s@%s", info.Name, info.Version)
 	if _, err := os.Stat(filepath.Join(pkg, "native", "go.mod")); err == nil {
-		reinstall = "node scripts/build-native.mjs --host"
+		reinstall = "sh scripts/cf-release.sh build-native --host"
 	}
 	supported := false
 	for _, t := range setupTargets {

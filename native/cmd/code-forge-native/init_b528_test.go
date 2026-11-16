@@ -324,6 +324,7 @@ func TestB528InitWizardHandOvers(t *testing.T) {
 // above. It runs only with B528_NODE_RUNS=<dir> holding n-<case>/{h,p} and
 // B528_NODE_OUT=<dir> holding n-<case>.out (drive.py output: the raw pty bytes, then "\nEXIT <code>\n").
 func TestB528WriteNodeGoldens(t *testing.T) {
+	b760NoNodeRecorder(t, "B528_NODE_RUNS")
 	dir := os.Getenv("B528_NODE_RUNS")
 	if dir == "" {
 		t.Skip("B528_NODE_RUNS is not set")

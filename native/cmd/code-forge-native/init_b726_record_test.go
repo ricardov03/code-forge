@@ -171,6 +171,7 @@ type b726Recorded struct {
 func b726TestdataFile(name string) string { return filepath.Join("testdata", "b726", name) }
 
 func TestB726RecordNode(t *testing.T) {
+	b760NoNodeRecorder(t, "B726_RECORD")
 	if os.Getenv("B726_RECORD") != "1" {
 		t.Skip("B726_RECORD is not 1")
 	}

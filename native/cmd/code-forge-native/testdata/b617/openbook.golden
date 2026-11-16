@@ -28,8 +28,8 @@ OK   codex rules: 83 execpolicy rules via CODEX_HOME=<session>/rules/code-forge.
 OK   signer key: generated; a signed row verifies, a changed one is refused
 OK   worker: pid N started, announced itself and stopped on SIGTERM
 INFO signer: same-user boundary only
-INFO native binary: not found, using Node
-INFO native daemon: off
+INFO native binary: not found
+INFO native daemon: fallback
 --- stderr
 doctor: 16 ok, 7 warn, 0 fail
 --- argv

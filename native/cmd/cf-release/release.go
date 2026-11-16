@@ -848,8 +848,8 @@ func (a *app) failed(root, label string, r result) string {
 }
 
 // runChecks runs the package checks: npm pack --dry-run, npm ls --json and claude plugin validate.
-// The Node checks (gen-config-doc and gen-commands-doc --check, npm test, npm run typecheck) run in
-// GitHub CI, and ciCheck reads that run before anything is written (B580).
+// The CI checks (go test, go vet, gofmt, the npm pack check, config-doc and gen-commands-doc
+// --check) run in GitHub CI, and ciCheck reads that run before anything is written (B580, B760).
 func (a *app) runChecks(root, name, version string) (string, error) {
 	if f := a.checkPacks(root, name, version); f != "" {
 		return f, nil
@@ -917,10 +917,10 @@ func (a *app) runChecks(root, name, version string) (string, error) {
 	return "", nil
 }
 
-// ciCheck reads the latest CI workflow run of HEAD (B580). CI runs npm test, which holds the
-// gen-config-doc and gen-commands-doc --check tests (test/docs-config.test.mjs,
-// test/docs-commands.test.mjs), and npm run typecheck on every main push, so a completed, successful
-// run of HEAD stands for those four checks; the laptop runs no Node suite. It returns one line that
+// ciCheck reads the latest CI workflow run of HEAD (B580). CI runs the Go tests, go vet, gofmt, the
+// npm pack check and config-doc and gen-commands-doc --check on every main push (B760: the Node
+// suite and typecheck are gone with Node), so a completed, successful run of HEAD stands for those
+// checks; the laptop runs no suite. It returns one line that
 // names HEAD and the run state when the run is missing, running or not green.
 func (a *app) ciCheck(root string) (string, error) {
 	headOut, err := a.gitOk(root, "rev-parse", "HEAD")
@@ -965,7 +965,7 @@ func (a *app) ciCheck(root string) (string, error) {
 	if state != "" {
 		return "CI for HEAD " + head + " is not green: " + state + "; push HEAD and wait for a green CI run", nil
 	}
-	a.ok("CI for HEAD " + head + ": completed, success (npm test, npm run typecheck, gen-config-doc and gen-commands-doc --check)")
+	a.ok("CI for HEAD " + head + ": completed, success (go test, go vet, gofmt, npm pack check, config-doc and gen-commands-doc --check)")
 	return "", nil
 }
 
@@ -1244,7 +1244,7 @@ func (a *app) release(root string, opts releaseOpts, written *[]planFile, restor
 		}
 		checks := "none (--no-checks)"
 		if opts.checks {
-			checks = "green CI run for HEAD (gh run list --workflow CI: npm test, npm run typecheck, gen-config-doc and gen-commands-doc --check), npm pack --dry-run, npm ls --json, claude plugin validate ."
+			checks = "green CI run for HEAD (gh run list --workflow CI: go test, go vet, gofmt, npm pack check, config-doc and gen-commands-doc --check), npm pack --dry-run, npm ls --json, claude plugin validate ."
 		}
 		a.out("would run the checks: " + checks + "\n")
 		a.out(fmt.Sprintf("would commit \"Release %s\" (%d files) and create the annotated tag %s\n", tag, len(plan), tag))
@@ -1304,9 +1304,9 @@ func (a *app) release(root string, opts releaseOpts, written *[]planFile, restor
 			if f := a.checkPacks(root, name, next); f != "" {
 				return rollback(f)
 			}
-			a.warn("!!! --no-checks: the CI run for HEAD (npm test, typecheck, gen-config-doc and gen-commands-doc --check), npm ls and plugin validate were NOT checked; native build and package size checked !!!")
+			a.warn("!!! --no-checks: the CI run for HEAD (go test, vet, gofmt, npm pack check, config-doc and gen-commands-doc --check), npm ls and plugin validate were NOT checked; native build and package size checked !!!")
 		} else {
-			a.warn("!!! --no-checks: the CI run for HEAD (npm test, typecheck, gen-config-doc and gen-commands-doc --check), npm pack, npm ls and plugin validate were NOT checked !!!")
+			a.warn("!!! --no-checks: the CI run for HEAD (go test, vet, gofmt, npm pack check, config-doc and gen-commands-doc --check), npm pack, npm ls and plugin validate were NOT checked !!!")
 		}
 	}
 

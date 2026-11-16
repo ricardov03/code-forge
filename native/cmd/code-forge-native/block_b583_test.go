@@ -15,6 +15,7 @@ import (
 // below were taken from.
 func b583Node(t *testing.T, build func() *closeReviewFixture, extra ...string) {
 	t.Helper()
+	b760NoNodeRecorder(t, "B583_NODE_GOLDEN")
 	if os.Getenv("B583_NODE_GOLDEN") != "1" {
 		return
 	}

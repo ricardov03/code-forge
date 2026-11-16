@@ -26,7 +26,7 @@ WARN path deny: skipped (coder CLI missing)
 OK   signer key: generated; a signed row verifies, a changed one is refused
 OK   worker: pid N started, announced itself and stopped on SIGTERM
 INFO signer: same-user boundary only
-INFO native binary: not found, using Node
-INFO native daemon: off
+INFO native binary: not found
+INFO native daemon: fallback
 --- stderr
 doctor: 10 ok, 7 warn, 3 fail

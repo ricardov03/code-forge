@@ -128,6 +128,7 @@ func b618Record(t *testing.T, w, node, nodeBin string, args []string, bg bool) (
 // b618Compare checks Go against the golden (or records it from Node).
 func b618Compare(t *testing.T, w, golden string, args []string, bg bool) {
 	t.Helper()
+	b760NoNodeRecorder(t, "B618_NODE")
 	if node := os.Getenv("B618_NODE"); node != "" {
 		code, out, errText := b618Record(t, w, node, os.Getenv("B618_NODE_BIN"), args, bg)
 		if err := os.WriteFile(golden, []byte(b618Report(t, w, code, out, errText)), 0o644); err != nil {

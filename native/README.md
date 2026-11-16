@@ -6,13 +6,12 @@ This also avoids the macOS 26 LC_UUID linker error during local tests.
 
 `internal block-rebase-landed --home <dir> --run <id> --block <id> --json` implements
 `block rebase --accept-landed` (the `internal` prefix is required; without it the
-binary hands the unknown verb to Node, which prints `unknown verb`). Users run
-`code-forge block rebase <id> --run <r> --accept-landed`; this feature requires the native binary and has no
-Node fallback. Under the block's own lock (not the run lock, B426) it checks owned upstream changes against
+binary prints `unknown verb`). Users run
+`code-forge block rebase <id> --run <r> --accept-landed`. Under the block's own lock (not the run lock, B426) it checks owned upstream changes against
 closed sibling branches, rebases with each original committer identity, queues
-changed owned content using Node ticket identities, then writes a signed
+changed owned content using the review ticket identities, then writes a signed
 `block.rebase` row before saving both bases. Failed replay aborts and restores the
-old head. Release builds provide binaries; local tests use `node scripts/build-native.mjs`.
+old head. Release builds provide binaries; local tests use `sh scripts/cf-release.sh build-native --host`.
 
 Test from the repository root:
 
@@ -54,5 +53,5 @@ object of updates and merges it into the existing record under the run lock.
 Build the host binary before running the Go write tables:
 
 ```sh
-node scripts/build-native.mjs --host
+sh scripts/cf-release.sh build-native --host
 ```

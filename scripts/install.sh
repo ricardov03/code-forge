@@ -48,7 +48,7 @@ version=$(field version)
 [ -n "$name" ] && [ -n "$version" ] || fail "cannot read name and version from $manifest" "npm i -g @codedology/code-forge"
 reinstall="npm i -g $name@$version"
 if [ -f "$pkg/native/go.mod" ]; then
-  reinstall="node scripts/build-native.mjs --host"
+  reinstall="sh scripts/cf-release.sh build-native --host"
 fi
 
 # Keep this mapping the same as bin/code-forge.
@@ -95,10 +95,9 @@ if [ ! -x "$binary" ]; then
   [ -x "$binary" ] || fail "Go binary is not executable and its mode could not be fixed: $binary" "chmod 755 '$binary'"
 fi
 
-# The checks must prove Go runs: no hand-over to Node, no hand-over or error log rows.
+# The checks must prove Go runs, and write no hand-over or error log rows.
 run_binary() {
-  CODE_FORGE_NATIVE=1 CODE_FORGE_NODE=/nonexistent-code-forge-node CODE_FORGE_HANDOVER_LOG=0 \
-    CODE_FORGE_NO_ERROR_LOG=1 "$binary" "$@" 2>/dev/null
+  CODE_FORGE_HANDOVER_LOG=0 CODE_FORGE_NO_ERROR_LOG=1 "$binary" "$@" 2>/dev/null
 }
 out=$(run_binary --version)
 status=$?

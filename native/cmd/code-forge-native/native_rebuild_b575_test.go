@@ -204,7 +204,7 @@ func TestB575NativeBuildErrors(t *testing.T) {
 			tc.setup(t, r)
 			err := nativeBuild(r.root)
 			want := strings.ReplaceAll(strings.ReplaceAll(tc.want, "%s", r.target), "%r", r.root)
-			want = "native-rebuild-failed: node scripts/build-native.mjs --host in " + r.root + ": " + want
+			want = "native-rebuild-failed: sh scripts/cf-release.sh build-native --host in " + r.root + ": " + want
 			if err == nil || err.Error() != want {
 				t.Fatalf("error:\n got %v\nwant %s", err, want)
 			}

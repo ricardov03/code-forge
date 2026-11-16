@@ -36,7 +36,6 @@ func newCloseReviewFixture(t *testing.T, count int) *closeReviewFixture {
 	f := &closeReviewFixture{home: t.TempDir(), top: t.TempDir()}
 	t.Setenv("HOME", f.home)
 	t.Setenv("CODE_FORGE_NO_ERROR_LOG", "1")
-	t.Setenv("CODE_FORGE_NATIVE", "0")
 	t.Setenv("CODE_FORGE_NODE", "/nonexistent")
 	git := func(args ...string) string {
 		t.Helper()
@@ -425,9 +424,10 @@ func TestCloseDoneRowsDaemonAndFallback(t *testing.T) {
 			t.Fatalf("wrong request: %v", request)
 		}
 	}
-	t.Setenv("CODE_FORGE_NATIVE", "0")
+	// B760: CODE_FORGE_NATIVE=0 no longer turns the daemon off; with no
+	// daemon socket listening the ledger is the answer.
 	rows, err := closeDoneRows(home, run, "B1", record)
 	if err != nil || len(rows) != 1 || rows[0].(map[string]any)["event"] != "ledger" {
-		t.Fatalf("disabled: %v %v", rows, err)
+		t.Fatalf("no daemon: %v %v", rows, err)
 	}
 }

@@ -104,6 +104,7 @@ func TestB551rSpawnCodexCoderMatchesNode(t *testing.T) {
 	}
 	// B551R_NODE=<repo>/bin/code-forge B551R_NODE_BIN=<dir of node> rewrites
 	// the goldens from Node instead of checking Go.
+	b760NoNodeRecorder(t, "B551R_NODE")
 	node := os.Getenv("B551R_NODE")
 	nodeBin := os.Getenv("B551R_NODE_BIN")
 	for _, tc := range b551rCases {
