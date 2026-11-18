@@ -9,8 +9,5 @@
   },
   "skills": [
     "./skill"
-  ],
-  "experimental": {
-    "evals": "evals"
-  }
+  ]
 }

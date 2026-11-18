@@ -18,7 +18,7 @@ import (
 var b690bNamePattern = regexp.MustCompile("(?i)" + strings.Join([]string{"condo" + "mera", "finance" + "360"}, "|"))
 
 // b690bSweptRoots are the package and repo content swept for a name.
-var b690bSweptRoots = []string{"bin", "schema", "skill", "evals", "docs", "examples", "test", "scripts", "native", "README.md", "CHANGELOG.md", "package.json"}
+var b690bSweptRoots = []string{"bin", "schema", "skill", "docs", "examples", "test", "scripts", "native", "README.md", "CHANGELOG.md", "package.json"}
 
 func b690bNameHits(text []byte) int { return len(b690bNamePattern.FindAllIndex(text, -1)) }
 
