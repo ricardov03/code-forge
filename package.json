@@ -1,6 +1,6 @@
 {
   "name": "@codedology/code-forge",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "description": "Plan/harden/code/review orchestration CLI and Agent Skill for cross-model, parallel, evidence-gated feature delivery.",
   "repository": {
     "type": "git",
@@ -36,9 +36,9 @@
     "changelog": "sh scripts/cf-release.sh changelog"
   },
   "optionalDependencies": {
-    "@codedology/code-forge-darwin-arm64": "0.24.0",
-    "@codedology/code-forge-darwin-x64": "0.24.0",
-    "@codedology/code-forge-linux-arm64": "0.24.0",
-    "@codedology/code-forge-linux-x64": "0.24.0"
+    "@codedology/code-forge-darwin-arm64": "0.25.0",
+    "@codedology/code-forge-darwin-x64": "0.25.0",
+    "@codedology/code-forge-linux-arm64": "0.25.0",
+    "@codedology/code-forge-linux-x64": "0.25.0"
   }
 }

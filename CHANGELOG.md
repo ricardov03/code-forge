@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-11-18
+
 - The `evals/` folder is retired: its harness (`evals/run.mjs`) and scenarios 15-19 imported the Node `src/` files B760 removed, so a live eval run failed with `ERR_MODULE_NOT_FOUND`; the folder and the plugin manifest's `experimental.evals` entry are gone (B773)
 - Docs: `getting-started.md` and `step-by-step.md` no longer say commands go to Node or name a Node fallback; the command runs the Go binary only (B774).
 - `npm run release:site` moves the site docs pin: it sets `"commit"` in the site's `docs-site/site/docs-source.json` to the release tag (other keys, key order, indent and trailing newline kept), so the docs build shows the released docs, and commits it with `src/data/site-data.json` in the one `Release site vX.Y.Z` commit; `--dry-run` names both files. A site without that file releases as before and prints one `Docs pin ... not found` line; a pin that is not a JSON object stops the release before any gate, commit or deploy. Before, the pin moved only by a hand edit, so the site docs kept the old text (B775)
