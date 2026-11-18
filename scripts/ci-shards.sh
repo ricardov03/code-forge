@@ -8,8 +8,9 @@
 # neighbouring names (often slow together) over all shards, which balances well enough without a
 # committed timing file that would go stale with every block.
 #
-# Run from native/. Build flags (for example -race) come from GOFLAGS, so -list and the test run
-# share one build.
+# Run from native/. RACE (empty or -race) is passed to `go test -list` as a flag, so -list and the
+# shard's `go test $RACE -run ...` share one build. Not GOFLAGS: tests that run `go build` with
+# CGO_ENABLED=0 inherit GOFLAGS, and -race needs cgo.
 #   sh ../scripts/ci-shards.sh list              sorted test names (Test, Example, Fuzz)
 #   sh ../scripts/ci-shards.sh names I N         names of shard I (0-based) of N
 #   sh ../scripts/ci-shards.sh regex I N         anchored -run regex for shard I of N
@@ -19,9 +20,10 @@ set -eu
 pkg=./cmd/code-forge-native
 
 die() { echo "ci-shards: $*" >&2; exit 1; }
+case ${RACE:-} in "" | -race) ;; *) die "RACE must be empty or -race, got: $RACE" ;; esac
 
 list() {
-	out=$(go test -list '.*' "$pkg") || { printf '%s\n' "$out" >&2; die "go test -list failed"; }
+	out=$(go test ${RACE:-} -list '.*' "$pkg") || { printf '%s\n' "$out" >&2; die "go test -list failed"; }
 	printf '%s\n' "$out" | grep -E '^(Test|Example|Fuzz)[A-Za-z0-9_]*$' | LC_ALL=C sort
 }
 
@@ -72,7 +74,7 @@ check)
 		want=$(printf '%s\n' "$full" | pick "$i" "$n")
 		[ -n "$want" ] || die "shard $i of $n has no tests"
 		re=$(printf '%s\n' "$want" | to_regex)
-		got=$(go test -list "$re" "$pkg" | grep -E '^(Test|Example|Fuzz)[A-Za-z0-9_]*$' | LC_ALL=C sort)
+		got=$(go test ${RACE:-} -list "$re" "$pkg" | grep -E '^(Test|Example|Fuzz)[A-Za-z0-9_]*$' | LC_ALL=C sort)
 		[ "$got" = "$want" ] || {
 			printf 'want/got diff for shard %s:\n' "$i" >&2
 			printf '%s\n' "$want" >"${TMPDIR:-/tmp}/ci-shards-want.$$"
