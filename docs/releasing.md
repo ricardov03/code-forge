@@ -209,7 +209,10 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
 4. **Checks.** The release runs no Node suite on the laptop (B580). Before it writes any file it
    reads the latest `CI` workflow run for HEAD (`gh run list --commit <HEAD> --workflow CI
    --limit 1`). CI runs the Go suite, the package check (no Node product file is packed) and the
-   `config-doc --check` and `gen-commands-doc --check` doc checks, so the run must be `completed` with
+   `config-doc --check` and `gen-commands-doc --check` doc checks. Since B777 the Go suite is split
+   into parallel jobs (`go lint`, `build-native`, `go native` shards of `cmd/code-forge-native` from
+   `scripts/ci-shards.sh`, `go other packages`; `-race` on Go stable, plain on the 1.22.x floor);
+   the run's conclusion is `success` only when every job passed, so the run must be `completed` with
    conclusion `success` for that exact HEAD. A missing, running or failed run, or a `gh` error,
    refuses with exit 1 and one line that names HEAD and the run state, for example
    `CI for HEAD <sha> is not green: run status in_progress; push HEAD and wait for a green CI run`.

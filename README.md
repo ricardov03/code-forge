@@ -171,7 +171,8 @@ See [security details](skill/references/security.md) and [privacy](docs/privacy.
 
 The engine is Go, in `native/` (B690b removed the Node code). In a checkout, run
 `cd native && go build ./... && go test ./<package>` for the packages you change; CI runs the
-Go suite and checks the generated config and command references. Record changes with
+Go suite (`cmd/code-forge-native` in parallel shards, `-race` on Go stable, the 1.22.x floor
+without it) and checks the generated config and command references. Record changes with
 `npm run changelog -- <type> "<text>"`; record fixed error reports by adding an entry to
 `native/cmd/code-forge-native/data/known-fixes.json`. `npm run release -- <bump> [--dry-run]`
 bumps versions, releases the CHANGELOG, updates the optional Latest line, checks, commits, and
