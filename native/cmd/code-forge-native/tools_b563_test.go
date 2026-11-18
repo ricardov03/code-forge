@@ -150,6 +150,10 @@ func TestB563ToolsUnwritableRegistryStillProbes(t *testing.T) {
 // entry as Node's `tools install` npm child does.
 func TestB563InitInstallRegistersTheInstaller(t *testing.T) {
 	c := tlRegEnv(t, "npm")
+	// init's start (runInitVerb sets lrRoot = ""): this test calls initToolLines directly, so a
+	// lazy root an earlier test in the process left set (B777: seen when the package runs in
+	// shards) would be used instead of this test's CODE_FORGE_TMP_ROOT.
+	lrRoot = ""
 	var lines []string
 	for _, line := range initToolLines(false, []string{"codex"}) {
 		if strings.HasPrefix(line, "tool codex:") {

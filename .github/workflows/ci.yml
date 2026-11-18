@@ -52,15 +52,81 @@ jobs:
       - name: gen-commands-doc --check
         run: sh scripts/gen-commands-doc.sh --check
 
-  # B237: the Go core (native/) has its own tests. Run them on the go.mod floor and on the
-  # newest Go, so a toolchain change cannot break the native binary without a red run.
-  go:
-    name: go (${{ matrix.go }})
+  # B237: the Go core (native/) has its own tests, on the go.mod floor and on the newest Go.
+  # B777: split for wall clock, same coverage. cmd/code-forge-native (~11 min under -race in one
+  # process) runs in shards (scripts/ci-shards.sh: sorted `go test -list`, round-robin, so a new test
+  # lands in a shard with no hand list); every other package runs in go-other. Go stable runs every
+  # test under -race; Go 1.22.x (the floor) runs the same tests without -race. gofmt, vet, the shard
+  # coverage guard and the four release builds run once, on stable, beside the tests.
+  # Go cache: setup-go's key is the OS, Go version and native/go.sum (no commit), and the first job
+  # to finish saves it. Only the test jobs use it, so the stable cache holds -race builds (std and
+  # deps); go-lint, build-native and package keep cache: false so they cannot save a cache with no
+  # -race builds under that key first.
+  # The shard count is NATIVE_SHARDS: the shard matrices must list 1..NATIVE_SHARDS (each shard job
+  # checks strategy.job-total against it, and go-lint proves the union of NATIVE_SHARDS shards).
+  go-lint:
+    name: go lint (stable)
+    runs-on: ubuntu-latest
+    env:
+      NATIVE_SHARDS: 6
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: gofmt (no unformatted files)
+        run: test -z "$(find . -path ./vendor -prune -o -name '*.go' -print | xargs gofmt -l)" || { find . -path ./vendor -prune -o -name '*.go' -print | xargs gofmt -l; exit 1; }
+
+      - name: go vet
+        run: go vet ./...
+
+      # Each shard's -run regex selects exactly its tests, no test is in two shards, and the union
+      # is the full `go test -list` of cmd/code-forge-native.
+      - name: shard coverage guard
+        run: sh ../scripts/ci-shards.sh check "$NATIVE_SHARDS"
+
+  # All four release targets must build, and the host binary must run (B690b: plain go build,
+  # the same flags the release tool uses; no Node).
+  build-native:
+    name: build-native (stable)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: build-native (all release targets)
+        run: |
+          for t in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+            CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build -trimpath -ldflags "-s -w" -o "bin-ci/${t%/*}-${t#*/}/code-forge-native" ./cmd/code-forge-native
+          done
+          bin-ci/linux-amd64/code-forge-native version
+
+  # cmd/code-forge-native in shards. GOFLAGS carries -race (stable) so the -list build and the test
+  # run share one compile.
+  go-native:
+    name: go native (${{ matrix.go }}, shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        go: ['1.22.x', stable]
+        go: [stable, '1.22.x']
+        shard: [1, 2, 3, 4, 5, 6]
+    env:
+      NATIVE_SHARDS: 6
+      GOFLAGS: ${{ matrix.go == 'stable' && '-race' || '' }}
     defaults:
       run:
         working-directory: native
@@ -70,22 +136,42 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
-          cache: false
+          cache-dependency-path: native/go.sum
 
-      - name: gofmt (no unformatted files)
-        run: test -z "$(find . -path ./vendor -prune -o -name '*.go' -print | xargs gofmt -l)" || { find . -path ./vendor -prune -o -name '*.go' -print | xargs gofmt -l; exit 1; }
-
-      - name: go vet
-        run: go vet ./...
-
-      - name: go test (race detector)
-        run: go test -race -count=1 -timeout 30m ./...
-
-      # All four release targets must build, and the host binary must run (B690b: plain go build,
-      # the same flags the release tool uses; no Node).
-      - name: build-native (all release targets)
+      - name: go test (shard ${{ matrix.shard }} of cmd/code-forge-native)
+        env:
+          SHARD: ${{ matrix.shard }}
+          JOBS: ${{ strategy.job-total }}
         run: |
-          for t in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
-            CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build -trimpath -ldflags "-s -w" -o "bin-ci/${t%/*}-${t#*/}/code-forge-native" ./cmd/code-forge-native
-          done
-          bin-ci/linux-amd64/code-forge-native version
+          [ "$JOBS" -eq $((2 * NATIVE_SHARDS)) ] || { echo "the go-native matrix has $JOBS jobs, NATIVE_SHARDS=$NATIVE_SHARDS needs $((2 * NATIVE_SHARDS)) (2 Go versions)"; exit 1; }
+          re=$(sh ../scripts/ci-shards.sh regex $((SHARD - 1)) "$NATIVE_SHARDS")
+          echo "GOFLAGS='$GOFLAGS', shard $SHARD of $NATIVE_SHARDS: $(printf '%s\n' "$re" | tr '|' '\n' | wc -l | tr -d ' ') tests"
+          go test -count=1 -timeout 30m -run "$re" ./cmd/code-forge-native
+
+  # Every native package but cmd/code-forge-native.
+  go-other:
+    name: go other packages (${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: [stable, '1.22.x']
+    env:
+      GOFLAGS: ${{ matrix.go == 'stable' && '-race' || '' }}
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache-dependency-path: native/go.sum
+
+      - name: go test (all packages but cmd/code-forge-native)
+        run: |
+          pkgs=$(go list ./... | grep -v '/cmd/code-forge-native$')
+          [ -n "$pkgs" ] || { echo "no packages"; exit 1; }
+          echo "GOFLAGS='$GOFLAGS', $(printf '%s\n' "$pkgs" | wc -l) packages"
+          go test -count=1 -timeout 30m $pkgs
