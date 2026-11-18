@@ -17,7 +17,7 @@ import (
 func TestExecuteSignalNames(t *testing.T) {
 	for _, signal := range []string{"HUP", "USR1", "USR2", "PIPE", "ALRM", "TERM", "INT", "KILL"} {
 		t.Run(signal, func(t *testing.T) {
-			r := execute(context.Background(), []string{"/bin/sh", "-c", "kill -" + signal + " $$"}, nil, t.TempDir(), "", 1000, false)
+			r := execute(context.Background(), []string{"/bin/sh", "-c", "kill -" + signal + " $$"}, nil, t.TempDir(), "", 30000, false)
 			want := "gate terminated: SIG" + signal
 			if r.Get("reason") != "SIG"+signal || r.Get("message") != want || r.Get("stderr") != want+"\n" || r.Get("code") != nil {
 				t.Fatalf("signal %s: %v", signal, r)
@@ -205,6 +205,10 @@ func TestExecuteHelper(t *testing.T) {
 	if os.Getenv("CF_PIPE_HELPER") != "1" {
 		return
 	}
+	// A slow start (loaded CI runner) is simulated by CF_PIPE_START_DELAY_MS.
+	if ms, _ := strconv.Atoi(os.Getenv("CF_PIPE_START_DELAY_MS")); ms > 0 {
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+	}
 	// Leave the gate's process group while retaining both inherited pipe ends.
 	child := exec.Command("/bin/sleep", "30")
 	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -212,7 +216,12 @@ func TestExecuteHelper(t *testing.T) {
 	if err := child.Start(); err != nil {
 		os.Exit(98)
 	}
-	if err := os.WriteFile(os.Getenv("CF_PIPE_PID"), []byte(strconv.Itoa(child.Process.Pid)), 0600); err != nil {
+	// Write then rename, so the parent never reads a partial pid file.
+	pidFile := os.Getenv("CF_PIPE_PID")
+	if err := os.WriteFile(pidFile+".tmp", []byte(strconv.Itoa(child.Process.Pid)), 0600); err != nil {
+		os.Exit(99)
+	}
+	if err := os.Rename(pidFile+".tmp", pidFile); err != nil {
 		os.Exit(99)
 	}
 	// Stay alive until the gate deadline terminates us, leaving the detached
@@ -234,15 +243,33 @@ func TestRunTimeoutWithLeakedDescendant(t *testing.T) {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
 		}
 	}()
+	// The gate's timeout clock starts after afterGateStart returns. Hold it
+	// until the descendant holds both pipes (its pid file exists), so a slow
+	// start on a loaded runner can never let the timeout fire first (B776).
+	// The cap only ends a helper that never starts its descendant.
+	ready := make(chan bool, 1)
+	old := afterGateStart
+	afterGateStart = func(pid int) {
+		for limit := time.Now().Add(2 * time.Minute); time.Now().Before(limit); time.Sleep(5 * time.Millisecond) {
+			if _, err := os.Stat(pidFile); err == nil {
+				ready <- true
+				return
+			}
+		}
+		ready <- false
+	}
+	defer func() { afterGateStart = old }()
 	const timeoutMs = 500.0
 	// Includes TERM grace and bounded pipe drain. A run that waited on the
-	// leaked descendant would take its full 30 s sleep, so 10 s still tells
-	// the two apart while leaving room for a loaded machine (B539).
+	// leaked descendant would take its full 30 s sleep, so 10 s from the
+	// moment the descendant holds the pipes still tells the two apart while
+	// leaving room for a loaded machine (B539).
 	deadline := 10 * time.Second
 	done := make(chan error, 1)
-	started := time.Now()
+	// The helper starts its descendant 700 ms late, past the 500 ms timeout,
+	// so every run proves the timeout clock waits for the ready point.
 	go func() {
-		p := Plan{Commands: map[string]*Command{"test": {Argv: []string{exe, "-test.run=^TestExecuteHelper$"}, Env: map[string]string{"CF_PIPE_HELPER": "1", "CF_PIPE_PID": pidFile}}}}
+		p := Plan{Commands: map[string]*Command{"test": {Argv: []string{exe, "-test.run=^TestExecuteHelper$"}, Env: map[string]string{"CF_PIPE_HELPER": "1", "CF_PIPE_PID": pidFile, "CF_PIPE_START_DELAY_MS": "700"}}}}
 		results, ok, err := Run(context.Background(), p, dir, "fixture", timeoutMs, Scope{})
 		if err == nil && (ok || len(results) != 4) {
 			err = fmt.Errorf("Run returned ok=%v, %d results; want failed and four results", ok, len(results))
@@ -256,6 +283,15 @@ func TestRunTimeoutWithLeakedDescendant(t *testing.T) {
 		}
 		done <- err
 	}()
+	select {
+	case up := <-ready:
+		if !up {
+			t.Fatal("helper never started its descendant within 2 min")
+		}
+	case err := <-done:
+		t.Fatal("gate run ended before its descendant held the pipes:", err)
+	}
+	started := time.Now()
 	select {
 	case err := <-done:
 		if err != nil {
