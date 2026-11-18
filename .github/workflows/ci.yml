@@ -114,8 +114,9 @@ jobs:
           done
           bin-ci/linux-amd64/code-forge-native version
 
-  # cmd/code-forge-native in shards. GOFLAGS carries -race (stable) so the -list build and the test
-  # run share one compile.
+  # cmd/code-forge-native in shards. RACE (-race on stable) is a go test flag, read by the step and by
+  # ci-shards.sh, so the -list build and the test run share one compile. Never GOFLAGS: tests that run
+  # `go build` with CGO_ENABLED=0 inherit it, and -race needs cgo.
   go-native:
     name: go native (${{ matrix.go }}, shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
@@ -126,7 +127,7 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6]
     env:
       NATIVE_SHARDS: 6
-      GOFLAGS: ${{ matrix.go == 'stable' && '-race' || '' }}
+      RACE: ${{ matrix.go == 'stable' && '-race' || '' }}
     defaults:
       run:
         working-directory: native
@@ -145,8 +146,8 @@ jobs:
         run: |
           [ "$JOBS" -eq $((2 * NATIVE_SHARDS)) ] || { echo "the go-native matrix has $JOBS jobs, NATIVE_SHARDS=$NATIVE_SHARDS needs $((2 * NATIVE_SHARDS)) (2 Go versions)"; exit 1; }
           re=$(sh ../scripts/ci-shards.sh regex $((SHARD - 1)) "$NATIVE_SHARDS")
-          echo "GOFLAGS='$GOFLAGS', shard $SHARD of $NATIVE_SHARDS: $(printf '%s\n' "$re" | tr '|' '\n' | wc -l | tr -d ' ') tests"
-          go test -count=1 -timeout 30m -run "$re" ./cmd/code-forge-native
+          echo "RACE='$RACE', shard $SHARD of $NATIVE_SHARDS: $(printf '%s\n' "$re" | tr '|' '\n' | wc -l | tr -d ' ') tests"
+          go test $RACE -count=1 -timeout 30m -run "$re" ./cmd/code-forge-native
 
   # Every native package but cmd/code-forge-native.
   go-other:
@@ -157,7 +158,7 @@ jobs:
       matrix:
         go: [stable, '1.22.x']
     env:
-      GOFLAGS: ${{ matrix.go == 'stable' && '-race' || '' }}
+      RACE: ${{ matrix.go == 'stable' && '-race' || '' }}
     defaults:
       run:
         working-directory: native
@@ -173,5 +174,5 @@ jobs:
         run: |
           pkgs=$(go list ./... | grep -v '/cmd/code-forge-native$')
           [ -n "$pkgs" ] || { echo "no packages"; exit 1; }
-          echo "GOFLAGS='$GOFLAGS', $(printf '%s\n' "$pkgs" | wc -l) packages"
-          go test -count=1 -timeout 30m $pkgs
+          echo "RACE='$RACE', $(printf '%s\n' "$pkgs" | wc -l) packages"
+          go test $RACE -count=1 -timeout 30m $pkgs
