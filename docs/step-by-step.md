@@ -23,7 +23,7 @@ output form, with variable values in brackets. Each excerpt says **Output shorte
 **What it does**
 
 Install the CLI and its agent skill (the instructions your orchestrator follows).
-The `code-forge` command starts a fast Go program first; commands not yet in Go go to Node by themselves ([native engine](native-engine.md)).
+The `code-forge` command runs a fast Go program and never starts Node ([native engine](native-engine.md)).
 
 **Run**
 
@@ -927,7 +927,7 @@ Stop the release on a failed check. Fix it, rerun the checks, and use the projec
 - [Brief mode](brief-mode.md), [review only](review-only.md), and [autopilot](autopilot.md): alternate flows.
 - [Command reference](reference/commands.md): generated CLI usage.
 - [Config reference](reference/config.md): settings and defaults.
-- [Native engine](native-engine.md): Go startup and Node fallback.
+- [Native engine](native-engine.md): how the Go binary starts and what it needs.
 - [Agent skill](../skill/SKILL.md): the orchestrator's full rules.
 
 ## Cheat sheet
