@@ -1,6 +1,7 @@
 exit 1
 --- stdout
 npm serves @example/pkg@0.21.0
+Docs pin docs-site/site/docs-source.json not found; the site docs pin was not moved
 Running gate: build:site
 built site with {
   "version": "0.21.0",

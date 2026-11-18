@@ -21,6 +21,7 @@ import (
 const (
 	siteUsage     = "usage: npm run release:site -- [--site <dir>] [--wait-min <minutes>] [--deploy-dir <path>] [--dry-run]"
 	siteData      = "src/data/site-data.json"
+	siteDocsPin   = "docs-site/site/docs-source.json" // B775: the docs pages come from docs/ at its "commit"
 	siteDeployDir = "docs-site/site/.pages-out"
 )
 
@@ -444,6 +445,46 @@ func linkModules(source, target string) error {
 	return nil
 }
 
+// moveDocsPin sets the site docs pin's "commit" to tag in the tree, keeping every other key, the
+// key order, the indent and the trailing newline (B775). A missing file is not an error: it
+// reports false and the release commits the site data only, as before.
+func moveDocsPin(tree, tag string) (old string, found bool, err error) {
+	file := filepath.Join(tree, siteDocsPin)
+	raw, err := os.ReadFile(file)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fsErr("open", file, err)
+	}
+	text := string(raw)
+	data, err := jsParse(text)
+	if err != nil {
+		return "", false, errors.New(siteDocsPin + " is not JSON: " + err.Error())
+	}
+	obj, ok := data.(*jsObject)
+	if !ok {
+		return "", false, errors.New(siteDocsPin + " must be a JSON object")
+	}
+	old = "(none)"
+	if v, has := obj.get("commit"); has {
+		old = jsTemplate(v, true)
+	}
+	obj.set("commit", tag)
+	indent := "  "
+	if m := indentRe.FindStringSubmatch(text); m != nil {
+		indent = m[1]
+	}
+	newline := ""
+	if strings.HasSuffix(text, "\n") {
+		newline = "\n"
+	}
+	if err := os.WriteFile(file, []byte(jsStringify(obj, indent)+newline), 0o644); err != nil {
+		return "", false, fsErr("open", file, err)
+	}
+	return old, true, nil
+}
+
 var deployURLRe = regexp.MustCompile(`https://[^\s<>"']+`)
 
 func releaseSiteMain(a *app, argv []string, root string) int {
@@ -547,6 +588,17 @@ func (a *app) releaseSite(argv []string, root string) (err error) {
 	if err := os.WriteFile(dataPath, []byte(data), 0o644); err != nil {
 		return fsErr("open", dataPath, err)
 	}
+	oldPin, pinFound, err := moveDocsPin(tree, tag)
+	if err != nil {
+		return err
+	}
+	commitFiles := []string{siteData}
+	if pinFound {
+		commitFiles = append(commitFiles, siteDocsPin)
+		a.out("Docs pin " + siteDocsPin + ": " + oldPin + " -> " + tag + "\n")
+	} else {
+		a.out("Docs pin " + siteDocsPin + " not found; the site docs pin was not moved\n")
+	}
 	custom, timeout, err := siteGates(tree)
 	if err != nil {
 		return err
@@ -608,12 +660,12 @@ func (a *app) releaseSite(argv []string, root string) (err error) {
 	}
 	deploy := deployArgv(opts.deployDir)
 	if opts.dryRun {
-		a.out("Would commit " + siteData + " on " + branch + "\nWould deploy: npx " + strings.Join(deploy, " ") + "\n")
+		a.out("Would commit " + strings.Join(commitFiles, " and ") + " on " + branch + "\nWould deploy: npx " + strings.Join(deploy, " ") + "\n")
 	} else {
 		for _, argv := range [][]string{
 			{"git", "switch", "-c", branch},
-			{"git", "add", "--", siteData},
-			{"git", "-c", "core.hooksPath=/dev/null", "commit", "--only", "-m", "Release site " + tag, "--", siteData},
+			append([]string{"git", "add", "--"}, commitFiles...),
+			append([]string{"git", "-c", "core.hooksPath=/dev/null", "commit", "--only", "-m", "Release site " + tag, "--"}, commitFiles...),
 		} {
 			if _, err := checked(tree, argv, 0); err != nil {
 				return err

@@ -84,7 +84,7 @@ npm publish dist/npm/darwin-x64
 npm publish dist/npm/linux-x64
 npm publish dist/npm/linux-arm64
 npm publish                             # then the main package, from your machine
-npm run release:site                    # wait for npm, check and deploy the site
+npm run release:site                    # wait for npm, move the docs pin, check and deploy the site
 git push origin main --follow-tags      # then push; CI only creates the GitHub release
 ```
 
@@ -260,7 +260,14 @@ Once npm serves the version, it generates the site data in Go, the same JSON as
 `cf-release site-data --tag vX.Y.Z` with the ledger at `~/.code-forge/ledger` (B690d).
 The site defaults to `../code-forge-site`. A clean detached worktree of the site's HEAD is
 created at `<site>/.code-forge-tmp/release-site-X.Y.Z`; the main site's files, staging index,
-branch and open work stay untouched. The command writes `src/data/site-data.json` there,
+branch and open work stay untouched. The command writes `src/data/site-data.json` there and
+moves the docs pin: it sets `"commit"` in `docs-site/site/docs-source.json` to the release tag
+`vX.Y.Z`, keeping every other key, the key order, the indent and the trailing newline, and
+prints `Docs pin docs-site/site/docs-source.json: <old> -> vX.Y.Z` (B775). The docs build reads
+the docs pages from `docs/<page>.md` at that commit, so the site docs show the released text. A
+site without that file releases as before, with one line `Docs pin
+docs-site/site/docs-source.json not found; the site docs pin was not moved`; a pin file that is
+not a JSON object stops the release before any gate, commit or deploy. It then
 links installed dependencies from the main checkout's `node_modules` if available, or runs
 `npm ci` when dependencies are missing. Cache directories such as `node_modules/.vite`,
 `.astro`, and `.cache` stay local to the temporary tree. It runs `npm run build:site`, every `gates.custom` entry (including its environment),
@@ -272,7 +279,8 @@ exits 1 with no commit and no deploy. The deploy folder defaults to `docs-site/s
 the full site that `build:site` merges (marketing pages plus `/docs`, `llms.txt` and `_headers`);
 `dist` alone holds only the marketing pages. `--deploy-dir <path>` picks another folder; it must
 be relative to the site root and may not contain `..`. Then it creates `release-site/vX.Y.Z`,
-commits only `src/data/site-data.json`, and runs
+commits `src/data/site-data.json` and the moved `docs-site/site/docs-source.json` in one commit
+(only the site data when the pin file is missing), and runs
 `npx wrangler pages deploy <deploy folder> --project-name code-forge-ai --branch main`, printing
 the deploy URL. `--dry-run` prints this command as its `Would deploy:` line. Wrangler must already be authenticated. The temporary worktree is removed
 on success or failure. An existing release branch is refused; a deployment failure keeps
