@@ -209,12 +209,13 @@ func TestB613CommandPage(t *testing.T) {
 	if !strings.Contains(block, "Usage:\n  usage: code-forge block open <id> --run <r> ") || !strings.Contains(block, "  block waive             Accept one review finding without a fix (owner)\n") {
 		t.Fatalf("help block:\n%s", block)
 	}
-	// A verb that refuses --help keeps its refusal; help <verb> still shows its usage.
-	if c, out, errText := b613Call(t, "status", "--help"); c != 2 || out != "" || !strings.HasPrefix(errText, "status: unknown flag \"--help\"\n") {
-		t.Fatalf("status --help: %d %q %q", c, out, errText)
+	// B877 (B801 audit P05): status --help answers with the same page as help status, exit 0.
+	c, statusPage, _ := b613Call(t, "help", "status")
+	if c != 0 || !strings.Contains(statusPage, "Usage:\n  usage: code-forge status [--run <id>] [--json]\n") {
+		t.Fatalf("help status: %d\n%s", c, statusPage)
 	}
-	if c, out, _ := b613Call(t, "help", "status"); c != 0 || !strings.Contains(out, "Usage:\n  usage: code-forge status [--run <id>] [--json]\n") {
-		t.Fatalf("help status: %d\n%s", c, out)
+	if c, out, errText := b613Call(t, "status", "--help"); c != 0 || out != statusPage || errText != "" {
+		t.Fatalf("status --help: %d %q %q", c, out, errText)
 	}
 	for _, args := range [][]string{{"help", "nope"}, {"help", "block", "nope"}, {"help", "block", "open", "x"}} {
 		if c, out, errText := b613Call(t, args...); c != 2 || out != "" || !strings.HasPrefix(errText, "help: unknown command ") {
