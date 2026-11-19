@@ -115,7 +115,8 @@ var b690bNodeVerbs = []string{"author", "autopilot", "block", "ci", "cloud-coder
 // verb file names, sorted), exit 1, and writes nothing at all.
 func TestB690aUnknownVerbMatchesNode(t *testing.T) {
 	// config is the first verb added after Node (B791); the list names it.
-	verbs := append(append([]string(nil), b690bNodeVerbs...), "config")
+	// audit (B802) is the second.
+	verbs := append(append([]string(nil), b690bNodeVerbs...), "config", "audit")
 	sort.Strings(verbs)
 	want := "code-forge: unknown verb \"private-verb\"\nVerbs:\n  " + strings.Join(verbs, "\n  ") + "\n"
 	res, repo := b690aInRepo(t, "private-verb", "private-value")

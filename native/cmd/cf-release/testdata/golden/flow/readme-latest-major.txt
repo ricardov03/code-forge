@@ -11,6 +11,7 @@ WARN  main is ahead of origin/main: the push will also send those commits
 ok    1.0.0 > 0.21.0 (package.json) and > 0.21.0 (npm)
 ok    tag v1.0.0 is free (local and origin)
 ok    docs block covers 7a2bd0c80c7dd008ad9e4bca7b7a939c56922902 since v0.21.0
+ok    command audit docs/audits/audit-1.0.0.md has no open high problem
 
 == 2. bump + 3. CHANGELOG and README ==
 package.json: version  0.21.0 → 1.0.0
@@ -90,7 +91,7 @@ would print: git push origin main --follow-tags
 dry run: 0 files changed, 0 commits, 0 tags
 --- stderr
 --- repo refs
-refs/heads/main 65185a7ad12dfd6383161a9a517ec841565b4688 change README.md
+refs/heads/main c7c1778d853f5ad13e51a52834fb97933b0f00f2 docs: command audit 1.0.0
 refs/remotes/origin/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
 refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b Release v0.21.0
 --- repo status
@@ -198,9 +199,9 @@ refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b
 --- repo .code-forge-tmp
 --- seen
 --- repo HEAD
-change README.md
+docs: command audit 1.0.0
 
-README.md
+docs/audits/audit-1.0.0.md
 === step 2: release major --date 2026-11-12
 exit 0
 --- stdout
@@ -214,6 +215,7 @@ WARN  main is ahead of origin/main: the push will also send those commits
 ok    1.0.0 > 0.21.0 (package.json) and > 0.21.0 (npm)
 ok    tag v1.0.0 is free (local and origin)
 ok    docs block covers 7a2bd0c80c7dd008ad9e4bca7b7a939c56922902 since v0.21.0
+ok    command audit docs/audits/audit-1.0.0.md has no open high problem
 
 == 2. bump + 3. CHANGELOG and README ==
 package.json: version  0.21.0 → 1.0.0
@@ -272,7 +274,7 @@ docs/step-by-step.md: version pins: 0.21.0 → 1.0.0
     + @codedology/code-forge 1.0.0
 
 == 4. checks ==
-ok    CI for HEAD 65185a7ad12dfd6383161a9a517ec841565b4688: completed, success (go test, go vet, gofmt, npm pack check, config-doc and gen-commands-doc --check)
+ok    CI for HEAD c7c1778d853f5ad13e51a52834fb97933b0f00f2: completed, success (go test, go vet, gofmt, npm pack check, config-doc and gen-commands-doc --check)
 ok    package size: @example/pkg 1234567 bytes (1.23 MB; limit <5 MB)
 ok    npm pack --dry-run: @example/pkg@1.0.0, 7 files
 ok    npm ls: 0 invalid, 0 missing
@@ -291,10 +293,10 @@ ok    annotated tag v1.0.0
       gh release create v1.0.0 --title v1.0.0 --notes-file <CASE>/tmp/code-forge-release-<RAND>/release-notes-v1.0.0.md --verify-tag
 --- stderr
 --- repo refs
-refs/heads/main 25dec665b2aff222dbf3a7cf6573a4aea2335220 Release v1.0.0
+refs/heads/main a59d30db20071210ab119a9035ca334e7591a62b Release v1.0.0
 refs/remotes/origin/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
 refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b Release v0.21.0
-refs/tags/v1.0.0 09f97db570b5b8a81de0e290c71d9c60623f0fd7 Release v1.0.0
+refs/tags/v1.0.0 709520841441cd666af418c91919b49d5921c203 Release v1.0.0
 --- repo status
 --- tag v0.21.0
 object 7a2bd0c80c7dd008ad9e4bca7b7a939c56922902
@@ -304,7 +306,7 @@ tagger Test <test@example.invalid> 1794477600 +0000
 
 Release v0.21.0
 --- tag v1.0.0
-object 25dec665b2aff222dbf3a7cf6573a4aea2335220
+object a59d30db20071210ab119a9035ca334e7591a62b
 type commit
 tag v1.0.0
 tagger Test <test@example.invalid> 1794477600 +0000
@@ -437,7 +439,7 @@ Release v1.0.0
 --- fake log
 <CASE>/repo npm view @example/pkg version
 <CASE>/repo npm view @example/pkg version
-<CASE>/repo gh run list --commit 65185a7ad12dfd6383161a9a517ec841565b4688 --workflow CI --limit 1 --json headSha,status,conclusion
+<CASE>/repo gh run list --commit c7c1778d853f5ad13e51a52834fb97933b0f00f2 --workflow CI --limit 1 --json headSha,status,conclusion
 <CASE>/repo npm pack --dry-run --json
 <CASE>/repo npm ls --json
 <CASE>/repo claude plugin validate .

@@ -2,7 +2,7 @@ exit 2
 --- stdout
 --- stderr
 missing <patch|minor|major|x.y.z>
-usage: npm run release -- <patch|minor|major|x.y.z> [--dry-run] [--date YYYY-MM-DD] [--no-checks] [--allow-branch <name>]
+usage: npm run release -- <patch|minor|major|x.y.z> [--dry-run] [--date YYYY-MM-DD] [--no-checks] [--allow-no-audit] [--allow-branch <name>]
 --- repo refs
 refs/heads/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
 refs/remotes/origin/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp

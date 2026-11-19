@@ -2,6 +2,7 @@
 
 This page lists every CLI command: its purpose, when to use it, its usage and flags, examples with their real output, exit codes, the `--json` shape and related commands. It is generated from the Go help table; agents read the same data in [`commands.json`](commands.json). Regenerate both with `sh scripts/gen-commands-doc.sh`.
 
+- [audit](#audit)
 - [author](#author)
 - [autopilot](#autopilot)
 - [block](#block)
@@ -46,6 +47,22 @@ This page lists every CLI command: its purpose, when to use it, its usage and fl
 - [validate](#validate)
 - [version](#version)
 - [worker](#worker)
+
+## audit
+
+Audit every command before a major release
+
+```text
+usage: code-forge audit commands [--json] [--out <file>]
+```
+
+### audit commands
+
+Run every command in a throwaway HOME and write the audit report
+
+```text
+usage: code-forge audit commands [--json] [--out <file>]
+```
 
 ## author
 

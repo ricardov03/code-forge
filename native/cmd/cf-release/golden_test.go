@@ -53,7 +53,7 @@ var parityCases = []parityCase{
 	{name: "release-patch-real", args: []string{"release", "patch", "--date", date}},
 	{name: "release-minor-real-native-no-checks", opts: fixtureOpts{native: true},
 		args: []string{"release", "minor", "--no-checks", "--date", date}},
-	{name: "release-explicit-real-no-claude", opts: fixtureOpts{noClaud: true},
+	{name: "release-explicit-real-no-claude", opts: fixtureOpts{noClaud: true}, prep: b802CleanAudit(nil),
 		args: []string{"release", "v1.0.0", "--date", date}},
 	{name: "release-dirty-dry", prep: dirty, args: []string{"release", "patch", "--dry-run", "--date", date}},
 	{name: "release-dirty-real", prep: dirty, args: []string{"release", "patch", "--date", date}},
