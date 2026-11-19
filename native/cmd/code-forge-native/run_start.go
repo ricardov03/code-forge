@@ -329,7 +329,10 @@ func runLaunchWorkerJudged(runID, workspace, binary string, env []string, strict
 	}
 	cmd := exec.Command(binary, "worker", "--run", runID)
 	cmd.Dir = repoRoot
-	cmd.Env = runWorkerLaunchEnv(env)
+	// B882: under the test signal guard the detached worker carries the
+	// test root, so the run end of the same test may stop it after init
+	// adopts it; a product build passes the environment unchanged.
+	cmd.Env = procguard.LaunchEnv(runWorkerLaunchEnv(env))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	// B884: the worker's stderr goes to .code-forge/logs/worker-<pid>.log
 	// (it was /dev/null, and why a worker stopped was lost).

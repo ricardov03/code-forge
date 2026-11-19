@@ -27,6 +27,15 @@ import (
 // may signal. A test binary sets it to its own pid at start.
 const Env = "CODE_FORGE_TEST_SIGNAL_ROOT"
 
+// OwnedEnv marks a detached process that guarded code-forge code launched on
+// purpose and still owns, such as the worker of `run start` (B882). Its value
+// is the test root of the launcher. Such a process is started with Setsid and
+// outlives its launcher, so init becomes its parent and it no longer descends
+// from the test root; a later `run end` of the same test may still stop it.
+// A process that merely inherited the test environment (a stranger's daemon
+// started by a test's shell) does not carry it.
+const OwnedEnv = "CODE_FORGE_TEST_SIGNAL_OWNED"
+
 // builtForTest is set at link time by test helpers that build the binary.
 var builtForTest string
 
@@ -47,6 +56,55 @@ func root() int {
 		return n
 	}
 	return os.Getpid()
+}
+
+// LaunchEnv is env for a detached process this code launches and owns: under
+// the guard it carries OwnedEnv set to the test root (any older value is
+// dropped); otherwise env is returned unchanged.
+func LaunchEnv(env []string) []string {
+	if !Guarded() {
+		return env
+	}
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, OwnedEnv+"=") {
+			out = append(out, kv)
+		}
+	}
+	return append(out, OwnedEnv+"="+strconv.Itoa(root()))
+}
+
+// ownedBy reads OwnedEnv from the environment of pid ("" when it is not set
+// or cannot be read): /proc/<pid>/environ where it exists, else `ps -E`,
+// which prints the environment after the command line.
+var ownedBy = func(pid int) string {
+	if _, err := os.Stat("/proc/self/environ"); err == nil {
+		data, _ := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/environ")
+		for _, kv := range strings.Split(string(data), "\x00") {
+			if strings.HasPrefix(kv, OwnedEnv+"=") {
+				return kv[len(OwnedEnv)+1:]
+			}
+		}
+		return ""
+	}
+	cmd := exec.Command("/bin/ps", "-E", "-ww", "-o", "command=", "-p", strconv.Itoa(pid))
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	for _, field := range strings.Fields(string(out)) {
+		if strings.HasPrefix(field, OwnedEnv+"=") {
+			return field[len(OwnedEnv)+1:]
+		}
+	}
+	return ""
+}
+
+// owned reports whether pid is a detached process launched under this test
+// root (OwnedEnv names the root).
+func owned(pid, top int) bool {
+	return ownedBy(pid) == strconv.Itoa(top)
 }
 
 type proc struct{ ppid, pgid int }
@@ -113,7 +171,9 @@ func descends(rows map[int]proc, pid, top int) bool {
 
 // Allowed reports whether a guarded process may send a real signal to pid
 // (a negative pid is the process group -pid): every target must descend from
-// the test root. Signal 0 (a liveness probe) always passes.
+// the test root, or carry OwnedEnv naming the test root (a detached process
+// guarded code-forge code launched, B882). Signal 0 (a liveness probe)
+// always passes.
 func Allowed(pid int, sig syscall.Signal) bool {
 	if !Guarded() || sig == 0 {
 		return true
@@ -139,7 +199,7 @@ func Allowed(pid int, sig syscall.Signal) bool {
 		}
 	}
 	for _, p := range targets {
-		if !descends(rows, p, top) {
+		if !descends(rows, p, top) && !owned(p, top) {
 			return false
 		}
 	}
