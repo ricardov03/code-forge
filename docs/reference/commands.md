@@ -769,17 +769,17 @@ Exit 0. Output:
   {
     "time": "2026-01-01T00:00:00Z",
     "event": "Question to the owner",
-    "block": null,
-    "file": null,
-    "detail": "waive:nit · to owner (session-failed) · ad-<id>",
+    "block": "B1",
+    "file": "src/a.txt",
+    "detail": "review:substitute · to owner (scope review:substitute not-allowed; the owner grants it with code-forge autopilot start --run <run> --until <time> --delegate L2 --allow review:substitute, else the review retries when its provider answers again) · ad-<id>",
     "link": null
   },
   {
     "time": "2026-01-01T00:00:00Z",
-    "event": "Delegate session",
+    "event": "Question to the owner",
     "block": null,
     "file": null,
-    "detail": "L2 · anthropic · status failed",
+    "detail": "waive:nit · to owner (session-failed) · ad-<id>",
 …
 ```
 
@@ -799,8 +799,8 @@ Prints JSON over several lines (pretty-printed): an array of objects with these 
 |---|---|
 | `time` | string |
 | `event` | string |
-| `block` | null |
-| `file` | null |
+| `block` | string |
+| `file` | string |
 | `detail` | string |
 | `link` | null |
 
@@ -1325,7 +1325,7 @@ code-forge block ready B1 --run <run> --json
 Exit 1. Output:
 
 ```text
-{"block":"B1","ready":false,"blockers":[{"code":"worker.down","file":null,"detail":"pinned worker pid <pid> is not running","fix":"code-forge run start --reattach --run <run>","clears_by":"orchestrator"},{"code":"no_green_gates","file":null,"detail":"no green gates run; run: code-forge gates run --r…
+{"block":"B1","ready":false,"blockers":[{"code":"worker.down","file":null,"detail":"pinned worker pid <pid> is not running; last worker exit: signal (stopped by signal terminated) at 2026-01-01T00:00:00Z","fix":"code-forge run start --add-worker --run <run>","clears_by":"orchestrator"},{"code":"no_g…
 ```
 
 #### Exit codes
@@ -1455,7 +1455,7 @@ code-forge block close B1 --run <run> --dry-run --json
 Exit 1. Output:
 
 ```text
-{"block":"B1","dry_run":true,"verb":"close","ready":false,"blockers":[{"code":"worker.down","file":null,"detail":"pinned worker pid <pid> is not running","fix":"code-forge run start --reattach --run <run>","clears_by":"orchestrator"},{"code":"unreviewed","file":"src/a.txt","detail":"no review.approv…
+{"block":"B1","dry_run":true,"verb":"close","ready":false,"blockers":[{"code":"worker.down","file":null,"detail":"pinned worker pid <pid> is not running; last worker exit: signal (stopped by signal terminated) at 2026-01-01T00:00:00Z","fix":"code-forge run start --add-worker --run <run>","clears_by"…
 ```
 
 #### Exit codes
@@ -2366,7 +2366,7 @@ code-forge context pack --run <run> --block B1 --json
 Exit 0. Output:
 
 ```text
-{"path":"<tmp>/cf-tmp/<run>/context/B1.md","tokens":1355,"lines":60,"cut":0,"sha256":"<sha256>"}
+{"path":"<tmp>/cf-tmp/<run>/context/B1.md","tokens":1499,"lines":65,"cut":0,"sha256":"<sha256>"}
 ```
 
 #### Exit codes
@@ -5811,10 +5811,11 @@ Queue one finished file for review, or wait for the reviews of a block.
 code-forge review-file src/a.txt --block B1 --run <run>
 ```
 
-Exit 3. Output:
+Exit 0. Output:
 
 ```text
-{"status":"worker_down","file":"src/a.txt"}
+{"ticket":"<ticket>","status":"queued","file":"src/a.txt","content_hash":"<sha256>"}
+review-file: no live worker for run <run>; started worker pid <pid>
 ```
 
 #### Exit codes
@@ -5868,7 +5869,7 @@ Available commands:
   run human-checks  List the open human checks of a run, or clear one (owner)
   run reload        Load the changed settings into a run
   run start         Start a run, or add or reattach a worker
-  run status        Show the state of a run
+  run status        Show the state of a run and whether its worker is alive
 
 Options:
   -h, --help  Show this help
@@ -5976,12 +5977,17 @@ Exit 0. Output:
   "status": "active",
   "engine": "auto",
   "worker_pinned": true,
+  "worker_live": false,
+  "workers": [
+    {
+      "pid": <pid>,
+      "alive": false,
+      "started_at": "Thu Nov 19 15:46:26 2026"
+    }
+  ],
   "blocks": {},
   "orphans": [],
-  "spent_usd": 0.5,
-  "budget_usd": null,
-  "unknown_usd_sessions": 0
-}
+…
 ```
 
 #### Exit codes
@@ -6329,6 +6335,8 @@ Exit 0. Output:
 
 ```text
 {"runs":[{"run_id":"<run>","status":"active","mode":"plan","spent_usd":0.5,"unknown_usd_sessions":0,"budget_usd":null,"blocks":[],"more":0,"closed":0,"stopped":0},{"run_id":"<run>","status":"active","mode":"plan","spent_usd":0.0134,"unknown_usd_sessions":0,"budget_usd":null,"blocks":[],"more":0,"clo…
+run <run>: no live worker; fix: code-forge run start --add-worker --run <run>
+run <run>: no live worker; fix: code-forge run start --add-worker --run <run>
 ```
 
 #### Exit codes

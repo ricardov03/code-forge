@@ -1075,7 +1075,7 @@
         {
           "command": "code-forge autopilot log --run <run> --json",
           "exit": 0,
-          "output": "[\n  {\n    \"time\": \"2026-01-01T00:00:00Z\",\n    \"event\": \"Question to the owner\",\n    \"block\": null,\n    \"file\": null,\n    \"detail\": \"waive:nit · to owner (session-failed) · ad-<id>\",\n    \"link\": null\n  },\n  {\n    \"time\": \"2026-01-01T00:00:00Z\",\n    \"event\": \"Delegate session\",\n    \"block\": null,\n    \"file\": null,\n    \"detail\": \"L2 · anthropic · status failed\",\n…"
+          "output": "[\n  {\n    \"time\": \"2026-01-01T00:00:00Z\",\n    \"event\": \"Question to the owner\",\n    \"block\": \"B1\",\n    \"file\": \"src/a.txt\",\n    \"detail\": \"review:substitute · to owner (scope review:substitute not-allowed; the owner grants it with code-forge autopilot start --run <run> --until <time> --delegate L2 --allow review:substitute, else the review retries when its provider answers again) · ad-<id>\",\n    \"link\": null\n  },\n  {\n    \"time\": \"2026-01-01T00:00:00Z\",\n    \"event\": \"Question to the owner\",\n    \"block\": null,\n    \"file\": null,\n    \"detail\": \"waive:nit · to owner (session-failed) · ad-<id>\",\n…"
         }
       ],
       "exit_codes": [
@@ -1106,11 +1106,11 @@
           },
           {
             "key": "block",
-            "type": "null"
+            "type": "string"
           },
           {
             "key": "file",
-            "type": "null"
+            "type": "string"
           },
           {
             "key": "detail",
@@ -1809,7 +1809,7 @@
         {
           "command": "code-forge block ready B1 --run <run> --json",
           "exit": 1,
-          "output": "{\"block\":\"B1\",\"ready\":false,\"blockers\":[{\"code\":\"worker.down\",\"file\":null,\"detail\":\"pinned worker pid <pid> is not running\",\"fix\":\"code-forge run start --reattach --run <run>\",\"clears_by\":\"orchestrator\"},{\"code\":\"no_green_gates\",\"file\":null,\"detail\":\"no green gates run; run: code-forge gates run --r…"
+          "output": "{\"block\":\"B1\",\"ready\":false,\"blockers\":[{\"code\":\"worker.down\",\"file\":null,\"detail\":\"pinned worker pid <pid> is not running; last worker exit: signal (stopped by signal terminated) at 2026-01-01T00:00:00Z\",\"fix\":\"code-forge run start --add-worker --run <run>\",\"clears_by\":\"orchestrator\"},{\"code\":\"no_g…"
         }
       ],
       "exit_codes": [
@@ -2036,7 +2036,7 @@
         {
           "command": "code-forge block close B1 --run <run> --dry-run --json",
           "exit": 1,
-          "output": "{\"block\":\"B1\",\"dry_run\":true,\"verb\":\"close\",\"ready\":false,\"blockers\":[{\"code\":\"worker.down\",\"file\":null,\"detail\":\"pinned worker pid <pid> is not running\",\"fix\":\"code-forge run start --reattach --run <run>\",\"clears_by\":\"orchestrator\"},{\"code\":\"unreviewed\",\"file\":\"src/a.txt\",\"detail\":\"no review.approv…"
+          "output": "{\"block\":\"B1\",\"dry_run\":true,\"verb\":\"close\",\"ready\":false,\"blockers\":[{\"code\":\"worker.down\",\"file\":null,\"detail\":\"pinned worker pid <pid> is not running; last worker exit: signal (stopped by signal terminated) at 2026-01-01T00:00:00Z\",\"fix\":\"code-forge run start --add-worker --run <run>\",\"clears_by\"…"
         }
       ],
       "exit_codes": [
@@ -3178,7 +3178,7 @@
         {
           "command": "code-forge context pack --run <run> --block B1 --json",
           "exit": 0,
-          "output": "{\"path\":\"<tmp>/cf-tmp/<run>/context/B1.md\",\"tokens\":1355,\"lines\":60,\"cut\":0,\"sha256\":\"<sha256>\"}"
+          "output": "{\"path\":\"<tmp>/cf-tmp/<run>/context/B1.md\",\"tokens\":1499,\"lines\":65,\"cut\":0,\"sha256\":\"<sha256>\"}"
         }
       ],
       "exit_codes": [
@@ -7289,8 +7289,8 @@
       "examples": [
         {
           "command": "code-forge review-file src/a.txt --block B1 --run <run>",
-          "exit": 3,
-          "output": "{\"status\":\"worker_down\",\"file\":\"src/a.txt\"}"
+          "exit": 0,
+          "output": "{\"ticket\":\"<ticket>\",\"status\":\"queued\",\"file\":\"src/a.txt\",\"content_hash\":\"<sha256>\"}\nreview-file: no live worker for run <run>; started worker pid <pid>"
         }
       ],
       "exit_codes": [
@@ -7331,7 +7331,7 @@
         {
           "command": "code-forge run --help",
           "exit": 0,
-          "output": "Description:\n  Start, check, reload or end a run\n\nUsage:\n  usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id> [--json] | human-checks list --run <id> [--json…\n\nAvailable commands:\n  run end           End a run\n  run human-checks  List the open human checks of a run, or clear one (owner)\n  run reload        Load the changed settings into a run\n  run start         Start a run, or add or reattach a worker\n  run status        Show the state of a run\n\nOptions:\n  -h, --help  Show this help"
+          "output": "Description:\n  Start, check, reload or end a run\n\nUsage:\n  usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id> [--json] | human-checks list --run <id> [--json…\n\nAvailable commands:\n  run end           End a run\n  run human-checks  List the open human checks of a run, or clear one (owner)\n  run reload        Load the changed settings into a run\n  run start         Start a run, or add or reattach a worker\n  run status        Show the state of a run and whether its worker is alive\n\nOptions:\n  -h, --help  Show this help"
         }
       ],
       "exit_codes": [
@@ -7467,7 +7467,7 @@
         {
           "command": "code-forge run status --run <run>",
           "exit": 0,
-          "output": "{\n  \"run_id\": \"<run>\",\n  \"status\": \"active\",\n  \"engine\": \"auto\",\n  \"worker_pinned\": true,\n  \"blocks\": {},\n  \"orphans\": [],\n  \"spent_usd\": 0.5,\n  \"budget_usd\": null,\n  \"unknown_usd_sessions\": 0\n}"
+          "output": "{\n  \"run_id\": \"<run>\",\n  \"status\": \"active\",\n  \"engine\": \"auto\",\n  \"worker_pinned\": true,\n  \"worker_live\": false,\n  \"workers\": [\n    {\n      \"pid\": <pid>,\n      \"alive\": false,\n      \"started_at\": \"Thu Nov 19 15:46:26 2026\"\n    }\n  ],\n  \"blocks\": {},\n  \"orphans\": [],\n…"
         }
       ],
       "exit_codes": [
@@ -7925,7 +7925,7 @@
         {
           "command": "code-forge status --json",
           "exit": 0,
-          "output": "{\"runs\":[{\"run_id\":\"<run>\",\"status\":\"active\",\"mode\":\"plan\",\"spent_usd\":0.5,\"unknown_usd_sessions\":0,\"budget_usd\":null,\"blocks\":[],\"more\":0,\"closed\":0,\"stopped\":0},{\"run_id\":\"<run>\",\"status\":\"active\",\"mode\":\"plan\",\"spent_usd\":0.0134,\"unknown_usd_sessions\":0,\"budget_usd\":null,\"blocks\":[],\"more\":0,\"clo…"
+          "output": "{\"runs\":[{\"run_id\":\"<run>\",\"status\":\"active\",\"mode\":\"plan\",\"spent_usd\":0.5,\"unknown_usd_sessions\":0,\"budget_usd\":null,\"blocks\":[],\"more\":0,\"closed\":0,\"stopped\":0},{\"run_id\":\"<run>\",\"status\":\"active\",\"mode\":\"plan\",\"spent_usd\":0.0134,\"unknown_usd_sessions\":0,\"budget_usd\":null,\"blocks\":[],\"more\":0,\"clo…\nrun <run>: no live worker; fix: code-forge run start --add-worker --run <run>\nrun <run>: no live worker; fix: code-forge run start --add-worker --run <run>"
         }
       ],
       "exit_codes": [
