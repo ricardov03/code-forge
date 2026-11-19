@@ -37,6 +37,10 @@ waits on a second real consumer (plan §10.4, Q17).
 - `TestB788WorkerOpFailureStartsWithoutJev/signed_out` no longer fails on a loaded machine: only the hanging-`op` case uses the short 300 ms budget, and the `run start` worker tests wait up to 60 s for a worker that announces or exits at once (B794, B798)
 - Three tests no longer fail at random on a loaded machine (B909). The process-sweep tests (`TestB511SweepStopsGoWorkersOfEndedRuns`, `TestRunStartSweepStops`) wait for a stopped child to be reaped before the fake clock moves on. Before, a late SIGTERM let the fake 2 s grace end after about 80 ms of real time, so the sweep also sent SIGKILL (`[terminated killed]`). The test that builds the native binary now builds it once per test process and retries one failed build. A Go build cache trim running at the same time had failed it with `could not import ... no such file`. The B529 foreign process now lives 1 h instead of 30 s, and the hanging-`op` case of B788 is bounded at 60 s instead of 10 s.
 
+### Fixed
+
+- `status --help`, `decisions [list] --help` and `docs [sync|path] --help` (also `-h`) print the help page (Description, Usage, Options) and exit 0, like every other command; before they exited 2 with `unknown flag "--help"` or the bare usage line on stderr (B877)
+
 ## [0.25.1] — 2026-11-19
 
 ### Added

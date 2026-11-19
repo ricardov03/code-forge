@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 
 	"github.com/ricardov03/code-forge/native/canon"
 	"github.com/ricardov03/code-forge/native/config"
@@ -17,6 +18,14 @@ func init() {
 }
 
 func statusCommand(args []string) int {
+	// B877: --help (or -h) anywhere prints the usage on stdout and exits 0;
+	// the router adds the Description and Options around it.
+	for _, arg := range args {
+		if metaIsHelp(arg) {
+			fmt.Fprint(safeStdout, statusUsage)
+			return 0
+		}
+	}
 	if code, ok := directStatus(args); ok {
 		return code
 	}
