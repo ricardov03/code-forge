@@ -147,7 +147,8 @@ func TestB885CustomerRunStatusAgreesWithBlockReady(t *testing.T) {
 	alive("after run start")
 
 	// The customer's sequence: the first worker is gone, a worker is added
-	// from a shell that exits at once, then that worker exits too.
+	// from a shell that exits at once, then that worker exits too. The added
+	// worker re-pinned the run to itself at boot, so it is the one pin (B905).
 	b885Stop(t, run)
 	f.must(t, "bash -c 'code-forge run start --add-worker --run "+run+"'")
 	if got := b884Workers(run); len(got) != 1 {
@@ -158,11 +159,11 @@ func TestB885CustomerRunStatusAgreesWithBlockReady(t *testing.T) {
 
 	doc, errText := b885RunStatus(t, f, run)
 	pins := b885Pins(t, doc)
-	if doc["worker_live"] != false || doc["worker_pinned"] != true || len(pins) < 2 || strings.Contains(fmt.Sprint(pins), "true") || errText != fixLine {
+	if doc["worker_live"] != false || doc["worker_pinned"] != true || len(pins) != 1 || strings.Contains(fmt.Sprint(pins), "true") || errText != fixLine {
 		t.Fatalf("run status with no live worker: %v\nstderr %q", doc, errText)
 	}
 	_, ready, readyErr := f.sh(t, "code-forge block ready B1 --run "+run)
-	if text := ready + readyErr; !strings.Contains(text, "worker.down") || !strings.Contains(text, "no pinned worker is running") ||
+	if text := ready + readyErr; !strings.Contains(text, "worker.down") || !regexp.MustCompile(`pinned worker pid \d+ is not running`).MatchString(text) ||
 		!strings.Contains(text, "fix: code-forge run start --add-worker --run "+run) {
 		t.Fatalf("block ready disagrees:\n%s", text)
 	}

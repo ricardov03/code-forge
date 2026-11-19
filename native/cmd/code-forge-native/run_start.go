@@ -434,10 +434,15 @@ func runPinLocked(home, runID string, pid float64, add bool) (ledger.Object, err
 		} else if runTruthy(current.Get("worker")) {
 			pins = []any{current.Get("worker")}
 		}
+		// B905: a launched worker that found every pin dead has already
+		// re-pinned the run to itself at boot; its pin is not added twice.
+		already, others := runSplitPin(pins, pid, *started)
 		event := "worker.reattach"
 		if add {
 			event = "worker.add"
-			current.Set("workers", append(append([]any{}, pins...), pin))
+			if !already {
+				current.Set("workers", append(append([]any{}, pins...), pin))
+			}
 		} else {
 			history := []any{}
 			if old := current.Get("worker_history"); old != nil {
@@ -447,7 +452,7 @@ func runPinLocked(home, runID string, pid float64, add bool) (ledger.Object, err
 				}
 				history = append(history, list...)
 			}
-			current.Set("worker_history", append(history, pins...))
+			current.Set("worker_history", append(history, others...))
 			current.Set("workers", []any{pin})
 		}
 		current.Set("worker", current.Get("workers").([]any)[0])
@@ -461,6 +466,25 @@ func runPinLocked(home, runID string, pid float64, add bool) (ledger.Object, err
 		return nil
 	})
 	return saved, err
+}
+
+// runSplitPin reports whether pins already hold the pin of pid started at
+// startedAt (B905), and the pins that are not that one.
+func runSplitPin(pins []any, pid float64, startedAt string) (bool, []any) {
+	found, others := false, []any{}
+	want := runNormalize(startedAt)
+	for _, raw := range pins {
+		if p, isObject := raw.(ledger.Object); isObject && p.Get("pid") == pid {
+			if at, isString := p.Get("started_at").(string); isString && want != nil {
+				if got := runNormalize(at); got != nil && *got == *want {
+					found = true
+					continue
+				}
+			}
+		}
+		others = append(others, raw)
+	}
+	return found, others
 }
 
 // runRepin is repinWorker with expectPid: pin only the launched worker.
