@@ -62,8 +62,22 @@ func prepareValidate(args []string) (func(stdout, stderr io.Writer) int, handove
 			// B787: the YAML error with its file, line and column
 			message = e.Kind + ": " + cpLoadErrorText(file, e)
 		}
+		next := ""
+		if e.Kind == "not-found" { // B875: the next step after a missing config
+			next = "code-forge init"
+			if defaultFile := filepath.Join(cwd, config.Filename); file != defaultFile {
+				if _, statErr := os.Stat(defaultFile); statErr == nil {
+					next = "code-forge validate"
+				}
+			}
+		}
 		return func(_, stderr io.Writer) int {
-			nodeLog(stderr, "error", maskTokens(message))
+			var text strings.Builder
+			nodeLog(&text, "error", maskTokens(message))
+			if next != "" {
+				text.WriteString(refusalNext(next))
+			}
+			fmt.Fprint(stderr, text.String())
 			return 1
 		}, 0, true
 	}

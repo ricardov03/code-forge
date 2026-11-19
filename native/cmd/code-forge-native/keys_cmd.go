@@ -824,7 +824,7 @@ func keysDecide(args []string, cwd string) keysRun {
 			for _, e := range errs {
 				r.write(stderr, p.name+": "+e+"\n")
 			}
-			r.write(stderr, p.name+": not found\n")
+			r.write(stderr, p.name+": not found\n"+refusalNext("code-forge keys set "+p.name)) // B875
 			return 1
 		}
 		if value := os.Getenv(envName); value != "" {

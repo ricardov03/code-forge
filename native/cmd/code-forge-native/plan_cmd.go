@@ -89,14 +89,15 @@ func preparePlan(args []string) (func(stdout, stderr io.Writer) int, handoverRea
 	planPath := resolve(positionals[1])
 	text, err := os.ReadFile(planPath)
 	if err != nil {
-		return refuse("plan: the plan file cannot be read\n")
+		// B875: name the path and the next step
+		return refuse("plan: the plan file cannot be read: " + positionals[1] + "\n" + refusalNext("code-forge plan check <path of a readable plan file>"))
 	}
 	factsPath, factsText := "", []byte(nil)
 	facts, hasFacts := flags["facts"]
 	if hasFacts {
 		factsPath = resolve(facts)
 		if factsText, err = os.ReadFile(factsPath); err != nil {
-			return refuse("plan: --facts cannot be read\n")
+			return refuse("plan: --facts cannot be read: " + facts + "\n" + refusalNext("code-forge plan check "+refusalShellArg(positionals[1])+" --facts <path of a readable facts sheet>"))
 		}
 	}
 	return preparePlanCheck(cwd, planPath, factsPath, hasFacts, nodeUTF8(string(text)), nodeUTF8(string(factsText)), flags)

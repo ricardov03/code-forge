@@ -28,7 +28,7 @@ func TestB694KeysLinuxNoBindingFileChain(t *testing.T) {
 	}{
 		{[]string{"list"}, 0, "NAME\tSOURCE\tBACKEND\tEXPIRES\njev\tuser\tfile\tnever\n", b694Warn},
 		{[]string{"test", "jev"}, 0, "jev: ok source=file expires=never\n", b694Warn},
-		{[]string{"test", "nope"}, 1, "", b694Warn + "nope: not found\n"},
+		{[]string{"test", "nope"}, 1, "", b694Warn + "nope: not found\nnext: code-forge keys set nope\n"},
 		{[]string{"remove", "jev"}, 0, "removed jev (1 backend)\n", b694Warn},
 		{[]string{"list"}, 0, "NAME\tSOURCE\tBACKEND\tEXPIRES\n", b694Warn},
 	} {
@@ -140,7 +140,7 @@ func TestB694KeysLinkWithoutItemID(t *testing.T) {
 		t.Fatalf("set: exit %d stdout %q stderr %q", code, stdout, stderr)
 	}
 	code, stdout, stderr = b456Keys(t, project, "test", "foo", "--ref", link)
-	if code != 1 || stdout != "" || stderr != b694Warn+"foo: not found\n" {
+	if code != 1 || stdout != "" || stderr != b694Warn+"foo: not found\nnext: code-forge keys set foo\n" {
 		t.Fatalf("test: exit %d stdout %q stderr %q", code, stdout, stderr)
 	}
 }

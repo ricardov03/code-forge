@@ -257,7 +257,7 @@ func TestB471ValidateArgsAndLoadErrors(t *testing.T) {
 		{[]string{"validate", "--file"}, 2, "", "[code-forge:error] --file requires a path argument\n"},
 		{[]string{"validate", "--file", "--x"}, 2, "", "[code-forge:error] --file requires a path argument\n"},
 		{[]string{"validate", "--bogus"}, 2, "", "[code-forge:error] unknown argument: --bogus\n"},
-		{[]string{"validate"}, 1, "", "[code-forge:error] not-found: no config file at " + filepath.Join(repo, ".code-forge.yml") + "\n"},
+		{[]string{"validate"}, 1, "", "[code-forge:error] not-found: no config file at " + filepath.Join(repo, ".code-forge.yml") + "\nnext: code-forge init\n"},
 		{[]string{"validate", "--file", "sub/../sub/c.yml"}, 0, "[code-forge:info] " + filepath.Join(repo, "sub", "c.yml") + ": valid (0 warnings)\n", ""},
 	})
 }
