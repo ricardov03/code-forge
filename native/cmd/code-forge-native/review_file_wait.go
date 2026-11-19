@@ -234,6 +234,7 @@ func reviewWaitTicketLoop(ctx context.Context, interrupted func() int, args []st
 	deadline := time.Now().Add(maxWait)
 	marker := filepath.Join(root, ".code-forge", "queue", ticket+".done")
 	down := 0
+	healed, healRun, heal := false, "", reviewHealResult{}
 	for {
 		if ctx.Err() != nil {
 			return interrupted()
@@ -261,10 +262,23 @@ func reviewWaitTicketLoop(ctx context.Context, interrupted func() int, args []st
 		} else {
 			down++
 		}
+		if down >= 2 && !healed {
+			// B826: start the ticket's run worker once, then wait on.
+			healed = true
+			if run := reviewHealTicketRun(root, ticket); run != "" {
+				heal = reviewHeal(root, run)
+				reviewHealSay(run, heal)
+				healRun = run
+				if heal.pid != 0 {
+					down = 0
+					continue
+				}
+			}
+		}
 		if down >= 2 {
 			if _, err := os.Stat(marker); err != nil {
 				before := reviewWaitBreadcrumb()
-				data, _ := ledger.Stringify(ledger.Object{{Key: "ticket", Value: ticket}, {Key: "status", Value: "worker_down"}}, false)
+				data, _ := ledger.Stringify(reviewHealDown(ledger.Object{{Key: "ticket", Value: ticket}, {Key: "status", Value: "worker_down"}}, healRun, heal), false)
 				fmt.Fprintln(safeStdout, string(data))
 				reviewWaitFailure(args, 3, nil, before)
 				return 3
