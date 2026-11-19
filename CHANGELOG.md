@@ -19,16 +19,14 @@ waits on a second real consumer (plan §10.4, Q17).
 - `run status` says whether the run's worker is alive, the same way `block ready` checks it: new fields `worker_live` and `workers` (each pin with `pid`, `alive`, `started_at`; `worker_pinned` stays and only says a pin is recorded), and with no live pin one stderr line `run <r>: no live worker; fix: code-forge run start --add-worker --run <r>`; `status` prints that line too and `doctor` shows it as a `run-worker` WARN row (one probe for all). B885
 - Coder worktrees are guarded: `block open` installs a git `reference-transaction` hook that refuses, from the coder worktree, any move or delete of the base branch (`git branch -f main`, `update-ref`, `fetch ...:main`) and of other block branches, naming the ref and the safe command (`git fetch origin`, then `FETCH_HEAD`); only `block land` and `cf-release release`/`docs-block` pass with the guard token. Every context pack lists the git rules (no moving main, no force push, no `rm -rf`, no `git stash`, no `git reset --hard`) and the one push command. `block land` refuses at step `main-reflog` when main's reflog has entries since the last land that are not a land, release or fast-forward commit, and lists them. `doctor` shows the `ref guard` row (B797)
 - `block land` merges append-only conflicts by itself (`land.auto_resolve`, default on): `CHANGELOG.md` bullets (main's lines first, then the block's, one `### Kind` heading per kind, no repeated entry), rows of the markdown tables in `land.auto_resolve.tables` (default `docs/native-engine.md`) and the `land.auto_resolve.generated` files it re-generates; the merge then runs the same gates as a clean one and writes a `land.resolved` ledger row. Any other conflict, in a single land or a batch, aborts the merge with main unchanged, prints the files with their kinds and one `next:` step, and writes a `land.conflict` row with the files and kinds. `land.auto_resolve: false` keeps the old behaviour, except that a single land no longer leaves main mid-merge (B795)
-
-### Fixed
-
-- `TestB788WorkerOpFailureStartsWithoutJev/signed_out` no longer fails on a loaded machine: only the hanging-`op` case uses the short 300 ms budget, and the `run start` worker tests wait up to 60 s for a worker that announces or exits at once (B794, B798)
-### Added
-
 - **`code-forge audit commands [--json] [--out <file>]`** runs every command with `--help` and an unknown flag in a
   throwaway HOME (stubbed tools, network blocked) and writes `docs/audits/audit-<version>.md`; `npm run release --
   major` refuses a major bump until that file is committed with no open high problem (each one names a landed block);
   `--no-checks` does not skip it, `--allow-no-audit` does with a loud warning (B802).
+
+### Fixed
+
+- `TestB788WorkerOpFailureStartsWithoutJev/signed_out` no longer fails on a loaded machine: only the hanging-`op` case uses the short 300 ms budget, and the `run start` worker tests wait up to 60 s for a worker that announces or exits at once (B794, B798)
 
 ## [0.25.1] — 2026-11-19
 
