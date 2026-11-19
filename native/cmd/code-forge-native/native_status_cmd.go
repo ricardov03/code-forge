@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/runstatus"
@@ -26,7 +27,14 @@ import (
 // JSON.stringify writes them. Without HOME, Node's os.homedir() is the
 // password file's home. B690b: every line is answered in Go; an id outside
 // printable ASCII sorts after the printable ASCII ids (no Node companion).
+// B879 (B801 audit P07): the Node router's "no default export" line is gone.
+// Records piped in are answered and the verb exits 0; an argument or a
+// terminal on stdin is a usage error: exit 2, the usage, the refusal line and
+// `next: code-forge status` (the error log keeps the refusal line).
 func init() { routes["native-status"] = runNativeStatus }
+
+// nsStdinTTY reports a terminal on stdin (a test seam).
+var nsStdinTTY = func() bool { return humanask.IsTTY(os.Stdin) }
 
 const nativeStatusUsageText = "usage: code-forge native-status\n  Internal daemon companion: reads JSON records and rows from standard input.\n"
 
@@ -70,6 +78,9 @@ func runNativeStatus(args []string) int {
 		return refuseUnported(append([]string{"native-status"}, args...), hRouterHintState)
 	}
 	before := gatesBreadcrumbName("native-status")
+	if len(args) > 0 || nsStdinTTY() {
+		return nativeStatusRefuse(args, before)
+	}
 	home := nsHome{dir: os.Getenv("HOME"), ok: true}
 	_, homeSet := os.LookupEnv("HOME")
 	if !homeSet {
@@ -86,13 +97,21 @@ func runNativeStatus(args []string) int {
 	if !homeSet {
 		_ = os.Unsetenv("HOME")
 	}
-	if done {
-		return code
-	}
+	_ = done
+	return code
+}
+
+// nativeStatusRefuse is the usage error for an argument or a terminal stdin.
+func nativeStatusRefuse(args []string, before []any) int {
 	stderr := &contextErrWriter{}
-	fmt.Fprint(stderr, "code-forge: verb \"native-status\" has no default export function\n")
-	routerHint(nativeVerbFailure("native-status", "", args, 1, stderr.last, before), 1)
-	return 1
+	fmt.Fprint(stderr, nativeStatusUsageText)
+	line := "native-status: reads status records piped on stdin; it takes no arguments"
+	if len(args) > 0 {
+		line = "native-status: takes no arguments (got " + args[0] + "); it reads status records piped on stdin"
+	}
+	fmt.Fprint(stderr, line+"\n"+refusalNext("code-forge status"))
+	routerHint(nativeVerbFailure("native-status", "", args, 2, stderr.last, before), 2)
+	return 2
 }
 
 // nativeStatusServe answers every line until EOF. done is never true since

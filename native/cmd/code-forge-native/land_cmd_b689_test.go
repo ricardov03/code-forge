@@ -9,17 +9,17 @@ import (
 	"testing"
 )
 
-// B689: Node's output for the top-level `code-forge land`, recorded by
-// running the Node router (CODE_FORGE_NATIVE=0) in a temp HOME on 2026-11-15.
-// src/cli/land.mjs has no default export, so every form but a leading
-// --help/-h refuses with exit 1; the errors.jsonl entry fingerprint is Node's.
+// B689: the top-level `code-forge land` (Node's usage). B879 (B801 audit
+// P07): every form but a leading --help/-h is a usage error: exit 2, the
+// usage, a line that names block land and its next line; the error log keeps
+// the refusal line (not the next line) and Go never hands it to Node.
 const (
-	b689NodeStderr = "code-forge: verb \"land\" has no default export function\n"
-	b689NodeUsage  = "usage: code-forge land\n  Used internally by code-forge block land; this module has no standalone handler.\n"
-	b689NodeFP     = "014b7ffb7d5f"
+	b689Refusal   = "land: not a command on its own; code-forge block land lands a closed block"
+	b689NodeUsage = "usage: code-forge land\n  Used internally by code-forge block land; this module has no standalone handler.\n"
+	b689Stderr    = b689NodeUsage + b689Refusal + "\nnext: code-forge block land <id> --run <run>\n"
 )
 
-func TestB689LandRefusesInGoLikeNode(t *testing.T) {
+func TestB689LandRefusesInGo(t *testing.T) {
 	for _, tc := range []struct {
 		args  []string
 		flags []any
@@ -36,7 +36,7 @@ func TestB689LandRefusesInGoLikeNode(t *testing.T) {
 		// binary (doctor keys' op_timeout) can leave one set.
 		nativeReportedKind, nativeCrashStack = "", nil
 		code, stdout, stderr := runCaptured(t, tc.args...)
-		if code != 1 || stdout != "" || stderr != b689NodeStderr {
+		if code != 2 || stdout != "" || stderr != b689Stderr {
 			t.Fatalf("%v: code=%d stdout=%q stderr=%q", tc.args, code, stdout, stderr)
 		}
 		if _, err := os.Stat(filepath.Join(home, ".code-forge", "native", "handovers.jsonl")); err == nil {
@@ -50,8 +50,8 @@ func TestB689LandRefusesInGoLikeNode(t *testing.T) {
 		if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &entry); err != nil {
 			t.Fatalf("%v: entry %q: %v", tc.args, data, err)
 		}
-		want := map[string]any{"verb": "land", "sub": nil, "flags": tc.flags, "exit": float64(1), "kind": "error",
-			"message": strings.TrimSuffix(b689NodeStderr, "\n"), "stack": nil, "cleaned": []any{}, "fp": b689NodeFP, "before": []any{}}
+		want := map[string]any{"verb": "land", "sub": nil, "flags": tc.flags, "exit": float64(2), "kind": "usage",
+			"message": b689Refusal, "stack": nil, "cleaned": []any{}, "before": []any{}}
 		for key, value := range want {
 			if !reflect.DeepEqual(entry[key], value) {
 				t.Errorf("%v: entry %s = %#v, want %#v", tc.args, key, entry[key], value)
