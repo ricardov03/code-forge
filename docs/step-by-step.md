@@ -938,7 +938,7 @@ Stop the release on a failed check. Fix it, rerun the checks, and use the projec
 - [Getting started](getting-started.md): setup details and key sources.
 - [How it works](how-it-works.md): the work loop and review depth.
 - [Brief mode](brief-mode.md), [review only](review-only.md), and [autopilot](autopilot.md): alternate flows.
-- [Command reference](reference/commands.md): generated CLI usage.
+- [Command reference](reference/commands.md): every command with its flags, examples, exit codes and `--json` shape ([commands.json](reference/commands.json) for agents).
 - [Config reference](reference/config.md): settings and defaults.
 - [Native engine](native-engine.md): how the Go binary starts and what it needs.
 - [Agent skill](../skill/SKILL.md): the orchestrator's full rules.

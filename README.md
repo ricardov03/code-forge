@@ -45,6 +45,9 @@ When ready, use `--jev-ref <1Password item ID|link|op://vault/item/field>` or
   [references](skill/references/). Model IDs, efforts, commands, thresholds, and paths come from
   config or the CLI.
 - A JSON Schema for `.code-forge.yml` and its generated [configuration reference](docs/reference/config.md).
+- A generated [command reference](docs/reference/commands.md): per command its purpose, when to use it,
+  flags, examples with real output, exit codes, the `--json` shape and related commands; agents read the
+  same data in [commands.json](docs/reference/commands.json).
 - An [example repository](examples/) and a [build-block map](docs/reference/blocks.json).
 
 ## 5-minute quickstart

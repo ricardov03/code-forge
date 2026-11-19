@@ -1,0 +1,2029 @@
+{
+  "version": 1,
+  "commands": {
+    "author": {
+      "examples": [
+        {
+          "args": "author --job plan --brief plans/brief.md --timeout 5",
+          "exit": 2,
+          "out": "author: facts sheet required: run forge facts first"
+        }
+      ]
+    },
+    "autopilot": {
+      "examples": [
+        {
+          "args": "autopilot --help",
+          "exit": 0,
+          "out": "Description:\n  Let a delegate decide for the owner within a grant\n\nUsage:\n  usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run …\n\nAvailable commands:\n  autopilot approve   Change one setting until a set time (owner)\n  autopilot ask       Ask the delegate one question inside the grant\n  autopilot binnacle  Print or write the autopilot run summary\n  autopilot digest    List what the autopilot decided, with ratify and revert commands\n  autopilot extend    Move the grant end time or deadline later (owner)\n  autopilot level     Record the lane (level) the delegate chose\n  autopilot log       Print every autopilot event of a run\n  autopilot ratify    Accept one autopilot decision from the digest (owner)\n…"
+        }
+      ]
+    },
+    "autopilot approve": {
+      "examples": [
+        {
+          "args": "autopilot approve --run {run} --key review.close_wait_s --value 5 --until {until2}",
+          "exit": 2,
+          "out": "autopilot approve: no terminal to confirm; only the owner approves a change, in a terminal (approve has no --yes)"
+        }
+      ]
+    },
+    "autopilot ask": {
+      "examples": [
+        {
+          "args": "autopilot ask --run {run} --scope waive:nit --question 'waive it?' --options waive,fix --json",
+          "exit": 3,
+          "out": "{\"run\":\"<run>\",\"scope\":\"waive:nit\",\"grant_id\":\"ap-<id>\",\"decision_id\":\"ad-<id>\",\"answered\":false,\"acted\":false,\"to_owner\":true,\"reason\":\"session failed (exit 1)\",\"decision\":null,\"confidence\":null,\"within_scope\":null,\"escalate\":null,\"answer_reason\":null}\nlevel=L2 provider=anthropic model=claude-opus-5-5 effort=none fallback_step=0"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "run",
+            "type": "string"
+          },
+          {
+            "key": "scope",
+            "type": "string"
+          },
+          {
+            "key": "grant_id",
+            "type": "string"
+          },
+          {
+            "key": "decision_id",
+            "type": "string"
+          },
+          {
+            "key": "answered",
+            "type": "boolean"
+          },
+          {
+            "key": "acted",
+            "type": "boolean"
+          },
+          {
+            "key": "to_owner",
+            "type": "boolean"
+          },
+          {
+            "key": "reason",
+            "type": "string"
+          },
+          {
+            "key": "decision",
+            "type": "null"
+          },
+          {
+            "key": "confidence",
+            "type": "null"
+          },
+          {
+            "key": "within_scope",
+            "type": "null"
+          },
+          {
+            "key": "escalate",
+            "type": "null"
+          },
+          {
+            "key": "answer_reason",
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "autopilot binnacle": {
+      "examples": [
+        {
+          "args": "autopilot binnacle --run {run} --json",
+          "exit": 0,
+          "out": "{\n  \"title\": \"Autopilot run <run>\",\n  \"byline\": {\n    \"date\": \"2026-11-19\",\n    \"owner\": \"T\"\n  },\n  \"status\": [\n    {\n      \"item\": \"Result\",\n      \"value\": \"0 of 1 block closed\"\n    },\n    {\n      \"item\": \"Stack/PRs\",\n      \"value\": \"none recorded\"\n    },\n…"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "several",
+        "keys": [
+          {
+            "key": "title",
+            "type": "string"
+          },
+          {
+            "key": "byline",
+            "type": "object"
+          },
+          {
+            "key": "status",
+            "type": "array"
+          },
+          {
+            "key": "decisions",
+            "type": "array"
+          },
+          {
+            "key": "blocks",
+            "type": "array"
+          },
+          {
+            "key": "open_questions",
+            "type": "array"
+          },
+          {
+            "key": "owner_actions",
+            "type": "array"
+          },
+          {
+            "key": "incidents",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "timeline",
+            "type": "array"
+          }
+        ]
+      }
+    },
+    "autopilot digest": {
+      "examples": [
+        {
+          "args": "autopilot digest --run {run} --json",
+          "exit": 0,
+          "out": "{\"run\":\"<run>\",\"rows\":[{\"id\":\"dg-<id>\",\"kind\":\"extend\",\"block\":null,\"file\":null,\"when\":\"2026-01-01T00:00:00Z\",\"why\":\"grant ap-<id> extended from 2026-01-01T00:00:00Z to 2026-01-01T00:00:00Z\",\"ratify\":\"code-forge autopilot ratify dg-<id> --run <run>\",\"revert\":null,\"revert_note\":\"an extend is undone b…"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "run",
+            "type": "string"
+          },
+          {
+            "key": "rows",
+            "type": "array"
+          }
+        ]
+      }
+    },
+    "autopilot extend": {
+      "examples": [
+        {
+          "args": "autopilot extend --run {run} --until {until2} --yes",
+          "exit": 0,
+          "out": "autopilot run <run>: grant ap-<id> now runs until 2026-01-01T00:00:00Z (1h 59m; was 2026-01-01T00:00:00Z)"
+        }
+      ]
+    },
+    "autopilot level": {
+      "examples": [
+        {
+          "args": "autopilot level --run {run} --block B1 --plan plans/plan.md --decision d-missing",
+          "exit": 2,
+          "out": "autopilot level: block B1 is not in the plan's block table"
+        }
+      ]
+    },
+    "autopilot log": {
+      "examples": [
+        {
+          "args": "autopilot log --run {run} --json",
+          "exit": 0,
+          "out": "[\n  {\n    \"time\": \"2026-01-01T00:00:00Z\",\n    \"event\": \"Question to the owner\",\n    \"block\": null,\n    \"file\": null,\n    \"detail\": \"waive:nit · to owner (session-failed) · ad-<id>\",\n    \"link\": null\n  },\n  {\n    \"time\": \"2026-01-01T00:00:00Z\",\n    \"event\": \"Delegate session\",\n    \"block\": null,\n    \"file\": null,\n    \"detail\": \"L2 · anthropic · status failed\",\n…"
+        }
+      ],
+      "json": {
+        "kind": "array of objects",
+        "lines": "several",
+        "keys": [
+          {
+            "key": "time",
+            "type": "string"
+          },
+          {
+            "key": "event",
+            "type": "string"
+          },
+          {
+            "key": "block",
+            "type": "null"
+          },
+          {
+            "key": "file",
+            "type": "null"
+          },
+          {
+            "key": "detail",
+            "type": "string"
+          },
+          {
+            "key": "link",
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "autopilot ratify": {
+      "examples": [
+        {
+          "args": "autopilot ratify row-missing --run {run} --json",
+          "exit": 1,
+          "out": "autopilot ratify: digest-row-not-open: run <run> has no open digest row row-missing (autopilot digest --run <run> lists them); nothing was recorded"
+        }
+      ]
+    },
+    "autopilot revert": {
+      "examples": [
+        {
+          "args": "autopilot revert row-missing --run {run} --json",
+          "exit": 1,
+          "out": "autopilot revert: digest-row-not-open: run <run> has no open digest row row-missing (autopilot digest --run <run> lists them); nothing was recorded"
+        }
+      ]
+    },
+    "autopilot round": {
+      "examples": [
+        {
+          "args": "autopilot round --run {run} --block B1 --file src/a.txt --decision d-missing",
+          "exit": 1,
+          "out": "autopilot round: refused — the grant refuses (not-allowed); the question goes to the owner"
+        }
+      ]
+    },
+    "autopilot start": {
+      "examples": [
+        {
+          "args": "autopilot start --run {run} --until {until} --delegate L2 --allow waive:nit --yes",
+          "exit": 0,
+          "out": "autopilot run <run>: grant ap-<id> active until 2026-01-01T00:00:00Z (0h 59m)\n  delegate L2 · allow waive:nit · budget no caps · stop at 90%"
+        }
+      ]
+    },
+    "autopilot status": {
+      "examples": [
+        {
+          "args": "autopilot status --run {run} --json",
+          "exit": 0,
+          "out": "{\n  \"run\": \"<run>\",\n  \"state\": \"active\",\n  \"grant_id\": \"ap-<id>\",\n  \"delegate\": \"L2\",\n  \"until\": \"2026-01-01T00:00:00Z\",\n  \"time_left_s\": 3599,\n  \"scopes\": [\n    \"waive:nit\"\n  ],\n  \"deny\": [],\n  \"fixed_deny\": [\n    \"waive:critical\",\n    \"waive:proof\",\n    \"reviews:skip\",\n…"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "several",
+        "keys": [
+          {
+            "key": "run",
+            "type": "string"
+          },
+          {
+            "key": "state",
+            "type": "string"
+          },
+          {
+            "key": "grant_id",
+            "type": "string"
+          },
+          {
+            "key": "delegate",
+            "type": "string"
+          },
+          {
+            "key": "until",
+            "type": "string"
+          },
+          {
+            "key": "time_left_s",
+            "type": "number"
+          },
+          {
+            "key": "scopes",
+            "type": "array"
+          },
+          {
+            "key": "deny",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "fixed_deny",
+            "type": "array"
+          },
+          {
+            "key": "caps",
+            "type": "object"
+          },
+          {
+            "key": "stop_at",
+            "type": "number"
+          },
+          {
+            "key": "spend",
+            "type": "object"
+          },
+          {
+            "key": "paused",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "link",
+            "type": "null"
+          },
+          {
+            "key": "files",
+            "type": "object"
+          },
+          {
+            "key": "started_at",
+            "type": "string"
+          },
+          {
+            "key": "stopped_at",
+            "type": "null"
+          },
+          {
+            "key": "expired_at",
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "autopilot stop": {
+      "examples": [
+        {
+          "args": "autopilot stop --run {run}",
+          "exit": 0,
+          "out": "autopilot run <run>: grant ap-<id> stopped\n  link      none\n  binnacle  ~/.code-forge/runs/<run>/autopilot-binnacle.md\n  full log  ~/.code-forge/runs/<run>/autopilot-log.md"
+        }
+      ]
+    },
+    "autopilot waive": {
+      "examples": [
+        {
+          "args": "autopilot waive --run {run} --block B1 --file src/a.txt --finding F1 --severity nit --reason r --decision d-missing",
+          "exit": 1,
+          "out": "autopilot waive: refused — finding F1 in src/a.txt has no verifiable recorded severity (not-recorded); critical findings are never delegated"
+        }
+      ]
+    },
+    "block": {
+      "examples": [
+        {
+          "args": "block --help",
+          "exit": 0,
+          "out": "Description:\n  Open, check, close and land the blocks of a run\n\nUsage:\n  usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]\n         code-forge block ready <id> --run <r> [--transcript <file>] [--report <file>]\n         code-forge block rebase <id> --run <r> --accept-landed\n         code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--dry-run] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n         code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n         code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n         code-forge block accept-hit <id> --run <r> [--rule <rule-id>] --line <n> --transcript <path> --reason <text>\n         code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>\n         code-forge block ack-waivers <id> --run <r>\n         code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>] [--dry-run]\n         code-forge block settle <id> --run <r> [--report <file>] [--transcript <file>]\n…"
+        }
+      ]
+    },
+    "block accept-hit": {
+      "examples": [
+        {
+          "args": "block accept-hit B1 --run {run} --line 1 --transcript plans/tr.txt --reason ok --json",
+          "exit": 2,
+          "out": "block accept-hit needs the human at a terminal to confirm; nothing was recorded (there is no --yes)"
+        }
+      ]
+    },
+    "block ack-waivers": {
+      "examples": [
+        {
+          "args": "block ack-waivers B1 --run {run} --json",
+          "exit": 1,
+          "out": "block ack-waivers: ack-waivers-none: the block has no counted agent waivers; nothing was recorded"
+        }
+      ]
+    },
+    "block amend-acceptance": {
+      "examples": [
+        {
+          "args": "block amend-acceptance B1 --run {run} --acceptance plans/acc.yml --reason same --json",
+          "exit": 2,
+          "out": "block amend-acceptance needs the human at a terminal to confirm; nothing was recorded (there is no --yes)"
+        }
+      ]
+    },
+    "block attempt": {
+      "examples": [
+        {
+          "args": "block attempt B1 --run {run} --json",
+          "exit": 0,
+          "out": "{\"block\":\"B1\",\"event\":\"attempt\",\"attempt\":2}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "block",
+            "type": "string"
+          },
+          {
+            "key": "event",
+            "type": "string"
+          },
+          {
+            "key": "attempt",
+            "type": "number"
+          }
+        ]
+      }
+    },
+    "block claim": {
+      "examples": [
+        {
+          "args": "block claim B1 src/b.txt --run {run} --json",
+          "exit": 0,
+          "out": "{\"block\":\"B1\",\"event\":\"claimed\",\"path\":\"src/b.txt\"}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "block",
+            "type": "string"
+          },
+          {
+            "key": "event",
+            "type": "string"
+          },
+          {
+            "key": "path",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "block close": {
+      "examples": [
+        {
+          "args": "block close B1 --run {run} --dry-run --json",
+          "exit": 1,
+          "out": "{\"block\":\"B1\",\"dry_run\":true,\"verb\":\"close\",\"ready\":false,\"blockers\":[{\"code\":\"worker.down\",\"file\":null,\"detail\":\"pinned worker pid <pid> is not running\",\"fix\":\"code-forge run start --reattach --run <run>\",\"clears_by\":\"orchestrator\"},{\"code\":\"unreviewed\",\"file\":\"src/a.txt\",\"detail\":\"no review.approv…"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "block",
+            "type": "string"
+          },
+          {
+            "key": "dry_run",
+            "type": "boolean"
+          },
+          {
+            "key": "verb",
+            "type": "string"
+          },
+          {
+            "key": "ready",
+            "type": "boolean"
+          },
+          {
+            "key": "blockers",
+            "type": "array"
+          }
+        ]
+      }
+    },
+    "block human-pass": {
+      "examples": [
+        {
+          "args": "block human-pass B1 --run {run} --note looked --dry-run --json",
+          "exit": 1,
+          "out": "{\"block\":\"B1\",\"dry_run\":true,\"verb\":\"human-pass\",\"ready\":false,\"blockers\":[{\"code\":\"not-awaiting\",\"file\":null,\"detail\":\"block B1 is not awaiting a human check\",\"fix\":\"code-forge block close B1 --run <run>\",\"clears_by\":\"orchestrator\"}]}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "block",
+            "type": "string"
+          },
+          {
+            "key": "dry_run",
+            "type": "boolean"
+          },
+          {
+            "key": "verb",
+            "type": "string"
+          },
+          {
+            "key": "ready",
+            "type": "boolean"
+          },
+          {
+            "key": "blockers",
+            "type": "array"
+          }
+        ]
+      }
+    },
+    "block land": {
+      "examples": [
+        {
+          "args": "block land B1 --run {run} --report plans/report.json --transcript plans/t.txt --max 2s --json",
+          "exit": 1,
+          "out": "{\"block\":\"B1\",\"event\":\"refused\",\"step\":\"join\",\"reason\":\"block has no recorded worktree and branch\",\"next\":\"code-forge review-file --wait-block B1 --run <run>\"}\nblock B1 land stopped at join: block has no recorded worktree and branch\nnext: code-forge review-file --wait-block B1 --run <run>"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "block",
+            "type": "string"
+          },
+          {
+            "key": "event",
+            "type": "string"
+          },
+          {
+            "key": "step",
+            "type": "string"
+          },
+          {
+            "key": "reason",
+            "type": "string"
+          },
+          {
+            "key": "next",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "block open": {
+      "examples": [
+        {
+          "args": "block open B1 --run {run} --level L1 --owned src/a.txt test/a.test.sh --acceptance plans/acc.yml --brief plans/brief.md --json",
+          "exit": 0,
+          "out": "{\"block\":\"B1\",\"event\":\"open\",\"level\":\"L1\",\"asked\":\"L1\",\"source\":\"flag\",\"kind\":\"code\",\"attempt\":1,\"base_sha\":\"<sha>\",\"tests\":0,\"worktree\":null,\"brief\":\"BRIEF plans/brief.md lines=1 sha=651ebc00 <<<EOM>>>\"}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "block",
+            "type": "string"
+          },
+          {
+            "key": "event",
+            "type": "string"
+          },
+          {
+            "key": "level",
+            "type": "string"
+          },
+          {
+            "key": "asked",
+            "type": "string"
+          },
+          {
+            "key": "source",
+            "type": "string"
+          },
+          {
+            "key": "kind",
+            "type": "string"
+          },
+          {
+            "key": "attempt",
+            "type": "number"
+          },
+          {
+            "key": "base_sha",
+            "type": "string"
+          },
+          {
+            "key": "tests",
+            "type": "number"
+          },
+          {
+            "key": "worktree",
+            "type": "null"
+          },
+          {
+            "key": "brief",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "block ready": {
+      "examples": [
+        {
+          "args": "block ready B1 --run {run} --json",
+          "exit": 1,
+          "out": "{\"block\":\"B1\",\"ready\":false,\"blockers\":[{\"code\":\"worker.down\",\"file\":null,\"detail\":\"pinned worker pid <pid> is not running\",\"fix\":\"code-forge run start --reattach --run <run>\",\"clears_by\":\"orchestrator\"},{\"code\":\"no_green_gates\",\"file\":null,\"detail\":\"no green gates run; run: code-forge gates run --r…"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "block",
+            "type": "string"
+          },
+          {
+            "key": "ready",
+            "type": "boolean"
+          },
+          {
+            "key": "blockers",
+            "type": "array"
+          }
+        ]
+      }
+    },
+    "block rebase": {
+      "examples": [
+        {
+          "args": "block rebase B1 --run {run} --json",
+          "exit": 0,
+          "out": "{\"block\":\"B1\",\"event\":\"rebased\",\"old_base\":\"<sha>\",\"new_base\":\"<sha>\"}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "block",
+            "type": "string"
+          },
+          {
+            "key": "event",
+            "type": "string"
+          },
+          {
+            "key": "old_base",
+            "type": "string"
+          },
+          {
+            "key": "new_base",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "block reopen": {
+      "examples": [
+        {
+          "args": "block reopen B1 --run {run} --file src/a.txt --reason again --yes --json",
+          "exit": 1,
+          "out": "block reopen: reopen-not-stopped: src/a.txt has no review state; only a stopped or lost file is reopened; nothing was recorded"
+        }
+      ]
+    },
+    "block settle": {
+      "examples": [
+        {
+          "args": "block settle B1 --run {run} --json",
+          "exit": 1,
+          "out": "{\"block\":\"B1\",\"outcome\":\"failed\",\"exit\":1,\"rounds\":1,\"actions\":[{\"fix\":\"gates\",\"code\":\"no_green_gates\",\"command\":\"code-forge gates run --run <run> --block B1\",\"result\":\"ok\"},{\"fix\":\"reviews\",\"code\":\"unreviewed\",\"command\":\"code-forge review-file --wait-block B1 --run <run>\",\"result\":\"failed\",\"detail\"…\nsettle B1: gates ok\nsettle B1: reviews failed: the run worker is down; run code-forge run start --reattach --run <run>"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "block",
+            "type": "string"
+          },
+          {
+            "key": "outcome",
+            "type": "string"
+          },
+          {
+            "key": "exit",
+            "type": "number"
+          },
+          {
+            "key": "rounds",
+            "type": "number"
+          },
+          {
+            "key": "actions",
+            "type": "array"
+          },
+          {
+            "key": "remaining",
+            "type": "array"
+          },
+          {
+            "key": "failed_fix",
+            "type": "string"
+          },
+          {
+            "key": "detail",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "block stop": {
+      "examples": [
+        {
+          "args": "block stop B1 --run {run} --reason done --json",
+          "exit": 0,
+          "out": "{\"block\":\"B1\",\"event\":\"stopped\"}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "block",
+            "type": "string"
+          },
+          {
+            "key": "event",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "block unwaive": {
+      "examples": [
+        {
+          "args": "block unwaive B1 F1 --run {run} --file src/a.txt --reason undo --json",
+          "exit": 1,
+          "out": "block unwaive: unwaive-no-agent-waiver: no verified agent waiver for this block, file and finding; nothing was recorded"
+        }
+      ]
+    },
+    "block waive": {
+      "examples": [
+        {
+          "args": "block waive B1 F1 --run {run} --file src/a.txt --reason test --json",
+          "exit": 2,
+          "out": "block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)"
+        }
+      ]
+    },
+    "ci": {
+      "examples": [
+        {
+          "args": "ci --help",
+          "exit": 0,
+          "out": "Description:\n  Watch the CI runs of one commit\n\nUsage:\n  usage: code-forge ci watch --sha <sha> [--run <r>] [--timeout 30m] [--cwd <dir>] [--json]\n\nAvailable commands:\n  ci watch  Wait for the CI runs of a commit; name failed tests\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "ci watch": {
+      "examples": [
+        {
+          "args": "ci watch",
+          "exit": 2,
+          "out": "ci watch: --sha is required\nusage: code-forge ci watch --sha <sha> [--run <r>] [--timeout 30m] [--cwd <dir>] [--json]"
+        },
+        {
+          "args": "ci watch --sha {head} --json --timeout 1s",
+          "exit": 3,
+          "out": "{\"sha\":\"<sha>\",\"status\":\"timeout\",\"runs\":[],\"message\":\"CI still running for <sha> after 1s (last gh error: gh run list: exit status 1)\"}\nci watch: gh run list: exit status 1\nci watch: gh run list: exit status 1\nci watch: CI still running for <sha> after 1s (last gh error: gh run list: exit status 1)"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "sha",
+            "type": "string"
+          },
+          {
+            "key": "status",
+            "type": "string"
+          },
+          {
+            "key": "runs",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "message",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "cloud-coder": {
+      "examples": [
+        {
+          "args": "cloud-coder --run {run} --block B1",
+          "exit": 1,
+          "out": "{\"block\":\"B1\",\"status\":\"refused\",\"reason\":\"no-worktree\",\"message\":\"block B1 has no worktree; open it with a worktree first\"}\ncloud-coder: block B1 has no worktree; open it with a worktree first"
+        }
+      ]
+    },
+    "config": {
+      "examples": [
+        {
+          "args": "config --help",
+          "exit": 0,
+          "out": "Description:\n  Check and fix the project configuration\n\nUsage:\n  usage: code-forge config fix [--dry-run] [--file <path>]\n\nAvailable commands:\n  config fix  Rewrite old config shapes this release refuses\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "config fix": {
+      "examples": [
+        {
+          "args": "config fix --dry-run",
+          "exit": 0,
+          "out": "<repo>/.code-forge.yml: config ok"
+        }
+      ]
+    },
+    "context": {
+      "examples": [
+        {
+          "args": "context --help",
+          "exit": 0,
+          "out": "Description:\n  Build the context a coder gets\n\nUsage:\n  usage: code-forge context pack --run <id> --block <id> [--json] [--path-only]\n\nAvailable commands:\n  context pack  Build the context pack of a block\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "context pack": {
+      "examples": [
+        {
+          "args": "context pack --run {run} --block B1 --json",
+          "exit": 0,
+          "out": "{\"path\":\"<tmp>/cf-tmp/<run>/context/B1.md\",\"tokens\":1355,\"lines\":60,\"cut\":0,\"sha256\":\"<sha256>\"}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "path",
+            "type": "string"
+          },
+          {
+            "key": "tokens",
+            "type": "number"
+          },
+          {
+            "key": "lines",
+            "type": "number"
+          },
+          {
+            "key": "cut",
+            "type": "number"
+          },
+          {
+            "key": "sha256",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "decisions": {
+      "examples": [
+        {
+          "args": "decisions --help",
+          "exit": 2,
+          "out": "usage: code-forge decisions list [--run <r>] [--json]"
+        }
+      ]
+    },
+    "decisions list": {
+      "examples": [
+        {
+          "args": "decisions list --json",
+          "exit": 0,
+          "out": "[]"
+        }
+      ],
+      "json": {
+        "kind": "array",
+        "lines": "one",
+        "keys": []
+      }
+    },
+    "docs": {
+      "examples": [
+        {
+          "args": "docs --help",
+          "exit": 2,
+          "out": "usage: code-forge docs sync|path [--json]"
+        }
+      ]
+    },
+    "docs path": {
+      "examples": [
+        {
+          "args": "docs path",
+          "exit": 1,
+          "out": "docs: none; run code-forge docs sync"
+        },
+        {
+          "args": "docs path --json",
+          "exit": 1,
+          "out": "docs: none; run code-forge docs sync"
+        }
+      ]
+    },
+    "docs sync": {
+      "examples": [
+        {
+          "args": "docs sync --json",
+          "exit": 0,
+          "out": "{\"status\":\"none\",\"reason\":\"offline or unreachable; no packed copy\"}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "status",
+            "type": "string"
+          },
+          {
+            "key": "reason",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "doctor": {
+      "examples": [
+        {
+          "args": "doctor --quick --json",
+          "exit": 0,
+          "out": "{\"ok\":true,\"counts\":{\"OK\":1,\"WARN\":2,\"FAIL\":0,\"INFO\":0},\"rows\":[{\"id\":\"config\",\"status\":\"OK\",\"label\":\"config\",\"detail\":\"valid\"},{\"id\":\"links\",\"status\":\"WARN\",\"label\":\"links\",\"detail\":\"no harness link recorded (run code-forge init)\"},{\"id\":\"keys\",\"status\":\"WARN\",\"label\":\"keys\",\"detail\":\"jev key not r…\ndoctor: 1 ok, 2 warn, 0 fail"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "counts",
+            "type": "object"
+          },
+          {
+            "key": "rows",
+            "type": "array"
+          }
+        ]
+      }
+    },
+    "facts": {
+      "examples": [
+        {
+          "args": "facts --brief plans/brief.md --timeout 5",
+          "exit": 1,
+          "out": "level=L0 provider=anthropic model=claude-haiku-4-5-20251001 effort=none fallback_step=0\nfacts: failed (exit 1)"
+        }
+      ]
+    },
+    "gates": {
+      "examples": [
+        {
+          "args": "gates --help",
+          "exit": 0,
+          "out": "Description:\n  Run the project gates and the safety checks\n\nUsage:\n  usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]\n    gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); without --changed, over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n    gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.\n    gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.\n    gates run --run --block --changed: the Go test selection (the block's tests, tests that import a changed file); never the full suite; an empty selection skips the test gate.\n    gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.\n    gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.\n\nAvailable commands:\n  gates acceptance       Check each acceptance clause has a passing test\n  gates detect           Find the test, lint, type and format commands\n…"
+        }
+      ]
+    },
+    "gates acceptance": {
+      "examples": [
+        {
+          "args": "gates acceptance --clauses plans/c.json --tap plans/t.tap",
+          "exit": 0,
+          "out": "{\"ok\":true}"
+        }
+      ]
+    },
+    "gates detect": {
+      "examples": [
+        {
+          "args": "gates detect",
+          "exit": 0,
+          "out": "{\"stack\":\"unknown\",\"test\":[\"sh\",\"test/a.test.sh\"],\"lint\":null,\"types\":null,\"format\":null,\"rerun_failed\":1}"
+        }
+      ]
+    },
+    "gates run": {
+      "examples": [
+        {
+          "args": "gates run --run {run} --block B1",
+          "exit": 0,
+          "out": "{\"stack\":\"unknown\",\"results\":[{\"gate\":\"test\",\"duration_ms\":0,\"argv\":[\"sh\",\"test/a.test.sh\"],\"skipped\":false,\"ok\":true,\"code\":0,\"stdout\":\"\",\"stderr\":\"\"},{\"gate\":\"lint\",\"duration_ms\":0,\"argv\":null,\"skipped\":true,\"ok\":true,\"code\":null,\"stdout\":\"\",\"stderr\":\"\"},{\"gate\":\"types\",\"duration_ms\":0,\"argv\":null…"
+        }
+      ]
+    },
+    "gates safe-edit": {
+      "examples": [
+        {
+          "args": "gates safe-edit --base {head}",
+          "exit": 0,
+          "out": "{\"ok\":true}"
+        }
+      ]
+    },
+    "gates scope": {
+      "examples": [
+        {
+          "args": "gates scope --base {head}",
+          "exit": 0,
+          "out": "{\"tracked\":[],\"untracked\":[],\"all\":[]}"
+        }
+      ]
+    },
+    "gates secret-scan": {
+      "examples": [
+        {
+          "args": "gates secret-scan --file src/a.txt",
+          "exit": 0,
+          "out": "{\"hits\":[],\"count\":0}"
+        }
+      ]
+    },
+    "gates transcript-grep": {
+      "examples": [
+        {
+          "args": "gates transcript-grep --file plans/t.txt",
+          "exit": 0,
+          "out": "{\"ok\":true,\"hits\":[]}"
+        }
+      ]
+    },
+    "heal": {
+      "examples": [
+        {
+          "args": "heal --help",
+          "exit": 0,
+          "out": "Description:\n  Retry failures that pass by themselves\n\nUsage:\n  usage: code-forge heal list [--run R] [--json] | show <id> [--run R] [--json] | run --run R [--once|--watch] [--max-tries N] [--json]\n\nAvailable commands:\n  heal list  List the heal queue\n  heal run   Retry the heal items of a run\n  heal show  Show one heal item\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "heal list": {
+      "examples": [
+        {
+          "args": "heal list --json",
+          "exit": 0,
+          "out": "[]"
+        }
+      ],
+      "json": {
+        "kind": "array",
+        "lines": "one",
+        "keys": []
+      }
+    },
+    "heal run": {
+      "examples": [
+        {
+          "args": "heal run --run {run} --once --json",
+          "exit": 0,
+          "out": "{\"healed\":0,\"needs_coder\":0,\"run\":\"<run>\"}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "healed",
+            "type": "number"
+          },
+          {
+            "key": "needs_coder",
+            "type": "number"
+          },
+          {
+            "key": "run",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "heal show": {
+      "examples": [
+        {
+          "args": "heal show h-missing --json",
+          "exit": 1,
+          "out": "heal: no item h-missing"
+        }
+      ]
+    },
+    "help": {
+      "examples": [
+        {
+          "args": "help block open",
+          "exit": 0,
+          "out": "Description:\n  Start a block: owned files, acceptance tests, brief\n\nUsage:\n  usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>] [--allow-api-mismatch] [--json] [--help|-h]\n    --help, -h  Print this usage and exit without changing state.\n    --json      Print one JSON line on success instead of text.\n    --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n                         Human checks use {clause, kind: human_check} without tests.\n    --brief <file>       A file inside the repository, not inline text.\n                         Its uses: lines (<file>: <symbol>(<param names>)) must fit the base:\n                         each named parameter exists, else exit 2 with an api-fit: line.\n                         Its extends: lines (<file>: <symbol>) own that file for additive change.\n    --allow-api-mismatch  Open anyway; print each api-fit: line as a note (native only).\n\n…"
+        },
+        {
+          "args": "help --json",
+          "exit": 0,
+          "out": "[{\"name\":\"author\",\"summary\":\"Write or harden a plan draft from a brief\",\"owner\":false,\"group\":\"\"},{\"name\":\"autopilot\",\"summary\":\"Let a delegate decide for the owner within a grant\",\"owner\":false,\"group\":\"autopilot\"},{\"name\":\"autopilot approve\",\"summary\":\"Change one setting until a set time\",\"owner\":…"
+        }
+      ],
+      "json": {
+        "kind": "array of objects",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "name",
+            "type": "string"
+          },
+          {
+            "key": "summary",
+            "type": "string"
+          },
+          {
+            "key": "owner",
+            "type": "boolean"
+          },
+          {
+            "key": "group",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "init": {
+      "examples": [
+        {
+          "args": "init --no-interaction --provider anthropic --no-jev --skip-doctor",
+          "exit": 1,
+          "out": "code-forge: init is not supported in this case yet (init-links). Please report it: code-forge logs report"
+        }
+      ]
+    },
+    "jev": {
+      "examples": [
+        {
+          "args": "jev --help",
+          "exit": 0,
+          "out": "Description:\n  Ask Jev a recorded decision question\n\nUsage:\n  usage: code-forge jev ask <question-id> --state <file> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]\n\nAvailable commands:\n  jev ask  Ask Jev one decision question\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "jev ask": {
+      "examples": [
+        {
+          "args": "jev ask q1 --state plans/st.json",
+          "exit": 2,
+          "out": "jev ask: unknown question id \"q1\""
+        }
+      ]
+    },
+    "keys": {
+      "examples": [
+        {
+          "args": "keys --help",
+          "exit": 0,
+          "out": "Description:\n  Store, list, test or remove credential references\n\nUsage:\n  usage: code-forge keys list | set <name> [--op <item-id|link|op://ref> [--cache-hours <1-24>]] | test <name> [--ref <ref>] | remove <name>\n\nAvailable commands:\n  keys list    List the stored credential references\n  keys remove  Remove a stored credential reference\n  keys set     Store a credential reference\n  keys test    Check a credential reference works\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "keys list": {
+      "examples": [
+        {
+          "args": "keys list",
+          "exit": 0,
+          "out": "NAME\tSOURCE\tBACKEND\tEXPIRES\nWARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store"
+        }
+      ]
+    },
+    "keys remove": {
+      "examples": [
+        {
+          "args": "keys remove jev",
+          "exit": 0,
+          "out": "removed jev (0 backends)\nWARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store"
+        }
+      ]
+    },
+    "keys set": {
+      "examples": [
+        {
+          "args": "keys set jev --op op://vault/item/field",
+          "exit": 1,
+          "out": "1Password may ask you to approve access: check the 1Password window (Touch ID or password).\nWARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store\njev: 1Password CLI failed (exit 1); run `op read op://vault/item/field` yourself to see why"
+        }
+      ]
+    },
+    "keys test": {
+      "examples": [
+        {
+          "args": "keys test jev",
+          "exit": 1,
+          "out": "WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store\njev: not found"
+        }
+      ]
+    },
+    "land": {
+      "examples": [
+        {
+          "args": "land --help",
+          "exit": 0,
+          "out": "Description:\n  Landing code that block land uses\n\nUsage:\n  usage: code-forge land\n    Used internally by code-forge block land; this module has no standalone handler.\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "ledger": {
+      "examples": [
+        {
+          "args": "ledger --help",
+          "exit": 0,
+          "out": "Description:\n  Read the ledger or record outcomes and spend\n\nUsage:\n  usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note \"...\"] | outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...\n\nAvailable commands:\n  ledger add             Add coder spend that code-forge did not see\n  ledger calibration     Show how reliable the recorded answers were\n  ledger outcome         Record the CI result of a pull request\n  ledger outside-review  Record an outside review of a pull request\n  ledger tail            Print the last ledger rows\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "ledger add": {
+      "examples": [
+        {
+          "args": "ledger add coder --run {run} --block B1 --usd 0.5 --note manual",
+          "exit": 0,
+          "out": "recorded coder spend $0.5000 for run <run> block B1 · run total $0.5000"
+        }
+      ]
+    },
+    "ledger calibration": {
+      "examples": [
+        {
+          "args": "ledger calibration --slug demo",
+          "exit": 0,
+          "out": "{\n  \"buckets\": {\n    \"0.50-0.60\": {\n      \"correct\": 0,\n      \"wrong\": 0,\n      \"unknown\": 0\n    },\n    \"0.60-0.70\": {\n      \"correct\": 0,\n      \"wrong\": 0,\n      \"unknown\": 0\n    },\n    \"0.70-0.80\": {\n      \"correct\": 0,\n      \"wrong\": 0,\n…"
+        }
+      ]
+    },
+    "ledger outcome": {
+      "examples": [
+        {
+          "args": "ledger outcome --pr 1 --ci green --slug demo",
+          "exit": 0,
+          "out": "recorded outcome for PR #1: green"
+        }
+      ]
+    },
+    "ledger outside-review": {
+      "examples": [
+        {
+          "args": "ledger outside-review --run {run} --pr 1 --rounds 1 --findings 0",
+          "exit": 0,
+          "out": "outside_review pr 1 · rounds 1 · findings 0 · blocks -"
+        }
+      ]
+    },
+    "ledger tail": {
+      "examples": [
+        {
+          "args": "ledger tail --slug demo --n 1",
+          "exit": 0,
+          "out": "{\"event\":\"outcome\",\"outcome\":\"correct\",\"outcome_source\":\"ci\",\"pr\":1,\"ts\":\"2026-01-01T00:00:00Z\",\"tokens_source\":null,\"cost_source\":null}"
+        }
+      ]
+    },
+    "list": {
+      "examples": [
+        {
+          "args": "list",
+          "exit": 0,
+          "out": "INSTALLED\nHARNESS\tSCOPE\tMETHOD\tTARGET\tRESOLVES\n(none)\n\nHARNESSES\nID\tLABEL\tDETECTED\tVERIFIED\tPROJECT PATH\nclaude\tClaude Code\tyes\tyes\t.claude/skills\ncodex\tCodex CLI\tyes\tyes\t.agents/skills\ngrok\tGrok CLI\tyes\tyes\t.agents/skills\ngemini\tGemini CLI\tyes\tUNVERIFIED\t.agents/skills\ncursor\tCursor\tno\tyes\t.agents/skills\ncopilot\tCopilot\tno\tyes\t.agents/skills"
+        }
+      ]
+    },
+    "logs": {
+      "examples": [
+        {
+          "args": "logs --json",
+          "exit": 0,
+          "out": "{\"errors\":[]}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "errors",
+            "type": "array (empty in the example)"
+          }
+        ]
+      }
+    },
+    "logs clear": {
+      "examples": [
+        {
+          "args": "logs clear --yes",
+          "exit": 0,
+          "out": "no errors logged"
+        }
+      ]
+    },
+    "logs path": {
+      "examples": [
+        {
+          "args": "logs path",
+          "exit": 0,
+          "out": "~/.code-forge/logs/errors.jsonl"
+        }
+      ]
+    },
+    "logs report": {
+      "examples": [
+        {
+          "args": "logs report --dry-run --no-ai",
+          "exit": 0,
+          "out": "no errors logged"
+        }
+      ]
+    },
+    "logs summary": {
+      "examples": [
+        {
+          "args": "logs summary --json",
+          "exit": 0,
+          "out": "{\"days\":30,\"counts\":[],\"warnings\":[]}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "days",
+            "type": "number"
+          },
+          {
+            "key": "counts",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "warnings",
+            "type": "array (empty in the example)"
+          }
+        ]
+      }
+    },
+    "models": {
+      "examples": [
+        {
+          "args": "models",
+          "exit": 0,
+          "out": "[code-forge:info] anthropic:\n[code-forge:info]   claude-haiku-4-5-20251001\n[code-forge:info]   claude-sonnet-5\n[code-forge:info]   claude-opus-5-5\n[code-forge:info]   claude-fable-5-1\n[code-forge:info]   claude-fable-5-2\n[code-forge:info] openai:\n[code-forge:info]   gpt-6-luna\n[code-forge:info]   gpt-6-sol\n[code-forge:info]   gpt-6-astra\n[code-forge:info] xai:\n[code-forge:info]   grok-4.7\n[code-forge:info]   grok-4.7-build-fast\n[code-forge:info]   grok-4.6\n[code-forge:info]   grok-4.5"
+        }
+      ]
+    },
+    "native-status": {
+      "examples": [
+        {
+          "args": "native-status --help",
+          "exit": 0,
+          "out": "Description:\n  Daemon companion for run status\n\nUsage:\n  usage: code-forge native-status\n    Internal daemon companion: reads JSON records and rows from standard input.\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "outcome": {
+      "examples": [
+        {
+          "args": "outcome --help",
+          "exit": 0,
+          "out": "Description:\n  Seal, check or record a specialist outcome file\n\nUsage:\n  usage: code-forge outcome seal|check|record <outcome.json> [--root <dir>] [--step <id> (record only)] [--json (check or record)]\n\nAvailable commands:\n  outcome check   Check an outcome file and its files\n  outcome record  Check an outcome and save it in the ledger\n  outcome seal    Fill the file hashes of an outcome file\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "outcome check": {
+      "examples": [
+        {
+          "args": "outcome check plans/outcome.json --json",
+          "exit": 0,
+          "out": "{\"ok\":true,\"problems\":[]}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "problems",
+            "type": "array (empty in the example)"
+          }
+        ]
+      }
+    },
+    "outcome record": {
+      "examples": [
+        {
+          "args": "outcome record plans/outcome.json --step s1 --json",
+          "exit": 1,
+          "out": "{\"ok\":false,\"problems\":[\"no project run to sign the outcome; start a run first\"]}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "problems",
+            "type": "array"
+          }
+        ]
+      }
+    },
+    "outcome seal": {
+      "examples": [
+        {
+          "args": "outcome seal plans/outcome.json",
+          "exit": 0,
+          "out": ""
+        }
+      ]
+    },
+    "pipeline": {
+      "examples": [
+        {
+          "args": "pipeline --help",
+          "exit": 0,
+          "out": "Description:\n  Show the steps of a pipeline\n\nUsage:\n  usage: code-forge pipeline status|next [--json] [--root <dir>]\n\nAvailable commands:\n  pipeline next    List the pipeline steps ready to run\n  pipeline status  Show the state of each pipeline step\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "pipeline next": {
+      "examples": [
+        {
+          "args": "pipeline next --json",
+          "exit": 0,
+          "out": "{\"exists\":false}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "exists",
+            "type": "boolean"
+          }
+        ]
+      }
+    },
+    "pipeline status": {
+      "examples": [
+        {
+          "args": "pipeline status --json",
+          "exit": 0,
+          "out": "{\"exists\":false}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "exists",
+            "type": "boolean"
+          }
+        ]
+      }
+    },
+    "plan": {
+      "examples": [
+        {
+          "args": "plan --help",
+          "exit": 0,
+          "out": "Description:\n  Check a plan before coding\n\nUsage:\n  usage: code-forge plan check <plan-file> [--facts <sheet>] [--slug <slug>]\n\nAvailable commands:\n  plan check  Check a plan against its facts and rules\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "plan check": {
+      "examples": [
+        {
+          "args": "plan check plans/brief.md",
+          "exit": 1,
+          "out": "no block table found (a table with id, owned_files and acceptance columns)"
+        }
+      ]
+    },
+    "proof": {
+      "examples": [
+        {
+          "args": "proof --help",
+          "exit": 0,
+          "out": "Description:\n  Prove the tests: tiers, exports and red-green\n\nUsage:\n  usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]\n         code-forge proof export <block> --run <r> [--remove] · proof lock|unlock <block> --run <r>\n         code-forge proof restore <block> --run <r>\n         code-forge proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert|assertion-deletion]\n\nAvailable commands:\n  proof export     Export a block's tests to a clean copy\n  proof lock       Lock a block's test files\n  proof red-green  Prove a test fails without the fix\n  proof restore    Put back the files a proof changed\n  proof tier       Show the proof tier of a file\n…"
+        }
+      ]
+    },
+    "proof export": {
+      "examples": [
+        {
+          "args": "proof export B1 --run {run}",
+          "exit": 0,
+          "out": "{\"dir\":\"<repo>/.code-forge/export/B1\",\"base\":\"<sha>\",\"restored\":[],\"untracked\":[],\"owned\":[\"src/a.txt\",\"test/a.test.sh\"],\"removed\":[],\"linked\":[],\"copied\":[]}"
+        }
+      ]
+    },
+    "proof lock": {
+      "examples": [
+        {
+          "args": "proof lock B1 --run {run}",
+          "exit": 0,
+          "out": "{\"locked\":{\"block\":\"B1\",\"acquired_at\":\"2026-01-01T00:00:00Z\"}}"
+        }
+      ]
+    },
+    "proof red-green": {
+      "examples": [
+        {
+          "args": "proof red-green B1 --run {run} --test test/a.test.sh",
+          "exit": 1,
+          "out": "proof red-green: only node:test files (.mjs, .cjs, .js) have a filtered test command in this version — add a proof.runners entry for it (see proof.md §2)"
+        }
+      ]
+    },
+    "proof restore": {
+      "examples": [
+        {
+          "args": "proof restore B1 --run {run}",
+          "exit": 1,
+          "out": "proof restore: no red→green journal for block B1 — nothing to restore"
+        }
+      ]
+    },
+    "proof tier": {
+      "examples": [
+        {
+          "args": "proof tier --file src/a.txt --risk 1",
+          "exit": 0,
+          "out": "{\"file\":\"src/a.txt\",\"tier\":\"light\",\"reason\":\"default\"}"
+        }
+      ]
+    },
+    "proof unlock": {
+      "examples": [
+        {
+          "args": "proof unlock B1 --run {run}",
+          "exit": 0,
+          "out": "{\"unlocked\":\"B1\"}"
+        }
+      ]
+    },
+    "queue": {
+      "examples": [
+        {
+          "args": "queue --json",
+          "exit": 0,
+          "out": "{\"holders\":[],\"waiters\":[],\"changed_slots\":1}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "holders",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "waiters",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "changed_slots",
+            "type": "number"
+          }
+        ]
+      }
+    },
+    "queue run": {
+      "examples": [
+        {
+          "args": "queue run -- true",
+          "exit": 0,
+          "out": ""
+        },
+        {
+          "args": "queue run -- false",
+          "exit": 1,
+          "out": ""
+        }
+      ]
+    },
+    "queue status": {
+      "examples": [
+        {
+          "args": "queue status --json",
+          "exit": 0,
+          "out": "{\"holders\":[],\"waiters\":[],\"changed_slots\":1}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "holders",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "waiters",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "changed_slots",
+            "type": "number"
+          }
+        ]
+      }
+    },
+    "remove": {
+      "examples": [
+        {
+          "args": "remove --help",
+          "exit": 0,
+          "out": "Description:\n  Remove skill installations\n\nUsage:\n  usage: code-forge remove [<harness>] [--scope project|global]\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "report": {
+      "examples": [
+        {
+          "args": "report --slug demo --json",
+          "exit": 0,
+          "out": "{\n  \"cost_per_block\": [\n    {\n      \"run\": \"<run>\",\n      \"block\": \"R-<id>\",\n      \"level\": \"L2\",\n      \"lane\": null,\n      \"completed\": false,\n      \"reviewUsd\": 0.0134,\n      \"coderUsd\": 0,\n      \"s1s2Usd\": 0,\n      \"factsUsd\": 0,\n      \"otherUsd\": 0,\n      \"proofTimeMs\": 0,\n      \"wallMs\": 0,\n…"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "several",
+        "keys": [
+          {
+            "key": "cost_per_block",
+            "type": "array"
+          },
+          {
+            "key": "lane_distribution",
+            "type": "array"
+          },
+          {
+            "key": "escalations",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "s1_calls_per_block",
+            "type": "object"
+          },
+          {
+            "key": "s2_rate",
+            "type": "object"
+          },
+          {
+            "key": "review_budget",
+            "type": "object"
+          },
+          {
+            "key": "review_depth_and_findings",
+            "type": "object"
+          },
+          {
+            "key": "fix_rounds",
+            "type": "object"
+          },
+          {
+            "key": "review_unavailable",
+            "type": "object"
+          },
+          {
+            "key": "proof_time",
+            "type": "object"
+          },
+          {
+            "key": "forecast_vs_actual_lines",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "blocks_stopped_at_l3",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "run_stop_counts",
+            "type": "object"
+          },
+          {
+            "key": "outside_review",
+            "type": "array"
+          },
+          {
+            "key": "agent_waivers",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "pace",
+            "type": "object"
+          },
+          {
+            "key": "run_time",
+            "type": "object"
+          },
+          {
+            "key": "specialist_outcomes",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "resolve": {
+      "examples": [
+        {
+          "args": "resolve L1",
+          "exit": 0,
+          "out": "{\"provider\":\"anthropic\",\"model\":\"claude-sonnet-5\",\"effort\":null,\"fallback\":[],\"cli\":\"claude\"}"
+        }
+      ]
+    },
+    "review": {
+      "examples": [
+        {
+          "args": "review --base HEAD --intent nothing --json --max 5",
+          "exit": 1,
+          "out": "{\"ok\":false,\"base\":\"<sha>\",\"base_from\":\"HEAD\",\"run\":\"<run>\",\"block\":\"R-<id>\",\"files\":[{\"file\":\"plans/outcome.json\",\"result\":\"unavailable\",\"reason\":\"exit\",\"findings\":[]}],\"skipped\":[],\"totals\":{\"files\":1,\"approved\":0,\"unchanged\":0,\"with_findings\":0,\"findings\":0,\"stopped\":0,\"unavailable\":1}}\nreview: base 45585b9cf037 (HEAD) · 1 file · run <run>\nreview: plans/outcome.json  unavailable: exit\nreview: run end exited 1: run end: kill EPERM"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "base",
+            "type": "string"
+          },
+          {
+            "key": "base_from",
+            "type": "string"
+          },
+          {
+            "key": "run",
+            "type": "string"
+          },
+          {
+            "key": "block",
+            "type": "string"
+          },
+          {
+            "key": "files",
+            "type": "array"
+          },
+          {
+            "key": "skipped",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "totals",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "review-file": {
+      "examples": [
+        {
+          "args": "review-file src/a.txt --block B1 --run {run}",
+          "exit": 3,
+          "out": "{\"status\":\"worker_down\",\"file\":\"src/a.txt\"}"
+        }
+      ]
+    },
+    "run": {
+      "examples": [
+        {
+          "args": "run --help",
+          "exit": 0,
+          "out": "Description:\n  Start, check, reload or end a run\n\nUsage:\n  usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id> [--json] | human-checks list --run <id> [--json…\n\nAvailable commands:\n  run end           End a run\n  run human-checks  List the open human checks of a run, or clear one (owner)\n  run reload        Load the changed settings into a run\n  run start         Start a run, or add or reattach a worker\n  run status        Show the state of a run\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "run end": {
+      "examples": [
+        {
+          "args": "run end --run {run} --json",
+          "exit": 0,
+          "out": "{\"run\":\"<run>\",\"ended\":true,\"ended_at\":\"2026-01-01T00:00:00Z\"}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "run",
+            "type": "string"
+          },
+          {
+            "key": "ended",
+            "type": "boolean"
+          },
+          {
+            "key": "ended_at",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "run human-checks": {
+      "examples": [
+        {
+          "args": "run human-checks list --run {run} --json",
+          "exit": 0,
+          "out": "{\"run\":\"<run>\",\"open\":[]}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "run",
+            "type": "string"
+          },
+          {
+            "key": "open",
+            "type": "array (empty in the example)"
+          }
+        ]
+      }
+    },
+    "run reload": {
+      "examples": [
+        {
+          "args": "run reload --run {run}",
+          "exit": 0,
+          "out": "run <run>: no config change"
+        }
+      ]
+    },
+    "run start": {
+      "examples": [
+        {
+          "args": "run start",
+          "exit": 0,
+          "out": "run <run> started · engine auto · worker pid <pid>"
+        }
+      ]
+    },
+    "run status": {
+      "examples": [
+        {
+          "args": "run status --run {run}",
+          "exit": 0,
+          "out": "{\n  \"run_id\": \"<run>\",\n  \"status\": \"active\",\n  \"engine\": \"auto\",\n  \"worker_pinned\": true,\n  \"blocks\": {},\n  \"orphans\": [],\n  \"spent_usd\": 0.5,\n  \"budget_usd\": null,\n  \"unknown_usd_sessions\": 0\n}"
+        }
+      ]
+    },
+    "s2": {
+      "examples": [
+        {
+          "args": "s2 --packet plans/p.json --timeout 5",
+          "exit": 1,
+          "out": "level=L3 provider=anthropic model=claude-fable-5-2 effort=none fallback_step=0\ns2: failed (exit 1)"
+        }
+      ]
+    },
+    "setup": {
+      "examples": [
+        {
+          "args": "setup --help",
+          "exit": 0,
+          "out": "Description:\n  Check the Go binary for this system\n\nUsage:\n  usage: code-forge setup\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "spawn": {
+      "examples": [
+        {
+          "args": "spawn --level L1 --role coder --brief plans/brief.md --print-argv",
+          "exit": 0,
+          "out": "{\"argv\":[\"claude\",\"-p\",\"--model\",\"claude-sonnet-5\",\"--permission-mode\",\"bypassPermissions\",\"--output-format\",\"json\",\"--no-session-persistence\",\"--disallowedTools\",\"Bash(gh pr ready:*)\",\"Bash(gh pr merge:*)\",\"Bash(gh pr close:*)\",\"Bash(gh pr edit --base:*)\",\"Bash(gh pr edit -B:*)\",\"Bash(git push --fo…"
+        }
+      ]
+    },
+    "status": {
+      "examples": [
+        {
+          "args": "status --json",
+          "exit": 0,
+          "out": "{\"runs\":[{\"run_id\":\"<run>\",\"status\":\"active\",\"mode\":\"plan\",\"spent_usd\":0.5,\"unknown_usd_sessions\":0,\"budget_usd\":null,\"blocks\":[],\"more\":0,\"closed\":0,\"stopped\":0},{\"run_id\":\"<run>\",\"status\":\"active\",\"mode\":\"plan\",\"spent_usd\":0.0134,\"unknown_usd_sessions\":0,\"budget_usd\":null,\"blocks\":[],\"more\":0,\"clo…"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "runs",
+            "type": "array"
+          }
+        ]
+      }
+    },
+    "sweep": {
+      "examples": [
+        {
+          "args": "sweep --help",
+          "exit": 0,
+          "out": "Description:\n  Find stale processes; stop them with --apply\n\nUsage:\n  usage: code-forge sweep [--apply] [--json]\n  Dry run by default: list stale workers, dead-run registry children and marked orphans with RSS and total MB.\n  --apply stops proven stale processes with SIGTERM, then SIGKILL after a grace period.\n  Zombies are reported by parent only; neither they nor their parents are signalled. Live engines have no memory limit.\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "tools": {
+      "examples": [
+        {
+          "args": "tools --json",
+          "exit": 0,
+          "out": "{\"tools\":[{\"id\":\"claude\",\"status\":\"installed\",\"version\":null,\"install\":null,\"hint\":null,\"note\":null},{\"id\":\"codex\",\"status\":\"installed\",\"version\":null,\"install\":null,\"hint\":null,\"note\":null},{\"id\":\"gemini\",\"status\":\"installed\",\"version\":null,\"install\":null,\"hint\":null,\"note\":null},{\"id\":\"grok\",\"stat…"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "tools",
+            "type": "array"
+          }
+        ]
+      }
+    },
+    "tools install": {
+      "examples": [
+        {
+          "args": "tools install --dry-run",
+          "exit": 0,
+          "out": "all recommended tools are installed"
+        }
+      ]
+    },
+    "upgrade": {
+      "examples": [
+        {
+          "args": "upgrade --help",
+          "exit": 0,
+          "out": "Description:\n  Refresh the skill installations\n\nUsage:\n  usage: code-forge upgrade [--source <path>] [--plain]\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "validate": {
+      "examples": [
+        {
+          "args": "validate",
+          "exit": 0,
+          "out": "[code-forge:info] <repo>/.code-forge.yml: valid (0 warnings)"
+        }
+      ]
+    },
+    "version": {
+      "examples": [
+        {
+          "args": "version",
+          "exit": 0,
+          "out": "@codedology/code-forge <version>"
+        }
+      ]
+    },
+    "worker": {
+      "examples": [
+        {
+          "args": "worker --help",
+          "exit": 0,
+          "out": "Description:\n  Serve a run's review queue\n\nUsage:\n  usage: code-forge worker --run <id> [--cwd <dir>] [--poll-ms <n>] [--once]\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    }
+  }
+}

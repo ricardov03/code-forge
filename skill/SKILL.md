@@ -90,6 +90,7 @@ Red→green means an assertion failure on old code, then a pass on new code; no 
 
 | when | read |
 |---|---|
+| a command's flags, exit codes or `--json` keys | `docs/reference/commands.json` in the package (`forge docs path` prints the docs folder; one entry per command: usage, flags, examples, exit codes, `json`, related). Never guess a flag or a key |
 | decomposing, forecasting, `plan check` | `references/plan.md`, `templates/plan.md`, `templates/facts-sheet.md` |
 | the author loop and the tranche gate | `references/harden.md` |
 | briefing a coder, the block gate, the PR contract, Definition of Done | `references/code.md`, `templates/coder-brief.md`, `templates/block-record.md` |
