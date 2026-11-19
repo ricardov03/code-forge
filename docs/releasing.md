@@ -323,6 +323,9 @@ Omit `--out` to print JSON to stdout. Version, date, released changelog entries 
 come from the tag's `CHANGELOG.md` and `docs/reference/commands.md`, even with local edits.
 Changelog sections contain `name` and Markdown `entries`; commands contain `name`, `description`,
 `usage` and `subcommands` (`name` and `usage`).
+Since B801 each command section on `commands.md` also holds its flags, examples, exit codes, `--json`
+shape and related commands under `####` headings after its usage; the site data still takes only
+the description before the first fence and the usage in that fence (`TestB801SiteReadsTheCommandReference`).
 
 Proof reads `code-forge.jsonl` and its numbered rotations in `~/.code-forge/ledger`; use
 `--ledger-dir <dir>` for another directory. A missing directory fails. It exports only distinct

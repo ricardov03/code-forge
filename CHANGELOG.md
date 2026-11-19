@@ -9,6 +9,9 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Changed
 
 - `block land` with `land.require_ci: github` no longer needs a human between a rebase and green CI: a tip with no CI run is pushed (never forced) to its CI branch, or after a rebase to a new `ci-<block>-<n>` branch with a draft PR "Replaces #N (rebased onto <sha>)" that closes the old PR; land waits for CI on that sha up to `land.ci_wait` (default `30m`, one progress line a minute) and a timeout refuses with the same land command to resume; a red run names the failed jobs; an SSH push (CI branch or main) that fails on auth is retried once over HTTPS with the gh credential helper; after the land the block's CI PRs are closed. New keys `land.ci_wait`, `land.ci_branch_prefix` (default `ci-`), `land.ci_remote` (default `origin`) (B796).
+### Added
+
+- The command reference is an API reference: `docs/reference/commands.md` and the new `docs/reference/commands.json` (for agents) give every command its purpose, when to use it, its flags (name, type, default, meaning), examples with their real output, exit codes, the `--json` shape (keys and types) and related commands, all generated from the Go help table by `sh scripts/gen-commands-doc.sh` (`--check` checks both); a Go test runs every example against the real binary in a temp repository with fake providers and fails when a command has no example; the skill points agents to `commands.json` (B801)
 
 ## [0.25.1] — 2026-11-19
 

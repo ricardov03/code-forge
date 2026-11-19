@@ -213,6 +213,9 @@ All of these are safe to run in any project that has a `.code-forge.yml`:
 | `code-forge ledger tail --slug <slug> -n 20` | the last 20 ledger rows (`--n 20` works too) |
 | `code-forge logs` | the last errors and warnings in the local log |
 
+Every command, with its flags, examples, exit codes and `--json` shape, is in the
+[command reference](reference/commands.md) ([commands.json](reference/commands.json) for agents).
+
 ## Set a budget
 
 Each session code-forge starts writes a ledger row with an estimated cost in US dollars (`usd`),

@@ -19,8 +19,12 @@ import (
 
 const helpDocPath = "docs/reference/commands.md"
 
+// helpDocJSONPath is the same reference as data (B801), for agents.
+const helpDocJSONPath = "docs/reference/commands.json"
+
 // helpDocSub is one sub-command section of the page.
 type helpDocSub struct {
+	entry   helpEntry
 	name    string
 	summary string
 	usage   string
@@ -28,6 +32,7 @@ type helpDocSub struct {
 
 // helpDocVerb is one verb section of the page.
 type helpDocVerb struct {
+	entry   helpEntry
 	verb    string
 	purpose string
 	usage   string
@@ -35,9 +40,9 @@ type helpDocVerb struct {
 }
 
 // helpDocCollect reads every verb (hidden ones too) and its sub-commands from
-// helpCommands, with the usage each prints. A sub-command gets its own section
-// when its usage differs from its verb's, or when it is the verb's only
-// sub-command (plan check, jev ask). missing lists commands with no usage.
+// helpCommands, with the usage each prints. Every sub-command gets its own
+// section (B801: each command has its own reference, even when its usage is
+// its verb's). missing lists commands with no usage.
 func helpDocCollect() ([]helpDocVerb, []string) {
 	verbs, missing := []helpDocVerb{}, []string{}
 	for _, entry := range helpCommands {
@@ -48,7 +53,7 @@ func helpDocCollect() ([]helpDocVerb, []string) {
 		if strings.TrimSpace(usage) == "" {
 			missing = append(missing, entry.name+".USAGE")
 		}
-		verb := helpDocVerb{verb: entry.name, purpose: entry.summary, usage: usage}
+		verb := helpDocVerb{entry: entry, verb: entry.name, purpose: entry.summary, usage: usage}
 		subs := []helpEntry{}
 		for _, sub := range helpCommands {
 			if strings.HasPrefix(sub.name, entry.name+" ") {
@@ -57,9 +62,6 @@ func helpDocCollect() ([]helpDocVerb, []string) {
 		}
 		for _, sub := range subs {
 			text := helpCommandUsage(sub.name)
-			if len(subs) > 1 && text == usage {
-				continue
-			}
 			if strings.TrimSpace(text) == "" {
 				missing = append(missing, sub.name+".USAGE")
 			}
@@ -67,7 +69,7 @@ func helpDocCollect() ([]helpDocVerb, []string) {
 			if !sub.hidden {
 				summary = sub.summary
 			}
-			verb.subs = append(verb.subs, helpDocSub{name: sub.name, summary: summary, usage: text})
+			verb.subs = append(verb.subs, helpDocSub{entry: sub, name: sub.name, summary: summary, usage: text})
 		}
 		verbs = append(verbs, verb)
 	}
@@ -75,12 +77,26 @@ func helpDocCollect() ([]helpDocVerb, []string) {
 	return verbs, missing
 }
 
-// helpDocRender is the page: the same layout scripts/gen-commands-doc.mjs wrote.
-func helpDocRender(verbs []helpDocVerb) string {
+// helpDocRender is the page: the layout scripts/gen-commands-doc.mjs wrote,
+// and since B801 each section's reference after its usage block. The same
+// data goes to commands.json (the second value).
+func helpDocRender(verbs []helpDocVerb) (string, string) {
+	rec := helpRefLoad()
+	cmds := []helpRefCommand{}
 	lines := []string{
 		"# Command reference", "",
-		"This page lists the CLI commands and their usage. It is generated from the Go help table. " +
-			"Regenerate it with `sh scripts/gen-commands-doc.sh`.", "",
+		"This page lists every CLI command: its purpose, when to use it, its usage and flags, " +
+			"examples with their real output, exit codes, the `--json` shape and related commands. " +
+			"It is generated from the Go help table; agents read the same data in " +
+			"[`commands.json`](commands.json). Regenerate both with `sh scripts/gen-commands-doc.sh`.", "",
+	}
+	addRef := func(entry helpEntry, usage string) {
+		if _, ok := helpRefs[entry.name]; !ok {
+			return
+		}
+		cmd := helpRefDocCommand(entry, usage, rec)
+		cmds = append(cmds, cmd)
+		lines = append(lines, helpRefMarkdown(cmd)...)
 	}
 	for _, verb := range verbs {
 		lines = append(lines, "- ["+verb.verb+"](#"+verb.verb+")")
@@ -92,15 +108,17 @@ func helpDocRender(verbs []helpDocVerb) string {
 	for _, verb := range verbs {
 		lines = append(lines, "## "+verb.verb, "", verb.purpose, "")
 		addUsage(verb.usage)
+		addRef(verb.entry, verb.usage)
 		for _, sub := range verb.subs {
 			lines = append(lines, "### "+sub.name, "")
 			if sub.summary != "" {
 				lines = append(lines, sub.summary, "")
 			}
 			addUsage(sub.usage)
+			addRef(sub.entry, sub.usage)
 		}
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), helpRefJSONDoc(cmds)
 }
 
 // helpDocQuote is JSON.stringify of one line.
@@ -147,13 +165,16 @@ func runHelpDoc(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "Missing CLI help metadata: %s\n", strings.Join(missing, ", "))
 		return 1
 	}
-	generated := helpDocRender(verbs)
+	generated, generatedJSON := helpDocRender(verbs)
+	jsonOut := filepath.Join(root, filepath.FromSlash(helpDocJSONPath))
 	if !check {
-		if err := os.WriteFile(out, []byte(generated), 0o644); err != nil {
-			fmt.Fprintf(stderr, "help --commands-doc: %v\n", err)
-			return 1
+		for _, f := range []struct{ path, text, name string }{{out, generated, helpDocPath}, {jsonOut, generatedJSON, helpDocJSONPath}} {
+			if err := os.WriteFile(f.path, []byte(f.text), 0o644); err != nil {
+				fmt.Fprintf(stderr, "help --commands-doc: %v\n", err)
+				return 1
+			}
+			fmt.Fprintln(stdout, "wrote "+f.name)
 		}
-		fmt.Fprintln(stdout, "wrote "+helpDocPath)
 		return 0
 	}
 	data, err := os.ReadFile(out)
@@ -162,6 +183,14 @@ func runHelpDoc(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if string(data) == generated {
+		// A copy given by path checks the page only; the package check
+		// covers commands.json too.
+		if file == "" {
+			if have, err := os.ReadFile(jsonOut); err != nil || string(have) != generatedJSON {
+				fmt.Fprintln(stderr, "gen-commands-doc --check: "+helpDocJSONPath+" is stale or missing; run sh scripts/gen-commands-doc.sh")
+				return 1
+			}
+		}
 		fmt.Fprintln(stdout, "gen-commands-doc --check: command reference is up to date")
 		return 0
 	}
