@@ -15,7 +15,7 @@
 #   4. `npx @codedology/code-forge@<version>` pinned to the version this skill was built with (a
 #      copied install with no package next to it).
 # The shim holds no logic of its own: every verb, flag and message is the CLI's.
-PINNED_VERSION="0.25.1"
+PINNED_VERSION="0.26.0"
 set -eu
 
 self="$0"

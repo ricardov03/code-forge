@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-11-19
+
 ### Changed
 
 - A red `go test` gate no longer fails a block for one flaky test: with `gates.rerun_failed` on (the default) it reruns only the failed top-level test names, 3 times in one `go test -count=3 -run '^(A|B)$' <pkgs>` call (also through a `go -C <dir> run` wrapper such as code-forge's own `cf-gotest`). All three pass: the gate passes with `gates: WARN flaky test <name> (<pkgs>): failed, then passed 3/3 reruns (load <n>)`, a `test.flaky` ledger row `{test, packages, gate, load, reruns}` (signed in `block land`) and a `flaky-test` finding in `~/.code-forge/runs/<run>/findings.jsonl`, so the flake gets its own fix. Any rerun failure, more than 3 failed names, a panic or a build failure stays a real failure (B798)
