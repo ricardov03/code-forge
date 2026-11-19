@@ -100,6 +100,13 @@ type attempt struct {
 // (0, false, nil) abandoned while stopping, (0, true, nil) poisoned (not even
 // a failure could be recorded), or (0, false, ErrUnsupported) for Node.
 func (w *TicketRunner) RunTicket(id string) (completed int, poison bool, err error) {
+	// B918: a ticket with finished_at but no done marker is closed, not
+	// served again; when its marker cannot be written it is poisoned.
+	if recovered, err := w.recoverFinished(id); recovered {
+		return 1, false, nil
+	} else if err != nil {
+		return 0, true, nil
+	}
 	a := &attempt{startedAt: w.now()}
 	outcome, ticket, err := w.decideRead(id)
 	if err != nil {
@@ -557,17 +564,17 @@ func (w *TicketRunner) signObject(row ledger.Object) (ledger.Object, error) {
 	return out, nil
 }
 
-// complete is loop.mjs complete: timings, the signed result and
-// done marker (writeResult), then the signed ledger row (a failure there is
-// swallowed: the done marker is what the queue reads).
+// complete is loop.mjs complete: the signed result and done marker
+// (writeResult), the signed ledger row (a failure there is swallowed: the
+// done marker is what the queue reads), then the ticket's finish timings.
+//
+// B918: the finish timings come last. Before, they were written first, so a
+// crash or a failed result/marker write left a ticket with finished_at and
+// no done marker, and every new worker picked it first. A finished_at is
+// now only ever written after the done marker exists.
 func (w *TicketRunner) complete(id string, outcome ledger.Object, a *attempt) error {
 	finished := w.now()
 	timings := w.timings(a, &finished)
-	if a.ticket != nil {
-		if err := w.writeTimings(a.ticket, a, &finished); err != nil {
-			return err
-		}
-	}
 	result := ledger.Object{}
 	if a.ticket != nil {
 		for _, k := range []string{"block", "file", "content_hash"} {
@@ -603,6 +610,36 @@ func (w *TicketRunner) complete(id string, outcome ledger.Object, a *attempt) er
 	if err := writeAtomic(resultFile, data, 0o644); err != nil {
 		return err
 	}
+	if err := w.publishResult(id, signed, measured, timings); err != nil {
+		return err
+	}
+	if a.ticket != nil {
+		w.finishTimings(id, a, &finished)
+	}
+	return nil
+}
+
+// finishTimings writes the ticket's finish timings after its done marker
+// (B918). A failure is swallowed: the done marker is what the queue reads.
+// When a re-queue dropped the marker meanwhile, the finish time is cleared
+// again so the rerun is not taken for a finished ticket.
+func (w *TicketRunner) finishTimings(id string, a *attempt, finished *time.Time) {
+	if err := w.writeTimings(a.ticket, a, finished); err != nil {
+		if w.Warn != nil {
+			w.Warn("ticket_timings_failed", "ticket "+id+": the finish timings were not written ("+ErrorKind(err)+"); its done marker stands")
+		}
+		return
+	}
+	if !IsDone(w.RepoRoot, id) {
+		_ = w.writeTimings(a.ticket, a, nil)
+	}
+}
+
+// publishResult writes the done marker of a signed result (already on disk)
+// and its signed review.result row (a failure there is swallowed).
+func (w *TicketRunner) publishResult(id string, signed ledger.Object, measured []ledger.Field, timings ledger.Object) error {
+	result := signed
+	resultFile := filepath.Join(w.RepoRoot, ".code-forge", "reviews", w.RunID, id+".json")
 	rel, _ := filepath.Rel(w.RepoRoot, resultFile)
 	done := ledger.Object{{Key: "ticket", Value: id}, {Key: "status", Value: signed.Get("status")}}
 	done = append(done, measured...)
@@ -611,7 +648,7 @@ func (w *TicketRunner) complete(id string, outcome ledger.Object, a *attempt) er
 		done = append(done, ledger.Field{Key: "open_findings", Value: true})
 	}
 	done = append(done, ledger.Field{Key: "result", Value: rel})
-	data, err = line(done)
+	data, err := line(done)
 	if err != nil {
 		return err
 	}

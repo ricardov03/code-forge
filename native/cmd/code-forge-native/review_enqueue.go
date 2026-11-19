@@ -511,6 +511,6 @@ func reviewEnqueueCached(root, id string) bool {
 		return false
 	}
 	result, _ := r.(ledger.Object)
-	// B884: an unsupported result is not a cached review; it runs again.
-	return result.Get("status") != "unavailable" && result.Get("status") != "split_required" && result.Get("stopped") != "split_required" && result.Get("status") != worker.UnsupportedStatus
+	// B884: an unsupported result is not a cached review; it runs again (B918: a recovered one too).
+	return result.Get("status") != "unavailable" && result.Get("status") != "split_required" && result.Get("stopped") != "split_required" && result.Get("status") != worker.UnsupportedStatus && result.Get("status") != worker.RecoveredStatus
 }

@@ -161,6 +161,10 @@ func (idx *Index) RetryOnce(repo, id string, marker Object) (Object, error) {
 		return marker, nil
 	}
 	seen := idx.entries[id+".done"].data
+	// B918: the retry is not taken for a finished ticket with a lost marker
+	if err := ResetTimings(idx.Dir, id); err != nil {
+		return nil, fmt.Errorf("fresh-claim-failed")
+	}
 	var random [4]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return nil, err
