@@ -823,104 +823,124 @@ func runAddWorkerPlan(home, runID string) (func(o *runOut) int, handoverReason) 
 		return nil, hRunAddWorker
 	}
 	return func(o *runOut) int {
-		var line string
-		err := filelock.WithLock("worker-add:"+runID, func() error {
-			record, err := state.ReadRun(home, runID)
-			if err != nil {
-				var stateErr *state.Error
-				if !errors.As(err, &stateErr) {
-					return errRunHandover
-				}
-				return err
-			}
-			if record.Get("status") != "active" {
-				return &runFail{fmt.Sprintf("run %s has ended", runID), false}
-			}
-			workspace, isString := record.Get("workspace").(string)
-			if !isString {
-				return errRunHandover
-			}
-			repoRoot, err := gitx.RepoTop(workspace)
-			if err != nil {
-				return &runFail{"not inside a git repository", false}
-			}
-			var cfg ledger.Object
-			if runTruthy(record.Get("config")) {
-				if cfg, err = runConfigInForce(record); err != nil {
-					return err
-				}
-			} else {
-				snap, err := config.LoadSnapshot(workspace)
-				if err != nil {
-					var cfgErr *config.Error
-					if !errors.As(err, &cfgErr) {
-						return errRunHandover
-					}
-					return &runFail{"the project config cannot be loaded", false}
-				}
-				cfg = snap.Ordered
-			}
-			limit := float64(1)
-			review, _ := cfg.Get("review").(ledger.Object)
-			if v := review.Get("workers"); v != nil {
-				n, isNumber := v.(float64)
-				if !isNumber {
-					return errRunHandover
-				}
-				limit = n
-			}
-			entries, ok := runWorkerRegistry(repoRoot, true)
-			if !ok {
-				return errRunHandover
-			}
-			legacy, ok := runLiveWorker(repoRoot, 0, false)
-			if !ok {
-				return errRunHandover
-			}
-			count := 0.0
-			for _, e := range entries {
-				if e.live {
-					count++
-				}
-			}
-			if legacy != nil {
-				counted := false
-				for _, e := range entries {
-					if e.worker != nil && e.worker.Get("pid") == legacy.Get("pid") && e.worker.Get("start_time") == legacy.Get("start_time") {
-						counted = true
-					}
-				}
-				if !counted {
-					count++
-				}
-			}
-			if count >= limit {
-				return &runFail{fmt.Sprintf("review.workers limit %s reached", runNumber(limit)), false}
-			}
-			pid, launchedRoot, err := runLaunchWorker(runID, workspace, binary)
-			if err != nil {
-				return err
-			}
-			startedAt := runProbe(float64(pid))
-			if _, err := runRepin(home, runID, launchedRoot, float64(pid), true); err != nil {
-				runStopLaunched(o, pid, startedAt)
-				if errors.Is(err, errRunHandover) {
-					return &runFail{"the worker registry could not be read", false}
-				}
-				return err
-			}
-			line = fmt.Sprintf("run %s: added worker pid %d (review.workers limit %s)\n", runID, pid, runNumber(limit))
-			return nil
-		}, filelock.Options{})
+		pid, limit, _, err := runStartWorker(o, home, runID, binary, true, false)
 		if errors.Is(err, errRunHandover) {
 			return runHandover([]string{"start", "--add-worker", "--run", runID}, hRunShape)
 		}
 		if err != nil {
 			return runReport(o, "start", err)
 		}
-		o.out(line)
+		o.out(fmt.Sprintf("run %s: added worker pid %d (review.workers limit %s)\n", runID, pid, runNumber(limit)))
 		return 0
 	}, 0
+}
+
+// runStartWorker is the body of `run start --add-worker` (B826: also of
+// `run start --reattach` and review-file when no live worker serves the run):
+// under the worker-add lock of the run, the review.workers limit, the launch
+// and the pin of the launched worker (add: worker.add, else worker.reattach).
+// onlyIfNone: when a live worker of this run is already registered (another
+// caller started it while this one waited for the lock), nothing is launched
+// and that worker's pid comes back with started false.
+func runStartWorker(o *runOut, home, runID, binary string, add, onlyIfNone bool) (pid int, limit float64, started bool, err error) {
+	limit = 1
+	err = filelock.WithLock("worker-add:"+runID, func() error {
+		record, err := state.ReadRun(home, runID)
+		if err != nil {
+			var stateErr *state.Error
+			if !errors.As(err, &stateErr) {
+				return errRunHandover
+			}
+			return err
+		}
+		if record.Get("status") != "active" {
+			return &runFail{fmt.Sprintf("run %s has ended", runID), false}
+		}
+		workspace, isString := record.Get("workspace").(string)
+		if !isString {
+			return errRunHandover
+		}
+		repoRoot, err := gitx.RepoTop(workspace)
+		if err != nil {
+			return &runFail{"not inside a git repository", false}
+		}
+		var cfg ledger.Object
+		if runTruthy(record.Get("config")) {
+			if cfg, err = runConfigInForce(record); err != nil {
+				return err
+			}
+		} else {
+			snap, err := config.LoadSnapshot(workspace)
+			if err != nil {
+				var cfgErr *config.Error
+				if !errors.As(err, &cfgErr) {
+					return errRunHandover
+				}
+				return &runFail{"the project config cannot be loaded", false}
+			}
+			cfg = snap.Ordered
+		}
+		review, _ := cfg.Get("review").(ledger.Object)
+		if v := review.Get("workers"); v != nil {
+			n, isNumber := v.(float64)
+			if !isNumber {
+				return errRunHandover
+			}
+			limit = n
+		}
+		entries, ok := runWorkerRegistry(repoRoot, true)
+		if !ok {
+			return errRunHandover
+		}
+		legacy, ok := runLiveWorker(repoRoot, 0, false)
+		if !ok {
+			return errRunHandover
+		}
+		if onlyIfNone {
+			for _, e := range entries {
+				if e.live && e.worker != nil && e.worker.Get("run") == runID {
+					n, _ := e.worker.Get("pid").(float64)
+					pid = int(n)
+					return nil
+				}
+			}
+		}
+		count := 0.0
+		for _, e := range entries {
+			if e.live {
+				count++
+			}
+		}
+		if legacy != nil {
+			counted := false
+			for _, e := range entries {
+				if e.worker != nil && e.worker.Get("pid") == legacy.Get("pid") && e.worker.Get("start_time") == legacy.Get("start_time") {
+					counted = true
+				}
+			}
+			if !counted {
+				count++
+			}
+		}
+		if count >= limit {
+			return &runFail{fmt.Sprintf("review.workers limit %s reached", runNumber(limit)), false}
+		}
+		launched, launchedRoot, err := runLaunchWorker(runID, workspace, binary)
+		if err != nil {
+			return err
+		}
+		startedAt := runProbe(float64(launched))
+		if _, err := runRepin(home, runID, launchedRoot, float64(launched), add); err != nil {
+			runStopLaunched(o, launched, startedAt)
+			if errors.Is(err, errRunHandover) {
+				return &runFail{"the worker registry could not be read", false}
+			}
+			return err
+		}
+		pid, started = launched, true
+		return nil
+	}, filelock.Options{})
+	return pid, limit, started, err
 }
 
 // --- run reload --run <id>: the refusals before a valid config ---

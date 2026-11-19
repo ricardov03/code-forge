@@ -351,8 +351,19 @@ func reviewEnqueueWith(args []string, step *landStep, pre *reviewFileScope) int 
 			return reviewEnqueueSay(args, reviewEnqueueRefusal("answers-same-file", file+" cannot answer its own findings: give the file that resolves them"), 1)
 		}
 	}
+	var heal reviewHealResult
+	if worker == nil && requested && step == nil {
+		// B826: no live worker: start the run's worker as --add-worker does.
+		heal = reviewHeal(root, run)
+		reviewHealSay(run, heal)
+		if heal.pid != 0 {
+			if worker, ok = reviewEnqueueWorker(root); !ok {
+				return reviewWaitHandover(args, hEnqueueWorker)
+			}
+		}
+	}
 	if worker == nil || requested && run != worker.Get("run") {
-		return reviewEnqueueSay(args, ledger.Object{{Key: "status", Value: "worker_down"}, {Key: "file", Value: file}}, 3)
+		return reviewEnqueueSay(args, reviewHealDown(ledger.Object{{Key: "status", Value: "worker_down"}, {Key: "file", Value: file}}, run, heal), 3)
 	}
 	// Only a missing/inaccessible authoritative record falls back to cwd's
 	// content tree. An existing record with no worktree selects the main tree.
