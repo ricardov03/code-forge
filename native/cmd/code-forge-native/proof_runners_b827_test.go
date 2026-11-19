@@ -116,6 +116,7 @@ func b827Fixture(t *testing.T, snapshot string, setup func(t *testing.T, repo st
 	base := ""
 	home, repo = b462Fixture(t, b462Case{blocks: ledger.Object{{Key: "B1", Value: block}}, extra: extra, setup: func(t *testing.T, repo string) {
 		b462Write(t, filepath.Join(repo, ".code-forge.yml"), []byte(b462Levels), 0o644)
+		b828Exclude(t, repo) // B828: proof red-green refuses while git would see .code-forge/
 		setup(t, repo)
 		base = strings.TrimSpace(b462Git(t, repo, "rev-parse", "HEAD"))
 	}})

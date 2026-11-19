@@ -104,9 +104,7 @@ func TestB885CustomerRunStatusAgreesWithBlockReady(t *testing.T) {
 	})
 	gitc := "git -c user.name=t -c user.email=t@t -c commit.gpgsign=false"
 	f.must(t, "git init -q -b main && echo hello > a.txt && "+gitc+" add -A && "+gitc+" commit -q -m base")
-	if err := os.WriteFile(filepath.Join(f.repo, ".code-forge.yml"), []byte(b884Config), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	f.initFiles(t)
 	f.must(t, gitc+" add -A && "+gitc+" commit -q -m cfg")
 	out := f.must(t, "code-forge run start 2>&1")
 	m := regexp.MustCompile(`run (\S+) started`).FindStringSubmatch(out)

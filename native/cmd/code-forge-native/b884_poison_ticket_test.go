@@ -81,6 +81,18 @@ type b884Fix struct {
 
 // b884Sh runs script with bash in the repo; it returns exit code, stdout and
 // stderr.
+// initFiles writes what `code-forge init --no-jev` writes: the config and
+// the .gitignore line .code-forge/ (B828: run start refuses without it).
+func (f b884Fix) initFiles(t *testing.T) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(f.repo, ".code-forge.yml"), []byte(b884Config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.repo, ".gitignore"), []byte(".code-forge/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (f b884Fix) sh(t *testing.T, script string) (int, string, string) {
 	t.Helper()
 	cmd := exec.Command("/bin/bash", "-c", script)
@@ -179,9 +191,7 @@ func TestB884CustomerPoisonTicketKeepsTheWorker(t *testing.T) {
 	f.must(t, "git init -q -b main && echo hello > a.txt && echo one > b.txt && "+gitc+" add -A && "+gitc+" commit -q -m base")
 	// The config `code-forge init --no-jev` writes (init needs the npm
 	// package layout, which a test-built binary has not).
-	if err := os.WriteFile(filepath.Join(f.repo, ".code-forge.yml"), []byte(b884Config), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	f.initFiles(t)
 	f.must(t, gitc+" add -A && "+gitc+" commit -q -m cfg")
 	out := f.must(t, "code-forge run start 2>&1")
 	m := regexp.MustCompile(`run (\S+) started`).FindStringSubmatch(out)
