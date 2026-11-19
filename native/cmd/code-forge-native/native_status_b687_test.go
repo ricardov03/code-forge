@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -61,7 +62,7 @@ func TestB687NativeStatusServesNodeOnlyLinesInGo(t *testing.T) {
 	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
 	b501Stdin(t, b687Input)
 	code, out, errText := runCaptured(t, "native-status")
-	if code != 1 || out != b687Want || errText != b501RouterLine {
+	if code != 0 || out != b687Want || errText != "" {
 		t.Fatalf("code=%d\nstdout=%q\nwant  =%q\nstderr=%q", code, out, b687Want, errText)
 	}
 	if data, err := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl")); !os.IsNotExist(err) {
@@ -88,7 +89,7 @@ func TestB687NativeStatusWithoutHomeUsesThePasswordHome(t *testing.T) {
 	t.Cleanup(func() { nsUserHome = saved })
 	b501Stdin(t, b687AwaitingIn)
 	code, out, errText := runCaptured(t, "native-status")
-	if code != 1 || out != b687AwaitingWant || errText != b501RouterLine {
+	if code != 0 || out != b687AwaitingWant || errText != "" {
 		t.Fatalf("code=%d\nstdout=%q\nstderr=%q", code, out, errText)
 	}
 	if value, set := os.LookupEnv("HOME"); set {
@@ -117,7 +118,7 @@ func TestB687NativeStatusWithoutAnyHome(t *testing.T) {
 	want := `{"runs":[{"run_id":"r","status":null,"mode":"plan","spent_usd":null,"unknown_usd_sessions":null,"budget_usd":null,"blocks":[],"more":0,"closed":0,"stopped":0}]}` + "\n" +
 		`{"runs":[{"run_id":"r","status":null,"mode":"plan","spent_usd":2,"unknown_usd_sessions":0,"budget_usd":null,"blocks":[],"more":0,"closed":0,"stopped":0}]}` + "\n"
 	code, out, errText := runCaptured(t, "native-status")
-	if code != 1 || out != want || errText != b501RouterLine {
+	if code != 0 || out != want || errText != "" {
 		t.Fatalf("code=%d\nstdout=%q\nstderr=%q", code, out, errText)
 	}
 }
@@ -133,13 +134,13 @@ func TestB687NativeStatusEmptyHomeReadsTheWorkingFolder(t *testing.T) {
 			`{"run":"r","block":"B1","event":"review.result","file":"a.js","approved":false,"open":[{"id":"F1","severity":"warning"}]}`+"\n")
 	b501Stdin(t, b687AwaitingIn)
 	code, out, errText := runCaptured(t, "native-status")
-	if code != 1 || out != b687AwaitingWant || errText != b501RouterLine {
+	if code != 0 || out != b687AwaitingWant || errText != "" {
 		t.Fatalf("code=%d\nstdout=%q\nstderr=%q", code, out, errText)
 	}
 }
 
-// On a terminal the router's maybeHint prints its hint after the router line
-// and remembers the fingerprint; Go does it instead of handing the verb over.
+// B879: served records exit 0, so a terminal stderr gets no router hint and
+// no hints.json; an argument is a usage error (exit 2), which never hints.
 func TestB687NativeStatusTerminalHintInGo(t *testing.T) {
 	home := b501NativeStatusFixture(t, true)
 	t.Setenv("CODE_FORGE_HANDOVER_LOG", "1")
@@ -148,16 +149,15 @@ func TestB687NativeStatusTerminalHintInGo(t *testing.T) {
 	t.Cleanup(func() { routerLogStderrTTY = saved })
 	b501Stdin(t, b687AwaitingIn)
 	code, out, errText := runCaptured(t, "native-status")
-	if code != 1 || out != b687AwaitingWant || errText != b501RouterLine+routerHintLine {
+	if code != 0 || out != b687AwaitingWant || errText != "" {
 		t.Fatalf("code=%d\nstdout=%q\nstderr=%q", code, out, errText)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".code-forge", "logs", "hints.json")); err != nil {
-		t.Fatalf("hints.json: %v", err)
-	}
-	// The same fingerprint within a day prints no second hint.
 	b501Stdin(t, b687AwaitingIn)
-	code, out, errText = runCaptured(t, "native-status")
-	if code != 1 || out != b687AwaitingWant || errText != b501RouterLine {
-		t.Fatalf("second run: code=%d stdout=%q stderr=%q", code, out, errText)
+	code, out, errText = runCaptured(t, "native-status", "x")
+	if code != 2 || out != "" || strings.Contains(errText, routerHintLine) {
+		t.Fatalf("refusal: code=%d stdout=%q stderr=%q", code, out, errText)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".code-forge", "logs", "hints.json")); !os.IsNotExist(err) {
+		t.Fatalf("hints.json: %v", err)
 	}
 }
