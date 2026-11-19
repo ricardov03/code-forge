@@ -76,7 +76,11 @@ func TestB648CommittedCommandsDocIsCurrent(t *testing.T) {
 		}
 	}
 	// Sub-commands that only repeat their verb's usage get no section.
-	for _, absent := range []string{"### heal list\n", "### queue run\n", "### docs sync\n", "\x1b["} {
+	// B877: docs sync has its own usage line now, so it gets its own section.
+	if !strings.Contains(doc, "### docs sync\n\nFetch the docs for the installed version\n\n```text\nusage: code-forge docs sync [--json]\n```\n") {
+		t.Error("page lacks the docs sync section with its own usage")
+	}
+	for _, absent := range []string{"### heal list\n", "### queue run\n", "\x1b["} {
 		if strings.Contains(doc, absent) {
 			t.Errorf("page has %q", absent)
 		}
