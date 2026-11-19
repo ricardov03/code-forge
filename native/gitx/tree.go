@@ -139,10 +139,18 @@ func nonempty(out string) []string {
 	}
 	return result
 }
+
+// union is the block file set: the diff since base plus the untracked
+// files. A path under a .code-forge/ folder (B829) is code-forge's own state
+// (run mirror, queue, proof export with its copied vendor/), never a block
+// file, so it is left out whatever .gitignore says.
 func union(a, b string, normalize bool) ([]string, error) {
 	set := map[string]bool{}
 	files := []string{}
 	for _, f := range append(nonempty(a), nonempty(b)...) {
+		if IsStatePath(f) {
+			continue
+		}
 		if normalize {
 			if path.IsAbs(f) || strings.ContainsAny(f, "\\\x00") {
 				return nil, &Error{"bad-path", "a block file must be a repo-relative POSIX path"}

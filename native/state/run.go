@@ -130,6 +130,7 @@ func SaveRun(home string, record ledger.Object) error {
 	if err != nil {
 		return err
 	}
+	warning := RecordSizeWarning(runID, record, len(data)+1)
 	if err := os.MkdirAll(runsDir(home), 0700); err != nil {
 		return err
 	}
@@ -164,6 +165,9 @@ func SaveRun(home string, record ledger.Object) error {
 	if err := os.Rename(mirrorTmp, mirrorFile); err != nil {
 		_ = os.Remove(mirrorTmp)
 		return err
+	}
+	if warning != "" {
+		fmt.Fprintln(RecordWarnOut, warning)
 	}
 	return nil
 }
