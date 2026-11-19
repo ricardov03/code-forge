@@ -109,13 +109,18 @@ func TestB876ReviewShowsTheProviderExit(t *testing.T) {
 	if g.code != 1 {
 		t.Fatalf("exit %d stderr %q", g.code, g.err)
 	}
-	// each file: the verdict, then why; one next line after all files
-	want := "review: src/a.txt  unavailable: exit\n" +
-		"review: src/a.txt  session failed (exit 1); the provider CLI printed nothing on stderr\n" +
-		"review: src/b.txt  unavailable: exit\n" +
-		"review: src/b.txt  session failed (exit 1); the provider CLI printed nothing on stderr\n" + b876Next
-	if !strings.Contains(g.err, want) || strings.Count(g.err, "next: ") != 1 {
-		t.Fatalf("stderr %q\nwant %q", g.err, want)
+	// each file: the verdict, then why (files run in parallel, in any
+	// order); one next line after all files
+	next := strings.Index(g.err, "printed nothing on stderr\n"+b876Next)
+	for _, file := range []string{"src/a.txt", "src/b.txt"} {
+		pair := "review: " + file + "  unavailable: exit\n" +
+			"review: " + file + "  session failed (exit 1); the provider CLI printed nothing on stderr\n"
+		if i := strings.Index(g.err, pair); i < 0 || next < 0 || i > next {
+			t.Fatalf("stderr %q\nwant %q before the next line", g.err, pair)
+		}
+	}
+	if strings.Count(g.err, "next: ") != 1 {
+		t.Fatalf("stderr %q: want one next line after the files", g.err)
 	}
 	if !strings.Contains(g.out, `"result":"unavailable","reason":"exit"`) || strings.Contains(g.out, "provider CLI") {
 		t.Fatalf("stdout %q", g.out)
