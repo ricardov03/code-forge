@@ -58,6 +58,7 @@ var handoverCommands = map[string]string{
 	"block":         "open attempt rebase claim ready close land stop waive reopen accept-hit unwaive ack-waivers human-pass amend-acceptance",
 	"ci":            "watch",
 	"cloud-coder":   "",
+	"config":        "fix",
 	"context":       "pack",
 	"decisions":     "list",
 	"docs":          "sync path",

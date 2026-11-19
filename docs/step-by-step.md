@@ -830,6 +830,7 @@ See [autopilot.md](autopilot.md) for grant limits and the log workflow.
 **What it does**
 
 npm changes the installed package version. `upgrade` refreshes recorded skill links and copies.
+Run in the project folder, it then fixes old shapes in `.code-forge.yml` (`code-forge config fix`).
 `remove` removes recorded skill installs.
 Keep the CLI installed through step 17 if you are about to release.
 
@@ -864,18 +865,22 @@ Then remove the package with `npm uninstall -g @codedology/code-forge`, or
 
 ```text
 upgraded claude (project) -> <package>/skill
+config ok
 removed claude (project) <project>/.claude/skills/code-forge
 ```
 
 **What changed**
 
-Upgrade refreshes installed skill content. Local npm changes update the manifest and lockfile.
+Upgrade refreshes installed skill content and fixes old config shapes it knows, keeping comments.
+Local npm changes update the manifest and lockfile.
 Remove deletes only recorded skill paths; it keeps your config, code, and history.
 
 **If it fails**
 
 If a harness still uses an old skill, run `code-forge list` and check its target.
 Run upgrade from the intended package version. Do not start a second install by mistake.
+If upgrade prints `config: not changed (...)`, run the command it names, for example
+`code-forge config fix --dry-run`, make the change by hand, then run `code-forge validate`.
 
 **Next:** [Release your project](#17-release-your-project).
 

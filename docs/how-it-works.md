@@ -262,7 +262,8 @@ with plain `code-forge gates run` (no run and no block).
 script, so the check was skipped without a word. Config validation now rejects the key as
 unknown, and `gates run` (with or without `--run`/`--block`, and inside `block land`) exits 2
 before any gate runs, with one line: `gates.extra.invariants is not supported`. To run such a
-script as a gate, add it to `gates.custom` as `{name, argv}` (B402).
+script as a gate, add it to `gates.custom` as `{name, argv}` (B402). `code-forge config fix` (and
+`code-forge upgrade`, run in the project folder) removes the key for you and keeps the rest of the file (B791).
 
 ### Block help
 
