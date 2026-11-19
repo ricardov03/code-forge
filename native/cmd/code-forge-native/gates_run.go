@@ -779,7 +779,11 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		if tree != nil {
 			ranTree = gatesCleanTree(cwd)
 		}
+		// B924: TMPDIR on the RAM disk (gates.ram_tmp), a fresh dir per run.
+		ramEnv, ramDone := gatesRamTmpEnv(configured, o.run, o.block, stderr)
+		runPlan.BaseEnv = ramEnv
 		results, all, err = gates.Run(ctx, runPlan, cwd, o.run, timeout, scope)
+		ramDone()
 		releaseSlot()
 		if err != nil {
 			return err

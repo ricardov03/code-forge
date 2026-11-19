@@ -412,6 +412,11 @@
           "default": true,
           "description": "B667: in a Go project (go.mod in the project root and a gates.test of go test with a whole ./... item), gates run --run --block --changed runs go test only on the changed Go packages: the directory of each changed .go file and the package of each changed testdata file, plus (B723b) every package whose build (Deps) or tests (TestImports, XTestImports) import a changed package, read from go list -json ./... (a go list failure fails the gate). go vet and gofmt still check the whole module. A deleted package is dropped. A change to go.mod, go.sum or go.work runs the full suite (reason go_mod). No changed package skips the test gate (reason no_changes). gate.done carries scope changed, reason go_packages, packages and importer_packages. block land uses this scope for each block, and a batch land runs one full go test ./... at the end before any block lands or main is pushed. false runs the B404 file selection instead."
         },
+        "ram_tmp": {
+          "enum": ["auto", "off"],
+          "default": "auto",
+          "description": "B924: auto (the default) puts the TMPDIR of every gate and test command code-forge runs (gates run, block land and close) on a macOS RAM disk named cf-tmp: /Volumes/cf-tmp is reused when mounted, else made with hdiutil attach -nomount ram://<sectors> and diskutil erasevolume APFS cf-tmp (2048 MB, no sudo), with .fseventsd/no_log and .metadata_never_index at its root, so fseventsd does not log the test temp files. Each gate run gets a fresh TMPDIR=/Volumes/cf-tmp/<run>-<block>-* that is removed after it. A gate's own env TMPDIR wins. Any error prints one warn line and the gates keep the normal TMPDIR; it never fails a gate. off, any OS other than macOS, or CODE_FORGE_RAM_TMP=off keeps the normal TMPDIR. code-forge doctor prints a ram_tmp row."
+        },
         "test_class_map": {
           "type": "array",
           "maxItems": 50,

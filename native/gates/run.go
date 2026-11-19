@@ -352,9 +352,9 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 		started := time.Now()
 		var outcome ledger.Object
 		if item.batches != nil {
-			outcome = runBatches(ctx, item.batches, c, cwd, run, timeout)
+			outcome = runBatches(ctx, item.batches, c, p.CommandEnv(c.Env), cwd, run, timeout)
 		} else {
-			outcome = execute(ctx, item.argv, c.Env, cwd, run, timeout, c.FailOnStdout)
+			outcome = execute(ctx, item.argv, p.CommandEnv(c.Env), cwd, run, timeout, c.FailOnStdout)
 		}
 		merge(&r, outcome)
 		if item.name == "test" && p.ReuseReason != "" {
@@ -385,7 +385,7 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 					recovered = false
 					break
 				}
-				if execute(ctx, a, c.Env, cwd, run, timeout, c.FailOnStdout).Get("ok") != true {
+				if execute(ctx, a, p.CommandEnv(c.Env), cwd, run, timeout, c.FailOnStdout).Get("ok") != true {
 					recovered = false
 				}
 			}
@@ -399,7 +399,7 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 				names, pkgs := goFailedTests(fmt.Sprint(r.Get("stdout"))+"\n"+fmt.Sprint(r.Get("stderr")), GoFlakyMax)
 				if a := goRerunArgv(item.argv, names, pkgs); names != nil && a != nil {
 					load := FlakyLoad()
-					if execute(ctx, a, c.Env, cwd, run, timeout, c.FailOnStdout).Get("ok") == true && ctx.Err() == nil {
+					if execute(ctx, a, p.CommandEnv(c.Env), cwd, run, timeout, c.FailOnStdout).Get("ok") == true && ctx.Err() == nil {
 						tests := []any{}
 						for _, name := range names {
 							tests = append(tests, ledger.Object{{Key: "test", Value: name}, {Key: "packages", Value: pkgs}})
@@ -452,7 +452,7 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 					}
 					a := plan[0].argv
 					for i := 0; i < p.Repeat.N && ctx.Err() == nil; i++ {
-						repeated := execute(ctx, a, c.Env, cwd, run, timeout, c.FailOnStdout)
+						repeated := execute(ctx, a, p.CommandEnv(c.Env), cwd, run, timeout, c.FailOnStdout)
 						if repeated.Get("ok") != true && repeats.Get("failed") != true {
 							repeats.Set("failed", true)
 							r.Set("reason", "flaky-test")
@@ -489,7 +489,7 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 			continue
 		}
 		started := time.Now()
-		outcome := execute(ctx, c.Argv, c.Env, cwd, run, timeout, false)
+		outcome := execute(ctx, c.Argv, p.CommandEnv(c.Env), cwd, run, timeout, false)
 		evidence, e := collectEvidence(cwd, custom.Evidence)
 		if e != nil {
 			return nil, false, e

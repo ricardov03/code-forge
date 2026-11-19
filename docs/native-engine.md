@@ -530,6 +530,34 @@ shell's background job inherits as ignored, and the copy also unblocks every
 signal before the gate starts, so a gate never inherits the engine's
 blocked-signal mask; Node's spawn (libuv) does both in its child (B721).
 
+## Gate temp files on a RAM disk (macOS)
+
+Go tests make thousands of temp git directories under `$TMPDIR`. On macOS
+`fseventsd` logs every one of those changes and can take a whole CPU. With
+`gates.ram_tmp: auto` (the default) the Go engine gives every gate and test
+command `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`, a fresh directory per
+`gates run` (and per `block land` batch gate), removed after it.
+
+- `/Volumes/cf-tmp` is reused when it is mounted. Otherwise the engine makes
+  it once, with no sudo: `hdiutil attach -nomount ram://4194304` (2 GB; pages
+  are only taken as they are written) and `diskutil erasevolume APFS cf-tmp
+  <device>`.
+- The engine writes `.fseventsd/no_log` (no file-event log for the volume)
+  and `.metadata_never_index` (Spotlight skips it) at the volume root.
+- Any error prints one line, `warn: gates.ram_tmp: <reason>; the gates use
+  the normal TMPDIR`, and the gates run on the normal `TMPDIR`. A RAM disk
+  problem never fails a gate.
+- A gate command's own `env.TMPDIR` wins. The RAM disk `TMPDIR` is not listed
+  in `env_keys` and is not masked.
+- `gates.ram_tmp: off` (or `CODE_FORGE_RAM_TMP=off` in the environment) keeps
+  the normal `TMPDIR`. On Linux and Windows `auto` does nothing.
+- `code-forge doctor` shows a `ram_tmp` row: `on: /Volumes/cf-tmp mounted,
+  .fseventsd/no_log present`, `on (auto): ... is made on the first gate`,
+  `off (gates.ram_tmp: off)` or `fallback: hdiutil not found; ...`. The row
+  never makes a disk.
+- The volume stays mounted until you eject it (`hdiutil detach
+  /Volumes/cf-tmp`) or restart the Mac (B924).
+
 ## Rebase runs in Go (B431)
 
 `block rebase <id> --run <run>` (with only `--json`) of an open block with a

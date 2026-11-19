@@ -82,7 +82,7 @@ func TestB450RunBatchesKeepsFirstFailure(t *testing.T) {
 	cwd := t.TempDir()
 	c := &Command{}
 	batches := [][]string{{"/bin/sh", "-c", "echo one", "sh"}, {"/bin/sh", "-c", "echo two; exit 3", "sh"}, {"/bin/sh", "-c", "echo three; exit 4", "sh"}}
-	o := runBatches(context.Background(), batches, c, cwd, "", 10000)
+	o := runBatches(context.Background(), batches, c, c.Env, cwd, "", 10000)
 	if o.Get("ok") != false || o.Get("code") != 3 || o.Get("stdout") != "one\ntwo\nthree\n" {
 		t.Fatalf("runBatches = %v, want the first failure (code 3) with every output", o)
 	}

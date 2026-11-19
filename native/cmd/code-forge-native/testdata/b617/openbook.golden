@@ -14,6 +14,7 @@ OK   tmp: 0 stale roots, 0 stale pids
 OK   sweep: 0 stale workers, 0 orphans, 0 zombies
 INFO memory: code-forge N MB, children N MB, orphans N MB
 INFO review concurrency: 6 tickets at once; provider slots anthropic 4 · openai 2 · xai 2
+INFO ram_tmp: off (CODE_FORGE_RAM_TMP=off)
 OK   claude: present, 9.9.9 (fake claude)
 OK   claude flags: every builder flag is in --help
 OK   codex: present, codex-cli 9.9.9 (fake codex)
