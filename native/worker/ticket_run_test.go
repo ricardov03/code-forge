@@ -364,12 +364,13 @@ func TestB488PoisonWhenNothingCanBeWritten(t *testing.T) {
 	if n, poison, err := w.RunTicket(id); n != 0 || !poison || err != nil {
 		t.Fatalf("read-only queue = %d, %v, %v; want poisoned", n, poison, err)
 	}
-	// Node's start timings write fails first, and again in the failure's complete: nothing written
-	if _, err := os.Stat(filepath.Join(fx.root, ".code-forge", "reviews", "r1", id+".json")); !os.IsNotExist(err) {
-		t.Fatalf("result: %v", err)
-	}
+	// The start timings write fails, then the failure's done marker: no done
+	// marker, and (B918) the ticket keeps no finish time, so it is retried
 	if IsDone(fx.root, id) {
 		t.Fatal("no done marker in a read-only queue")
+	}
+	if tk, _ := readJSON(filepath.Join(q, id+".json")); tk == nil || tk.Get("finished_at") != nil {
+		t.Fatalf("ticket after a failed finish: %v", tk)
 	}
 }
 
