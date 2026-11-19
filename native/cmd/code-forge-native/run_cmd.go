@@ -434,6 +434,13 @@ func runStatusPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 		}
 	}
 	out.Set("worker_pinned", runTruthy(record.Get("worker")))
+	// B885: worker_pinned says a pin is recorded; worker_live and workers
+	// say whether a pinned worker runs (the probe block ready uses).
+	workers, hasWorkers := record.Get("workers"), runHas(record, "workers")
+	live, pins := rwlLive(workers, hasWorkers, record.Get("worker"))
+	out.Set("worker_live", live)
+	out.Set("workers", pins)
+	noLive := record.Get("status") != "ended" && rwlNoLive(workers, hasWorkers, record.Get("worker"))
 	out.Set("blocks", blocks)
 	if runHas(record, "orphans") {
 		out.Set("orphans", record.Get("orphans"))
@@ -455,6 +462,9 @@ func runStatusPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 	}
 	return func(o *runOut) int {
 		o.out(string(data) + "\n")
+		if noLive {
+			o.err(rwlNoLiveLine(runID))
+		}
 		if unknown > 0 {
 			if unknown == 1 {
 				o.err("1 session has no known price; the budget does not count it\n")

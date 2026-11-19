@@ -959,6 +959,11 @@ Every worker exit writes a signed `worker.exit` row with its reason and detail (
 `handover`, ...). A worker that `run start` launched keeps the last 50 lines of its stderr in
 `<repo>/.code-forge/logs/worker-<pid>.log` (the newest 20 logs are kept). When no pinned worker is
 live, the `worker.down` blocker names the last exit and the fix `code-forge run start --add-worker --run <r>`.
+`run status` uses the same probe (B885): `worker_live` is true when a pinned worker runs with the
+start time its pin recorded, and `workers` lists each pin with `pid`, `alive` and `started_at`
+(`worker_pinned` only says a pin is recorded). With pins and none alive, `run status` and `status`
+print `run <r>: no live worker; fix: code-forge run start --add-worker --run <r>` on stderr and
+`doctor` shows the same text as a `run-worker` WARN row.
 
 Forgotten workers exit after `worker.idle_exit_hours` without run activity (default 24, `0` disables);
 `sweep` and `doctor` flag idle workers, and `status` hints when all open branches are merged so

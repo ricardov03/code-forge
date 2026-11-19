@@ -200,6 +200,14 @@ func TestRunVerbStatus(t *testing.T) {
   "status": "active",
   "engine": "claude",
   "worker_pinned": true,
+  "worker_live": false,
+  "workers": [
+    {
+      "pid": 4242,
+      "alive": false,
+      "started_at": "x"
+    }
+  ],
   "blocks": {
     "B2": {
       "status": "awaiting_human_check"
@@ -224,7 +232,7 @@ func TestRunVerbStatus(t *testing.T) {
   ]
 }
 `
-	if code != 0 || out != want || errs != "1 session has no known price; the budget does not count it\n" {
+	if code != 0 || out != want || errs != "run r-test: no live worker; fix: code-forge run start --add-worker --run r-test\n1 session has no known price; the budget does not count it\n" {
 		t.Fatalf("status = %d\n%s\nstderr %q", code, out, errs)
 	}
 
@@ -236,7 +244,7 @@ func TestRunVerbStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errs = runVerbCall(t, "status", "--run", "r-two")
-	want = "{\n  \"run_id\": \"r-two\",\n  \"status\": \"ended\",\n  \"worker_pinned\": false,\n  \"blocks\": {},\n  \"spent_usd\": 0,\n  \"budget_usd\": null,\n  \"unknown_usd_sessions\": 0\n}\n"
+	want = "{\n  \"run_id\": \"r-two\",\n  \"status\": \"ended\",\n  \"worker_pinned\": false,\n  \"worker_live\": false,\n  \"workers\": [],\n  \"blocks\": {},\n  \"spent_usd\": 0,\n  \"budget_usd\": null,\n  \"unknown_usd_sessions\": 0\n}\n"
 	if code != 0 || out != want || errs != "" {
 		t.Fatalf("bare status = %d %q %q", code, out, errs)
 	}
