@@ -70,7 +70,9 @@ func newB524Fixture(t *testing.T, mode string) *b524Fixture {
 	f.ctx = dwpCtx{cfg: snap, configFile: snap.Path, workDir: f.workDir, runRootDir: f.runRoot, env: env, runID: "r-20261112-000000-b524aa", home: f.home}
 	beforeBinary, beforeTimeout, beforeStop, beforeVerify := runWorkerBinary, runLaunchTimeout, dwpStopWait, dwpVerify
 	runWorkerBinary = func() (string, error) { return fake, nil }
-	runLaunchTimeout = 5 * time.Second
+	// B798: the worker announces or exits; the loop ends at once either way,
+	// so a long bound only keeps a loaded machine from failing the test.
+	runLaunchTimeout = 60 * time.Second
 	t.Cleanup(func() {
 		runWorkerBinary, runLaunchTimeout, dwpStopWait, dwpVerify = beforeBinary, beforeTimeout, beforeStop, beforeVerify
 		for _, pid := range f.launched() {

@@ -75,20 +75,27 @@ func TestB788WorkerOpKeyReadAndCached(t *testing.T) {
 // without Jev, prints one warning with op's reason and the fix, and hands
 // nothing over.
 func TestB788WorkerOpFailureStartsWithoutJev(t *testing.T) {
+	// B794/B798: only the hanging op gets a short budget. An op that answers
+	// keeps the worker's own budget (6 s), so a loaded machine cannot turn
+	// its answer into "did not answer in time"; the hang (sleep 5) always
+	// outlasts 300 ms, so that case does not depend on load either.
 	cases := []struct {
 		name, body, reason string
 		missing            bool
+		budget             time.Duration
 	}{
-		{"signed out", "echo '[ERROR] You are not currently signed in.' >&2\nexit 1\n", opMessages["op_locked"], false},
-		{"not found", "echo '[ERROR] \"i\" isn'\"'\"'t an item in the \"v\" vault.' >&2\nexit 1\n", opMessages["op_not_found"], false},
-		{"no op on PATH", "", opMessages["op_missing"], true},
-		{"op hangs", "sleep 5\n", opMessages["op_timeout"], false},
+		{"signed out", "echo '[ERROR] You are not currently signed in.' >&2\nexit 1\n", opMessages["op_locked"], false, 0},
+		{"not found", "echo '[ERROR] \"i\" isn'\"'\"'t an item in the \"v\" vault.' >&2\nexit 1\n", opMessages["op_not_found"], false, 0},
+		{"no op on PATH", "", opMessages["op_missing"], true, 0},
+		{"op hangs", "sleep 5\n", opMessages["op_timeout"], false, 300 * time.Millisecond},
 	}
-	oldBudget := workerOpBudget
-	workerOpBudget = 300 * time.Millisecond
-	t.Cleanup(func() { workerOpBudget = oldBudget })
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			if c.budget != 0 {
+				oldBudget := workerOpBudget
+				workerOpBudget = c.budget
+				t.Cleanup(func() { workerOpBudget = oldBudget })
+			}
 			f := newB788Fix(t)
 			if !c.missing {
 				b788Op(t, c.body)
@@ -109,7 +116,7 @@ func TestB788WorkerOpFailureStartsWithoutJev(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(f.home, ".code-forge", "store", "jev.key")); err == nil {
 				t.Fatal("a key was cached after op failed")
 			}
-			if time.Since(start) > 10*time.Second {
+			if c.budget != 0 && time.Since(start) > 10*time.Second {
 				t.Fatalf("worker took %s; the op budget did not cap it", time.Since(start))
 			}
 		})

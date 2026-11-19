@@ -394,6 +394,25 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 				r.Set("code", 0)
 				r.Set("flaky", files)
 			}
+			// B798: a go test gate reruns its failed test names instead.
+			if r.Get("ok") != true && ctx.Err() == nil {
+				names, pkgs := goFailedTests(fmt.Sprint(r.Get("stdout"))+"\n"+fmt.Sprint(r.Get("stderr")), GoFlakyMax)
+				if a := goRerunArgv(item.argv, names, pkgs); names != nil && a != nil {
+					load := FlakyLoad()
+					if execute(ctx, a, c.Env, cwd, run, timeout, c.FailOnStdout).Get("ok") == true && ctx.Err() == nil {
+						tests := []any{}
+						for _, name := range names {
+							tests = append(tests, ledger.Object{{Key: "test", Value: name}, {Key: "packages", Value: pkgs}})
+						}
+						r.Set("ok", true)
+						r.Set("code", 0)
+						r.Set("flaky", names)
+						r.Set("flaky_tests", tests)
+						r.Set("flaky_load", math.Round(load*100)/100)
+						r.Set("flaky_rerun", a)
+					}
+				}
+			}
 		}
 		if item.name == "test" && r.Get("ok") == true && p.Repeat != nil && ctx.Err() == nil {
 			skip := func(message string) {

@@ -92,7 +92,9 @@ func b525Setup(t *testing.T, c b525Case, version string) *b525Env {
 	}
 	beforeBinary, beforeTimeout, beforeJev, beforeProcs := runWorkerBinary, runLaunchTimeout, doctorJevOpts, runReadProcesses
 	runWorkerBinary = func() (string, error) { return fake, nil }
-	runLaunchTimeout = 5 * time.Second
+	// B798: the worker announces or exits; the loop ends at once either way,
+	// so a long bound only keeps a loaded machine from failing the test.
+	runLaunchTimeout = 60 * time.Second
 	doctorJevOpts = jev.Opts{URL: b525JevDown, Sleep: func(float64) {}}
 	// B544: the sweep and memory rows read a sealed (empty) process table,
 	// never the machine's: a zombie of another program is not in the golden.

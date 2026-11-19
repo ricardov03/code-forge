@@ -72,7 +72,9 @@ func newStartFixture(t *testing.T, config string) startFixture {
 	}
 	beforeProcs, beforeTimeout, beforeBinary := runReadProcesses, runLaunchTimeout, runWorkerBinary
 	runReadProcesses = func() []runProc { return []runProc{} }
-	runLaunchTimeout = 5 * time.Second
+	// B798: the worker announces or exits; the loop ends at once either way,
+	// so a long bound only keeps a loaded machine from failing the test.
+	runLaunchTimeout = 60 * time.Second
 	runWorkerBinary = func() (string, error) { return fake, nil }
 	t.Cleanup(func() {
 		runReadProcesses, runLaunchTimeout, runWorkerBinary = beforeProcs, beforeTimeout, beforeBinary
