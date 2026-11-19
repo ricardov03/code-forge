@@ -553,6 +553,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	all := false
 	var files ledger.Object
 	var changedScope *gates.Scope
+	sharedTree := 0
 	base := ""
 	ranTree := ""
 	slug := o.slug
@@ -759,13 +760,23 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 				}
 			}
 		}
+		classFiltered := false
 		if gates.HasClasses(runPlan) {
 			filter := ""
 			if o.run != "" {
 				filter = gates.BlockClassFilter(classRules, b)
 			}
+			classFiltered = filter != ""
 			if runPlan, err = gates.WithClasses(runPlan, filter); err != nil {
 				return err
+			}
+		}
+		// B870: a block gate in the shared checkout whose test gate runs the
+		// whole suite also tests the other open blocks' half-done edits.
+		if step == nil && o.run != "" && tree == nil && !p.ReuseTest && !classFiltered && gatesRunsFullTest(runPlan, scope) {
+			if n := gatesSharedOpen(r, o.block); n > 0 {
+				sharedTree = n
+				gatesErrf("gates run: full suite in a shared tree (%d other open blocks); for this block's tests use --changed, or proof.isolation: worktree\n", n)
 			}
 		}
 		// B352: the machine-wide FIFO test queue; full scope waits for the
@@ -950,6 +961,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		}
 		if ranTree != "" {
 			row.Set("tree", ranTree)
+		}
+		if sharedTree > 0 {
+			row.Set("shared_tree", sharedTree)
 		}
 		if p.ReuseTest && scoped != nil {
 			gatesAdd(&row, scoped)
@@ -1153,4 +1167,31 @@ func gatesJSString(n float64) string {
 	text := strconv.FormatFloat(n, 'e', -1, 64)
 	mantissa, exp, _ := strings.Cut(text, "e")
 	return mantissa + "e" + strings.TrimLeft(strings.Replace(exp, "+0", "+", 1), "0")
+}
+
+// gatesRunsFullTest reports that the plan's test gate runs and runs the whole
+// suite (B870): no file list, no package list, not skipped.
+func gatesRunsFullTest(p gates.Plan, scope gates.Scope) bool {
+	if p.Commands["test"] == nil || len(p.Light) > 0 || (p.Restricted && !gates.Has(p.Names, "test")) {
+		return false
+	}
+	kind := scope.Kind
+	if scope.Report != "" {
+		kind = scope.Report
+	}
+	return kind == "full"
+}
+
+// gatesSharedOpen counts the run's other open blocks that work in the shared
+// checkout (no worktree of their own) (B870).
+func gatesSharedOpen(record ledger.Object, block string) int {
+	n := 0
+	for _, field := range gatesObj(record.Get("blocks")) {
+		entry, ok := field.Value.(ledger.Object)
+		if !ok || field.Key == block || entry.Get("status") != "open" || entry.Get("worktree") != nil {
+			continue
+		}
+		n++
+	}
+	return n
 }

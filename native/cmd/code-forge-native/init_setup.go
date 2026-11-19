@@ -73,6 +73,8 @@ type initCtx struct {
 	harness           string
 	solo              bool
 	name, slug        string
+	// workers is review.workers from the project or user config (B870).
+	workers float64
 }
 
 func initExists(p string) bool { _, err := os.Stat(p); return err == nil }
@@ -905,7 +907,12 @@ func initSummary(v initValues, ctx initCtx) (ledger.Object, []string, []string) 
 				lines = append(lines, "  "+label+": "+strings.Join(list, ", ")+" (from "+note+")")
 			}
 		}
-		settings = append(settings, ledger.Field{Key: key, Value: ledger.Object{{Key: "value", Value: value}, {Key: "source", Value: source}, {Key: "note", Value: note}}})
+		entry := ledger.Object{{Key: "value", Value: value}, {Key: "source", Value: source}, {Key: "note", Value: note}}
+		if hint := initIsolationHint(pk, value, ctx); hint != "" {
+			lines = append(lines, "    "+hint)
+			entry = append(entry, ledger.Field{Key: "hint", Value: hint})
+		}
+		settings = append(settings, ledger.Field{Key: key, Value: entry})
 	}
 	if len(blank) > 0 {
 		lines = append(lines, "Set the blanks later: edit .code-forge.yml ("+strings.Join(blank, ", ")+"), then run `code-forge validate`.")
@@ -1115,6 +1122,7 @@ func initSetupLoad(parsed initParsed, home, cwd string, existingFile bool) (init
 		return initSetupState{}, hInitUserConfig
 	}
 	ctx := initGather(cwd, home)
+	ctx.workers = initWorkers(existing, user)
 	v, ok := initResolve(ctx, existing, user, existingFile, parsed)
 	if !ok {
 		return initSetupState{}, hInitConfigShape
@@ -1535,4 +1543,31 @@ func initSetupRun(r initSetupResult) func(stdout, stderr io.Writer) int {
 		}
 		return code
 	}
+}
+
+// initWorkers is review.workers from the project config, else the user
+// config; 0 when neither sets a number.
+func initWorkers(existing, user ledger.Object) float64 {
+	for _, source := range []ledger.Object{existing, user} {
+		if v, ok := initField(source, "review", "workers"); ok {
+			if n, number := gatesNumber(v); number {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+// initIsolationHint (B870) is the worktree hint under the isolation line for a
+// project where several coders work at once (review.workers > 1) or a Laravel
+// project: their blocks share one checkout unless proof.isolation is worktree.
+func initIsolationHint(key string, value any, ctx initCtx) string {
+	if key != "isolation" || value == "worktree" || (ctx.profile != "laravel" && ctx.workers <= 1) {
+		return ""
+	}
+	mode, _ := value.(string)
+	if mode == "" {
+		mode = "export"
+	}
+	return "several coders share one checkout under " + mode + ": a full test run sees their edits; set proof.isolation: worktree (one tree per block), or run gates run --run <r> --block <id> --changed for a block's own tests"
 }

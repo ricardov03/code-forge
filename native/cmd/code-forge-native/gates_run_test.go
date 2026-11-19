@@ -265,9 +265,12 @@ func TestGatesRunExpandsTestClasses(t *testing.T) {
 		cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
 		cmd.Dir = repo
 		cmd.Env = append(envWithoutGit(), "HOME="+home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_ARGS="+string(encoded))
-		out, err := cmd.CombinedOutput()
+		// B870: stderr may carry the shared-tree line; the JSON is stdout.
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
 		if err != nil {
-			t.Fatalf("%s: %v: %s", tc.block, err, out)
+			t.Fatalf("%s: %v: %s%s", tc.block, err, out, stderr.String())
 		}
 		var result struct {
 			AllOK   bool `json:"allOk"`

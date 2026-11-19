@@ -118,6 +118,12 @@ Project settings (detected)
 Set the blanks later: edit .code-forge.yml (gates.types, proof.tiers.high.paths), then run `code-forge validate`.
 ```
 
+For a Laravel project, or when `review.workers` is above 1, a hint follows the `isolation` line
+(and the JSON `settings."proof.isolation"` carries it as `hint`) unless isolation is already
+`worktree`: several coders share one checkout, so a full test run sees each other's half-done
+edits. Set `proof.isolation: worktree` (one tree per block), or run a block's own tests with
+`code-forge gates run --run <r> --block <id> --changed`.
+
 After the summary `init` asks question 7 once. With `--no-interaction` at a terminal nothing is
 asked and the summary is still printed. In agent mode or without a terminal no text summary is
 printed: the same facts appear only as `settings` and `blank` in the one JSON line. A re-run keeps
