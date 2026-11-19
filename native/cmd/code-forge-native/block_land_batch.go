@@ -16,6 +16,7 @@ import (
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/proof"
 	"github.com/ricardov03/code-forge/native/rebase"
+	"github.com/ricardov03/code-forge/native/refguard"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -164,6 +165,12 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 				return err
 			}
 			batch = append(batch, &landBatchBlock{id: id, branch: blockString(wt.Get("branch")), head: head, original: strings.TrimSpace(head), entryBase: blockString(entry.Get("base_sha")), base: blockString(wt.Get("base_sha")), tree: tree, entry: entry, saved: state.CloneObject(entry), node: node})
+		}
+		// B797: main moved only by lands, releases and plain commits since the
+		// last land, checked before any rebase or gate.
+		if bad, reviewed, err := refguard.Unsafe(main, baseBranch); err == nil && len(bad) > 0 {
+			stoppedID, step = strings.Join(ids, " "), "main-reflog"
+			return fmt.Errorf("%s", refguard.Refusal(baseBranch, main, reviewed, bad))
 		}
 		// B397: before any rebase or gate, merge every block (in order) into
 		// the running result with git merge-tree. A block that conflicts is
@@ -427,7 +434,12 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if reason, checked := tested[green]; !checked || reason != "" {
 				return fmt.Errorf("refusing a prefix whose tree failed")
 			}
-			if _, err := gitx.Run(main, "merge", "--ff-only", "--", prefixes[green]); err != nil {
+			landed := []string{}
+			for _, block := range batch[:green] {
+				landed = append(landed, block.id)
+			}
+			refguard.Authorize(main)
+			if _, err := gitx.WithEnv(main, refguard.LandEnv(landed...), "merge", "--ff-only", "--", prefixes[green]); err != nil {
 				return err
 			}
 			// Single-block land keeps a landed block "closed" (dependents test

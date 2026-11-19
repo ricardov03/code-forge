@@ -39,6 +39,7 @@ import (
 	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/jev"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/refguard"
 	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/worker"
 )
@@ -357,6 +358,10 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 		}
 		if indexing {
 			tail = append(tail, drunIndexingRows(cwd, snap.Path, inForce, liveRun)...)
+		}
+		// B797: the coder ref guard (hook and guarded worktrees).
+		if status, detail := refguard.State(cwd); status != "" {
+			tail = append(tail, doctorRow{"ref-guard", status, "ref guard", detail})
 		}
 		tail = append(tail, doctorRow{"native_daemon", "INFO", "native daemon", daemon})
 		if root != "" {
