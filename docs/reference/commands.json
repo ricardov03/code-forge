@@ -3,6 +3,141 @@
   "source": "Generated from the Go help table by scripts/gen-commands-doc.sh; do not edit.",
   "commands": [
     {
+      "name": "audit",
+      "purpose": "Audit every command before a major release.",
+      "when": "Before a major release: check every command's help and refusals in a throwaway HOME.",
+      "owner_only": false,
+      "hidden": false,
+      "namespace": true,
+      "usage": "usage: code-forge audit commands [--json] [--out <file>]",
+      "flags": [],
+      "examples": [
+        {
+          "command": "code-forge audit --help",
+          "exit": 0,
+          "output": "Description:\n  Audit every command before a major release\n\nUsage:\n  usage: code-forge audit commands [--json] [--out <file>]\n\nAvailable commands:\n  audit commands  Run every command in a throwaway HOME and write the audit report\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ],
+      "exit_codes": [
+        {
+          "code": 0,
+          "meaning": "Success."
+        },
+        {
+          "code": 1,
+          "meaning": "Refused or failed; the message says why."
+        },
+        {
+          "code": 2,
+          "meaning": "Usage error: a missing, unknown or bad argument (the usage is printed)."
+        }
+      ],
+      "json": {
+        "kind": "none",
+        "lines": "one",
+        "keys": []
+      },
+      "related": [
+        "audit commands",
+        "doctor",
+        "version"
+      ]
+    },
+    {
+      "name": "audit commands",
+      "purpose": "Run every command in a throwaway HOME and write the audit report.",
+      "when": "Before `npm run release -- major`: run every command of this build with --help and with an unknown flag in a throwaway HOME (stubbed tools, network blocked), and commit the report as docs/audits/audit-<version>.md.",
+      "owner_only": false,
+      "hidden": false,
+      "namespace": false,
+      "usage": "usage: code-forge audit commands [--json] [--out <file>]",
+      "flags": [
+        {
+          "name": "--json",
+          "value": "",
+          "type": "bool",
+          "default": "off",
+          "meaning": "Print JSON instead of text."
+        },
+        {
+          "name": "--out",
+          "value": "<file>",
+          "type": "path",
+          "default": "not set",
+          "meaning": "Also write the Markdown report to this file (docs/audits/audit-<version>.md for a major release); prints a one-line summary instead of the report."
+        }
+      ],
+      "examples": [
+        {
+          "command": "code-forge audit commands --json",
+          "exit": 0,
+          "output": "{\"version\":\"dev\",\"commit\":\"<sha>\",\"date\":\"2026-01-01T00:00:00Z\",\"commands\":125,\"checks\":250,\"problems\":{\"high\":0,\"low\":0,\"medium\":9},\"out\":\"\",\"rows\":[{\"command\":\"audit\",\"check\":\"help\",\"result\":\"ok\",\"severity\":\"\",\"detail\":\"\",\"block\":\"\"},{\"command\":\"audit\",\"check\":\"bad-flag\",\"result\":\"ok\",\"severity\":\"…"
+        },
+        {
+          "command": "code-forge audit commands --out",
+          "exit": 2,
+          "output": "code-forge audit: --out needs a file\nusage: code-forge audit commands [--json] [--out <file>]"
+        }
+      ],
+      "exit_codes": [
+        {
+          "code": 0,
+          "meaning": "Success."
+        },
+        {
+          "code": 1,
+          "meaning": "At least one high problem (a crash, a hand-over or a --help with no usage), or the report could not be written; fix or give each a block id before a major release."
+        },
+        {
+          "code": 2,
+          "meaning": "Usage error: a missing, unknown or bad argument (the usage is printed)."
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "version",
+            "type": "string"
+          },
+          {
+            "key": "commit",
+            "type": "string"
+          },
+          {
+            "key": "date",
+            "type": "string"
+          },
+          {
+            "key": "commands",
+            "type": "number"
+          },
+          {
+            "key": "checks",
+            "type": "number"
+          },
+          {
+            "key": "problems",
+            "type": "object"
+          },
+          {
+            "key": "out",
+            "type": "string"
+          },
+          {
+            "key": "rows",
+            "type": "array"
+          }
+        ]
+      },
+      "related": [
+        "audit",
+        "doctor",
+        "help"
+      ]
+    },
+    {
       "name": "author",
       "purpose": "Write or harden a plan draft from a brief.",
       "when": "Turn a brief and a facts sheet into a plan draft (--job plan), or check and improve a draft (--job harden).",
@@ -4465,7 +4600,7 @@
         {
           "command": "code-forge help --json",
           "exit": 0,
-          "output": "[{\"name\":\"author\",\"summary\":\"Write or harden a plan draft from a brief\",\"owner\":false,\"group\":\"\"},{\"name\":\"autopilot\",\"summary\":\"Let a delegate decide for the owner within a grant\",\"owner\":false,\"group\":\"autopilot\"},{\"name\":\"autopilot approve\",\"summary\":\"Change one setting until a set time\",\"owner\":…"
+          "output": "[{\"name\":\"audit\",\"summary\":\"Audit every command before a major release\",\"owner\":false,\"group\":\"audit\"},{\"name\":\"audit commands\",\"summary\":\"Run every command in a throwaway HOME and write the audit report\",\"owner\":false,\"group\":\"audit\"},{\"name\":\"author\",\"summary\":\"Write or harden a plan draft from a …"
         }
       ],
       "exit_codes": [

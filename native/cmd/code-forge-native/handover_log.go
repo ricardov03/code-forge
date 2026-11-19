@@ -56,6 +56,7 @@ func handoverLogPath() string {
 // store "unknown" for them, or an empty field when the argument is absent.
 var handoverCommands = map[string]string{
 	"author":        "",
+	"audit":         "commands",
 	"autopilot":     "start status stop ask waive round level approve binnacle log",
 	"block":         "open attempt rebase claim ready close land stop waive reopen accept-hit unwaive ack-waivers human-pass amend-acceptance",
 	"ci":            "watch",

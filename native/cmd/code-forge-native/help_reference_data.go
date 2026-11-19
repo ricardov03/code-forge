@@ -250,6 +250,23 @@ var helpRefs = map[string]helpRef{
 		related:  []string{"autopilot digest", "autopilot revert"},
 		examples: []helpRefExample{helpRefEx("autopilot", "autopilot ratify row-missing --run {run} --json")},
 	},
+	"audit": {
+		when:     "Before a major release: check every command's help and refusals in a throwaway HOME.",
+		related:  []string{"audit commands", "doctor", "version"},
+		examples: []helpRefExample{helpRefEx("none", "audit --help")},
+	},
+	"audit commands": {
+		when:    "Before `npm run release -- major`: run every command of this build with --help and with an unknown flag in a throwaway HOME (stubbed tools, network blocked), and commit the report as docs/audits/audit-<version>.md.",
+		related: []string{"audit", "doctor", "help"},
+		flags: map[string]string{
+			"--out": "Also write the Markdown report to this file (docs/audits/audit-<version>.md for a major release); prints a one-line summary instead of the report.",
+		},
+		exits: map[int]string{1: "At least one high problem (a crash, a hand-over or a --help with no usage), or the report could not be written; fix or give each a block id before a major release."},
+		examples: []helpRefExample{
+			helpRefEx("none", "audit commands --json"),
+			helpRefEx("none", "audit commands --out"),
+		},
+	},
 	"autopilot found": {
 		when:    "During an autopilot run: turn a problem you found (a red gate, a land failure, a coder's leftover, a flaky test, a hand-over, a review) into a queued block of the same run instead of fixing it on the side.",
 		related: []string{"autopilot status", "autopilot binnacle", "autopilot start"},

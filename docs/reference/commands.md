@@ -2,6 +2,7 @@
 
 This page lists every CLI command: its purpose, when to use it, its usage and flags, examples with their real output, exit codes, the `--json` shape and related commands. It is generated from the Go help table; agents read the same data in [`commands.json`](commands.json). Regenerate both with `sh scripts/gen-commands-doc.sh`.
 
+- [audit](#audit)
 - [author](#author)
 - [autopilot](#autopilot)
 - [block](#block)
@@ -46,6 +47,133 @@ This page lists every CLI command: its purpose, when to use it, its usage and fl
 - [validate](#validate)
 - [version](#version)
 - [worker](#worker)
+
+## audit
+
+Audit every command before a major release
+
+```text
+usage: code-forge audit commands [--json] [--out <file>]
+```
+
+#### When to use
+
+Before a major release: check every command's help and refusals in a throwaway HOME.
+
+#### Flags
+
+None of its own; see its sub-commands.
+
+#### Examples
+
+```sh
+code-forge audit --help
+```
+
+Exit 0. Output:
+
+```text
+Description:
+  Audit every command before a major release
+
+Usage:
+  usage: code-forge audit commands [--json] [--out <file>]
+
+Available commands:
+  audit commands  Run every command in a throwaway HOME and write the audit report
+
+Options:
+  -h, --help  Show this help
+```
+
+#### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | Refused or failed; the message says why. |
+| 2 | Usage error: a missing, unknown or bad argument (the usage is printed). |
+
+#### JSON output
+
+Takes `--json`; the examples above refuse, so no shape is recorded.
+
+#### Related
+
+- [`audit commands`](#audit-commands)
+- [`doctor`](#doctor)
+- [`version`](#version)
+
+### audit commands
+
+Run every command in a throwaway HOME and write the audit report
+
+```text
+usage: code-forge audit commands [--json] [--out <file>]
+```
+
+#### When to use
+
+Before `npm run release -- major`: run every command of this build with --help and with an unknown flag in a throwaway HOME (stubbed tools, network blocked), and commit the report as docs/audits/audit-<version>.md.
+
+#### Flags
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--json` | bool | off | Print JSON instead of text. |
+| `--out <file>` | path | not set | Also write the Markdown report to this file (docs/audits/audit-<version>.md for a major release); prints a one-line summary instead of the report. |
+
+#### Examples
+
+```sh
+code-forge audit commands --json
+```
+
+Exit 0. Output:
+
+```text
+{"version":"dev","commit":"<sha>","date":"2026-01-01T00:00:00Z","commands":125,"checks":250,"problems":{"high":0,"low":0,"medium":9},"out":"","rows":[{"command":"audit","check":"help","result":"ok","severity":"","detail":"","block":""},{"command":"audit","check":"bad-flag","result":"ok","severity":"…
+```
+
+```sh
+code-forge audit commands --out
+```
+
+Exit 2. Output:
+
+```text
+code-forge audit: --out needs a file
+usage: code-forge audit commands [--json] [--out <file>]
+```
+
+#### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | At least one high problem (a crash, a hand-over or a --help with no usage), or the report could not be written; fix or give each a block id before a major release. |
+| 2 | Usage error: a missing, unknown or bad argument (the usage is printed). |
+
+#### JSON output
+
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `version` | string |
+| `commit` | string |
+| `date` | string |
+| `commands` | number |
+| `checks` | number |
+| `problems` | object |
+| `out` | string |
+| `rows` | array |
+
+#### Related
+
+- [`audit`](#audit)
+- [`doctor`](#doctor)
+- [`help`](#help)
 
 ## author
 
@@ -3451,7 +3579,7 @@ code-forge help --json
 Exit 0. Output:
 
 ```text
-[{"name":"author","summary":"Write or harden a plan draft from a brief","owner":false,"group":""},{"name":"autopilot","summary":"Let a delegate decide for the owner within a grant","owner":false,"group":"autopilot"},{"name":"autopilot approve","summary":"Change one setting until a set time","owner":…
+[{"name":"audit","summary":"Audit every command before a major release","owner":false,"group":"audit"},{"name":"audit commands","summary":"Run every command in a throwaway HOME and write the audit report","owner":false,"group":"audit"},{"name":"author","summary":"Write or harden a plan draft from a …
 ```
 
 #### Exit codes

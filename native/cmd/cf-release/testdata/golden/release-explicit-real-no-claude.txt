@@ -6,10 +6,11 @@ release @example/pkg: 0.21.0 → 1.0.0
 ok    CHANGELOG.md [Unreleased] has entries
 ok    working tree is clean
 ok    on branch main
-ok    up to date with origin/main
+WARN  main is ahead of origin/main: the push will also send those commits
 ok    1.0.0 > 0.21.0 (package.json) and > 0.21.0 (npm)
 ok    tag v1.0.0 is free (local and origin)
 ok    docs block covers 7a2bd0c80c7dd008ad9e4bca7b7a939c56922902 since v0.21.0
+ok    command audit docs/audits/audit-1.0.0.md has no open high problem
 
 == 2. bump + 3. CHANGELOG and README ==
 package.json: version  0.21.0 → 1.0.0
@@ -68,7 +69,7 @@ docs/step-by-step.md: version pins: 0.21.0 → 1.0.0
     + @codedology/code-forge 1.0.0
 
 == 4. checks ==
-ok    CI for HEAD 8a15962788ece72ef64a2215357f61f94b9682f7: completed, success (go test, go vet, gofmt, npm pack check, config-doc and gen-commands-doc --check)
+ok    CI for HEAD 2a9b8751c8c54575e98674a3b06a7ff7e541edb3: completed, success (go test, go vet, gofmt, npm pack check, config-doc and gen-commands-doc --check)
 ok    package size: @example/pkg 1234567 bytes (1.23 MB; limit <5 MB)
 ok    npm pack --dry-run: @example/pkg@1.0.0, 7 files
 ok    npm ls: 0 invalid, 0 missing, 0 extraneous
@@ -87,10 +88,10 @@ ok    annotated tag v1.0.0
       gh release create v1.0.0 --title v1.0.0 --notes-file <CASE>/tmp/code-forge-release-<RAND>/release-notes-v1.0.0.md --verify-tag
 --- stderr
 --- repo refs
-refs/heads/main 5d7d8b939b975ad7085008c870c8bf6d49c312ab Release v1.0.0
+refs/heads/main 20c8d1bec830daf9bc21a895b6be11468143d05d Release v1.0.0
 refs/remotes/origin/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
 refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b Release v0.21.0
-refs/tags/v1.0.0 3644235411b96447ab0238c86581597bd20cf0c4 Release v1.0.0
+refs/tags/v1.0.0 a9b5e21976db99b36a7fd38044297b3656f069f2 Release v1.0.0
 --- repo status
 --- tag v0.21.0
 object 7a2bd0c80c7dd008ad9e4bca7b7a939c56922902
@@ -100,7 +101,7 @@ tagger Test <test@example.invalid> 1794477600 +0000
 
 Release v0.21.0
 --- tag v1.0.0
-object 5d7d8b939b975ad7085008c870c8bf6d49c312ab
+object 20c8d1bec830daf9bc21a895b6be11468143d05d
 type commit
 tag v1.0.0
 tagger Test <test@example.invalid> 1794477600 +0000
@@ -219,6 +220,6 @@ Release v1.0.0
 - A fixed bug.
 --- fake log
 <CASE>/repo npm view @example/pkg version
-<CASE>/repo gh run list --commit 8a15962788ece72ef64a2215357f61f94b9682f7 --workflow CI --limit 1 --json headSha,status,conclusion
+<CASE>/repo gh run list --commit 2a9b8751c8c54575e98674a3b06a7ff7e541edb3 --workflow CI --limit 1 --json headSha,status,conclusion
 <CASE>/repo npm pack --dry-run --json
 <CASE>/repo npm ls --json

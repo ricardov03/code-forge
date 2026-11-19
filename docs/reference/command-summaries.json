@@ -1,4 +1,6 @@
 [
+  {"name":"audit","summary":"Audit every command before a major release","owner":false,"group":"audit"},
+  {"name":"audit commands","summary":"Run every command in a throwaway HOME and write the audit report","owner":false,"group":"audit"},
   {"name":"author","summary":"Write or harden a plan draft from a brief","owner":false,"group":""},
   {"name":"autopilot","summary":"Let a delegate decide for the owner within a grant","owner":false,"group":"autopilot"},
   {"name":"autopilot approve","summary":"Change one setting until a set time","owner":true,"group":"autopilot"},

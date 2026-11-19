@@ -1,6 +1,67 @@
 {
   "version": 1,
   "commands": {
+    "audit": {
+      "examples": [
+        {
+          "args": "audit --help",
+          "exit": 0,
+          "out": "Description:\n  Audit every command before a major release\n\nUsage:\n  usage: code-forge audit commands [--json] [--out <file>]\n\nAvailable commands:\n  audit commands  Run every command in a throwaway HOME and write the audit report\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ]
+    },
+    "audit commands": {
+      "examples": [
+        {
+          "args": "audit commands --json",
+          "exit": 0,
+          "out": "{\"version\":\"dev\",\"commit\":\"<sha>\",\"date\":\"2026-01-01T00:00:00Z\",\"commands\":125,\"checks\":250,\"problems\":{\"high\":0,\"low\":0,\"medium\":9},\"out\":\"\",\"rows\":[{\"command\":\"audit\",\"check\":\"help\",\"result\":\"ok\",\"severity\":\"\",\"detail\":\"\",\"block\":\"\"},{\"command\":\"audit\",\"check\":\"bad-flag\",\"result\":\"ok\",\"severity\":\"…"
+        },
+        {
+          "args": "audit commands --out",
+          "exit": 2,
+          "out": "code-forge audit: --out needs a file\nusage: code-forge audit commands [--json] [--out <file>]"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "version",
+            "type": "string"
+          },
+          {
+            "key": "commit",
+            "type": "string"
+          },
+          {
+            "key": "date",
+            "type": "string"
+          },
+          {
+            "key": "commands",
+            "type": "number"
+          },
+          {
+            "key": "checks",
+            "type": "number"
+          },
+          {
+            "key": "problems",
+            "type": "object"
+          },
+          {
+            "key": "out",
+            "type": "string"
+          },
+          {
+            "key": "rows",
+            "type": "array"
+          }
+        ]
+      }
+    },
     "author": {
       "examples": [
         {
@@ -1210,7 +1271,7 @@
         {
           "args": "help --json",
           "exit": 0,
-          "out": "[{\"name\":\"author\",\"summary\":\"Write or harden a plan draft from a brief\",\"owner\":false,\"group\":\"\"},{\"name\":\"autopilot\",\"summary\":\"Let a delegate decide for the owner within a grant\",\"owner\":false,\"group\":\"autopilot\"},{\"name\":\"autopilot approve\",\"summary\":\"Change one setting until a set time\",\"owner\":…"
+          "out": "[{\"name\":\"audit\",\"summary\":\"Audit every command before a major release\",\"owner\":false,\"group\":\"audit\"},{\"name\":\"audit commands\",\"summary\":\"Run every command in a throwaway HOME and write the audit report\",\"owner\":false,\"group\":\"audit\"},{\"name\":\"author\",\"summary\":\"Write or harden a plan draft from a …"
         }
       ],
       "json": {

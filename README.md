@@ -135,6 +135,7 @@ default. See [the workflow](docs/how-it-works.md) and [concepts](docs/concepts.m
 | `code-forge upgrade` | Refresh installed skill copies after upgrading the package, then fix the project config |
 | `code-forge release check [--json]` | Check the project is ready to release (clean tree, HEAD pushed, green CI, CHANGELOG shape, `npm ls`), suggest the bump and print the release steps |
 | `code-forge config fix [--dry-run]` | Rewrite `.code-forge.yml` shapes an older release accepted and this one refuses |
+| `code-forge audit commands [--out <file>]` | Maintainers: run every command in a sandbox and write the audit a major release needs |
 | `code-forge --help` | List every verb; each verb prints its own usage on bad arguments |
 
 The skill normally calls `run`, `block`, `worker`, `spawn`, `s2`, `author`, `facts`, and

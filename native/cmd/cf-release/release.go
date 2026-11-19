@@ -15,10 +15,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/releaseaudit"
 	"github.com/ricardov03/code-forge/native/releasecheck"
 )
 
-const releaseUsage = "usage: npm run release -- <patch|minor|major|x.y.z> [--dry-run] [--date YYYY-MM-DD] [--no-checks] [--allow-branch <name>]"
+const releaseUsage = "usage: npm run release -- <patch|minor|major|x.y.z> [--dry-run] [--date YYYY-MM-DD] [--no-checks] [--allow-no-audit] [--allow-branch <name>]"
 
 // refusal stops the release with exit 1; usageErr with exit 2. crash is an unexpected error
 // (Node would throw it): exit 1.
@@ -34,6 +35,8 @@ type releaseOpts struct {
 	date        string
 	checks      bool
 	allowBranch string
+	// allowNoAudit skips the major-release audit gate (B802); --no-checks alone does not.
+	allowNoAudit bool
 }
 
 var dateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
@@ -47,6 +50,8 @@ func parseReleaseArgs(argv []string) (releaseOpts, error) {
 			o.dryRun = true
 		case a == "--no-checks":
 			o.checks = false
+		case a == "--allow-no-audit":
+			o.allowNoAudit = true
 		case a == "--date" || a == "--allow-branch":
 			v := ""
 			if i+1 < len(argv) {
@@ -512,6 +517,7 @@ func (a *app) docsBlockFailure(root string) (string, error) {
 type preflightArgs struct {
 	branch, allowBranch, tag, current, next, name string
 	checks                                        bool
+	allowNoAudit                                  bool
 }
 
 func (a *app) preflight(root string, p preflightArgs, fail func(string) error) error {
@@ -626,6 +632,20 @@ func (a *app) preflight(root string, p preflightArgs, fail func(string) error) e
 		}
 	} else {
 		a.warn("!!! --no-checks: docs block preflight check was NOT run !!!")
+	}
+	// B802: a major release needs the committed command audit; --no-checks does not skip it.
+	if releaseaudit.IsMajor(p.current, p.next) {
+		path := releaseaudit.Path(p.next)
+		switch failure := releaseaudit.CheckRoot(root, p.next); {
+		case p.allowNoAudit:
+			a.warn("!!! --allow-no-audit: the major release command audit " + path + " was NOT checked !!!")
+		case failure != "":
+			if err := fail(failure); err != nil {
+				return err
+			}
+		default:
+			a.ok("command audit " + path + " has no open high problem")
+		}
 	}
 	return nil
 }
@@ -1177,7 +1197,7 @@ func (a *app) release(root string, opts releaseOpts, written *[]planFile, restor
 
 	var refusals []string
 	err = a.preflight(root, preflightArgs{branch: branch, allowBranch: opts.allowBranch, tag: tag, current: current,
-		next: next, name: name, checks: opts.checks}, func(msg string) error {
+		next: next, name: name, checks: opts.checks, allowNoAudit: opts.allowNoAudit}, func(msg string) error {
 		if !opts.dryRun {
 			return &refusal{msg}
 		}
