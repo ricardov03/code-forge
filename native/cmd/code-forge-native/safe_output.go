@@ -28,6 +28,7 @@ func (s safeStream) Write(p []byte) (int, error) {
 	file := os.Stdout
 	if s.stderr {
 		file = os.Stderr
+		usageNote(p) // B895
 	}
 	if !safeHasSecrets() {
 		return file.Write(p)

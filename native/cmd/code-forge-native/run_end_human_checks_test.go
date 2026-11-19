@@ -121,7 +121,7 @@ func TestB633RunEndRefusalJSON(t *testing.T) {
 		"run end: run r-test has 2 open human check(s); it cannot end until each is cleared\n")
 	// --json is a run end flag only.
 	code, out, errs := runVerbCall(t, "status", "--run", "r-test", "--json")
-	if code != 2 || out != "" || errs != "run status: unknown flag \"--json\"\n" {
+	if code != 2 || out != "" || errs != "run status: unknown flag \"--json\"\n"+usageText("run status") {
 		t.Fatalf("status --json = %d %q %q", code, out, errs)
 	}
 	code, _, errs = runVerbCall(t, "end", "--run", "r-test", "--json=1")

@@ -142,7 +142,7 @@ func TestRunVerbHelpAndUsage(t *testing.T) {
 		{"status", 2, "", runUsage},
 		{"end|positional", 2, "", runUsage},
 		{"reload", 2, "", runUsage},
-		{"status|--nope", 2, "", "run status: unknown flag \"--nope\"\n"},
+		{"status|--nope", 2, "", "run status: unknown flag \"--nope\"\n" + usageText("run status")},
 		{"status|--run|a|--run|b", 2, "", "run status: --run given more than once\n"},
 		{"start|--reattach=yes", 2, "", "run start: --reattach takes no value\n"},
 		{"status|--run", 2, "", "run status: --run needs a value\n"},
