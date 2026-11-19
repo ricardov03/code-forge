@@ -206,7 +206,7 @@ func TestB791UpgradeRunsConfigFix(t *testing.T) {
 	base := "nothing to upgrade\ndocs: kept packed 0.23.0\n"
 	b791Write(t, file, b791Old)
 	checkSmallCases(t, []smallCase{
-		{[]string{"upgrade", "--plain"}, 0, base + "config: fixed gates-extra-invariants (" + cfxInvariantsReason + ")\nconfig: " + strings.TrimPrefix(b791Hint, "  "), ""},
+		{[]string{"upgrade", "--plain"}, 0, base + "config: fixed gates-extra-invariants (" + cfxInvariantsReason + ")\nconfig: " + strings.TrimPrefix(b791Hint, "  ") + ".gitignore: added .code-forge/\n", ""},
 	})
 	b791Unchanged(t, file, b791Fixed)
 	checkSmallCases(t, []smallCase{{[]string{"upgrade", "--plain"}, 0, base + "config ok\n", ""}})

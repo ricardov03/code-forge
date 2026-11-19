@@ -66,6 +66,9 @@ Check exits 0 and prints `ok` only when the schema is valid, status is `approved
 exists with the saved SHA-256 hash, and no check is `fail`. A `warn` check is allowed. Other
 results exit 1 and print one line per problem to stderr. With `--json`, stdout contains
 `{"ok":true,"problems":[]}` or `{"ok":false,"problems":["..."]}`.
+A file that is not UTF-8 text, or JSON of the wrong shape, is one problem that names what is
+wrong, for example `Outcome "outcome.json" does not match the outcome schema: unknown field
+"step"; missing field "skill"; missing field "status"` (exit 1; `seal` and `record` say the same).
 Unknown subcommands or missing arguments print usage to stderr and exit 2.
 
 Run `code-forge outcome record` to check the result and save its cost and time in the project ledger:

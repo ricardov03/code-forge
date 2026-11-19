@@ -300,7 +300,15 @@
     "caps": {
       "type": "object",
       "additionalProperties": false,
-      "properties": { "coders": { "type": "integer", "minimum": 1, "default": 2 } }
+      "properties": {
+        "coders": { "type": "integer", "minimum": 1, "default": 2 },
+        "run_record_warn_mb": {
+          "type": "number",
+          "minimum": 0,
+          "default": 2,
+          "description": "Each save of a run record larger than this many MB (1 MB = 1,048,576 bytes) writes one WARN line to stderr naming the largest keys. The save still happens and a large record still reads. 0 turns the warning off."
+        }
+      }
     },
     "gates": {
       "type": "object",

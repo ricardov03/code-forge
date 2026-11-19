@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -96,8 +97,8 @@ func TestB455PipelineProblems(t *testing.T) {
 	checkSmallCases(t, []smallCase{{[]string{"pipeline", "status"}, 1, "", "Cannot read pipeline (EISDIR)\n"}})
 }
 
-// AJV and YAML wording stays with Node: a pipeline or an outcome of an
-// unsupported shape, and a YAML syntax error, go to Node before any output.
+// AJV and YAML wording stays with Node: a pipeline of an unsupported shape
+// and a YAML syntax error are refused before any output.
 func TestB455PipelineHandsOverSchemaAndYAMLErrors(t *testing.T) {
 	_, repo := smallProject(t, "")
 	for _, pipeline := range []string{
@@ -109,6 +110,12 @@ func TestB455PipelineHandsOverSchemaAndYAMLErrors(t *testing.T) {
 		expectHandover(t, "pipeline-unsupported", "pipeline", "status")
 	}
 	writeHomeFile(t, repo, "code-forge.pipeline.yml", "root: .\nsteps:\n  - {id: a, skill: s, outcome: a.json, approval: none}\n")
+	// B873: an outcome of the wrong shape is invalid with the schema problem named.
 	writeHomeFile(t, repo, "a.json", `{"skill":"s","status":"done","files":[]}`)
-	expectHandover(t, "pipeline-unsupported", "pipeline", "next")
+	checkSmallCases(t, []smallCase{{[]string{"pipeline", "next"}, 0, "nothing ready\n", ""}})
+	code, out, errText := runCaptured(t, "pipeline", "status")
+	if code != 0 || errText != "" || !strings.HasPrefix(out, "a  invalid  s  — Outcome ") ||
+		!strings.HasSuffix(out, `a.json" does not match the outcome schema: "status" must be one of draft, approved, blocked, failed`+"\n") {
+		t.Fatalf("pipeline status = %d %q %q", code, out, errText)
+	}
 }

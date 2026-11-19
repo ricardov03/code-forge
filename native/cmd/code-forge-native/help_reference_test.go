@@ -187,6 +187,7 @@ func helpRefNewSandbox(t *testing.T) *helpRefSandbox {
 		helpRefWrite(t, filepath.Join(s.repo, path), text, 0o644)
 	}
 	s.git(t, s.repo, "init", "-q")
+	b828Exclude(t, s.repo) // B828: run start refuses while git would see .code-forge/
 	s.git(t, s.repo, "add", "-A")
 	s.git(t, s.repo, "commit", "-qm", "start")
 	s.head = strings.TrimSpace(s.git(t, s.repo, "rev-parse", "HEAD"))

@@ -48,6 +48,13 @@ code-forge init
 `init` writes `.code-forge.yml` in the current directory, links the skill into the harnesses you
 pick, and ends with `doctor --quick`. Running it again changes nothing it already wrote.
 
+In a git repository `init` also adds `.code-forge/` to the repository's `.gitignore` and prints
+`.gitignore: added .code-forge/`. The folder holds the run mirror, the queue and the proof export,
+which copies `.env`, so git must never see it. `upgrade` adds the line to older projects. While
+git would see the folder, `run start`, `proof export` and `proof red-green` refuse with the fix, and
+`doctor` shows a FAIL row `.code-forge/ ignored by git`. When git already tracks files there, `init`,
+`upgrade` and `doctor` print the fix, `git rm -r --cached .code-forge && git commit`, and never run it.
+
 **Where the skill goes.** By default `init` links the skill with a symlink, at **project** scope
 inside a git repository (for Claude Code: `.claude/skills/code-forge` in the repo) and at
 **global** scope (under your home folder) outside one. With a global install, pass `-g` inside a

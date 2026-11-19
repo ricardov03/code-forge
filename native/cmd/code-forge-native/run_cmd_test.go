@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -16,6 +17,23 @@ import (
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/sign"
 )
+
+// sameJSONLine reports whether out is one JSON line (one trailing newline)
+// whose decoded value equals the decoded want.
+func sameJSONLine(t *testing.T, out, want string) bool {
+	t.Helper()
+	if !strings.HasSuffix(out, "\n") || strings.Count(out, "\n") != 1 {
+		return false
+	}
+	var got, exp any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		return false
+	}
+	if err := json.Unmarshal([]byte(want), &exp); err != nil {
+		t.Fatalf("want is not JSON: %v", err)
+	}
+	return reflect.DeepEqual(got, exp)
+}
 
 // runVerbCall runs `code-forge run <args>` in process and returns its exit
 // code and the bytes it wrote. A B690a refusal exits 1.
@@ -195,44 +213,9 @@ func TestRunVerbStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errs := runVerbCall(t, "status", "--run", "r-test")
-	want := `{
-  "run_id": "r-test",
-  "status": "active",
-  "engine": "claude",
-  "worker_pinned": true,
-  "worker_live": false,
-  "workers": [
-    {
-      "pid": 4242,
-      "alive": false,
-      "started_at": "x"
-    }
-  ],
-  "blocks": {
-    "B2": {
-      "status": "awaiting_human_check"
-    },
-    "B1": {
-      "status": "awaiting_human_check",
-      "owned_files": []
-    },
-    "B3": {
-      "status": "open"
-    }
-  },
-  "orphans": [
-    "keep"
-  ],
-  "spent_usd": 0.75,
-  "budget_usd": 12,
-  "unknown_usd_sessions": 1,
-  "awaiting_human_check": [
-    "B1",
-    "B2"
-  ]
-}
-`
-	if code != 0 || out != want || errs != "run r-test: no live worker; fix: code-forge run start --add-worker --run r-test\n1 session has no known price; the budget does not count it\n" {
+	// B874 prints one compact line; B885 adds worker_live and workers. Compare the decoded value.
+	want := `{"run_id":"r-test","status":"active","engine":"claude","worker_pinned":true,"worker_live":false,"workers":[{"pid":4242,"alive":false,"started_at":"x"}],"blocks":{"B2":{"status":"awaiting_human_check"},"B1":{"status":"awaiting_human_check","owned_files":[]},"B3":{"status":"open"}},"orphans":["keep"],"spent_usd":0.75,"budget_usd":12,"unknown_usd_sessions":1,"awaiting_human_check":["B1","B2"]}`
+	if code != 0 || !sameJSONLine(t, out, want) || errs != "run r-test: no live worker; fix: code-forge run start --add-worker --run r-test\n1 session has no known price; the budget does not count it\n" {
 		t.Fatalf("status = %d\n%s\nstderr %q", code, out, errs)
 	}
 
@@ -244,8 +227,8 @@ func TestRunVerbStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errs = runVerbCall(t, "status", "--run", "r-two")
-	want = "{\n  \"run_id\": \"r-two\",\n  \"status\": \"ended\",\n  \"worker_pinned\": false,\n  \"worker_live\": false,\n  \"workers\": [],\n  \"blocks\": {},\n  \"spent_usd\": 0,\n  \"budget_usd\": null,\n  \"unknown_usd_sessions\": 0\n}\n"
-	if code != 0 || out != want || errs != "" {
+	want = `{"run_id":"r-two","status":"ended","worker_pinned":false,"worker_live":false,"workers":[],"blocks":{},"spent_usd":0,"budget_usd":null,"unknown_usd_sessions":0}`
+	if code != 0 || !sameJSONLine(t, out, want) || errs != "" {
 		t.Fatalf("bare status = %d %q %q", code, out, errs)
 	}
 
@@ -426,8 +409,10 @@ func TestRunVerbReattach(t *testing.T) {
 			t.Fatalf("git init: %v %s", err, out)
 		}
 		f.record(t, "r-test", "active", `,"blocks":{}`)
+		// B826: with no live worker --reattach starts one as --add-worker
+		// does; this workspace has no config, so the start is refused.
 		code, out, errs := runVerbCall(t, "start", "--reattach", "--run", "r-test")
-		if code != 1 || out != "" || errs != "run start: no live worker serves this queue\n" {
+		if code != 1 || out != "" || errs != "run start: the project config cannot be loaded\n" {
 			t.Fatalf("no worker = %d %q %q", code, out, errs)
 		}
 		sleeper, started := startSleeper(t)

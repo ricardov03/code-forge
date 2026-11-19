@@ -473,7 +473,7 @@ func runStatusPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 		}
 		out.Set("awaiting_human_check", list)
 	}
-	data, err := ledger.Stringify(out, true)
+	data, err := ledger.Stringify(out, false) // B874: one compact line
 	if err != nil {
 		return nil, hRunShape
 	}
@@ -743,6 +743,35 @@ func runString(v any) string {
 
 // --- run start --reattach --run <id> [--worker-pid <pid>] ---
 
+// runReattachLaunchPlan is --reattach with no live worker (B826): start the
+// run's worker under the --add-worker lock and limit, pinned as the run's one
+// worker (worker.reattach). A worker another caller started meanwhile is
+// pinned instead of a second launch.
+func runReattachLaunchPlan(home, runID string) (func(o *runOut) int, handoverReason) {
+	runApplyTmpRoot()
+	binary, err := runWorkerBinary()
+	if err != nil {
+		return nil, hRunAddWorker
+	}
+	return func(o *runOut) int {
+		pid, _, started, err := runStartWorker(o, home, runID, binary, false, true)
+		if err == nil && !started {
+			_, err = runPinLocked(home, runID, float64(pid), false)
+		}
+		if errors.Is(err, errRunHandover) {
+			return runHandover([]string{"start", "--reattach", "--run", runID}, hRunShape)
+		}
+		if err != nil {
+			return runReport(o, "start", err)
+		}
+		if started {
+			o.err(fmt.Sprintf("run start: no live worker served run %s; started worker pid %d\n", runID, pid))
+		}
+		o.out(fmt.Sprintf("run %s: worker re-pinned to pid %d\n", runID, pid))
+		return 0
+	}, 0
+}
+
 func runReattachPlan(home, runID string, workerPid float64) (func(o *runOut) int, handoverReason) {
 	record, readErr, ok := runReadRecord(home, runID)
 	if !ok {
@@ -767,8 +796,9 @@ func runReattachPlan(home, runID string, workerPid float64) (func(o *runOut) int
 			return nil, hRunRegistry
 		}
 		if live == nil {
-			fail := &runFail{"no live worker serves this queue", false}
-			return func(o *runOut) int { return runReport(o, "start", fail) }, 0
+			// B826: no live worker serves the queue (it died, or left after
+			// worker.idle_exit_hours): launch one as --add-worker does and pin it.
+			return runReattachLaunchPlan(home, runID)
 		}
 		if serves, _ := live.Get("run").(string); serves != runID {
 			fail := &runFail{"the live worker serves run " + serves, false}

@@ -91,7 +91,11 @@ func TestAutopilotBinnacleInGo(t *testing.T) {
 	}
 	for _, tc := range cases {
 		code, out, errText := autopilotCall(t, tc.args...)
-		if want := bnTestdata(t, f, tc.want); code != 0 || out != want || errText != "" {
+		want := bnTestdata(t, f, tc.want)
+		if strings.HasSuffix(tc.want, ".json") {
+			want = b874Compact(t, want) // B874: --json is one compact line
+		}
+		if code != 0 || out != want || errText != "" {
 			t.Fatalf("%v = %d %q\n%s\nwant\n%s", tc.args, code, errText, out, want)
 		}
 	}
@@ -172,7 +176,7 @@ func TestAutopilotStatusStopFilesInGo(t *testing.T) {
 	if code != 0 || json.Unmarshal([]byte(out), &status) != nil {
 		t.Fatalf("status --json = %d %q", code, out)
 	}
-	if files, _ := status["files"].(map[string]any); files["binnacle"] != binnacle || files["log"] != log || !strings.Contains(out, "\"link\": null,\n  \"files\": {\n    \"binnacle\": ") {
+	if files, _ := status["files"].(map[string]any); files["binnacle"] != binnacle || files["log"] != log || !strings.Contains(out, `"link":null,"files":{"binnacle":`) {
 		t.Fatalf("status files: %s", out)
 	}
 

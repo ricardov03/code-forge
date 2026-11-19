@@ -205,6 +205,11 @@ func (f *b612Fixture) b717Node(root, args string) hvResult {
 
 func TestB717RequeueMatchesNode(t *testing.T) {
 	if os.Getenv("BLOCK_HV_CHILD") == "1" {
+		// B826: with no live worker Go review-file now starts the run's
+		// worker before it answers worker_down; Node never did. These
+		// goldens pin the requeue and join report Node recorded, so the
+		// child does not start one (the start is covered by the B826 tests).
+		reviewHeal = func(string, string) reviewHealResult { return reviewHealResult{} }
 		blockHVChild()
 	}
 	b760NoNodeRecorder(t, "B717_RECORD_NODE")

@@ -15,9 +15,9 @@ func TestB786RunStatusBudget(t *testing.T) {
 	cases := []struct {
 		name, cfg, budget string
 	}{
-		{"no budget", base, `"budget_usd": null`},
-		{"budget without usd", base + "budget:\n  block_lines: 400\n", `"budget_usd": null`},
-		{"budget.usd 5", base + "budget:\n  usd: 5\n", `"budget_usd": 5`},
+		{"no budget", base, `"budget_usd":null`},
+		{"budget without usd", base + "budget:\n  block_lines: 400\n", `"budget_usd":null`},
+		{"budget.usd 5", base + "budget:\n  usd: 5\n", `"budget_usd":5`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -35,7 +35,7 @@ func TestB786RunStatusBudget(t *testing.T) {
 			if handover != nil || code != 0 {
 				t.Fatalf("code=%d handover=%v stdout=%q stderr=%q", code, handover, stdout, stderr)
 			}
-			for _, want := range []string{`"run_id": "r-fix"`, `"status": "active"`, `"spent_usd": 0`, tc.budget} {
+			for _, want := range []string{`"run_id":"r-fix"`, `"status":"active"`, `"spent_usd":0`, tc.budget} {
 				if !strings.Contains(stdout, want) {
 					t.Fatalf("stdout lacks %s:\n%s", want, stdout)
 				}

@@ -133,6 +133,7 @@ func b553Fixture(t *testing.T, mode string) b553Fix {
 		}
 	}
 	git("-c", "init.defaultBranch=main", "init", "-q")
+	b828Exclude(t, f.repo) // B828: run start refuses while git would see .code-forge/
 	git("add", "-A")
 	git("-c", "user.name=t", "-c", "user.email=t@e", "-c", "commit.gpgsign=false", "commit", "-qm", "base")
 	write(filepath.Join(f.repo, "src", "a.txt"), "hello\nWORLD\nthree\n", 0o644)

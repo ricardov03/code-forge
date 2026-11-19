@@ -93,8 +93,13 @@ func TestB690aUsageErrorsMatchNode(t *testing.T) {
 			code, stdout, stderr, home := b690aUsageRun(t, args)
 			stdout = strings.ReplaceAll(stdout, token, "<TOKEN>")
 			stderr = strings.ReplaceAll(stderr, token, "<TOKEN>")
-			if code != g.Exit || stdout != g.Stdout || stderr != g.Stderr {
-				t.Fatalf("exit %d stdout %q stderr %q\nwant exit %d stdout %q stderr %q", code, stdout, stderr, g.Exit, g.Stdout, g.Stderr)
+			want := g.Stdout
+			if want == "" && g.Exit != 0 && jsonRefusalWanted(args) {
+				// B872: a --json refusal also prints one {"ok":false,...} line.
+				want = jsonRefusalLine(args, g.Exit, g.Stderr)
+			}
+			if code != g.Exit || stdout != want || stderr != g.Stderr {
+				t.Fatalf("exit %d stdout %q stderr %q\nwant exit %d stdout %q stderr %q", code, stdout, stderr, g.Exit, want, g.Stderr)
 			}
 			if files := b690aFiles(t, home); strings.Join(files, ",") != strings.Join(g.HomeFiles, ",") {
 				t.Fatalf("HOME files %q; want %q", files, g.HomeFiles)

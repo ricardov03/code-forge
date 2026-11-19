@@ -90,9 +90,10 @@ func outcomeHashFile(name, root string) (hash, problem string, ok bool) {
 	return fmt.Sprintf("%x", sha256.Sum256(data)), "", true
 }
 
-// loadOutcomeFile is loadOutcome plus the schema check: a problem Node
-// reports, or the parsed contract; ok is false where Node's wording (AJV,
-// an unmapped errno, a decoding Go does not reproduce) is not ported.
+// loadOutcomeFile is loadOutcome plus the schema check: a problem (an
+// unreadable file, not UTF-8, not JSON, or the schema problems, B873), or the
+// parsed contract; ok is false only for an unmapped errno or a decoding Go
+// does not reproduce.
 func loadOutcomeFile(file string) (outcome ledger.Object, problem string, ok bool) {
 	data, err := os.ReadFile(file)
 	if err != nil {
@@ -103,14 +104,22 @@ func loadOutcomeFile(file string) (outcome ledger.Object, problem string, ok boo
 		return nil, "Cannot read outcome " + jsQuote(file) + " (" + code + ")", true
 	}
 	if !utf8.Valid(data) {
-		return nil, "", false
+		return nil, "Outcome " + jsQuote(file) + " is not UTF-8 text", true // B873
 	}
 	if !json.Valid(data) {
 		return nil, "Outcome " + jsQuote(file) + " is not valid JSON", true
 	}
-	outcome, err = ledger.DecodeObject(data)
-	if err != nil || !blockopen.ValidOutcome(outcome) {
+	// B873: a wrong shape names the schema problem instead of handing over.
+	value, err := ledger.DecodeValue(data)
+	if err != nil {
 		return nil, "", false
+	}
+	outcome, _ = value.(ledger.Object)
+	if outcome == nil || !blockopen.ValidOutcome(outcome) {
+		if problem := outcomeSchemaProblem(file, value); problem != "" {
+			return nil, problem, true
+		}
+		return nil, "Outcome " + jsQuote(file) + " does not match the outcome schema", true
 	}
 	return outcome, "", true
 }

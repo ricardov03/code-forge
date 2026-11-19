@@ -199,7 +199,7 @@ suite locally: it runs the whole test command with no file list, and the gate ca
 
 The orchestrator runs full gates before `block close` (D2).
 
-To overlap reviews with coding, set `review.file_loop: overlap` (`wait` is the default; `watch` uses the commit loop below). Enqueue each green file with `code-forge review-file <path> --block <id> --run <r>` and continue coding. Before the completion sentinel, including in fix rounds, run `code-forge review-file --wait-block <id> --run <r> [--max 90s]`. It reads the workspace scope mirror, the queue and owned changed files; it never runs a review itself. It prints one JSON line `{block, files: [{file, ticket, status, outcome}], done}` with `done`, `findings`, `pending` or `not_queued` per file. Changed content with an earlier ticket gets a new current-content ticket after any unseen findings are delivered; the worker marks an old pending ticket stale at start. Timeout returns exit 0 with `done: false`, `reason: wait_timeout`; wait again. No live worker for the run returns exit 3 with `status: worker_down`, always `done: false`, even with completed markers; print the FAILED sentinel. An unreadable scope, ticket or completion marker refuses (exit 1). `done: true` means reviews finished or findings were delivered, not approved: inspect the tickets with `--wait` and fix findings. The close still checks signed approvals independently.
+To overlap reviews with coding, set `review.file_loop: overlap` (`wait` is the default; `watch` uses the commit loop below). Enqueue each green file with `code-forge review-file <path> --block <id> --run <r>` and continue coding. Before the completion sentinel, including in fix rounds, run `code-forge review-file --wait-block <id> --run <r> [--max 90s]`. It reads the workspace scope mirror, the queue and owned changed files; it never runs a review itself. It prints one JSON line `{block, files: [{file, ticket, status, outcome}], done}` with `done`, `findings`, `pending` or `not_queued` per file. Changed content with an earlier ticket gets a new current-content ticket after any unseen findings are delivered; the worker marks an old pending ticket stale at start. Timeout returns exit 0 with `done: false`, `reason: wait_timeout`; wait again. With no live worker for the run the join first starts the run's worker (B826); only when that start fails does it return exit 3 with `status: worker_down` (plus `start_error` and `fix`), always `done: false`, even with completed markers; print the FAILED sentinel. An unreadable scope, ticket or completion marker refuses (exit 1). `done: true` means reviews finished or findings were delivered, not approved: inspect the tickets with `--wait` and fix findings. The close still checks signed approvals independently.
 
 Each file's `outcome` is `approved`, `findings`, `stopped`, `split_required` or `unavailable` from its completion marker, and `null` while `pending` or `not_queued`; a live join queues an owned changed file even if it has no earlier ticket. A `split_required` outcome returns `done: false`, `reason: split_required` and `next` naming the file: the owner raises `review.budgets`, runs `run reload`, then runs `review-file <path> --fresh`.
 
@@ -384,10 +384,11 @@ Every block verb also takes `--json`. On success stdout is exactly one line,
 | `stop` | `stopped` | none; with `hooks.on_block_end` set, `done_file` |
 | `waive` | `waived` | `finding`, `file`, `by` |
 
-On failure the exit code and stderr are unchanged and stdout stays empty, except a close the gate
-refused, which also prints `{"block":<id>,"ok":false,"reason":<text>}`; every other close refusal
-(a usage error, a block not open, a cancelled `--no-require-reviews`, a failed worktree removal)
-leaves stdout empty. Without `--json` the output
+On failure the exit code and stderr are unchanged. A close the gate refused prints
+`{"block":<id>,"ok":false,"reason":<text>}`; every other refusal (a usage error, a block not
+open, a cancelled `--no-require-reviews`, a failed worktree removal) prints one line
+`{"ok":false,"error":<the stderr text>,"next":<command or null>}` (B872, for every verb's
+`--json`). Without `--json` the output
 is byte-identical to before.
 
 ### When a block ends: the done file and the hook
@@ -810,8 +811,12 @@ Gates, reviews and the close check of a worktree block run in its tree (B62b):
 - `block close` runs no gate. It measures the changed and unowned files in the tree against its
   base, committed and uncommitted. Changes in the main tree or another block's tree never count, and
   inside the tree nothing is exempt: a file a sibling block owns, or one dirty in the main tree at
-  open, is unowned there too. A tree that is gone, or not on the block's branch, refuses the close;
+  open, is unowned there too. Paths under a `.code-forge/` folder (any depth) are never measured, in
+  the tree or the main tree (B829). A tree that is gone, or not on the block's branch, refuses the close;
   nothing is recorded until it is restored.
+- A run record save over `caps.run_record_warn_mb` (default 2 MB, `0` turns it off) prints one line
+  `WARN run record <run> is <size>, over caps.run_record_warn_mb (<bound>); largest keys: ...` naming
+  the largest keys (for example `blocks.B3`). The save still happens and a large record still reads (B829).
 - `proof export` and `proof red-green` read the block's files and base in the tree, and run the
   red→green proof in an export built from the tree (kept under the main tree's `.code-forge/export`),
   so the tree itself is never changed.
@@ -946,7 +951,11 @@ by a coder) serves the ticket:
 Each worker writes one registry entry in `<repo>/.code-forge/workers/<pid>-<start_time>.json`
 (0700 directory, 0600 files), outside the ticket queue.
 The first worker also writes `queue/worker.json` for older readers. Its timer beats both files,
-and a clean stop removes its announcements. `worker_down` means no registered worker is live.
+and a clean stop removes its announcements. When no registered worker is live for an active run (it died, or left
+after `worker.idle_exit_hours`), `review-file` (enqueue with `--run`, `--wait`, `--wait-block`) and `run start --reattach`
+start the run's worker as `run start --add-worker` does: the same lock, the same `review.workers` limit, the same pin,
+so four coders at once start one worker (B826). `worker_down` means that start failed too; the answer carries
+`start_error` and `fix: code-forge run start --add-worker --run <r>`. An ended run answers `worker_down` and starts nothing.
 An unreadable or malformed registry entry blocks a new worker. Doctor names its path.
 
 A ticket the Go worker cannot serve fails only that ticket (B884). The worker writes its done marker
@@ -1573,7 +1582,7 @@ higher, at most L2), and an S2 ruling. A docs or contract block is never coded b
 
 | Claim | Checked by |
 |---|---|
-| only owned files touched | every changed or new file since the block's base must be in its `owned_files`, unchanged since `block open` recorded the tree, owned by another block of the run that is still open, or still exactly what a closed block's gate approved; anything else refuses `unowned_change <file>` (`block claim` it, or put it back). Only files under the repository top-level `.code-forge/` are not changes (for a workspace in a subdirectory, its own `.code-forge/` counts as source tree except this run's record mirror and the block's default transcript), so keep transcripts and reports there. A file a closed block of the run owns is accounted for while it is exactly the content that block's gate approved. A file an open sibling block owns is left to that block's gate: the close cannot tell which coder wrote it, so it prints a `WARN` line naming each such file |
+| only owned files touched | every changed or new file since the block's base must be in its `owned_files`, unchanged since `block open` recorded the tree, owned by another block of the run that is still open, or still exactly what a closed block's gate approved; anything else refuses `unowned_change <file>` (`block claim` it, or put it back). Files under a `.code-forge/` folder at any depth (the repository top level or a subdirectory workspace's own) are never changes, whatever `.gitignore` says, so keep transcripts and reports there; `block open` never records them in `tree_at_open` either, so a proof export with a copied `vendor/` or the queue tickets cannot grow the run record (B829). A file a closed block of the run owns is accounted for while it is exactly the content that block's gate approved. A file an open sibling block owns is left to that block's gate: the close cannot tell which coder wrote it, so it prints a `WARN` line naming each such file |
 | every file reviewed | the files are every owned file changed since the base plus every owned file with any review row for this block (so work committed before `block open` or done in another worktree is still checked, with a WARN naming the likely cause); an owned entry with no glob owns the paths below it; a block with no such file refuses `no_changes`, which only the owner's `--no-require-reviews` (confirmed at a terminal) lifts. Files matching `review.exclude` are `excluded`, never `unreviewed`, and write signed `gate.review_excluded {block, file, content_hash, rule}` rows only on a passing close. Excluded npm locks must pass the HTTPS registry and integrity check (`review.lockfile_registries`); other lock formats receive no safety check. Ownership and every other check still apply. Each remaining file needs a **signed** `review.approved` row for its current content hash, and no later review of that same content that did not approve it. A later review that left findings open refuses `not_approved <file> <finding>` per finding until it is fixed and approved again or waived; a critical finding only by the human's `block waive`. A file with no approval refuses `unreviewed <file>` unless it is **reviewed by waiver**: a signed `review.round` row exists for its current hash (a session really reviewed these bytes — a repeated stop or an `unavailable` result never counts), the latest refusal row is signed, carries `content_hash` equal to the current hash (a row with no hash never qualifies), and names at least one finding, and every finding it names and every open id of the file's `review.cap` rows is waived or answered (a critical waiver only by the human, an autopilot waiver only when its grant covered it, an agent waiver only with a signed `verdict: agree` for warning or nit). Such a file is reported `reviewed_by_waiver`, never approved; the close prints `block <id>: <file> reviewed_by_waiver (<ids>; by <human\|autopilot\|agent>)`, `--json` adds `reviewed_by_waiver`, and one signed `gate.review_waived_all {file, content_hash, findings, by}` row per such file (`findings`: the sorted ids) is written just before `block.close` — none when the close is refused |
 | tests green | the gates, run again |
 | clauses covered | every clause names a test that exists and passed; S1 `scope` on the other hunks |

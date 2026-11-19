@@ -130,7 +130,16 @@ func reviewWaitBlockDirect(args []string, flags map[string]string, paths []strin
 	if !valid {
 		return reviewWaitUsageError(args, "--max must look like 90s or 1500ms")
 	}
+	// B826: no live worker serves the run: start it as --add-worker does.
+	var heal reviewHealResult
+	if w, ok := reviewEnqueueWorker(root); ok && w == nil {
+		heal = reviewHeal(root, run)
+		reviewHealSay(run, heal)
+	}
 	joined := reviewWaitBlockJoin(cwd, root, run, block, maxWait, safeStderr)
+	if joined.code == 3 && joined.answer != nil {
+		joined.answer = reviewHealDown(joined.answer, run, heal)
+	}
 	switch {
 	case joined.handed:
 		return reviewWaitHandover(args, joined.handover)

@@ -599,7 +599,7 @@ func autopilotStatus(o *runOut, home, runID string, flags autopilotFlags, now ti
 			{Key: "started_at", Value: nil}, {Key: "stopped_at", Value: nil}, {Key: "expired_at", Value: nil},
 		}...)
 		if flags.bools["json"] {
-			out, _ := ledger.Stringify(data, true)
+			out, _ := ledger.Stringify(data, false) // B874: one compact line
 			o.out(string(out) + "\n")
 		} else {
 			o.out("autopilot run " + runID + ": no grant\n")
@@ -672,7 +672,7 @@ func autopilotStatus(o *runOut, home, runID string, flags autopilotFlags, now ti
 		}...)
 	}
 	if flags.bools["json"] {
-		out, _ := ledger.Stringify(data, true)
+		out, _ := ledger.Stringify(data, false) // B874: one compact line
 		o.out(string(out) + "\n")
 		return 0
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/docsync"
 	"github.com/ricardov03/code-forge/native/gates"
+	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
@@ -1386,6 +1387,27 @@ type initSetupResult struct {
 	doctor   *doctorQuick // step 9, nil with --skip-doctor
 }
 
+// initStateIgnoreLines adds .code-forge/ to the repository's .gitignore
+// (B828) and says what it did, plus the untrack fix when git already
+// tracks state files. A write failure is said, never fatal.
+func initStateIgnoreLines(dir string, wrote *[]any) []string {
+	lines := []string{}
+	file, added, err := gitx.EnsureStateIgnored(dir)
+	switch {
+	case err != nil:
+		lines = append(lines, ".gitignore: could not add "+gitx.StateIgnoreLine+" ("+file+": "+err.Error()+"); add the line by hand")
+	case added:
+		if wrote != nil {
+			*wrote = append(*wrote, file)
+		}
+		lines = append(lines, ".gitignore: added "+gitx.StateIgnoreLine)
+	}
+	if tracked := gitx.StateTracked(dir); len(tracked) > 0 {
+		lines = append(lines, gitx.StateTrackedLine(tracked))
+	}
+	return lines
+}
+
 func initWriteText(file, text string) error {
 	if err := os.MkdirAll(filepath.Dir(file), 0o777); err != nil {
 		return err
@@ -1429,6 +1451,13 @@ func initSetupRun(r initSetupResult) func(stdout, stderr io.Writer) int {
 					}
 					wrote = append(wrote, r.configFile)
 					say(config.Filename + ": written")
+				}
+				// B828: .code-forge/ (runs, queue, the proof export with
+				// its .env copies) stays out of git.
+				if r.configFile != "" {
+					for _, line := range initStateIgnoreLines(filepath.Dir(r.configFile), &wrote) {
+						say(line)
+					}
 				}
 				if r.tools {
 					for _, line := range initToolLines(r.solo, r.yesTools) {
