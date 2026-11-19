@@ -316,3 +316,27 @@ func changelogMain(a *app, argv []string, root string) int {
 	a.err("REFUSED: " + e.msg + "\n" + extra)
 	return e.code
 }
+
+// sectionShapeError is the first shape fault of the section (B785): an entry before the first
+// `### ` heading, or a `### ` kind that appears twice (case-insensitive). Line numbers are 1-based.
+// The site's changelog page shows such a section as a nameless group or as repeated groups.
+func sectionShapeError(lines []string, sec *clSection) string {
+	name := jsTrim(lines[sec.start][3:])
+	seen := map[string]int{}
+	for _, s := range parseSubsections(lines, sec.start+1, sec.end) {
+		if s.typ == "" {
+			if len(s.bullets) > 0 {
+				return "CHANGELOG.md line " + strconv.Itoa(s.bullets[0].first+1) + ": an entry of \"## " + name +
+					"\" comes before its first ### heading: put each entry under ### " + strings.Join(clTypes, ", ")
+			}
+			continue
+		}
+		kind := strings.ToLower(s.typ)
+		if first, dup := seen[kind]; dup {
+			return "CHANGELOG.md line " + strconv.Itoa(s.heading+1) + ": \"### " + s.typ + "\" repeats in \"## " + name +
+				"\" (first at line " + strconv.Itoa(first+1) + "): merge them into one ### " + s.typ + " heading"
+		}
+		seen[kind] = s.heading
+	}
+	return ""
+}
