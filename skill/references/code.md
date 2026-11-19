@@ -178,7 +178,13 @@ commit: a second start says another ci watch is already watching and exits 0.
 **Require green CI (B765).** `land.require_ci: github` (default `off`) makes `--merge` and a batch
 land merge a block only when GitHub CI is green for the block's own tip (`gh run list --commit
 <sha>`, `gh` from `PATH`; `land.ci_workflow` limits it to one workflow). No run, a running or red
-run, or no `gh` stops at step `ci` with exit 1; nothing is merged or written. A red run lands only
+run, or no `gh` stops at step `ci` with exit 1; nothing is merged or written. B796: a tip with no CI
+run is pushed (never forced) to `ci-<block>` or, after a rebase, a new `ci-<block>-<n>` with a draft
+PR that replaces and closes the old one (`land.ci_branch_prefix`, `land.ci_remote`); land then waits
+for CI on that sha up to `land.ci_wait` (default `30m`, one progress line a minute) and a timeout
+refuses with the same land command to resume; red refuses with the failed jobs. An SSH push that
+fails on auth is retried once over HTTPS with the gh credential helper. After the land the block's
+CI PRs are closed. Do not write poll scripts or open replacement PRs by hand. A red run lands only
 when every failing test matches a `<block> <regexp>` line of `land.ci_red_list` for a block named in
 `CODE_FORGE_CI_RED_BLOCKS`; a block never covers its own red.
 

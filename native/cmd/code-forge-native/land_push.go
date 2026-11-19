@@ -73,7 +73,8 @@ func landPush(home, run string, ids []string, main, base string, watch bool, pri
 		return result, fmt.Errorf("cannot resolve main HEAD before push")
 	}
 	result.sha = strings.TrimSpace(sha)
-	if output, err := gitx.Run(main, "push", "origin", base); err != nil {
+	// B796: an SSH auth failure is retried once over HTTPS (landGitPush).
+	if _, output, err := landGitPush(main, "origin", base, print); err != nil {
 		detail := strings.TrimSpace(landFirst(landGitError(err, ""), output, err.Error()))
 		id, herr := healQueue(home, run, strings.Join(ids, ","), healq.KindLand, landRetryArgv(run, ids), main, "push of "+base+" at "+result.sha+" rejected: "+detail)
 		if herr != nil {

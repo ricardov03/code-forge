@@ -711,10 +711,35 @@ each block, before any rebase), land runs `gh run list --commit <sha> --limit 10
 databaseId,status,conclusion,name` with `gh` from `PATH` and its existing login (no new token; none
 is printed); `land.ci_workflow: ci.yml` adds `--workflow ci.yml`. Each workflow passes when one of
 its completed runs concluded `success`, `skipped` or `neutral`; the land needs every workflow to
-pass and prints `ci: tip <sha8> green (<n> runs)`. No run, a run still going, a red run, a failing
-`gh` call or no `gh` on `PATH` stops the land at step `ci` with exit 1 (`--json`: `event: refused`,
-`step: ci`) and next command `code-forge ci watch --sha <sha> --cwd <main>`; nothing is merged and no
-state is written.
+pass and prints `ci: tip <sha8> green (<n> runs)`. A red run, a failing `gh` call or no `gh` on
+`PATH` stops the land at step `ci` with exit 1 (`--json`: `event: refused`, `step: ci`); nothing is
+merged and no state is written. A red refusal names the failed jobs (`gh run view <id> --json jobs`)
+and its next command is `gh run view <id> --log-failed`.
+
+**No human between a rebase and green CI (B796).** With `land.require_ci: github`:
+
+- A tip with no CI run and no open CI pull request at that tip is pushed, never forced, to
+  `land.ci_remote` (default `origin`). When the tip fast-forwards the newest open CI branch
+  (`<land.ci_branch_prefix><block>`, default prefix `ci-`, block id in lower case) it goes there and
+  that PR updates. After a rebase it does not, so the tip goes to a new branch `ci-<block>-<n>` with
+  a draft PR "Replaces #N (rebased onto <sha8>)", and each replaced PR is closed with "Replaced by
+  #M". Output: `ci: pushed tip <sha8> to origin/ci-b7-2 over ssh`, `ci: opened draft PR #M for
+  ci-b7-2`, `ci: closed #N (replaced by #M)`.
+- The land then waits for CI on that exact sha up to `land.ci_wait` (default `30m`; `off` reads CI
+  once). It polls with backoff (10 s doubling to 1 min) and prints one line a minute:
+  `ci: waiting for tip <sha8> (running: CI), 3m10s of 30m0s`. Green lands; red refuses at once; at
+  the limit it refuses with `tip <sha8> CI not green after 30m0s (...)` and next command the same
+  `block land` call, so running it again resumes the wait. Nothing is merged before green.
+- A push over SSH (the CI branch, and main with `--push` or `land.push`) that fails on SSH
+  authentication (`communication with agent failed`, `Permission denied (publickey)`, ...) is retried
+  once over HTTPS with the gh credential helper (`git -c credential.helper= -c
+  credential.helper='!gh auth git-credential' push https://<host>/<path> ...`). It prints
+  `push: origin over ssh failed (<reason>); retrying once over https with the gh credential helper`
+  and `push: https push to <url> worked`. No token is printed.
+- After the block lands, its open CI pull requests are closed with "Block <id> landed into <base> at
+  <sha8>" (`ci: closed #M (block <id> landed)`); a failure there only warns.
+
+An autopilot that runs `block land` gets all of this with no extra step.
 A red run can still land when it is red only on known main reds: set `CODE_FORGE_CI_RED_BLOCKS` to
 the comma-separated fix blocks and `land.ci_red_list` to a list file (relative to the main
 checkout). Each line is `<block> <regexp>` (Go regexp, matched against a failing test name); blank
