@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"os/exec"
@@ -320,6 +321,16 @@ func (f *rvfFlow) note(s string) {
 	f.o.err("review: " + s + "\n")
 }
 
+// errQuiet writes s on stderr without making it the error log's message
+// (B876: the provider's stderr lines and the next step; the log keeps the
+// "unavailable" line). The caller holds outMu.
+func (f *rvfFlow) errQuiet(s string) {
+	if f.o.redact != nil {
+		s = f.o.redact(s)
+	}
+	fmt.Fprint(safeStderr, s)
+}
+
 func (f *rvfFlow) aborted() bool {
 	select {
 	case <-f.abort:
@@ -466,6 +477,8 @@ type rvfOutcome struct {
 	tokensIn     any // float64 or nil
 	budget       any
 	section      *string
+	// B876: why a provider gave no answer (stderr lines or the exit detail)
+	why []string
 }
 
 func (o rvfOutcome) object() ledger.Object {
@@ -547,7 +560,37 @@ func rvfClassify(file string, waited any) rvfOutcome {
 	if rStatus == "reviewed" && len(findings) > 0 {
 		return out("findings", nil)
 	}
-	return out("unavailable", str(runJSString(rvfCoalesce(r, []string{"reason", "status"}, "not approved"))))
+	o := out("unavailable", str(runJSString(rvfCoalesce(r, []string{"reason", "status"}, "not approved"))))
+	o.why = rvfProviderWhy(r)
+	return o
+}
+
+// rvfProviderWhy is the provider's side of an unavailable review (B876):
+// the stderr lines of the last session that ended on an exit or a timeout,
+// or its detail and that the CLI printed nothing.
+func rvfProviderWhy(r any) []string {
+	sessions, _ := rvfGet(r, "sessions")
+	list, _ := sessions.([]any)
+	for i := len(list) - 1; i >= 0; i-- {
+		reason, _ := rvfGet(list[i], "reason")
+		if reason != "exit" && reason != "timeout" {
+			continue
+		}
+		tail, _ := rvfGet(list[i], "stderr_tail")
+		if text, _ := tail.(string); text != "" {
+			var why []string
+			for _, line := range strings.Split(text, "\n") {
+				why = append(why, "provider stderr: "+line)
+			}
+			return why
+		}
+		detail, _ := rvfGet(list[i], "detail")
+		if text, _ := detail.(string); text != "" {
+			return []string{text + "; the provider CLI printed nothing on stderr"}
+		}
+		return nil
+	}
+	return nil
 }
 
 func rvfPlural(n int, word string) string {
@@ -833,7 +876,12 @@ func (f *rvfFlow) flow(code *int) error {
 	errs := make([]error, len(queue))
 	finish := func(i int, o rvfOutcome) {
 		outcomes[i] = o
-		f.note(o.file + "  " + rvfLabel(o))
+		f.outMu.Lock()
+		defer f.outMu.Unlock()
+		f.o.err("review: " + o.file + "  " + rvfLabel(o) + "\n")
+		for _, line := range o.why {
+			f.errQuiet("review: " + o.file + "  " + line + "\n")
+		}
 	}
 	for i, q := range queue {
 		if !q.has {
@@ -902,6 +950,12 @@ func (f *rvfFlow) flow(code *int) error {
 		f.o.out(string(text) + "\n")
 	} else {
 		f.o.out(rvfRenderText(outcomes))
+	}
+	for _, o := range outcomes {
+		if len(o.why) > 0 {
+			f.errQuiet(refusalNext(providerExitNext))
+			break
+		}
 	}
 	return nil
 }

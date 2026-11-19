@@ -45,6 +45,7 @@ case $(cat "$(dirname "$0")/mode") in
 approve) printf '%s' '{"type":"result","is_error":false,"result":"done","structured_output":{"passed":true,"summary":"fake review","reviewed_hunks":['"$heads"'],"findings":[]},"usage":{"input_tokens":1000,"output_tokens":300}}' ;;
 findings) printf '%s' '{"type":"result","is_error":false,"result":"done","structured_output":{"passed":false,"summary":"fake review","reviewed_hunks":['"$heads"'],"findings":[{"id":"F1","file":"src/a.txt","line_start":2,"line_end":2,"severity":"warning","category":"correctness","claim":"a bug","evidence":"the line says world","fix":"remove it"}]},"usage":{"input_tokens":1000,"output_tokens":300}}' ;;
 fail) echo boom >&2; exit 3 ;;
+silent) exit 1 ;;
 esac
 `
 
@@ -269,7 +270,7 @@ func TestB553ReviewFlowGo(t *testing.T) {
 			func(string) string {
 				return "src/a.txt  unavailable: exit\n\ntotals: 1 file · 0 approved · 0 with findings (0 findings) · 0 stopped · 1 unavailable\n"
 			},
-			"review: base %s (HEAD (uncommitted changes)) · 1 file · run <RUN>\nreview: src/a.txt  unavailable: exit\n"},
+			"review: base %s (HEAD (uncommitted changes)) · 1 file · run <RUN>\nreview: src/a.txt  unavailable: exit\nreview: src/a.txt  provider stderr: boom\n" + b876Next},
 		{"json", "findings", []string{"--files", "src/a.txt", "--json", "--max", "60", "--keep-run"}, 1,
 			func(base string) string {
 				return `{"ok":false,"base":"` + base + `","base_from":"HEAD (uncommitted changes)","run":"<RUN>","block":"<BLOCK>","files":[{"file":"src/a.txt","result":"findings","reason":null,"findings":[{"id":"F1","severity":"warning","lines":"2-2","claim":"a bug","fix":"remove it"}]}],"skipped":[],"totals":{"files":1,"approved":0,"unchanged":0,"with_findings":1,"findings":1,"stopped":0,"unavailable":0}}` + "\n"

@@ -2,7 +2,9 @@ exit=1
 --- stdout
 --- stderr
 level=L0 provider=openai model=gpt-x effort=medium fallback_step=0
+facts: provider stderr: boom
 facts: failed (exit 5)
+next: code-forge doctor (checks each provider CLI and its login; code-forge logs --last 5 shows the error log)
 --- log/codex.argv
 exec
 -m
