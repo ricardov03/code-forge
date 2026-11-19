@@ -159,9 +159,9 @@ func TestB473RunUsageAndFlagErrors(t *testing.T) {
 		{[]string{"run", "reload", "--add-worker", "--run", "a"}, 2, "", "run reload: run start --add-worker needs --run and cannot use --reattach or --worker-pid\n"},
 		{[]string{"run", "reload", "--worker-pid", "0", "--run", "a"}, 2, "", "run reload: --worker-pid must be a positive integer\n"},
 		{[]string{"run", "reload", "--run", "BAD"}, 1, "", "run reload: run id must match /^[a-z0-9][a-z0-9-]{0,63}$/\n"},
-		{[]string{"run", "reload", "--run", "nope"}, 1, "", "run reload: no run record for nope\n"},
-		{[]string{"run", "reload", "pos", "--run", "nope"}, 1, "", "run reload: no run record for nope\n"},
-		{[]string{"run", "reload", "--run", "nope", "--reattach", "--worker-pid", "5", "--cwd", "/x", "--engine", "e"}, 1, "", "run reload: no run record for nope\n"},
+		{[]string{"run", "reload", "--run", "nope"}, 1, "", "run reload: no run record for nope\nnext: code-forge status\n"},
+		{[]string{"run", "reload", "pos", "--run", "nope"}, 1, "", "run reload: no run record for nope\nnext: code-forge status\n"},
+		{[]string{"run", "reload", "--run", "nope", "--reattach", "--worker-pid", "5", "--cwd", "/x", "--engine", "e"}, 1, "", "run reload: no run record for nope\nnext: code-forge status\n"},
 	})
 }
 

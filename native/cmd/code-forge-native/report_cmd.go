@@ -1740,7 +1740,7 @@ func reportDecide(args []string) reportRun {
 		if known == "" {
 			known = "none"
 		}
-		return rpFail(fmt.Sprintf("report: no ledger for slug \"%s\"; known slugs: %s\n", slug, known), 1)
+		return rpFail(fmt.Sprintf("report: no ledger for slug \"%s\"; known slugs: %s\n", slug, known)+refusalNext(refusalSlugNext("report", slugs)), 1) // B875
 	}
 	if err != nil {
 		// B744: Node's stat throws (ENOTDIR, EACCES, ...) and report prints it.

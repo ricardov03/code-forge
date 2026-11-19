@@ -142,7 +142,7 @@ func TestLedgerGoCalibration(t *testing.T) {
 		t.Errorf("calibration --question q2: (%d, %q)", code, out)
 	}
 	ledgerCheck(t, []ledgerCase{
-		{[]string{"calibration", "--slug", "nope"}, 1, "", "ledger calibration: no ledger for slug \"nope\"; known slugs: proj, zeta\n"},
+		{[]string{"calibration", "--slug", "nope"}, 1, "", "ledger calibration: no ledger for slug \"nope\"; known slugs: proj, zeta\nnext: code-forge ledger calibration --slug proj\n"},
 		{[]string{"calibration", "--slug", "Bad"}, 1, "", "ledger calibration: ledgerPath: slug must match /^[a-z0-9][a-z0-9-]*$/ (got \"Bad\")\n"},
 		{[]string{"calibration", "--slug", "proj", "--question"}, 2, "", "ledger calibration: --question requires a value\n"},
 	})

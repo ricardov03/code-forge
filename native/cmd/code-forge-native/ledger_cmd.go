@@ -227,7 +227,7 @@ func ledgerTailCommand(args []string, slug string) ledgerResult {
 
 // ledgerMissing is Node's readExistingRows check before reading: a bad slug or
 // an absent ledger gives an error message; ok false means hand over.
-func ledgerMissing(slug string) (dir, message string, ok bool) {
+func ledgerMissing(slug, sub string) (dir, message string, ok bool) {
 	if !regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`).MatchString(slug) {
 		return "", ledgerSlugError(slug), true
 	}
@@ -263,7 +263,9 @@ func ledgerMissing(slug string) (dir, message string, ok bool) {
 	if names == "" {
 		names = "none"
 	}
-	return "", fmt.Sprintf("no ledger for slug \"%s\"; known slugs: %s", slug, names), true
+	// B875: the next step on its own line (callers end the text with "\n")
+	next := strings.TrimSuffix(refusalNext(refusalSlugNext("ledger "+sub, slugs)), "\n")
+	return "", fmt.Sprintf("no ledger for slug \"%s\"; known slugs: %s\n%s", slug, names, next), true
 }
 
 func ledgerSlugError(slug string) string {
@@ -272,7 +274,7 @@ func ledgerSlugError(slug string) string {
 }
 
 func ledgerTail(slug string, n float64) (int, string, string, bool) {
-	dir, message, ok := ledgerMissing(slug)
+	dir, message, ok := ledgerMissing(slug, "tail")
 	if !ok {
 		return 0, "", "", false
 	}

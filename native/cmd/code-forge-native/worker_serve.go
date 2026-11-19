@@ -364,7 +364,7 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 	if err := wk.Boot(); err != nil {
 		var werr *worker.Error
 		if errors.As(err, &werr) {
-			o.err("worker: " + werr.Message + "\n")
+			o.err("worker: " + werr.Message + "\n" + workerRefusalNext(werr))
 			return 1, 0
 		}
 		return 0, hWorkerBoot
