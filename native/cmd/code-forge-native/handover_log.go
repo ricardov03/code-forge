@@ -18,6 +18,8 @@ type handoverRow struct {
 	Sub     string `json:"sub"`
 	Reason  string `json:"reason"`
 	Version string `json:"version"`
+	// Detail is the redacted text of why (B884: the worker's hand-over).
+	Detail string `json:"detail,omitempty"`
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
@@ -122,6 +124,12 @@ func handoverCommand(args []string) (string, string) {
 // Best effort only: no diagnostics, no changes to process inputs. A separate
 // inode protects append AND rename, so concurrent trimming cannot lose a row.
 func recordHandover(args []string, reason string) {
+	recordHandoverDetail(args, reason, "")
+}
+
+// recordHandoverDetail is recordHandover with the redacted detail text
+// (B884); an empty detail writes the same row as before.
+func recordHandoverDetail(args []string, reason, detail string) {
 	if os.Getenv("CODE_FORGE_HANDOVER_LOG") == "0" {
 		return
 	}
@@ -148,7 +156,10 @@ func recordHandover(args []string, reason string) {
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	verb, sub := handoverCommand(args)
-	data, err := json.Marshal(handoverRow{time.Now().UTC().Format(time.RFC3339Nano), verb, sub, reason, version})
+	if detail != "" {
+		detail = autopilotRedact(detail)
+	}
+	data, err := json.Marshal(handoverRow{time.Now().UTC().Format(time.RFC3339Nano), verb, sub, reason, version, detail})
 	if err != nil {
 		return
 	}
@@ -191,6 +202,9 @@ type handoverCount struct {
 	Reason string `json:"reason"`
 	Count  int    `json:"count"`
 	LastAt string `json:"last_at"`
+	// LastDetail is the detail of the newest row that has one (B884).
+	LastDetail string `json:"last_detail,omitempty"`
+	detailAt   time.Time
 }
 
 func runHandoverLogs(args []string) int {
@@ -256,6 +270,9 @@ func runHandoverLogs(args []string) int {
 		if at.After(last) {
 			group.LastAt = row.At
 		}
+		if row.Detail != "" && !at.Before(group.detailAt) {
+			group.LastDetail, group.detailAt = row.Detail, at
+		}
 		total++
 	}
 	rows := []handoverCount{}
@@ -286,6 +303,9 @@ func runHandoverLogs(args []string) int {
 		fmt.Fprintln(safeStdout, "count  verb  sub  reason")
 		for _, row := range rows {
 			fmt.Fprintf(safeStdout, "%d  %s  %s  %s\n", row.Count, row.Verb, row.Sub, row.Reason)
+			if row.LastDetail != "" {
+				fmt.Fprintf(safeStdout, "   last: %s\n", row.LastDetail)
+			}
 		}
 		fmt.Fprintf(safeStdout, "total  %d\n", total)
 	}
