@@ -391,6 +391,10 @@ The worker uses the project's review queue. Run events go in the project ledger.
 
 `already serves this queue` means a worker is still live. Do not start another by mistake.
 If the worker was replaced, reattach before you try to close a block.
+If `block ready` says `worker.down`, the line names the last worker exit (`last worker exit: <reason> (<detail>)`).
+Start a new worker with `code-forge run start --add-worker --run demo-1`. Its stderr log is `.code-forge/logs/worker-<pid>.log`.
+A file the worker could not review shows as `unreviewed <file> ...; the Go worker could not review it: <reason>`.
+The worker keeps serving the other files. Fix the cause, then run `review-file` for that file again.
 
 **Next:** [Open a block](#8-open-a-block).
 

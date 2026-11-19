@@ -331,12 +331,19 @@ func runLaunchWorkerJudged(runID, workspace, binary string, env []string, strict
 	cmd.Dir = repoRoot
 	cmd.Env = runWorkerLaunchEnv(env)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	// B884: the worker's stderr goes to .code-forge/logs/worker-<pid>.log
+	// (it was /dev/null, and why a worker stopped was lost).
+	stderrLog := wexitLaunchLog(repoRoot)
+	if stderrLog != nil {
+		cmd.Stderr = stderrLog
+	}
 	pid := 0
 	exited := make(chan struct{})
 	if cmd.Start() == nil {
 		pid = cmd.Process.Pid
 		go func() { _ = cmd.Wait(); close(exited) }()
 	}
+	wexitLaunched(stderrLog, repoRoot, pid)
 	deadline := time.Now().Add(runLaunchTimeout)
 	for time.Now().Before(deadline) {
 		if pid != 0 {

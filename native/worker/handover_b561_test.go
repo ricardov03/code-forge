@@ -94,6 +94,9 @@ func TestB561OnceHandOverKeepsAnnouncement(t *testing.T) {
 	if err := l.Worker.Announce(); err != nil {
 		t.Fatal(err)
 	}
+	// B884: an unported ticket no longer hands over; the one hand-over left
+	// is the commit watch's (B534), set here before the drain.
+	l.HandOff("the commit watch")
 	if _, err := l.Once(); err != nil {
 		t.Fatal(err)
 	}

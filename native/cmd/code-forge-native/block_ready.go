@@ -151,6 +151,7 @@ func runBlockReady(args []string) int {
 	if err := closeQueuePins(p.home, p.run, p.id, current, rows, &event, &why, mainTop); err != nil {
 		return p.fallback()
 	}
+	why = wexitDownDetail(rows, p.run, event, why)
 	if event != "" {
 		blockers = append(blockers, gatecheck.Blocker{Code: event, Detail: why})
 	}
@@ -266,6 +267,7 @@ func runBlockReady(args []string) int {
 			fmt.Fprint(safeStderr, w)
 		}
 	}
+	wexitUnsupportedNote(blockers, rows, p.run, p.id)
 	formatted := closeBlockersRows(blockers, p.id, p.run, p.flags, entry, true)
 	ready := len(blockers) == 0
 	// B625: only reviewer-down files block: COMPLETE_PENDING_REVIEW.

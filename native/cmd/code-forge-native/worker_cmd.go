@@ -86,8 +86,14 @@ func runWorkerVerb(args []string) int {
 		spawnWarnBefore = before
 		var handTo handoverReason
 		code, handTo = workerServe(home, args, a, o)
+		if file := workerLogFile; file != "" {
+			workerLogFile = ""
+			defer wexitTrim(file)
+		}
 		if handTo != 0 {
-			code := workerHandover(args, handTo)
+			detail := workerHandOverDetail
+			workerHandOverDetail = ""
+			code := refuseUnportedDetailTo(os.Stderr, append([]string{"worker"}, args...), handTo, detail)
 			if undo := workerHandOverUndo; undo != nil {
 				workerHandOverUndo = nil
 				undo()

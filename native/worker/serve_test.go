@@ -4,7 +4,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -66,12 +65,12 @@ func reviewResults(t *testing.T, fx *b488Fix, id string) int {
 	return n
 }
 
-// The split rule: a queue holding ported and unported tickets. Go reviews
-// the ported ones it starts (done marker, one result row), meets the
-// unported one, stops taking tickets and hands the worker to Node. The
-// tickets left are exactly the ones without a done marker, none is claimed,
-// and Node's own queue scan (Pending) serves each of them once.
-func TestB489SplitRuleEachTicketReviewedOnce(t *testing.T) {
+// B884 (was the B489 split rule): a queue holding ported and unported
+// tickets. Go reviews the ported ones (done marker, one result row) and closes
+// each unported one as unsupported (done marker with the reason, one signed
+// review.unsupported row, no result row); the worker never hands over and no
+// ticket is left for a next worker to claim (the poison loop).
+func TestB884UnsupportedTicketFailsOnlyThatTicket(t *testing.T) {
 	for _, parallel := range []int{1, 4} {
 		t.Run(map[int]string{1: "serial", 4: "parallel"}[parallel], func(t *testing.T) {
 			clock := fixedNow
@@ -81,53 +80,47 @@ func TestB489SplitRuleEachTicketReviewedOnce(t *testing.T) {
 				fx.ticket(t, "r1", "B2", "b.txt", sha("one\nWARNME\n")),
 			}
 			unported := []string{b489Unported(t, fx, 0), b489Unported(t, fx, 1)}
-			all := append(append([]string{}, ported...), unported...)
 			l := b489Loop(t, fx, w, parallel)
-			if _, err := l.Once(); err != nil {
+			n, err := l.Once()
+			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.HasPrefix(l.Handoff(), "ticket ") || !strings.Contains(l.Handoff(), "not ported to Go: reopened_at Date.parse undecided") {
-				t.Fatalf("handoff = %q, want an unsupported ticket", l.Handoff())
+			if l.Handoff() != "" {
+				t.Fatalf("handoff %q: one unsupported ticket stopped the worker", l.Handoff())
 			}
-			var goDone, left []string
-			for _, id := range all {
-				if exists(filepath.Join(QueueDir(fx.root), id+".done")) {
-					goDone = append(goDone, id)
-					if n := reviewResults(t, fx, id); n != 1 {
-						t.Errorf("ticket %s: %d result rows, want 1", id, n)
-					}
-				} else {
-					left = append(left, id)
-					if n := reviewResults(t, fx, id); n != 0 {
-						t.Errorf("left ticket %s has %d result rows", id, n)
-					}
-					if !exists(filepath.Join(QueueDir(fx.root), id+".json")) {
-						t.Errorf("left ticket %s lost its file", id)
-					}
+			if n != len(ported)+len(unported) {
+				t.Fatalf("Once served %d tickets, want %d", n, len(ported)+len(unported))
+			}
+			for _, id := range ported {
+				done, err := readJSON(filepath.Join(QueueDir(fx.root), id+".done"))
+				if err != nil || done == nil || done.Get("status") != "reviewed" || reviewResults(t, fx, id) != 1 {
+					t.Fatalf("ported ticket %s: done %v (%v), %d result rows", id, done, err, reviewResults(t, fx, id))
 				}
 			}
+			rows := b884Rows(t, fx, UnsupportedEvent)
 			for _, id := range unported {
-				if exists(filepath.Join(QueueDir(fx.root), id+".done")) {
-					t.Errorf("unported %s was marked done by Go", id)
+				done, err := readJSON(filepath.Join(QueueDir(fx.root), id+".done"))
+				if err != nil || done == nil || done.Get("status") != UnsupportedStatus {
+					t.Fatalf("unported ticket %s: done %v (%v)", id, done, err)
+				}
+				if reason, _ := done.Get("reason").(string); !strings.Contains(reason, "not ported to Go: reopened_at Date.parse undecided") {
+					t.Fatalf("unported ticket %s: reason %q", id, reason)
+				}
+				if reviewResults(t, fx, id) != 0 {
+					t.Fatalf("unported ticket %s got a review.result row", id)
+				}
+				found := 0
+				for _, r := range rows {
+					if r.Get("ticket") == id && r.Get("block") != nil && r.Get("file") != nil && strings.Contains(r.Get("reason").(string), "reopened_at") {
+						found++
+					}
+				}
+				if found != 1 {
+					t.Fatalf("unported ticket %s: %d review.unsupported rows, want 1 (%v)", id, found, rows)
 				}
 			}
-			// Node's queue scan after the hand-over: exactly the tickets left,
-			// each claimable (no lock held by Go).
-			pending := Pending(fx.root)
-			sort.Strings(pending)
-			sort.Strings(left)
-			if strings.Join(pending, ",") != strings.Join(left, ",") {
-				t.Fatalf("Node would see %v, Go left %v", pending, left)
-			}
-			for _, id := range pending {
-				release, ok, err := ClaimTicket("r1", id)
-				if err != nil || !ok {
-					t.Fatalf("ticket %s is still claimed after the hand-over: %v", id, err)
-				}
-				release()
-			}
-			if len(goDone)+len(left) != len(all) {
-				t.Fatalf("done %v + left %v != %v", goDone, left, all)
+			if pending := Pending(fx.root); len(pending) != 0 {
+				t.Fatalf("tickets left for the next worker: %v", pending)
 			}
 		})
 	}

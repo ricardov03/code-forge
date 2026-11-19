@@ -93,13 +93,19 @@ func refuseUnported(args []string, reasons ...handoverReason) int {
 // refuseUnportedTo writes the refusal to w (the panic guard passes the
 // stderr the command started with).
 func refuseUnportedTo(w io.Writer, args []string, reason handoverReason) int {
+	return refuseUnportedDetailTo(w, args, reason, "")
+}
+
+// refuseUnportedDetailTo is refuseUnportedTo whose handovers.jsonl row keeps
+// the redacted detail text (B884); the stderr line is the same.
+func refuseUnportedDetailTo(w io.Writer, args []string, reason handoverReason, detail string) int {
 	if refusal := untilDoneHandoverRefusal(args); refusal != "" {
 		// B649: an until-done grant keeps its own refusal text
 		recordHandover(args, handoverReasons[hUntilDoneGrant])
 		fmt.Fprint(w, autopilotRedact(refusal))
 		return 1
 	}
-	recordHandover(args, handoverReasons[reason])
+	recordHandoverDetail(args, handoverReasons[reason], detail)
 	name, sub := handoverCommand(args)
 	if sub != "" && sub != "unknown" {
 		name += " " + sub
