@@ -222,7 +222,7 @@ func TestB485BootAnnouncesAndCleanStopRetracts(t *testing.T) {
 func TestB485BootRefusesLiveWorkers(t *testing.T) {
 	cases := []struct {
 		name, file, body, cfg, want string
-		holder                       [3]string // B875: pid, run, file name
+		holder                      [3]string // B875: pid, run, file name
 	}{
 		{"same run at limit 1", "workers/5151-S2.json", `{"pid":5151,"start_time":"S2","run":"r1","started_at":"2026-11-11T10:00:00.000Z","heartbeat_at":"2026-11-11T10:00:00.000Z"}`, "", "review.workers limit 1: a live or unreadable worker entry already serves this queue", [3]string{"5151", "r1", ""}},
 		{"other run", "workers/5151-S2.json", `{"pid":5151,"start_time":"S2","run":"r0","started_at":"2026-11-11T10:00:00.000Z","heartbeat_at":"2026-11-11T10:00:00.000Z"}`, "3", "review.workers limit 3: a live or unreadable worker entry already serves this queue", [3]string{"5151", "r0", ""}},
