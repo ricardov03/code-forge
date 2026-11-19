@@ -64,25 +64,34 @@ func runReloadLoadedPlan(home, runID string, record ledger.Object, workspace str
 	}
 	root := config.ProjectRootFor(workspace)
 	raw, readErr := os.ReadFile(filepath.Join(root, config.Filename))
-	if readErr == nil && strings.Contains(string(raw), "!!") {
-		// a tagged scalar can load as a Date, a byte array, a Set or a Map in Node
-		return nil, hRunReloadYAMLTag
+	if readErr == nil {
+		// B787: only a real YAML tag is refused (a tagged scalar can load as
+		// a date or a byte array); a "!!" in a comment or a string is text
+		if tag, line := cpYAMLTag(string(raw)); tag != "" {
+			return func(o *runOut) int {
+				o.err("run reload: " + cpTagText(config.Filename, tag, line) + " — nothing changed\n")
+				return 1
+			}, 0
+		}
 	}
 	cfgMap, order, err := config.LoadOrdered(workspace)
 	if err != nil {
 		// LoadSnapshot loaded the same file a moment ago
 		return nil, hRunReloadConfigError
 	}
-	if len(config.SchemaIssues(cfgMap, "")) > 0 {
-		return nil, hRunReloadSchemaIssues
+	if issues := config.SchemaIssues(cfgMap, version); len(issues) > 0 {
+		// B787: the schema's issues, each with its key path and why
+		return func(o *runOut) int {
+			var lines strings.Builder
+			for _, issue := range issues {
+				lines.WriteString("  [schema] " + issue.Text + "\n")
+			}
+			o.err(fmt.Sprintf("run reload: %s is invalid (%s) — nothing changed; run code-forge validate\n%s", config.Filename, plural(len(issues), "error"), maskTokens(lines.String())))
+			return 1
+		}, 0
 	}
 	if configHoldsSecretShape(cfgMap) {
 		return nil, hRunReloadSecretValues
-	}
-	if sandbox, ok := objAt(cfgMap, "coder", "sandbox"); ok {
-		if dirs, ok := sandbox["add_dirs"].([]any); ok && len(dirs) > 0 {
-			return nil, hRunReloadSandboxDirs
-		}
 	}
 	v := configValidator{cfg: cfgMap, order: order, seen: config.LoadSeenInCache(home), hasCli: hasCliOnPath}
 	if errs, _ := v.run(); len(errs) > 0 {

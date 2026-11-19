@@ -379,9 +379,7 @@ func TestB473RunReloadKeptHandovers(t *testing.T) {
 		edit         func(map[string]any)
 		text         string
 	}{
-		{"yaml syntax error", "run-reload", nil, "a: [\n"},
-		{"schema issue", "run-reload-schema-issues", nil, "engine: claude\n"},
-		{"explicit yaml tag", "run-reload-yaml-tag", nil, "provider: !!str anthropic\n"},
+		// B787: YAML syntax errors, schema issues and YAML tags print in Go
 		{"array grant", "run-reload-autopilot-grant", func(r map[string]any) { r["autopilot"] = []any{} }, ""},
 		{"array snapshots", "run-reload-record-shape", func(r map[string]any) {
 			r["config"].(map[string]any)["snapshots"] = []any{}

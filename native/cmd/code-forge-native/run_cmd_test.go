@@ -471,28 +471,12 @@ func TestRunVerbHandsOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.record(t, "r-shape", "active", `,"blocks":[1]`)
-	// a config that loads: run reload hands over a config with schema issues
-	// (B473); run start no longer needs Node to launch the worker (B511, see
-	// TestB511RunStartNeedsNoNode)
-	if err := os.WriteFile(filepath.Join(f.workspace, ".code-forge.yml"), []byte("project:\n  slug: unit\ntmp:\n  root: "+t.TempDir()+"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// a YAML syntax error is worded (and its line counted) by Node's parser
-	syntax := t.TempDir()
-	if err := os.WriteFile(filepath.Join(syntax, ".code-forge.yml"), []byte("a: 1\nb: [\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	ws := f.workspace
-	f.workspace = syntax
-	f.record(t, "r-syntax", "active", `,"blocks":{}`)
-	f.workspace = ws
+	// B787: schema issues and YAML syntax errors in run reload and run start
+	// print in Go (b787_config_errors_test.go)
 	cases := []struct {
 		args   []string
 		reason string
 	}{
-		{[]string{"reload", "--run", "r-test"}, "run-reload-schema-issues"},
-		{[]string{"start", "--cwd", syntax}, "run-start"},
-		{[]string{"reload", "--run", "r-syntax"}, "run-reload"},
 		{[]string{"status", "--run", "r-bad"}, "run-record"},
 		{[]string{"end", "--run", "r-bad"}, "run-record"},
 		{[]string{"status", "--run", "r-shape"}, "run-shape"},

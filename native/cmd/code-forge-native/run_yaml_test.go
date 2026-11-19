@@ -47,7 +47,7 @@ func TestRunYAMLKeyAndTagErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 			code, out, errs := runVerbCall(t, "reload", "--run", "r-test")
-			want := "run reload: the config could not be parsed (.code-forge.yml:" + tc.line + ") — nothing changed\n"
+			want := "run reload: the config could not be parsed (.code-forge.yml:" + tc.line + ": " + tc.message + ") — nothing changed\n"
 			if code != 1 || out != "" || errs != want {
 				t.Fatalf("%q = %d %q %q", tc.src, code, out, errs)
 			}

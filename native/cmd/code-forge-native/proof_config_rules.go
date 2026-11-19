@@ -340,29 +340,48 @@ func proofRefusedTrees(cfg map[string]any) proofTrees {
 
 // proofSandboxRefused is checkOne of sandbox-dirs.mjs: true for a refusal.
 func proofSandboxRefused(entry string, trees proofTrees) bool {
+	return proofSandboxWhy(entry, trees) != ""
+}
+
+// proofSandboxWhy is checkOne's why: the category of a refused entry, never
+// the value, or "" for an entry the toolchain profile may open (B787:
+// validate, doctor, run reload and autopilot approve print it).
+func proofSandboxWhy(entry string, trees proofTrees) string {
 	var expanded string
 	switch {
 	case entry == "" || strings.Contains(entry, "\x00"):
-		return true
+		return "it must be an absolute path or start with ~/"
 	case strings.HasPrefix(entry, "~/"):
 		abs, _ := filepath.Abs(trees.home)
 		expanded = abs + string(filepath.Separator) + entry[2:]
 	case filepath.IsAbs(entry):
 		expanded = entry
 	default:
-		return true
+		return "it must be an absolute path or start with ~/"
 	}
 	hops := 0
 	real, err := proofResolvePath(expanded, &hops)
-	if err != nil || real == "/" || proofSame(real, trees.realHome) || proofWithin(trees.realHome, real) {
-		return true
+	switch {
+	case err != nil:
+		return "its symlinks cannot be resolved"
+	case real == "/":
+		return "it is the filesystem root"
+	case proofSame(real, trees.realHome):
+		return "it is the home directory"
+	case proofWithin(trees.realHome, real):
+		return "it holds the home directory"
 	}
-	for _, tree := range append(append([]string{}, trees.protected...), trees.run...) {
+	for _, tree := range trees.protected {
 		if proofWithin(real, tree) || proofWithin(tree, real) {
-			return true
+			return "it is, holds or sits inside a protected directory (~/.code-forge, ~/.codex, ~/.ssh, ~/.gnupg, ~/.aws, ~/.config, ~/Library/Keychains)"
 		}
 	}
-	return false
+	for _, tree := range trees.run {
+		if proofWithin(real, tree) || proofWithin(tree, real) {
+			return "it is, holds or sits inside the run temp root or the session CODEX_HOME"
+		}
+	}
+	return ""
 }
 
 var errProofUnresolvable = errors.New("unresolvable")

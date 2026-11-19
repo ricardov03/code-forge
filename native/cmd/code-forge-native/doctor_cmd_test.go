@@ -173,10 +173,7 @@ func TestB474DoctorHandsOverUnportedCases(t *testing.T) {
 	expectHandover(t, "doctor-key-store", "doctor", "--quick")
 
 	for _, c := range []struct{ config, reason string }{
-		{"provider: anthropic\nbogus: 1\n" + b474Levels, "doctor-config-schema"},
 		{"provider: anthropic\ngates: {test: [npm, sk-abcdefghijklmnopqrstu]}\n" + b474Levels, "doctor-config-secrets"},
-		{"provider: anthropic\ncoder: {sandbox: {add_dirs: [\"/\"]}}\n" + b474Levels, "doctor-sandbox-dirs"},
-		{"provider: [\n", "config-parse-error"},
 	} {
 		b474Project(t, c.config, 0)
 		expectHandover(t, c.reason, "doctor", "--quick")

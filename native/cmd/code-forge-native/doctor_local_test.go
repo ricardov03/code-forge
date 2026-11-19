@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ricardov03/code-forge/native/config"
@@ -189,13 +190,13 @@ func TestB504WorktreeIndexingRow(t *testing.T) {
 	}
 }
 
-// A config that loads but fails validation still goes to Node, named.
-func TestB504InvalidConfigKeepsHandover(t *testing.T) {
+// B787: a config that loads but fails validation runs in Go: the FAIL config
+// row names the first error and the probes are skipped.
+func TestB504InvalidConfigRunsInGo(t *testing.T) {
 	b474Project(t, "provider: openai\nengine: subprocess\nreview: {multimodel: true, second_provider: openai}\nlevels:\n  L0: {model: gpt-6-luna, effort: max}\n  L1: {model: gpt-6-luna, effort: max}\n  L2: {model: gpt-6-sol}\n  L3: {model: gpt-6-astra}\n", 0)
-	home := os.Getenv("HOME")
-	expectHandover(t, "doctor-full-invalid-config", "doctor")
-	if _, err := os.Stat(filepath.Join(home, ".code-forge", "ledger")); err == nil {
-		t.Error("Go made the ledger folder before it handed over")
+	code, out, errText := cpRunNoHandover(t, "doctor")
+	if code != 1 || !strings.Contains(out, "FAIL config: ") || !strings.Contains(out, "error(s); first: ") || !strings.Contains(out, "skipped: no valid config") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errText)
 	}
 }
 
