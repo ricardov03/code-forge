@@ -170,7 +170,10 @@ testing; Go, no Node, B760); the release builds the four release targets itself 
 The native code is pure Go and standard library only; builds and compatibility tests
 force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller configuration.
 
-1. Every landed block has a CHANGELOG entry under `## [Unreleased]`.
+1. Every landed block has a CHANGELOG entry under `## [Unreleased]`. `code-forge release check`
+   checks the tree is clean, HEAD is pushed, GitHub CI is green for the HEAD sha, the
+   `[Unreleased]` shape and `npm ls`; it prints the bump (`### Added` entries: minor, else patch)
+   and every step below in order, and exits 0 only when every check passes (`--json` for scripts).
 2. The known-fixes test above when the release fixes reported errors.
 3. Complete [the docs block](#the-docs-block), commit its stamp last, and land it on `main`.
 4. `npm run release -- <bump> --dry-run`, and read the README and CHANGELOG diffs.
@@ -228,7 +231,9 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
    README, LICENSE, `bin/code-forge-native`; `dist/npm/` is git-ignored) (B606), then runs
    `npm pack --dry-run` on each platform package (must be under 35 MB and hold the binary) and on
    the main package (the name and version must match, the file count is printed, it must be under
-   5 MB and ship nothing from `native/bin`), `npm ls --json` (0 invalid, 0 missing), and `claude plugin validate .` when the
+   5 MB and ship nothing from `native/bin`), `npm ls --json` (0 invalid, 0 missing, 0 extraneous; the project's own platform packages still
+   installed at the previous version are ignored, and a tree whose only fault is extraneous
+   packages names `npm prune`, the same rules as `code-forge release check`, B778), and `claude plugin validate .` when the
    `claude` CLI is installed (otherwise a warning). A failure here rolls back the version edits.
    CI covers HEAD before the release commit; the release commit only changes version fields,
    CHANGELOG and README.

@@ -39,10 +39,11 @@ The allowable scope `close:routine` means “close a routine block.” It lets p
 1. `forge autopilot stop --run <r>` when the owner is back (at `until` the grant expires by itself; an until-done grant ends when its planned blocks are all closed or at its deadline; `forge autopilot status --run <r>` then says so).
 2. Add the stop (or expiry) event as the newest Timeline row and the newest Full log row, then write the final Status at a glance (the window's end, the result, the spend). Leave the doc as the record of the run; do not delete or move it.
 3. Tell the owner in chat: the link, and "review Open questions and Actions only you can take before work resumes".
+4. The final report is the release check: when the run's workspace is a git repository with a `CHANGELOG.md` or `package.json`, `forge autopilot stop` ends its output with `final report (code-forge release check):` and the `code-forge release check` result (each check, its fix, the bump and the release steps, then `READY` or `NOT READY`). Copy that block into the doc's final Status at a glance and into the chat message. It never changes the stop's exit code; run `forge release check` again after fixing what it names.
 
 ## §4 Without the Docs connector
 
-Another harness, or the connector is missing: the two Markdown files in the run dir are the record. At start, run `forge autopilot binnacle --run <r> --markdown` once: it creates `autopilot-binnacle.md` and `autopilot-log.md`; print both paths for the owner. After that the CLI rewrites both files by itself, after every delegate decision and at every `forge autopilot status` and `forge autopilot stop`, and those two commands print both paths. At stop, tell the owner the two paths and the same review line as §3.
+Another harness, or the connector is missing: the two Markdown files in the run dir are the record. At start, run `forge autopilot binnacle --run <r> --markdown` once: it creates `autopilot-binnacle.md` and `autopilot-log.md`; print both paths for the owner. After that the CLI rewrites both files by itself, after every delegate decision and at every `forge autopilot status` and `forge autopilot stop`, and those two commands print both paths. At stop, tell the owner the two paths, the same review line as §3 and the release check block `forge autopilot stop` printed.
 
 ## §5 Never delegated — always the owner
 
