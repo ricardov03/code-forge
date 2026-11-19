@@ -648,6 +648,16 @@ unscoped. A passing run prints
 still refuses with `test gate unavailable: configure gates.test before merging`.
 A red suite or conflict stops at `merge-gate`. It names the first ten failing TAP tests
 (or gate diagnostics) or the conflict files, and prints a `next:` action.
+A merge conflict whose files are all append-only is resolved by land itself (B795,
+`land.auto_resolve`, default on), in the trial merge and again in the merge into main, which must
+give the tree the merge gate checked: `CHANGELOG.md` keeps main's lines, then the block's new ones,
+one `### Kind` heading per kind and no repeated entry; a file in `land.auto_resolve.tables`
+(default `docs/native-engine.md`) merges row by row; a `land.auto_resolve.generated` file keeps
+main's copy and its argv runs again. Land prints `merge: resolved append-only conflicts: <files>`
+and writes a signed `land.resolved` row. Any other conflict aborts the merge, so main is unchanged,
+and stops with `merge conflict land cannot resolve by itself; main is unchanged: <file> (<kind>), ...`
+and `next: git -C <main> merge --no-ff --no-edit -- <branch>`; a signed `land.conflict` row lists
+the files with their kinds and the next step.
 Land removes the temporary worktree on success or failure. It checks that both merge parents
 and the main checkout stayed unchanged before the real merge. A failed check leaves main unmerged.
 `gates.merge_gate` defaults to `true` in the run config. Setting it to `false`, or passing
@@ -661,7 +671,10 @@ given order. Before any rebase or gate, land checks every block with `git merge-
 against the running result of the blocks before it (B397). A block that would conflict is parked:
 land prints `block <id> parked: block_rebase_conflict (<files>)` (`--json`: `event: parked`,
 `reason: block_rebase_conflict`, `files`), runs no gate for it and leaves its branch as it was; the
-other blocks go on and the signed `land.batch` row lists it under `parked`. When every block
+other blocks go on and the signed `land.batch` row lists it under `parked`. The precheck and each
+rebase resolve the append-only kinds above by themselves (B795); a parked block also prints
+`next: git -C <block tree> rebase <base>` (`--json`: `conflicts` with each file's kind, and `next`)
+and writes a signed `land.conflict` row. When every block
 conflicts, nothing lands and land exits 1 naming each block and its files.
 Each block is rebased onto the trial merge of the blocks before it. Every block
 runs its own changed gates with the Go selection above (`gate.done`). Then the merge gate runs once

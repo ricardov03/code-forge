@@ -687,12 +687,41 @@
         "ci_red_list": { "type": "string", "minLength": 1, "description": "B765: known-red list for land.require_ci, relative to the main checkout. One `<block> <regexp>` per line (Go regexp, matched against a failing test name); blank lines and # lines are skipped." },
         "ci_wait": { "type": "string", "pattern": "^(off|0|([0-9]+(ms|s|m|h))+)$", "default": "30m", "description": "B796: with land.require_ci, how long `block land` waits for CI on the block tip before it refuses with the command that resumes the land. It polls `gh run list --commit <sha>` with backoff (10s doubling to 1m) and prints one progress line a minute. A red run refuses at once with the failed job names. `off` (or 0) reads CI once and refuses when it is not green yet." },
         "ci_branch_prefix": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$", "default": "ci-", "description": "B796: with land.require_ci, a block tip with no CI run and no open CI pull request at that tip is pushed (never forced) to <prefix><block> (lower case), or <prefix><block>-<n> when the old CI branch does not fast-forward (after a rebase), with a draft PR that replaces and closes the old one. After the land the block's open CI pull requests are closed." },
-        "ci_remote": { "type": "string", "minLength": 1, "default": "origin", "description": "B796: the git remote the CI branch is pushed to. An SSH push that fails on authentication is retried once over HTTPS with the gh credential helper." }
+        "ci_remote": { "type": "string", "minLength": 1, "default": "origin", "description": "B796: the git remote the CI branch is pushed to. An SSH push that fails on authentication is retried once over HTTPS with the gh credential helper." },
+        "auto_resolve": {
+          "anyOf": [
+            { "type": "boolean" },
+            { "$ref": "#/$defs/landAutoResolve" }
+          ],
+          "default": true,
+          "description": "B795: land merges append-only conflicts by itself (default on): CHANGELOG.md bullets (main's lines first, then the block's, one `### Kind` heading per kind, no repeated entry), rows of the markdown tables in `tables`, and the `generated` files land re-generates. Any other conflict aborts the merge, leaves main unchanged, prints the files with their kinds and one next step, and writes a land.conflict ledger row. `false` (or an object with `enabled: false`) keeps only the B431 CHANGELOG.md rule of a batch rebase. The object form also takes `tables` (repository-relative markdown files whose rows merge row by row; default `[docs/native-engine.md]`) and `generated` (`[{path, argv}]`: keep main's copy, run argv in the repository root, stage the file again). Authority: read from the run-start config snapshot."
+        }
       }
     },
     "telemetry": { "type": "string", "const": "off", "default": "off" }
   },
   "$defs": {
+    "landAutoResolve": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true, "description": "false keeps only the B431 CHANGELOG.md rule of a batch rebase; a single land then refuses every conflict." },
+        "tables": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": ["docs/native-engine.md"], "description": "Repository-relative markdown files whose table rows merge row by row (rows keyed by their first cell)." },
+        "generated": {
+          "type": "array",
+          "description": "Files land re-generates: the merge keeps main's copy, then argv runs in the repository root and the file is staged again.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "argv"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "argv": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+            }
+          }
+        }
+      }
+    },
     "provider": { "type": "string", "enum": ["anthropic", "openai", "xai"] },
     "levelName": { "type": "string", "enum": ["L0", "L1", "L2", "L3"] },
     "level": {
