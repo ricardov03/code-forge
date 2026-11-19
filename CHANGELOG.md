@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- `block land` with `land.require_ci: github` no longer needs a human between a rebase and green CI: a tip with no CI run is pushed (never forced) to its CI branch, or after a rebase to a new `ci-<block>-<n>` branch with a draft PR "Replaces #N (rebased onto <sha>)" that closes the old PR; land waits for CI on that sha up to `land.ci_wait` (default `30m`, one progress line a minute) and a timeout refuses with the same land command to resume; a red run names the failed jobs; an SSH push (CI branch or main) that fails on auth is retried once over HTTPS with the gh credential helper; after the land the block's CI PRs are closed. New keys `land.ci_wait`, `land.ci_branch_prefix` (default `ci-`), `land.ci_remote` (default `origin`) (B796).
+
 ## [0.25.1] — 2026-11-19
 
 ### Added
@@ -15,7 +19,6 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
-- `block land` with `land.require_ci: github` no longer needs a human between a rebase and green CI: a tip with no CI run is pushed (never forced) to its CI branch, or after a rebase to a new `ci-<block>-<n>` branch with a draft PR "Replaces #N (rebased onto <sha>)" that closes the old PR; land waits for CI on that sha up to `land.ci_wait` (default `30m`, one progress line a minute) and a timeout refuses with the same land command to resume; a red run names the failed jobs; an SSH push (CI branch or main) that fails on auth is retried once over HTTPS with the gh credential helper; after the land the block's CI PRs are closed. New keys `land.ci_wait`, `land.ci_branch_prefix` (default `ci-`), `land.ci_remote` (default `origin`) (B796).
 - `npm run release:site` is fast: it builds the site once (`npm run build:site`), checks that the deploy folder holds `index.html` and that a built `.html`, `.md` or `.txt` file names `<package>@<version>`, then commits and deploys; it no longer reads or runs the site's `gates.test` and `gates.custom` (the site's `npm test` and design-fidelity checks run during development as site gates) and prints one line saying so; a failed build reads `Site build failed: npm run build:site (exit N)` (B780)
 
 ### Fixed
