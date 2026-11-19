@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/humancheck"
+	"github.com/ricardov03/code-forge/native/landmerge"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/proof"
 	"github.com/ricardov03/code-forge/native/rebase"
@@ -188,11 +188,19 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		// the running result with git merge-tree. A block that conflicts is
 		// parked; the others go on. Nothing in Git moves here.
 		var parked []string
-		batch, parked, err = landBatchPrecheck(main, strings.TrimSpace(mainHead), batch, func(block *landBatchBlock, files []string) {
+		snapshot, _ := blockSnapshot(record)
+		auto := landmerge.FromConfig(snapshot)
+		batch, parked, err = landBatchPrecheck(main, strings.TrimSpace(mainHead), batch, auto, func(block *landBatchBlock, files []string, kinds []landmerge.File) {
+			// B795: the conflict is recorded with each file's kind; a parked
+			// block is resolved by hand in its own worktree.
+			next := closeCommand([]string{"git", "-C", block.tree.Path, "rebase", baseBranch})
+			if err := landConflictRow(home, run, block.id, kinds, next); err != nil {
+				fmt.Fprintln(safeStderr, "block land:", err)
+			}
 			if json {
-				emit(ledger.Object{{Key: "block", Value: block.id}, {Key: "event", Value: "parked"}, {Key: "reason", Value: "block_rebase_conflict"}, {Key: "files", Value: files}})
+				emit(ledger.Object{{Key: "block", Value: block.id}, {Key: "event", Value: "parked"}, {Key: "reason", Value: "block_rebase_conflict"}, {Key: "files", Value: files}, {Key: "conflicts", Value: landConflictList(kinds)}, {Key: "next", Value: next}})
 			} else {
-				fmt.Fprintf(safeStdout, "block %s parked: block_rebase_conflict (%s)\n", block.id, strings.Join(files, ", "))
+				fmt.Fprintf(safeStdout, "block %s parked: block_rebase_conflict (%s)\nnext: %s\n", block.id, strings.Join(files, ", "), next)
 			}
 		})
 		if err != nil {
@@ -259,9 +267,10 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 				return fmt.Errorf("block %s recorded base is not an ancestor", block.id)
 			}
 			if _, err := gitx.Run(block.tree.Path, "-c", rebase.UnionOff, "-c", "rebase.updateRefs=false", "rebase", "--no-autostash", "--onto", tip, block.base); err != nil {
-				// B431: an add-only CHANGELOG.md is merged (earlier block's
-				// lines first) and the rebase goes on; anything else stops.
-				if cont := rebase.Continue(block.tree.Path, gitx.ChildEnv()); cont != nil {
+				// B431/B795: append-only files (CHANGELOG.md, configured
+				// tables, generated files) are merged, earlier block's lines
+				// first, and the rebase goes on; anything else stops.
+				if cont := rebase.ContinueWith(block.tree.Path, gitx.ChildEnv(), auto); cont != nil {
 					_, _ = gitx.Run(block.tree.Path, "rebase", "--abort")
 					if conflict, ok := cont.(*rebase.ConflictError); ok && len(conflict.Files) > 0 {
 						return fmt.Errorf("block %s rebase failed: %s", block.id, cont.Error())
@@ -591,7 +600,7 @@ func landBatchRestore(home, run string, batch []*landBatchBlock, keep int) error
 // running result through an unreferenced commit object. It returns the blocks
 // that may go on. When every block conflicts it returns an error naming each
 // block and its files.
-func landBatchPrecheck(main, head string, batch []*landBatchBlock, park func(*landBatchBlock, []string)) ([]*landBatchBlock, []string, error) {
+func landBatchPrecheck(main, head string, batch []*landBatchBlock, auto landmerge.Settings, park func(*landBatchBlock, []string, []landmerge.File)) ([]*landBatchBlock, []string, error) {
 	running := head
 	kept, parked, reasons := []*landBatchBlock{}, []string{}, []string{}
 	for _, block := range batch {
@@ -609,14 +618,18 @@ func landBatchPrecheck(main, head string, batch []*landBatchBlock, park func(*la
 					files = append(files, file)
 				}
 			}
-			// B431: a conflict only in CHANGELOG.md files to which both sides
-			// only added lines is merged the way the rebase merges it.
-			appended, ok, appendErr := landBatchAppendTree(main, strings.TrimSpace(lines[0]), block.base, running, strings.TrimSpace(block.head), files)
+			// B431/B795: a conflict only in append-only files is merged the
+			// way the rebase merges it.
+			appended, ok, appendErr := landBatchAppendTree(main, strings.TrimSpace(lines[0]), block.base, running, strings.TrimSpace(block.head), files, auto)
 			if appendErr != nil {
 				return nil, nil, appendErr
 			}
 			if !ok {
-				park(block, files)
+				kinds := make([]landmerge.File, len(files))
+				for i, file := range files {
+					kinds[i] = landmerge.File{Path: file, Kind: auto.Kind(file, false)}
+				}
+				park(block, files, kinds)
 				parked = append(parked, block.id)
 				reasons = append(reasons, fmt.Sprintf("block %s block_rebase_conflict (%s)", block.id, strings.Join(files, ", ")))
 				continue
@@ -853,13 +866,14 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 // and, when every conflicted file is a CHANGELOG.md that both sides only
 // added lines to, writes the append merge (running side first) into it. ok is
 // false for any other conflict.
-func landBatchAppendTree(main, tree, base, ours, theirs string, files []string) (string, bool, error) {
+func landBatchAppendTree(main, tree, base, ours, theirs string, files []string, auto landmerge.Settings) (string, bool, error) {
 	if len(files) == 0 {
 		return "", false, nil
 	}
 	merged := map[string]string{}
 	for _, file := range files {
-		if path.Base(file) != "CHANGELOG.md" {
+		kind := auto.Kind(file, false)
+		if kind == landmerge.KindCode {
 			return "", false, nil
 		}
 		var text [3]string
@@ -870,7 +884,7 @@ func landBatchAppendTree(main, tree, base, ours, theirs string, files []string) 
 			}
 			text[i] = out
 		}
-		body, ok, err := rebase.AppendMerge(text[0], text[1], text[2])
+		body, ok, err := landmerge.Merge(kind, text[0], text[1], text[2])
 		if err != nil || !ok {
 			return "", false, err
 		}

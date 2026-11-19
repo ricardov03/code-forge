@@ -1,16 +1,16 @@
 package rebase
 
 import (
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/landmerge"
 )
 
 // B431: a replay that stops is a real conflict unless every unmerged file is a
@@ -30,7 +30,10 @@ import (
 const UnionOff = "merge.union.driver=false"
 
 // ConflictError names the files a replay could not merge.
-type ConflictError struct{ Files []string }
+type ConflictError struct {
+	Files []string
+	Kinds []landmerge.File // B795: each file with its kind (code, changelog, table, ...)
+}
 
 func (e *ConflictError) Error() string {
 	if len(e.Files) == 0 {
@@ -72,176 +75,28 @@ func unmerged(tree string, env []string) ([]string, error) {
 	return files, nil
 }
 
-// lines splits text into lines that keep their newline.
-func lines(text string) []string {
-	if text == "" {
-		return nil
-	}
-	return strings.SplitAfter(strings.TrimSuffix(text, "\n"), "\n")
-}
-
-// addOnly reports whether side is base with lines only inserted: every base
-// line is kept, in order. A trailing newline is normalised so that adding a
-// line after an unterminated last line still counts as an addition.
-func addOnly(base, side string) bool {
-	b, s := lines(base), lines(side)
-	j := 0
-	for _, line := range s {
-		if j < len(b) && strings.TrimSuffix(line, "\n") == strings.TrimSuffix(b[j], "\n") {
-			j++
-		}
-	}
-	return j == len(b)
-}
-
 // AppendMerge merges an add-only file three ways: lines both sides added at
 // the same place keep ours (the new base side) first, then theirs. ok is false
-// when either side removed or changed a base line.
+// when either side removed or changed a base line. B795: a `### Kind` heading
+// the merge would repeat in one release section is folded into one.
 func AppendMerge(base, ours, theirs string) (merged string, ok bool, err error) {
-	if !addOnly(base, ours) || !addOnly(base, theirs) {
-		return "", false, nil
-	}
-	// git's diff sees an unterminated last line and the same line with a
-	// newline as different lines, so the union would keep the base's last
-	// line twice. addOnly already treats them as one line: terminate all
-	// three texts, merge, and drop the newline again when neither side had
-	// one.
-	if base == "" || strings.HasSuffix(base, "\n") {
-		return threeWay(base, ours, theirs, true)
-	}
-	terminate := func(text string) string {
-		if text == "" || strings.HasSuffix(text, "\n") {
-			return text
-		}
-		return text + "\n"
-	}
-	merged, ok, err = threeWay(base+"\n", terminate(ours), terminate(theirs), true)
-	if ok && !strings.HasSuffix(ours, "\n") && !strings.HasSuffix(theirs, "\n") {
-		merged = strings.TrimSuffix(merged, "\n")
-	}
-	return merged, ok, err
-}
-
-// threeWay runs git merge-file on the three texts; ok is false when a plain
-// merge (union false) has conflicts.
-func threeWay(base, ours, theirs string, union bool) (merged string, ok bool, err error) {
-	dir, err := os.MkdirTemp("", "forge-append-")
-	if err != nil {
-		return "", false, err
-	}
-	defer os.RemoveAll(dir)
-	names := []string{filepath.Join(dir, "ours"), filepath.Join(dir, "base"), filepath.Join(dir, "theirs")}
-	for i, body := range []string{ours, base, theirs} {
-		if err := os.WriteFile(names[i], []byte(body), 0600); err != nil {
-			return "", false, err
-		}
-	}
-	args := []string{"merge-file", "-p"}
-	if union {
-		args = append(args, "--union")
-	}
-	cmd := exec.Command("git", append(args, names...)...)
-	cmd.Env = gitx.ChildEnv()
-	out, err := cmd.Output()
-	if exit, isExit := err.(*exec.ExitError); isExit && exit.ExitCode() > 0 && exit.ExitCode() < 128 {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	return string(out), true, nil
-}
-
-// unionFile reports whether the file's merge attribute is union.
-func unionFile(tree string, env []string, file string) bool {
-	out, err := gitx.WithEnv("", env, "-C", tree, "check-attr", "-z", "merge", "--", file)
-	if err != nil {
-		return false
-	}
-	fields := strings.Split(out, "\x00")
-	return len(fields) >= 3 && fields[2] == "union"
-}
-
-// stages reads the unmerged index entries of one file: stage → blob id.
-func stages(tree string, env []string, file string) (map[string]string, error) {
-	out, err := gitx.WithEnv("", env, "-C", tree, "ls-files", "-u", "-z", "--", file)
-	if err != nil {
-		return nil, err
-	}
-	found := map[string]string{}
-	for _, entry := range strings.Split(out, "\x00") {
-		meta, name, ok := strings.Cut(entry, "\t")
-		fields := strings.Fields(meta)
-		if ok && name == file && len(fields) == 3 {
-			found[fields[2]] = fields[1]
-		}
-	}
-	return found, nil
-}
-
-func blob(tree string, env []string, id string) (string, error) {
-	if id == "" {
-		return "", nil
-	}
-	return gitx.WithEnv("", env, "-C", tree, "cat-file", "blob", id)
+	return landmerge.Changelog(base, ours, theirs)
 }
 
 // resolveAppend merges and stages every unmerged file, or returns a
-// ConflictError naming all of them when any one is not an add-only CHANGELOG.md.
-func resolveAppend(tree string, env []string) error {
-	files, err := unmerged(tree, env)
-	if err != nil {
-		return err
+// ConflictError naming all of them when any one is not append-only under
+// settings (B431: CHANGELOG.md and merge=union files; B795: tables and
+// generated files of land.auto_resolve).
+func resolveAppend(tree string, env []string, settings landmerge.Settings) error {
+	_, err := landmerge.Resolve(tree, env, settings)
+	var conflict *landmerge.Conflict
+	if errors.As(err, &conflict) {
+		if len(conflict.Files) == 0 {
+			return &ConflictError{}
+		}
+		return &ConflictError{Files: landmerge.Paths(conflict.Files), Kinds: conflict.Files}
 	}
-	if len(files) == 0 {
-		return &ConflictError{}
-	}
-	merged := map[string]string{}
-	for _, file := range files {
-		union := unionFile(tree, env, file)
-		if path.Base(file) != "CHANGELOG.md" && !union {
-			return &ConflictError{files}
-		}
-		ids, err := stages(tree, env, file)
-		if err != nil {
-			return err
-		}
-		if ids["2"] == "" || ids["3"] == "" {
-			return &ConflictError{files}
-		}
-		var text [3]string
-		for i, stage := range []string{"1", "2", "3"} {
-			if text[i], err = blob(tree, env, ids[stage]); err != nil {
-				return err
-			}
-		}
-		body, ok, err := threeWay(text[0], text[1], text[2], false)
-		if err == nil && !ok && path.Base(file) == "CHANGELOG.md" {
-			body, ok, err = AppendMerge(text[0], text[1], text[2])
-		} else if err == nil && !ok && union {
-			body, ok, err = threeWay(text[0], text[1], text[2], true)
-		}
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return &ConflictError{files}
-		}
-		merged[file] = body
-	}
-	for _, file := range files {
-		info, err := os.Lstat(filepath.Join(tree, file))
-		if err != nil || !info.Mode().IsRegular() {
-			return &ConflictError{files}
-		}
-		if err := os.WriteFile(filepath.Join(tree, file), []byte(merged[file]), info.Mode().Perm()); err != nil {
-			return err
-		}
-		if _, err := gitx.WithEnv("", env, "-C", tree, "add", "--", file); err != nil {
-			return err
-		}
-	}
-	return nil
+	return err
 }
 
 func inProgress(tree string, env []string, ref string) bool {
@@ -272,12 +127,17 @@ func rebasing(tree string, env []string) bool {
 // Any other stop returns a ConflictError naming the unmerged files; the caller
 // aborts and restores its HEAD.
 func Continue(tree string, env []string) error {
+	return ContinueWith(tree, env, landmerge.Legacy())
+}
+
+// ContinueWith is Continue with land.auto_resolve settings (B795).
+func ContinueWith(tree string, env []string, settings landmerge.Settings) error {
 	editor := append(append([]string{}, env...), "GIT_EDITOR=true")
 	for step := 0; ; step++ {
 		if step > 10000 {
 			return fmt.Errorf("replay did not finish")
 		}
-		if err := resolveAppend(tree, env); err != nil {
+		if err := resolveAppend(tree, env, settings); err != nil {
 			return err
 		}
 		if inProgress(tree, env, "CHERRY_PICK_HEAD") {
