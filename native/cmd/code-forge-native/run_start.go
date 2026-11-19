@@ -500,9 +500,10 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 	snap, err := config.LoadSnapshot(workspace)
 	if err != nil {
 		var cfgErr *config.Error
-		if !errors.As(err, &cfgErr) || runYAMLSyntax(cfgErr) {
+		if !errors.As(err, &cfgErr) {
 			return nil, hRunStart
 		}
+		// B787: every YAML error carries its line and column
 		return func(o *runOut) int {
 			o.err("run start: " + cfgErr.Message + "\n")
 			return 2
@@ -939,18 +940,18 @@ func runReloadPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 		return runReloadLoadedPlan(home, runID, record, workspace)
 	}
 	var cfgErr *config.Error
-	if !errors.As(err, &cfgErr) || runYAMLSyntax(cfgErr) {
-		// Node's parser words a YAML syntax error (and counts its line)
+	if !errors.As(err, &cfgErr) {
 		return nil, hRunReload
 	}
+	// B787: every YAML error carries its line; the reload names it
 	var text string
 	switch cfgErr.Kind {
 	case "not-found":
 		text = "no .code-forge.yml in the workspace"
 	case "parse-error":
 		text = "the config could not be parsed (.code-forge.yml)" // a root that is not a mapping has no line
-		if m := runYAMLLine.FindStringSubmatch(cfgErr.Message); m != nil {
-			text = "the config could not be parsed (.code-forge.yml:" + m[1] + ")"
+		if runYAMLLine.MatchString(cfgErr.Message) {
+			text = "the config could not be parsed (" + cpLoadErrorText(config.Filename, cfgErr) + ")"
 		}
 	case "migrate-error":
 		text = ".code-forge.yml could not be migrated to the current format"

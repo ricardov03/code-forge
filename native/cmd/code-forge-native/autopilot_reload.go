@@ -187,11 +187,23 @@ func apdApproveDecide(home, runID string, record ledger.Object, key string, valu
 		return nil, nil, write
 	}
 	step.edited = edited
+	// B787: a file that is already invalid is named as such, not as the edit's fault
+	if refusal := apdConfigRefusalLead(home, workspace, text, "fix "+config.Filename+" first: it "); refusal != nil {
+		return nil, refusal, 0
+	}
 	if refusal := apdConfigRefusal(home, workspace, edited); refusal != nil {
 		return nil, refusal, 0
 	}
 	in, ok := apdReloadDecide(home, runID, record, workspace, edited, segs, now)
 	if !ok {
+		// B787: a config that does not check clean is refused, naming its
+		// first error: the file as it stands, else the edit
+		if problem := cpFirstProblem(home, step.file, text); problem != "" {
+			return nil, &state.Error{Code: "config-invalid", Message: "fix " + config.Filename + " first: " + problem + " — nothing changed; run code-forge validate"}, 0
+		}
+		if problem := cpFirstProblem(home, step.file, edited); problem != "" {
+			return nil, &state.Error{Code: "config-invalid", Message: key + " = that value would make " + config.Filename + " invalid: " + problem + " — nothing changed"}, 0
+		}
 		return nil, nil, hAutopilotApproveReloadShape
 	}
 	step.in = in
@@ -214,8 +226,14 @@ func apdShapeRefusal(key string, err error) error {
 // autopilot-approve-reload-shape): a YAML tag, a schema issue, a raw
 // secret, a refused sandbox dir or a validate error. Nothing is written.
 func apdConfigRefusal(home, workspace, text string) error {
+	return apdConfigRefusalLead(home, workspace, text, "with that change .code-forge.yml ")
+}
+
+// apdConfigRefusalLead is apdConfigRefusal with the refusal's opening words
+// (B787 checks the file as it stands with "fix .code-forge.yml first: it ").
+func apdConfigRefusalLead(home, workspace, text, lead string) error {
 	refuse := func(why string) error {
-		return &state.Error{Code: "config-invalid", Message: "with that change .code-forge.yml " + why + "; nothing was changed; run code-forge validate"}
+		return &state.Error{Code: "config-invalid", Message: lead + why + "; nothing was changed; run code-forge validate"}
 	}
 	if apdHasTag(text) {
 		return refuse("holds a YAML tag (!!...), which code-forge does not read")
@@ -247,7 +265,7 @@ func apdConfigRefusal(home, workspace, text string) error {
 		if len(errs) == 1 {
 			noun = "error"
 		}
-		return &state.Error{Code: "config-invalid", Message: "with that change .code-forge.yml is invalid (" + strconv.Itoa(len(errs)) + " " + noun + "); nothing was changed; run code-forge validate" + config.MaskSecrets(lines.String())}
+		return &state.Error{Code: "config-invalid", Message: lead + "is invalid (" + strconv.Itoa(len(errs)) + " " + noun + "); nothing was changed; run code-forge validate" + config.MaskSecrets(lines.String())}
 	}
 	return nil
 }

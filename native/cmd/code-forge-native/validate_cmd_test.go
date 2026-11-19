@@ -262,14 +262,12 @@ func TestB471ValidateArgsAndLoadErrors(t *testing.T) {
 	})
 }
 
-// The cases Go does not port go to Node with their own reasons.
+// The cases Go does not port go to Node with their own reasons. B787: schema
+// issues, YAML errors and coder.sandbox.add_dirs print in Go (b787_config_errors_test.go).
 func TestB471ValidateHandsOverUnportedCases(t *testing.T) {
 	levels := "levels:\n  L0: {model: claude-haiku-4-5-20251001}\n  L1: {model: claude-sonnet-5}\n  L2: {model: claude-opus-5-5}\n  L3: {model: claude-fable-5-1}\n"
 	for _, c := range []struct{ config, reason string }{
-		{"provider: anthropic\nbogus: 1\n" + levels, "validate-schema-issues"},
 		{"provider: anthropic\ngates: {test: [npm, sk-abcdefghijklmnopqrstu]}\n" + levels, "validate-secret-values"},
-		{"provider: anthropic\ncoder: {sandbox: {add_dirs: [\"/\"]}}\n" + levels, "validate-sandbox-dirs"},
-		{"provider: [\n", "config-parse-error"},
 	} {
 		smallProject(t, c.config)
 		expectHandover(t, c.reason, "validate")

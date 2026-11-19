@@ -1479,10 +1479,11 @@ func preparePlanCheck(cwd, planPath, factsPath string, hasFacts bool, text, fact
 	root := config.ProjectRootFor(cwd)
 	cfg, _, err := config.LoadOrdered(root)
 	if err != nil {
-		if yamlSyntaxError(err) {
-			return nil, hConfigParseError, false
-		}
 		failure, known := err.(*config.Error)
+		if known && yamlSyntaxError(err) {
+			// B787: the YAML error with its file, line and column
+			return refuse(maskTokens(cpLoadErrorText(filepath.Join(root, config.Filename), failure)))
+		}
 		if !known || failure.Kind == "read-error" && !configReadErrno.MatchString(failure.Message) {
 			return nil, hPlanCheckNodeThrows, false
 		}

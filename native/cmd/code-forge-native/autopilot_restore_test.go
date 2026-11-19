@@ -362,23 +362,23 @@ func TestAutopilotApproveAtTerminalInGo(t *testing.T) {
 	}
 	answerErr = nil
 	// the file changed while the owner was asked: Go decides again under the
-	// lock; B781: this config (no provider, no levels) is invalid, so Go
-	// refuses it with no hand-over
+	// lock; B781 + B787: this config (no provider, no levels) is invalid, so
+	// Go refuses it with no hand-over: "fix .code-forge.yml first: ..."
 	during = func() { apWriteConfig(t, f, "review:\n  max_rounds_per_file: 2\n") }
-	if code, out, _ = approve("4"); code != 1 || out != "" {
-		t.Fatalf("changed during prompt = %d %q", code, out)
+	fixFirst := "autopilot approve: fix .code-forge.yml first: "
+	if code, out, errText = approve("4"); code != 1 || out != "" || !strings.HasPrefix(errText, fixFirst) || !strings.HasSuffix(errText, "; nothing was changed; run code-forge validate\n") {
+		t.Fatalf("changed during prompt = %d %q %q", code, out, errText)
 	}
 	during = func() {}
 	asked = nil
-	// B781: a change that leaves the config invalid (the config above) is
-	// refused in Go before any prompt, with no hand-over
-	if code, _, _ = approve("5"); code != 1 {
-		t.Fatalf("write = %d", code)
+	// B787: the same invalid config is refused before any prompt
+	if code, _, errText = approve("5"); code != 1 || !strings.HasPrefix(errText, fixFirst) {
+		t.Fatalf("write = %d %q", code, errText)
 	}
-	// B732: a lone surrogate is a value Go holds now; B781: this invalid
-	// config is refused in Go at the config check, before any prompt
-	if code, _, _ = approve(`"\ud800"`); code != 1 {
-		t.Fatalf("surrogate = %d", code)
+	// B732: a lone surrogate is a value Go holds now; the invalid config is
+	// refused at the reload check, before any prompt
+	if code, _, errText = approve(`"\ud800"`); code != 1 || !strings.HasPrefix(errText, fixFirst) {
+		t.Fatalf("surrogate = %d %q", code, errText)
 	}
 	// clack measures wide text by display width: non-ASCII prompts stay on Node
 	if code, _, _ = approve(`"caf\u00e9"`); code != 1 {

@@ -24,10 +24,10 @@ func init() {
 type validateIssue struct{ rule, message string }
 
 // prepareValidate is src/cli/validate.mjs with validateConfig from
-// src/config/validate.mjs. Node keeps three cases: a config the schema
-// refuses (Ajv's own wording and order), a config holding a secret-shaped
-// string (the message scrub over the config's own text) and a non-empty
-// coder.sandbox.add_dirs (rule 19 resolves each dir on the filesystem).
+// src/config/validate.mjs. One case keeps its hand-over: a config holding a
+// secret-shaped string (the message scrub over the config's own text).
+// B787: a YAML error, the schema's issues and coder.sandbox.add_dirs (rules
+// 19 and 20) are printed in Go.
 func prepareValidate(args []string) (func(stdout, stderr io.Writer) int, handoverReason, bool) {
 	usage := func(message string) (func(stdout, stderr io.Writer) int, handoverReason, bool) {
 		return func(_, stderr io.Writer) int {
@@ -52,29 +52,33 @@ func prepareValidate(args []string) (func(stdout, stderr io.Writer) int, handove
 		i++
 	}
 	cfg, order, err := config.LoadFileOrdered(file)
-	if yamlSyntaxError(err) {
-		return nil, hConfigParseError, false
-	}
 	if err != nil {
 		e, ok := err.(*config.Error)
 		if !ok {
 			return nil, hValidateUnported, false
 		}
+		message := e.Kind + ": " + e.Message
+		if yamlSyntaxError(err) {
+			// B787: the YAML error with its file, line and column
+			message = e.Kind + ": " + cpLoadErrorText(file, e)
+		}
 		return func(_, stderr io.Writer) int {
-			nodeLog(stderr, "error", maskTokens(e.Kind+": "+e.Message))
+			nodeLog(stderr, "error", maskTokens(message))
 			return 1
 		}, 0, true
 	}
-	if len(config.SchemaIssues(cfg, "")) > 0 {
-		return nil, hValidateSchemaIssues, false
+	if issues := config.SchemaIssues(cfg, version); len(issues) > 0 {
+		// B787: each schema issue (key path and why), then the verdict
+		return func(stdout, stderr io.Writer) int {
+			for _, issue := range issues {
+				nodeLog(stderr, "error", maskTokens("[schema] "+issue.Text))
+			}
+			nodeLog(stdout, "info", file+": invalid ("+plural(len(issues), "error")+")")
+			return 1
+		}, 0, true
 	}
 	if configHoldsSecretShape(cfg) {
 		return nil, hValidateSecretValues, false
-	}
-	if sandbox, ok := objAt(cfg, "coder", "sandbox"); ok {
-		if dirs, ok := sandbox["add_dirs"].([]any); ok && len(dirs) > 0 {
-			return nil, hValidateSandboxDirs, false
-		}
 	}
 	v := configValidator{cfg: cfg, order: order, seen: config.LoadSeenInCache(os.Getenv("HOME")), hasCli: hasCliOnPath}
 	errs, warns := v.run()
@@ -549,8 +553,56 @@ func (v configValidator) run() (errs, warns []validateIssue) {
 	add("error", "review-routes-invalid", v.routeMessages()...)
 	// B651: each review.on_unavailable route's provider and model, like a level's
 	add("error", "review-on-unavailable-invalid", v.onUnavailableMessages()...)
-	// 19 and 20: an empty coder.sandbox.add_dirs yields nothing; a non-empty one went to Node.
+	// 19 sandbox-dir-refused and 20 sandbox-dirs-unused (B787: in Go, no hand-over)
+	add("error", "sandbox-dir-refused", v.sandboxDirRefusals()...)
+	add("warning", "sandbox-dirs-unused", v.sandboxDirsUnused()...)
 	return errs, warns
+}
+
+// sandboxDirRefusals is checkSandboxDirRefused (rule 19): one message per
+// string add_dirs entry the toolchain profile may not open, naming the key
+// path and the category, never the value. A non-list or a non-string entry
+// is the schema layer's issue.
+func (v configValidator) sandboxDirRefusals() []string {
+	sandbox, _ := objAt(v.cfg, "coder", "sandbox")
+	dirs, ok := sandbox["add_dirs"].([]any)
+	if sandbox == nil || !ok {
+		return nil
+	}
+	trees := proofRefusedTrees(v.cfg)
+	var out []string
+	for i, entry := range dirs {
+		text, isText := entry.(string)
+		if !isText {
+			continue
+		}
+		if why := proofSandboxWhy(text, trees); why != "" {
+			out = append(out, fmt.Sprintf("coder.sandbox.add_dirs[%d] is refused — %s", i, why))
+		}
+	}
+	return out
+}
+
+// sandboxDirsUnused is checkSandboxDirsUnused (rule 20): add_dirs set under
+// a known profile other than toolchain changes nothing.
+func (v configValidator) sandboxDirsUnused() []string {
+	sandbox, _ := objAt(v.cfg, "coder", "sandbox")
+	dirs, _ := sandbox["add_dirs"].([]any)
+	if len(dirs) == 0 {
+		return nil
+	}
+	profile := "workspace"
+	if raw, present := sandbox["profile"]; present && raw != nil {
+		text, isText := raw.(string)
+		if !isText {
+			return nil
+		}
+		profile = text
+	}
+	if profile == "toolchain" || !inList(profile, []string{"workspace", "full"}) {
+		return nil
+	}
+	return []string{"coder.sandbox.add_dirs is set but coder.sandbox.profile is " + profile + ", which does not use it — only toolchain adds --add-dir"}
 }
 
 var providerEfforts = map[string][]string{

@@ -186,6 +186,4 @@ func TestB475PlanCheckHandsOverOddCases(t *testing.T) {
 	expectHandover(t, "plan-check-limits", "plan", "check", "plans/x.plan.md", "--slug", "lanes")
 	planCheckProject(t, "", `{"fact_id":"F1"`, `null,{"fact_id":"F1"`)
 	expectHandover(t, "plan-check-node-throws", "plan", "check", "plans/x.plan.md", "--slug", "lanes")
-	planCheckProject(t, "caps: [\n")
-	expectHandover(t, "config-parse-error", "plan", "check", "plans/x.plan.md", "--slug", "lanes")
 }

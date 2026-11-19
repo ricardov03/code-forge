@@ -277,25 +277,22 @@ func doctorConfigRow(cwd string) ([]doctorRow, map[string]any, handoverReason) {
 // list for the review.on_unavailable rule is read (B655).
 func doctorConfigJudge(cfg map[string]any, order config.Ordered, err error, home string) ([]doctorRow, map[string]any, handoverReason) {
 	if err != nil {
-		if yamlSyntaxError(err) {
-			return nil, nil, hConfigParseError
-		}
 		var e *config.Error
 		if !errors.As(err, &e) {
 			return nil, nil, hDoctorConfigSchema
 		}
+		if yamlSyntaxError(err) {
+			// B787: the YAML error with its line, not a hand-over
+			return []doctorRow{{"config", "FAIL", "config", maskTokens(e.Kind + ": " + cpLoadErrorText(config.Filename, e) + " (run code-forge validate)")}}, nil, 0
+		}
 		return []doctorRow{{"config", "FAIL", "config", e.Kind + ": .code-forge.yml cannot be loaded (run code-forge init)"}}, nil, 0
 	}
-	if len(config.SchemaIssues(cfg, "")) > 0 {
-		return nil, nil, hDoctorConfigSchema
+	if issues := config.SchemaIssues(cfg, version); len(issues) > 0 {
+		// B787: the schema's issues as the config row, not a hand-over
+		return []doctorRow{{"config", "FAIL", "config", maskTokens(fmt.Sprintf("%d schema error(s); first: %s (run code-forge validate)", len(issues), issues[0].Text))}}, nil, 0
 	}
 	if configHoldsSecretShape(cfg) {
 		return nil, nil, hDoctorConfigSecrets
-	}
-	if sandbox, ok := objAt(cfg, "coder", "sandbox"); ok {
-		if dirs, ok := sandbox["add_dirs"].([]any); ok && len(dirs) > 0 {
-			return nil, nil, hDoctorSandboxDirs
-		}
 	}
 	v := configValidator{cfg: cfg, order: order, hasCli: func(string) bool { return true }, chainSeen: config.LoadSeenInCache(home)}
 	errs, warns := v.run()
