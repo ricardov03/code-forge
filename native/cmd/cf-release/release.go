@@ -5,6 +5,7 @@ package main
 // It never pushes and never publishes. Port of scripts/release.mjs (B570).
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ricardov03/code-forge/native/releasecheck"
 )
 
 const releaseUsage = "usage: npm run release -- <patch|minor|major|x.y.z> [--dry-run] [--date YYYY-MM-DD] [--no-checks] [--allow-branch <name>]"
@@ -858,55 +861,17 @@ func (a *app) runChecks(root, name, version string) (string, error) {
 		return f, nil
 	}
 
+	// B778: the same npm ls rules as `code-forge release check`: the own platform packages at the
+	// previous version (their pins were just bumped) are ignored, and extraneous-only names npm prune.
 	r := runCmd(root, 0, "npm", "ls", "--json")
-	tree, err := jsParse(r.stdout)
-	if err != nil {
+	ls := releasecheck.NpmLs(r.stdout, name, releaseOptionalPins(root))
+	if !ls.Parsed {
 		return a.failed(root, "npm ls --json (no JSON)", r), nil
 	}
-	var bad []string
-	var walk func(node any, at string)
-	walk = func(node any, at string) {
-		obj, isObj := node.(*jsObject)
-		if !isObj {
-			return
-		}
-		deps, _ := obj.get("dependencies")
-		d, isObj := deps.(*jsObject)
-		if !isObj {
-			return
-		}
-		for _, dep := range d.keys {
-			info := d.vals[dep]
-			if io, isObj := info.(*jsObject); isObj {
-				if jsTruthy(io.vals["missing"]) {
-					bad = append(bad, at+dep+" (missing)")
-				}
-				if jsTruthy(io.vals["invalid"]) {
-					bad = append(bad, at+dep+" (invalid)")
-				}
-			}
-			walk(info, at+dep+" > ")
-		}
+	if !ls.OK() {
+		return ls.Summary() + "\nfix: " + ls.Fix(), nil
 	}
-	walk(tree, "")
-	var problems []any
-	if obj, isObj := tree.(*jsObject); isObj {
-		problems, _ = obj.vals["problems"].([]any)
-	}
-	if len(bad) > 0 || len(problems) > 0 {
-		detail := strings.Join(bad, ", ")
-		if detail == "" {
-			parts := make([]string, len(problems))
-			for i, p := range problems {
-				if p != nil {
-					parts[i] = jsTemplate(p, true)
-				}
-			}
-			detail = strings.Join(parts, "; ")
-		}
-		return fmt.Sprintf("npm ls: %d invalid or missing: %s", len(bad), detail), nil
-	}
-	a.ok("npm ls: 0 invalid, 0 missing")
+	a.ok(ls.Summary())
 
 	if onPath("claude") {
 		r = runCmd(root, 120*time.Second, "claude", "plugin", "validate", ".")
@@ -918,6 +883,21 @@ func (a *app) runChecks(root, name, version string) (string, error) {
 		a.warn(`the claude CLI is not on PATH: "claude plugin validate ." was skipped; install it and run "claude plugin validate ." before you publish`)
 	}
 	return "", nil
+}
+
+// releaseOptionalPins is package.json's optionalDependencies (name → pinned version).
+func releaseOptionalPins(root string) map[string]string {
+	data, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if err != nil {
+		return nil
+	}
+	var pkg struct {
+		Optional map[string]string `json:"optionalDependencies"`
+	}
+	if json.Unmarshal(data, &pkg) != nil {
+		return nil
+	}
+	return pkg.Optional
 }
 
 // ciCheck reads the latest CI workflow run of HEAD (B580). CI runs the Go tests, go vet, gofmt, the

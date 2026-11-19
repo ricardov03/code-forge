@@ -734,7 +734,9 @@ func autopilotStop(o *runOut, home, runID string, now time.Time) int {
 		return autopilotReport(o, "stop", &runFail{autopilotExpiredMsg(runID, checked.Grant), false})
 	}
 	var stopped ledger.Object
+	workspace := ""
 	err = state.UpdateRun(home, runID, func(record *ledger.Object) error {
+		workspace, _ = record.Get("workspace").(string)
 		grant, _ := record.Get("autopilot").(ledger.Object)
 		if grant == nil {
 			return &runFail{"run " + runID + " has no autopilot grant", false}
@@ -765,6 +767,10 @@ func autopilotStop(o *runOut, home, runID string, now time.Time) int {
 		return autopilotReport(o, "stop", err)
 	}
 	o.out("autopilot run " + runID + ": grant " + autopilotText(stopped.Get("grant_id")) + " stopped\n" + autopilotRecordText(stopped.Get("link"), autopilotRecordFiles(o, home, runID, stopped, now)))
+	// B799: the run ends with the release check as its final report (exit code unchanged).
+	if report := autopilotStopReleaseCheck(workspace); report != "" {
+		o.out("\nfinal report (code-forge release check):\n" + report)
+	}
 	return 0
 }
 

@@ -68,7 +68,7 @@ docs/step-by-step.md: version pins: 0.21.0 → 0.21.1
 ok    CI for HEAD de5284401f9b3414ed1f9fa02e3a2e52e964f737: completed, success (go test, go vet, gofmt, npm pack check, config-doc and gen-commands-doc --check)
 ok    package size: @example/pkg 1234567 bytes (1.23 MB; limit <5 MB)
 ok    npm pack --dry-run: @example/pkg@0.21.1, 7 files
-ok    npm ls: 0 invalid, 0 missing
+ok    npm ls: 0 invalid, 0 missing, 0 extraneous
 ok    claude plugin validate .
 
 == 5. commit + tag ==

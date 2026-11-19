@@ -62,6 +62,9 @@ a block lands only when GitHub CI is green for its own tip (B765); land pushes a
 CI branch and draft PR, waits for CI (`land.ci_wait`, default 30m) and closes the block's CI PRs
 after the land (B796). Retry queued lock and git
 failures with `forge heal run --run <r>`; see the test queue with `forge queue` (`references/code.md` §5.1).
+Before you call the work release-ready, run `forge release check` (`--json` for scripts): it checks the
+tree, the push, GitHub CI for HEAD, the CHANGELOG `[Unreleased]` shape and `npm ls`, and prints the bump and the
+release steps; exit 0 means ready. Never run the steps it prints; the owner releases.
 
 ## §4 Hard rules (the headings of `references/rules-core.md`)
 
