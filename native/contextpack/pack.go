@@ -487,6 +487,9 @@ func Assemble(root, run, id string, entry ledger.Object, cfg map[string]any, nod
 	}
 	header = append(header, split(proofRule)...)
 	header = append(header, forbiddenSection()...)
+	ownBranch, _ := tree.Get("branch").(string)
+	baseBranch, _ := entry.Get("base_branch").(string)
+	header = append(header, gitRulesSection(root, ownBranch, baseBranch)...)
 	task := []string{}
 	if hasBrief {
 		task = append(task, "## brief: "+briefPath)

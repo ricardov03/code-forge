@@ -19,6 +19,7 @@ import (
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/proof"
+	"github.com/ricardov03/code-forge/native/refguard"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -434,6 +435,13 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		next = closeCommand([]string{"git", "-C", top, "status", "--short"})
 		return stop("block worktree is dirty or unreadable; commit and review its changes before merging")
 	}
+	// B797: main moved only by lands, releases and plain commits since the
+	// last land.
+	if bad, reviewed, err := refguard.Unsafe(main, base); err == nil && len(bad) > 0 {
+		step = "main-reflog"
+		next = closeCommand([]string{"git", "-C", main, "reflog", "show", base})
+		return stop(refguard.Refusal(base, main, reviewed, bad))
+	}
 	if mergeGate {
 		step = "merge-gate"
 		next = closeCommand([]string{"code-forge", "gates", "run", "--cwd", tree.Workspace})
@@ -461,7 +469,8 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	}
 	step = "merge"
 	next = command
-	output, err := gitx.Run(main, "-C", main, "merge", "--no-ff", "--no-edit", "--", branch)
+	refguard.Authorize(main)
+	output, err := gitx.WithEnv(main, refguard.LandEnv(id), "-C", main, "merge", "--no-ff", "--no-edit", "--", branch)
 	if err != nil {
 		next = closeCommand([]string{"git", "-C", main, "status"})
 		return stop(landFirst(landGitError(err, ""), output, "git merge failed; resolve the merge before continuing"))

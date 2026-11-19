@@ -6,6 +6,8 @@ package main
 import (
 	"fmt"
 	"os"
+
+	"github.com/ricardov03/code-forge/native/refguard"
 )
 
 const mainUsage = "usage: cf-release <release|release-site|site-data|docs-block|changelog|config-doc|build-native> [args...]"
@@ -14,6 +16,11 @@ func run(a *app, args []string, root string) int {
 	if len(args) == 0 {
 		a.err(mainUsage + "\n")
 		return 2
+	}
+	switch args[0] {
+	case "release", "docs-block":
+		// B797: release commits pass the coder ref guard like a land.
+		refguard.Authorize(root)
 	}
 	switch args[0] {
 	case "release":

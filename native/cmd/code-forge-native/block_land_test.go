@@ -17,6 +17,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/refguard"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -60,6 +61,14 @@ func TestBlockLandFullDaemonChain(t *testing.T) {
 // B430: land --merge --push puts the merge commit on the remote's main.
 func TestBlockLandPushSingle(t *testing.T) {
 	blockLandChain(t, "push")
+}
+
+// B797: a guarded coder worktree lands (the merge carries the land token
+// and the land reflog action); main moved outside land refuses the merge.
+func TestBlockLandRefGuard(t *testing.T) {
+	for _, shape := range []string{"guarded", "main-rewritten"} {
+		t.Run(shape, func(t *testing.T) { blockLandChain(t, shape) })
+	}
 }
 
 func TestBlockLandMergeGateReuse(t *testing.T) {
@@ -167,6 +176,23 @@ func blockLandChain(t *testing.T, shape string) {
 	base := git(repo, "rev-parse", "HEAD")
 	tree := filepath.Join(repo, ".code-forge/worktrees/B1")
 	git(repo, "worktree", "add", "-qb", "block-B1", tree, base)
+	guarded := shape == "guarded" || shape == "main-rewritten"
+	if guarded {
+		// B797: block open's ref guard on the coder worktree.
+		t.Setenv(refguard.TokenEnv, "")
+		if _, err := refguard.Install(tree, "main", "block-B1", "block-{block}"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if shape == "main-rewritten" {
+		// main moved outside land after the guard went on: a commit, then a
+		// reset that throws it away.
+		common := git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		old := time.Now().Add(-time.Hour)
+		must(os.Chtimes(refguard.ReviewedPath(common), old, old))
+		git(repo, "commit", "--allow-empty", "-qm", "stray")
+		git(repo, "reset", "-q", "--keep", "HEAD~1")
+	}
 	must(os.WriteFile(filepath.Join(tree, "sample.mjs"), []byte("new\n"), 0600))
 	if shape == "partial" {
 		must(os.WriteFile(filepath.Join(tree, "sample.test.mjs"), []byte("// fixture\n"), 0600))
@@ -307,7 +333,7 @@ func blockLandChain(t *testing.T, shape string) {
 	must(os.WriteFile(report, []byte("TESTS go test exit=0\n===BLOCK B1 COMPLETE===\n"), 0600))
 	must(os.WriteFile(transcript, []byte("Completed implementation.\n"), 0600))
 	// same-tree, no-token, push (B430) and older-base (B393) run the whole land chain and check its output.
-	if shape != "plain" && shape != "same-tree" && shape != "no-token" && shape != "push" && shape != "older-base" {
+	if shape != "plain" && shape != "same-tree" && shape != "no-token" && shape != "push" && shape != "older-base" && !guarded {
 		if !strings.HasPrefix(shape, "prior-") {
 			mode := "--changed"
 			if shape == "main-empty-commit" {
@@ -482,8 +508,33 @@ func blockLandChain(t *testing.T, shape string) {
 		landJoinStopped(t, home, run, join, code, string(output), started, ended, diedAt, requests)
 		return
 	}
+	if shape == "main-rewritten" {
+		if code != 1 || !strings.Contains(string(output), "block B1 land stopped at main-reflog: main moved outside land since the last land (1 reflog entry") || !strings.Contains(string(output), "reset: moving to HEAD~1") || !strings.Contains(string(output), "touch ") {
+			t.Fatalf("land exit=%d, want the main-reflog refusal: %s", code, output)
+		}
+		if got := git(repo, "rev-parse", "HEAD"); got != base {
+			t.Fatalf("refused land moved main to %s", got)
+		}
+		return
+	}
 	if code != 0 {
 		t.Fatalf("land exit=%d, want 0: %s", code, output)
+	}
+	if guarded {
+		if got := git(repo, "reflog", "show", "-1", "--format=%gs", "refs/heads/main"); !strings.HasPrefix(got, "code-forge land B1: Merge made by") {
+			t.Errorf("land reflog entry=%q, want the code-forge land action", got)
+		}
+		// The coder worktree still cannot move main without the token.
+		cmd := exec.Command("git", "update-ref", "refs/heads/main", base)
+		cmd.Dir = tree
+		for _, v := range gitx.ChildEnv() {
+			if !strings.HasPrefix(v, refguard.TokenEnv+"=") {
+				cmd.Env = append(cmd.Env, v)
+			}
+		}
+		if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "refused to move refs/heads/main") {
+			t.Errorf("update-ref of main from the coder worktree: err=%v out=%s", err, out)
+		}
 	}
 	fresh, err := state.ReadRun(home, run)
 	must(err)

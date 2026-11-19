@@ -14,6 +14,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
+	"github.com/ricardov03/code-forge/native/refguard"
 	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/worktree"
@@ -334,6 +335,12 @@ func Open(o Options) (result Result, err error) {
 			if err != nil {
 				return nil, err
 			}
+			// B797: the coder worktree cannot move the main branch or other
+			// blocks' branches. A guard that cannot go on (another hook,
+			// core.hooksPath in a work tree) leaves the worktree usable;
+			// doctor shows the guard state.
+			protect, _ := baseBranch.(string)
+			_, _ = refguard.Install(text(made.Record.Get("path")), protect, text(made.Record.Get("branch")), o.Settings.Branch)
 		}
 		entry := ledger.Object{{Key: "block", Value: o.ID}, {Key: "base_sha", Value: base}, {Key: "base_branch", Value: baseBranch}, {Key: "owned_files", Value: files}, {Key: "owned_kinds", Value: kinds}, {Key: "level", Value: level}, {Key: "kind", Value: kind}, {Key: "attempt", Value: o.Attempt}, {Key: "opened_at", Value: now}, {Key: "acceptance", Value: acceptance}, {Key: "lines_forecast", Value: o.Lines}, {Key: "status", Value: "open"}, {Key: "tree_at_open", Value: treeOpen}}
 		if o.Tests != nil {
