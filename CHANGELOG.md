@@ -9,6 +9,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Changed
 
 - `block land` with `land.require_ci: github` no longer needs a human between a rebase and green CI: a tip with no CI run is pushed (never forced) to its CI branch, or after a rebase to a new `ci-<block>-<n>` branch with a draft PR "Replaces #N (rebased onto <sha>)" that closes the old PR; land waits for CI on that sha up to `land.ci_wait` (default `30m`, one progress line a minute) and a timeout refuses with the same land command to resume; a red run names the failed jobs; an SSH push (CI branch or main) that fails on auth is retried once over HTTPS with the gh credential helper; after the land the block's CI PRs are closed. New keys `land.ci_wait`, `land.ci_branch_prefix` (default `ci-`), `land.ci_remote` (default `origin`) (B796).
+- `.code-forge/` stays out of git: `init` (also `--no-interaction`) and `upgrade` add `.code-forge/` to the repository's `.gitignore` (created when missing, your lines and order kept, never twice) and print `.gitignore: added .code-forge/`. While git would see the folder, `run start`, `proof export` and `proof red-green` refuse (exit 1) with the fix, so the proof export's copy of `.env` can no longer show up in `git status`. When git already tracks files under `.code-forge/`, `init`, `upgrade` and `doctor` print `git rm -r --cached .code-forge && git commit` and never run it. `doctor` has a new row, `.code-forge/ ignored by git` (B828).
 
 ### Added
 

@@ -24,6 +24,7 @@ const (
 func b474Project(t *testing.T, config string, nowMs float64) (home, repo string) {
 	t.Helper()
 	home, repo = smallProject(t, config)
+	b828Exclude(t, repo) // B828: the state-ignored row says yes, as after init
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "file")
 	t.Setenv("CODE_FORGE_KEY_JEV", "")
 	saved := doctorNow

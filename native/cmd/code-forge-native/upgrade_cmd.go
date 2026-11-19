@@ -17,6 +17,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/docsync"
 	"github.com/ricardov03/code-forge/native/pkgroot"
 )
@@ -249,6 +250,12 @@ func prepareUpgrade(args []string) (func(stdout, stderr io.Writer) int, handover
 		fmt.Fprint(stdout, head.String()+line)
 		// B791: fix the cwd's .code-forge.yml old shapes; never fails upgrade.
 		fmt.Fprint(stdout, cfxUpgradeLines(cwd))
+		// B828: a project here gets .code-forge/ in its .gitignore.
+		if initExists(filepath.Join(cwd, config.Filename)) {
+			for _, l := range initStateIgnoreLines(cwd, nil) {
+				fmt.Fprint(stdout, l+"\n")
+			}
+		}
 		return 0
 	}, 0, true
 }

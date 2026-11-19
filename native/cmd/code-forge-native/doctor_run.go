@@ -37,6 +37,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/daemonclient"
+	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/jev"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/refguard"
@@ -359,6 +360,10 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 		if indexing {
 			tail = append(tail, drunIndexingRows(cwd, snap.Path, inForce, liveRun)...)
 		}
+		// B828: .code-forge/ stays out of git (the export holds .env copies).
+		if row, ok := doctorStateIgnoreRow(cwd); ok {
+			tail = append(tail, row)
+		}
 		// B797: the coder ref guard (hook and guarded worktrees).
 		if status, detail := refguard.State(cwd); status != "" {
 			tail = append(tail, doctorRow{"ref-guard", status, "ref guard", detail})
@@ -526,4 +531,22 @@ func drunProbes(d drunCtx) (rows []doctorRow, thrown string, reason handoverReas
 		rows = append(rows, more...)
 	}
 	return rows, "", 0
+}
+
+// doctorStateIgnoreRow is the B828 row ".code-forge/ ignored by git": OK
+// when git ignores the folder and tracks nothing under it, FAIL with the
+// exact fix otherwise. ok is false outside a git work tree.
+func doctorStateIgnoreRow(cwd string) (doctorRow, bool) {
+	visible, known := gitx.StateVisible(cwd)
+	if !known {
+		return doctorRow{}, false
+	}
+	const id, label = "state-ignored", ".code-forge/ ignored by git"
+	if visible {
+		return doctorRow{id, "FAIL", label, "no; git would see the proof export (copies of .env) and the run files; fix: add the line " + gitx.StateIgnoreLine + " to " + gitx.StateIgnoreFile(cwd) + " (code-forge upgrade or init adds it)"}, true
+	}
+	if tracked := gitx.StateTracked(cwd); len(tracked) > 0 {
+		return doctorRow{id, "FAIL", label, gitx.StateTrackedLine(tracked)}, true
+	}
+	return doctorRow{id, "OK", label, "yes"}, true
 }

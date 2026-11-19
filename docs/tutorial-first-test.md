@@ -53,8 +53,10 @@ lockfile:
 }
 ```
 
-Create `.gitignore` with one line. code-forge keeps local state in `.code-forge/` (review queue,
-review results, coder logs, exports):
+You do not need to write a `.gitignore` for code-forge. code-forge keeps local state in
+`.code-forge/` (review queue, review results, coder logs, exports with copies of `.env`), and
+`code-forge init` adds `.code-forge/` to the repository's `.gitignore` in step 2. To ignore it
+before the base commit, create `.gitignore` with the same line now; `init` then leaves it alone:
 
 ```text
 .code-forge/
@@ -120,10 +122,10 @@ code-forge resolve L1
 | `code-forge validate` | `valid (0 warnings)`. A `closed-book-on-openai` warning means L2 or L3 runs on Codex: change it before you go on |
 | `code-forge list` | the skill linked for `claude`, `RESOLVES` yes |
 
-Commit the config (never `.code-forge/`, which `.gitignore` already covers):
+Commit the config and the `.gitignore` line `init` added (never `.code-forge/` itself):
 
 ```bash
-git add .code-forge.yml
+git add .code-forge.yml .gitignore
 git commit -m "code-forge: project config"
 git status --short
 ```

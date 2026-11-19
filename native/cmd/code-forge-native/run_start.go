@@ -560,6 +560,11 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 		if rel, err := filepath.Rel(ws, filepath.Join(h, ".code-forge", "runs")); err == nil && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
 			return fail(fmt.Sprintf("the workspace %s contains %s — run code-forge from a project directory, not $HOME or above", ws, filepath.Join(home, ".code-forge", "runs")))
 		}
+		// B828: the proof export (copies of .env) and the run files live in
+		// <workspace>/.code-forge/; a run never starts while git sees them.
+		if visible, known := gitx.StateVisible(ws); known && visible {
+			return fail(gitx.StateIgnoreLine + " is not ignored by git in " + ws + ", so the proof export (copies of .env) and the run files would be visible to git; no run was started. Fix: add the line " + gitx.StateIgnoreLine + " to " + gitx.StateIgnoreFile(ws) + " (code-forge upgrade adds it), then re-run")
+		}
 		review, _ := cfg.Get("review").(ledger.Object)
 		external, _ := review.Get("external").(ledger.Object)
 		reviewer := ""
