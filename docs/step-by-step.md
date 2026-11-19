@@ -103,7 +103,11 @@ JSON is a text format for named values.
 It links the skill into your chosen harnesses and records the links under `~/.code-forge/`.
 It may write shared defaults in `~/.code-forge/config.yml`.
 It ends with the quick setup check. A rerun keeps settings you already set.
-Add `.code-forge/` to your project's `.gitignore` so local work state stays out of commits.
+In a git repository it adds `.code-forge/` to the repository's `.gitignore` (it creates the file when
+it is missing, keeps your lines, and never adds the line twice) and prints `.gitignore: added .code-forge/`.
+The folder holds the run mirror, the queue and the proof export, which copies `.env`, so it must stay
+out of commits. When git already tracks files under `.code-forge/`, `init` names them and prints the
+fix, `git rm -r --cached .code-forge && git commit`. It never runs that command for you.
 
 **If it fails**
 

@@ -29,9 +29,10 @@ OK   signer key: generated; a signed row verifies, a changed one is refused
 OK   worker: pid N started, announced itself and stopped on SIGTERM
 INFO signer: same-user boundary only
 INFO native binary: not found
+OK   .code-forge/ ignored by git: yes
 INFO native daemon: fallback
 --- stderr
-doctor: 14 ok, 8 warn, 0 fail
+doctor: 15 ok, 8 warn, 0 fail
 --- argv
 === claude
 -p

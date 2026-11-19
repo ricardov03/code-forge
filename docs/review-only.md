@@ -28,8 +28,9 @@ too. See [how-it-works.md](how-it-works.md).
    names, the same as a normal run. L2 (the reviewers) and L3 (the judge) need an anthropic or xai
    model: Codex always has a shell, so an openai L2 or L3 is refused and every file comes back
    `unavailable` (see [getting-started.md](getting-started.md#codex-and-closed-book-roles)).
-3. Add `.code-forge/` to `.gitignore`. `review` writes its review queue, review results and a run
-   mirror there (see [What it writes](#what-it-writes)).
+3. `.code-forge/` is in `.gitignore`. `init` and `upgrade` add the line. `review` writes its review
+   queue, review results and a run mirror there (see [What it writes](#what-it-writes)). Without
+   the line, the run start under `review` refuses (exit 1) and prints the fix.
 
 ## The command
 

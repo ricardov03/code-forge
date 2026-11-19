@@ -51,6 +51,7 @@ func newStartFixture(t *testing.T, config string) startFixture {
 	if out, err := exec.Command("git", "-C", f.repo, "init", "-q").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v %s", err, out)
 	}
+	b828Exclude(t, f.repo) // B828: run start refuses while git would see .code-forge/
 	if config != "" {
 		body := strings.ReplaceAll(config, "TMPROOT", f.tmpRoot)
 		if err := os.WriteFile(filepath.Join(f.repo, ".code-forge.yml"), []byte(body), 0644); err != nil {
