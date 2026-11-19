@@ -26,6 +26,11 @@ The union driver keeps the lines from both sides, so these lands go through on e
 CI. It does not sort lines or remove duplicates, so read the `[Unreleased]` section before you
 release. The file is not in the npm package.
 
+Every `[Unreleased]` entry must sit under a `### <Type>` heading, and each type has one heading:
+`npm run release` refuses a section with an entry before its first `###` heading or a `###` type
+that appears twice, and names the line to fix (the site's changelog page would show a nameless or
+repeated group).
+
 ## Record a known fix
 
 When a release fixes an error users report through `code-forge logs report`, record its

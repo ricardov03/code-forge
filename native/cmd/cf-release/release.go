@@ -319,6 +319,9 @@ func releaseChangelog(text, version, date string) (string, string, error) {
 	if !hasEntries {
 		return "", "", &refusal{`CHANGELOG.md: "## [Unreleased]" has no entries: add one with npm run changelog -- added "…"`}
 	}
+	if msg := sectionShapeError(lines, sec); msg != "" {
+		return "", "", &refusal{msg}
+	}
 	notes := jsTrim(strings.Join(body, "\n"))
 	out := append([]string{}, lines[:sec.start]...)
 	out = append(out, "## [Unreleased]", "", "## ["+version+"] — "+date)
