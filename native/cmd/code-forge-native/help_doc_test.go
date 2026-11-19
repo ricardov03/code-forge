@@ -66,7 +66,7 @@ func TestB648CommittedCommandsDocIsCurrent(t *testing.T) {
 		t.Error("block section does not hold the block usage")
 	}
 	for _, want := range []string{
-		"### plan check\n", "### ci watch\n", "### decisions list\n", "### tools install\n",
+		"### plan check\n", "### ci watch\n", "### heal list\n\nList the heal queue\n\n```text\nusage: code-forge heal list [--run R] [--json]\n", "### decisions list\n", "### tools install\n",
 		"### block open\n\nStart a block: owned files, acceptance tests, brief\n\n```text\nusage: code-forge block open ",
 		"## help\n\nShow the commands, or the help of one command\n\n```text\n" + strings.TrimSuffix(helpUsage, "\n") + "\n```\n",
 		"## land\n\nLanding code that block land uses\n\n```text\nusage: code-forge land\n",
