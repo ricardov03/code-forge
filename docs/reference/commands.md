@@ -803,7 +803,7 @@ code-forge autopilot binnacle --run <run> --json
 Exit 0. Output:
 
 ```text
-{"title":"Autopilot run <run>","byline":{"date":"2026-11-19","owner":"T"},"status":[{"item":"Result","value":"0 of 1 block closed"},{"item":"Stack/PRs","value":"none recorded"},{"item":"Full suite","value":"green"},{"item":"Reviews","value":"1 result · 0 files approved · 0 waived by autopilot"},{"it…
+{"title":"Autopilot run <run>","byline":{"date":"2026-01-01","owner":"T"},"status":[{"item":"Result","value":"0 of 1 block closed"},{"item":"Stack/PRs","value":"none recorded"},{"item":"Full suite","value":"green"},{"item":"Reviews","value":"0 results · 0 files approved · 0 waived by autopilot"},{"i…
 ```
 
 #### Exit codes
@@ -864,7 +864,7 @@ code-forge autopilot log --run <run> --json
 Exit 0. Output:
 
 ```text
-[{"time":"2026-01-01T00:00:00Z","event":"Question to the owner","block":"B1","file":"src/a.txt","detail":"review:substitute · to owner (scope review:substitute not-allowed; the owner grants it with code-forge autopilot start --run <run> --until <time> --delegate L2 --allow review:substitute, else th…
+[{"time":"2026-01-01T00:00:00Z","event":"Question to the owner","block":null,"file":null,"detail":"waive:nit · to owner (session-failed) · ad-<id>","link":null},{"time":"2026-01-01T00:00:00Z","event":"Delegate session","block":null,"file":null,"detail":"L2 · anthropic · status failed","link":null},{…
 ```
 
 #### Exit codes
@@ -883,8 +883,8 @@ Prints one JSON line: an array of objects with these keys.
 |---|---|
 | `time` | string |
 | `event` | string |
-| `block` | string |
-| `file` | string |
+| `block` | null |
+| `file` | null |
 | `detail` | string |
 | `link` | null |
 
