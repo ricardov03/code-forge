@@ -24,6 +24,8 @@ type sweepChild struct {
 	command string
 	env     map[string]string
 	done    chan struct{}
+	// ignoreTerm: the child traps SIGTERM, so only SIGKILL stops it.
+	ignoreTerm bool
 }
 
 type sweepWorld struct {
@@ -31,7 +33,14 @@ type sweepWorld struct {
 	children []*sweepChild
 	signals  []string
 	clock    time.Time
+	// stopping: children sent a signal that stops them (SIGTERM unless
+	// they ignore it, or SIGKILL) and not yet seen gone by a fake sleep.
+	stopping map[*sweepChild]bool
 }
+
+// sweepStopWait bounds the real wait, in one fake sleep, for a signalled
+// child to be reaped (B909: the stop no longer races the fake clock).
+const sweepStopWait = 10 * time.Second
 
 func (w *sweepWorld) alive(c *sweepChild) bool {
 	select {
@@ -54,7 +63,7 @@ func (w *sweepWorld) spawn(t *testing.T, ignoreTerm bool, ppid int, command stri
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	c := &sweepChild{pid: cmd.Process.Pid, ppid: ppid, command: command, env: env, done: make(chan struct{})}
+	c := &sweepChild{pid: cmd.Process.Pid, ppid: ppid, command: command, env: env, done: make(chan struct{}), ignoreTerm: ignoreTerm}
 	go func() { _, _ = cmd.Process.Wait(); close(c.done) }()
 	t.Cleanup(func() { _ = syscall.Kill(c.pid, syscall.SIGKILL); <-c.done })
 	// the start time once the shell has become sleep (exec keeps the pid)
@@ -77,10 +86,14 @@ func (w *sweepWorld) spawn(t *testing.T, ignoreTerm bool, ppid int, command stri
 
 // install swaps the sweep's seams for this world: the table lists live
 // children only, signals go only to them (anything else fails the test), and
-// the clock moves only when the sweep sleeps.
+// the clock moves only when the sweep sleeps. B909: a fake sleep first waits
+// (real time, up to sweepStopWait) until every child sent a signal that stops
+// it is reaped, so a loaded machine that delivers SIGTERM late can never make
+// the fake grace run out first and add a SIGKILL.
 func (w *sweepWorld) install(t *testing.T) {
 	t.Helper()
 	w.clock = time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	w.stopping = map[*sweepChild]bool{}
 	before := []any{runReadProcesses, runReadEnv, runSignal, runGroupMembers, runSweepNow, runSweepSleep}
 	runReadProcesses = func() []runProc {
 		w.mu.Lock()
@@ -113,6 +126,9 @@ func (w *sweepWorld) install(t *testing.T) {
 		for _, c := range w.children {
 			if c.pid == target {
 				w.signals = append(w.signals, fmt.Sprintf("%d:%s", pid, sig))
+				if sig == syscall.SIGKILL || (sig == syscall.SIGTERM && !c.ignoreTerm) {
+					w.stopping[c] = true
+				}
 				return syscall.Kill(pid, sig)
 			}
 		}
@@ -127,9 +143,24 @@ func (w *sweepWorld) install(t *testing.T) {
 	}
 	runSweepSleep = func(d time.Duration) {
 		w.mu.Lock()
+		waits := []*sweepChild{}
+		for c := range w.stopping {
+			waits = append(waits, c)
+		}
+		w.mu.Unlock()
+		for _, c := range waits {
+			select {
+			case <-c.done:
+			case <-time.After(sweepStopWait):
+				t.Errorf("pid %d still running %s after the signal that stops it", c.pid, sweepStopWait)
+			}
+			w.mu.Lock()
+			delete(w.stopping, c)
+			w.mu.Unlock()
+		}
+		w.mu.Lock()
 		w.clock = w.clock.Add(d)
 		w.mu.Unlock()
-		time.Sleep(time.Millisecond) // lets the kernel deliver and the child be reaped
 	}
 	t.Cleanup(func() {
 		runReadProcesses = before[0].(func() []runProc)

@@ -77,8 +77,10 @@ func TestB788WorkerOpKeyReadAndCached(t *testing.T) {
 func TestB788WorkerOpFailureStartsWithoutJev(t *testing.T) {
 	// B794/B798: only the hanging op gets a short budget. An op that answers
 	// keeps the worker's own budget (6 s), so a loaded machine cannot turn
-	// its answer into "did not answer in time"; the hang (sleep 5) always
-	// outlasts 300 ms, so that case does not depend on load either.
+	// its answer into "did not answer in time"; the hang (sleep 120) always
+	// outlasts 300 ms, so that case does not depend on load either. B909: an
+	// uncapped worker would wait opTimeout (60 s) twice, so the 60 s bound
+	// below tells the cap apart with a margin no machine load closes.
 	cases := []struct {
 		name, body, reason string
 		missing            bool
@@ -87,7 +89,7 @@ func TestB788WorkerOpFailureStartsWithoutJev(t *testing.T) {
 		{"signed out", "echo '[ERROR] You are not currently signed in.' >&2\nexit 1\n", opMessages["op_locked"], false, 0},
 		{"not found", "echo '[ERROR] \"i\" isn'\"'\"'t an item in the \"v\" vault.' >&2\nexit 1\n", opMessages["op_not_found"], false, 0},
 		{"no op on PATH", "", opMessages["op_missing"], true, 0},
-		{"op hangs", "sleep 5\n", opMessages["op_timeout"], false, 300 * time.Millisecond},
+		{"op hangs", "sleep 120\n", opMessages["op_timeout"], false, 300 * time.Millisecond},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -116,7 +118,7 @@ func TestB788WorkerOpFailureStartsWithoutJev(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(f.home, ".code-forge", "store", "jev.key")); err == nil {
 				t.Fatal("a key was cached after op failed")
 			}
-			if c.budget != 0 && time.Since(start) > 10*time.Second {
+			if c.budget != 0 && time.Since(start) > 60*time.Second {
 				t.Fatalf("worker took %s; the op budget did not cap it", time.Since(start))
 			}
 		})

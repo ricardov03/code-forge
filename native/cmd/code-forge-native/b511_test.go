@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -21,23 +22,58 @@ import (
 // needed. These tests build the real binary, point run start at it and check
 // the process that serves the queue, the record, the signed rows and the stop.
 
-// b511BuildNative builds this package into a temp dir (call before a chdir).
+// b511BuildNative builds this package once per test process (call before a
+// chdir) and returns the binary. B909: the build shares the user's Go build
+// cache, which other processes on the machine trim (disk-guard.sh deletes
+// entries unused for 24 h); a trim racing the build fails it with "could not
+// import ... no such file" or "package ... is not in std". One build per
+// process makes that window small, and a failed build is retried once (a
+// real compile error fails both attempts).
 func b511BuildNative(t *testing.T) string {
 	t.Helper()
-	pkg, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
+	b511Build.once.Do(func() {
+		pkg, err := os.Getwd()
+		if err != nil {
+			b511Build.err = err.Error()
+			return
+		}
+		dir := os.Getenv(b753TmpEnv) // removed by TestMain at the end
+		if dir == "" {
+			dir = os.TempDir()
+		}
+		dir, err = os.MkdirTemp(dir, "b511-native-")
+		if err != nil {
+			b511Build.err = err.Error()
+			return
+		}
+		out := filepath.Join(dir, "code-forge-native")
+		for attempt := 1; attempt <= 2; attempt++ {
+			// B529: a binary built for a test refuses every signal to a process the
+			// test did not start, even when it runs with an environment of its own.
+			cmd := exec.Command("go", "build", "-ldflags", "-X github.com/ricardov03/code-forge/native/procguard.builtForTest=1", "-o", out, ".")
+			cmd.Dir = pkg
+			cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+			text, err := cmd.CombinedOutput()
+			if err == nil {
+				b511Build.path = out
+				b511Build.err = ""
+				return
+			}
+			b511Build.err += fmt.Sprintf("go build (attempt %d): %v\n%s", attempt, err, text)
+		}
+	})
+	if b511Build.path == "" {
+		t.Fatal(b511Build.err)
 	}
-	out := filepath.Join(t.TempDir(), "code-forge-native")
-	// B529: a binary built for a test refuses every signal to a process the
-	// test did not start, even when it runs with an environment of its own.
-	cmd := exec.Command("go", "build", "-ldflags", "-X github.com/ricardov03/code-forge/native/procguard.builtForTest=1", "-o", out, ".")
-	cmd.Dir = pkg
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if text, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, text)
+	if b511Build.err != "" {
+		t.Logf("the first build failed and was retried:\n%s", b511Build.err)
 	}
-	return out
+	return b511Build.path
+}
+
+var b511Build struct {
+	once      sync.Once
+	path, err string
 }
 
 func b511RunID(t *testing.T) string {
