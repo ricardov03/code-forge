@@ -959,7 +959,7 @@ usage: code-forge run start --reattach --run <id> [--worker-pid <pid>]
 
 ### run status
 
-Show the state of a run
+Show the state of a run and whether its worker is alive
 
 ```text
 usage: code-forge run status --run <id>

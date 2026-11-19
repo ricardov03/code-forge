@@ -687,6 +687,7 @@ func prepareDoctorNoConfig(cwd, home string, rows []doctorRow, jsonOut bool) (fu
 		return handover(reason)
 	}
 	rows = append(rows, review...)
+	rows = append(rows, rwlDoctorRows(home)...) // B885: the run status probe
 	rows = append(rows, dfReviewConcurrencyRow(nil, config.Ordered{}))
 	rows = append(rows, doctorRow{"probes", "FAIL", "probes", "skipped: no valid config"}, doctorRow{"signer", "INFO", "signer", "same-user boundary only"})
 	native, reason := dfNativeRow()

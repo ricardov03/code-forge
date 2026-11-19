@@ -13,6 +13,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Added
 
+- `run status` says whether the run's worker is alive, the same way `block ready` checks it: new fields `worker_live` and `workers` (each pin with `pid`, `alive`, `started_at`; `worker_pinned` stays and only says a pin is recorded), and with no live pin one stderr line `run <r>: no live worker; fix: code-forge run start --add-worker --run <r>`; `status` prints that line too and `doctor` shows it as a `run-worker` WARN row (one probe for all). B885
 - Coder worktrees are guarded: `block open` installs a git `reference-transaction` hook that refuses, from the coder worktree, any move or delete of the base branch (`git branch -f main`, `update-ref`, `fetch ...:main`) and of other block branches, naming the ref and the safe command (`git fetch origin`, then `FETCH_HEAD`); only `block land` and `cf-release release`/`docs-block` pass with the guard token. Every context pack lists the git rules (no moving main, no force push, no `rm -rf`, no `git stash`, no `git reset --hard`) and the one push command. `block land` refuses at step `main-reflog` when main's reflog has entries since the last land that are not a land, release or fast-forward commit, and lists them. `doctor` shows the `ref guard` row (B797)
 
 ## [0.25.1] — 2026-11-19
