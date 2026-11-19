@@ -684,12 +684,41 @@
         "push": { "type": "boolean", "default": false, "description": "After a successful merge, run `git push origin <base>` from the main checkout (the same as `block land --push`). A rejected push (the remote moved) leaves the local merge, appends one heal item of kind land to ~/.code-forge/heal/<run>.jsonl with the push argv, prints `heal: queued <id>` and exits non-zero. `--watch-ci` (flag only) then starts a detached `code-forge ci watch` for the pushed commit, logging to ~/.code-forge/heal/ci-<sha>.log; land never waits for CI. Authority: read from the run-start config snapshot." },
         "require_ci": { "type": "string", "enum": ["off", "github"], "default": "off", "description": "B765: `github` makes `block land --merge` (and a batch land) merge a block only when GitHub CI is green for the block branch's own tip sha, read with the gh CLI on PATH (`gh run list --commit <sha>`). No run, a run still going, a red run or no gh refuses the land at step ci (exit 1) before anything is merged or written. A red run passes only when every failing test matches a land.ci_red_list line of a block named in CODE_FORGE_CI_RED_BLOCKS (never the landing block itself). Authority: read from the run-start config snapshot." },
         "ci_workflow": { "type": "string", "minLength": 1, "description": "B765: with land.require_ci, only runs of this workflow count (passed to `gh run list --workflow`, e.g. ci.yml). Unset: every workflow run for the tip must be green." },
-        "ci_red_list": { "type": "string", "minLength": 1, "description": "B765: known-red list for land.require_ci, relative to the main checkout. One `<block> <regexp>` per line (Go regexp, matched against a failing test name); blank lines and # lines are skipped." }
+        "ci_red_list": { "type": "string", "minLength": 1, "description": "B765: known-red list for land.require_ci, relative to the main checkout. One `<block> <regexp>` per line (Go regexp, matched against a failing test name); blank lines and # lines are skipped." },
+        "auto_resolve": {
+          "anyOf": [
+            { "type": "boolean" },
+            { "$ref": "#/$defs/landAutoResolve" }
+          ],
+          "default": true,
+          "description": "B795: land merges append-only conflicts by itself (default on): CHANGELOG.md bullets (main's lines first, then the block's, one `### Kind` heading per kind, no repeated entry), rows of the markdown tables in `tables`, and the `generated` files land re-generates. Any other conflict aborts the merge, leaves main unchanged, prints the files with their kinds and one next step, and writes a land.conflict ledger row. `false` (or an object with `enabled: false`) keeps only the B431 CHANGELOG.md rule of a batch rebase. The object form also takes `tables` (repository-relative markdown files whose rows merge row by row; default `[docs/native-engine.md]`) and `generated` (`[{path, argv}]`: keep main's copy, run argv in the repository root, stage the file again). Authority: read from the run-start config snapshot."
+        }
       }
     },
     "telemetry": { "type": "string", "const": "off", "default": "off" }
   },
   "$defs": {
+    "landAutoResolve": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true, "description": "false keeps only the B431 CHANGELOG.md rule of a batch rebase; a single land then refuses every conflict." },
+        "tables": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": ["docs/native-engine.md"], "description": "Repository-relative markdown files whose table rows merge row by row (rows keyed by their first cell)." },
+        "generated": {
+          "type": "array",
+          "description": "Files land re-generates: the merge keeps main's copy, then argv runs in the repository root and the file is staged again.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "argv"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "argv": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+            }
+          }
+        }
+      }
+    },
     "provider": { "type": "string", "enum": ["anthropic", "openai", "xai"] },
     "levelName": { "type": "string", "enum": ["L0", "L1", "L2", "L3"] },
     "level": {

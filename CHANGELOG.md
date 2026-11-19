@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `block land` merges append-only conflicts by itself (`land.auto_resolve`, default on): `CHANGELOG.md` bullets (main's lines first, then the block's, one `### Kind` heading per kind, no repeated entry), rows of the markdown tables in `land.auto_resolve.tables` (default `docs/native-engine.md`) and the `land.auto_resolve.generated` files it re-generates; the merge then runs the same gates as a clean one and writes a `land.resolved` ledger row. Any other conflict, in a single land or a batch, aborts the merge with main unchanged, prints the files with their kinds and one `next:` step, and writes a `land.conflict` row with the files and kinds. `land.auto_resolve: false` keeps the old behaviour, except that a single land no longer leaves main mid-merge (B795)
+
 ## [0.25.1] — 2026-11-19
 
 ### Added

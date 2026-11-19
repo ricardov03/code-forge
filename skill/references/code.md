@@ -164,6 +164,14 @@ gates. One merge gate then runs on the merged trial tree with the selection for 
 never the full suite. When it fails, land names the first failing block, lands only the blocks
 before it and prints `block <id> not landed (after <culprit>)` for the rest.
 
+**Append-only conflicts (B795).** Single and batch land resolve a conflict by themselves when every
+file is append-only (`land.auto_resolve`, default on): `CHANGELOG.md` bullets (one `### Kind`
+heading per kind, main's lines first), rows of the tables in `land.auto_resolve.tables` (default
+`docs/native-engine.md`) and the `generated` files land re-generates; the same gates then run.
+Any other conflict aborts with main unchanged, prints the files with their kinds and one `next:`
+step and writes a `land.conflict` ledger row. Two blocks that both add a `### Fixed` bullet land
+in one batch with no human.
+
 **Push and CI watch (B430).** `--push` (a single block needs `--merge` too; a batch does not), or
 `land.push: true` in the run-start config, runs `git push origin <base>` from the main checkout
 after the merge and prints `pushed <sha> to origin/<base>`. A rejected push keeps the local merge,

@@ -16,6 +16,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/humancheck"
+	"github.com/ricardov03/code-forge/native/landmerge"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/proof"
@@ -433,17 +434,28 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		next = closeCommand([]string{"git", "-C", top, "status", "--short"})
 		return stop("block worktree is dirty or unreadable; commit and review its changes before merging")
 	}
+	// B795: land.auto_resolve from the run-start config snapshot.
+	auto := landmerge.FromConfig(cfg)
+	gatedTree := ""
 	if mergeGate {
 		step = "merge-gate"
 		next = closeCommand([]string{"code-forge", "gates", "run", "--cwd", tree.Workspace})
 		started := time.Now()
-		failure := landMergeGate(home, blockString(record.Get("project")), run, id, main, tree.Path, workspace, branch, base, entry, flags["copy-links"] == true)
+		failure := landMergeGateWith(home, blockString(record.Get("project")), run, id, main, tree.Path, workspace, branch, base, entry, flags["copy-links"] == true, auto)
 		if failure.elapsed != nil {
 			mergeGateMs = *failure.elapsed
+		}
+		if len(failure.conflicts) > 0 {
+			step, next = "merge", command
+			if err := landConflictRow(home, run, id, failure.conflicts, command); err != nil {
+				fmt.Fprintln(stderr, "block land:", err)
+			}
+			return stop(lcfReason(failure.conflicts))
 		}
 		if failure.reason != "" {
 			return stop(failure.reason)
 		}
+		gatedTree = failure.tree
 		if failure.reusedTree != "" {
 			mergeGateTree = failure.reusedTree
 			fmt.Fprintf(print, "merge gate: reused green full suite on tree %.12s\n", mergeGateTree)
@@ -460,10 +472,24 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	}
 	step = "merge"
 	next = command
-	output, err := gitx.Run(main, "-C", main, "merge", "--no-ff", "--no-edit", "--", branch)
+	// B795: an append-only conflict is resolved (to the tree the merge gate
+	// checked); any other conflict aborts the merge, so main is unchanged.
+	resolved, conflicts, output, err := lcfMerge(main, branch, auto, gatedTree)
+	if len(conflicts) > 0 {
+		if err := landConflictRow(home, run, id, conflicts, command); err != nil {
+			fmt.Fprintln(stderr, "block land:", err)
+		}
+		return stop(lcfReason(conflicts))
+	}
 	if err != nil {
 		next = closeCommand([]string{"git", "-C", main, "status"})
-		return stop(landFirst(landGitError(err, ""), output, "git merge failed; resolve the merge before continuing"))
+		return stop(landFirst(landGitError(err, ""), output, "git merge failed; main is unchanged"))
+	}
+	if len(resolved) > 0 {
+		fmt.Fprintf(print, "merge: resolved append-only conflicts: %s\n", landmerge.Describe(resolved))
+		if err := landResolvedRow(home, run, id, resolved); err != nil {
+			fmt.Fprintln(stderr, "block land:", err)
+		}
 	}
 	// B430: main first; push after the merge (flag --push or land.push).
 	if landPushWanted(flags, cfg) {
@@ -512,6 +538,8 @@ func landClosedHeadMoved(home, run, id, main, branch string) string {
 
 type landMergeResult struct {
 	reason      string
+	tree        string           // B795: the merged tree the gate checked
+	conflicts   []landmerge.File // B795: a trial-merge conflict land does not resolve
 	elapsed     *int64
 	reusedTree  string
 	gateReused  string // B393: tree of the block's own green gate, reused
@@ -524,7 +552,13 @@ type landMergeResult struct {
 // is merged. B404: the gate runs the tests selected from what the merge
 // changed (landMergeScope), never the full suite; a green full suite already
 // recorded for the merged tree is still reused.
-func landMergeGate(home, project, run, id, main, treePath, workspace, branch, base string, entry ledger.Object, copyLinks ...bool) (result landMergeResult) {
+func landMergeGate(home, project, run, id, main, treePath, workspace, branch, base string, entry ledger.Object, copyLinks ...bool) landMergeResult {
+	return landMergeGateWith(home, project, run, id, main, treePath, workspace, branch, base, entry, len(copyLinks) != 0 && copyLinks[0], landmerge.Legacy())
+}
+
+// landMergeGateWith is landMergeGate with land.auto_resolve (B795): the trial
+// merge resolves append-only conflicts the way the merge into main will.
+func landMergeGateWith(home, project, run, id, main, treePath, workspace, branch, base string, entry ledger.Object, copyLinks bool, auto landmerge.Settings) (result landMergeResult) {
 	mainHead, err := gitx.Run(main, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		result.reason = "cannot resolve merge parents"
@@ -567,14 +601,14 @@ func landMergeGate(home, project, run, id, main, treePath, workspace, branch, ba
 			return
 		}
 		added = true
-		output, err := gitx.Run(temporary, "merge", "--no-ff", "--no-edit", "--", strings.TrimSpace(blockHead))
+		_, conflicts, output, err := lcfMerge(temporary, strings.TrimSpace(blockHead), auto, "")
+		if len(conflicts) > 0 {
+			result.conflicts = conflicts
+			result.reason = lcfReason(conflicts)
+			return
+		}
 		if err != nil {
-			conflicts, _ := gitx.Run(temporary, "diff", "--name-only", "--diff-filter=U")
-			if strings.TrimSpace(conflicts) != "" {
-				result.reason = "merge conflict:\n" + strings.TrimSpace(conflicts)
-			} else {
-				result.reason = landFirst(landGitError(err, ""), output, "trial merge failed")
-			}
+			result.reason = landFirst(landGitError(err, ""), output, "trial merge failed")
 			return
 		}
 		mergedTree, err := gitx.Run(temporary, "rev-parse", "HEAD^{tree}")
@@ -583,6 +617,7 @@ func landMergeGate(home, project, run, id, main, treePath, workspace, branch, ba
 			return
 		}
 		mergedTree = strings.TrimSpace(mergedTree)
+		result.tree = mergedTree
 		gateWorkspace := filepath.Join(temporary, prefix)
 		loaded, err := config.Load(gateWorkspace)
 		if err != nil {
@@ -598,7 +633,7 @@ func landMergeGate(home, project, run, id, main, treePath, workspace, branch, ba
 			result.reusedTree = mergedTree
 			return
 		}
-		if err := landPrepareMergeGate(main, temporary, gateWorkspace, settings, len(copyLinks) != 0 && copyLinks[0]); err != nil {
+		if err := landPrepareMergeGate(main, temporary, gateWorkspace, settings, copyLinks); err != nil {
 			result.reason = err.Error()
 			return
 		}
