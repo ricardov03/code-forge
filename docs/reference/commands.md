@@ -553,6 +553,30 @@ Retry failures that pass by themselves
 usage: code-forge heal list [--run R] [--json] | show <id> [--run R] [--json] | run --run R [--once|--watch] [--max-tries N] [--json]
 ```
 
+### heal list
+
+List the heal queue
+
+```text
+usage: code-forge heal list [--run R] [--json]
+```
+
+### heal show
+
+Show one heal item
+
+```text
+usage: code-forge heal show <id> [--run R] [--json]
+```
+
+### heal run
+
+Retry the heal items of a run
+
+```text
+usage: code-forge heal run --run R [--once|--watch] [--max-tries N] [--json]
+```
+
 ## help
 
 Show the commands, or the help of one command

@@ -139,9 +139,9 @@ func TestRunVerbHelpAndUsage(t *testing.T) {
 		{"", 2, "", runUsage},
 		{"bogus", 2, "", runUsage},
 		{"bogus|--help", 2, "", runUsage},
-		{"status", 2, "", runUsage},
-		{"end|positional", 2, "", runUsage},
-		{"reload", 2, "", runUsage},
+		{"status", 2, "", "run status needs --run <id>\nusage: code-forge run status --run <id>\n"}, // B881 P16 audit sample
+		{"end|positional", 2, "", "run end needs --run <id>\n" + runSubUsage["end"]},
+		{"reload", 2, "", "run reload needs --run <id>\n" + runSubUsage["reload"]},
 		{"status|--nope", 2, "", "run status: unknown flag \"--nope\"\n"},
 		{"status|--run|a|--run|b", 2, "", "run status: --run given more than once\n"},
 		{"start|--reattach=yes", 2, "", "run start: --reattach takes no value\n"},
@@ -332,7 +332,7 @@ func TestRunVerbEnd(t *testing.T) {
 		for _, tc := range []struct{ status, blocks, errs string }{
 			{"ended", `{}`, "run end: run r-test has already ended\n"},
 			{"active", `{"B2":{"status":"awaiting_human_check"},"B1":{"status":"awaiting_human_check"},"B3":{"status":"open"}}`, "run end: run r-test has blocks awaiting human check: B2, B1; human-pass or stop them first\n"},
-			{"active", `{"B3":{"status":"open"},"B1":{"status":"done"},"B0":{"status":"open"}}`, "run end: run r-test still has open blocks: B3, B0\n"},
+			{"active", `{"B3":{"status":"open"},"B1":{"status":"done"},"B0":{"status":"open"}}`, "run end: run r-test still has open blocks: B3, B0; stop or close each first: code-forge block stop B3 --run r-test\n"},
 		} {
 			f := newRunFixture(t)
 			f.record(t, "r-test", tc.status, `,"blocks":`+tc.blocks)

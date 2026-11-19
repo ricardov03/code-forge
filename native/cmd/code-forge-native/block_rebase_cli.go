@@ -368,17 +368,24 @@ func rebaseStepBody(args []string, stdout io.Writer, stderr *rebaseHeldStderr, h
 // rebaseAcceptLanded is Node's call of the internal block-rebase-landed
 // command, run in-process: its stderr reaches the user on one line.
 func rebaseAcceptLanded(home, run, id string, asJSON bool, stdout, stderr io.Writer) int {
+	// B881 (P11): the "block rebase:" prefix of the other forms, not the
+	// internal command's binary name, and no raw refusal code before the text.
 	if !rebaseRunID.MatchString(run) {
-		fmt.Fprintln(stderr, "code-forge-native: block-rebase-landed requires --home <dir> and a valid --run <id>")
+		fmt.Fprintln(stderr, "block rebase: --accept-landed needs a valid --run <id>")
 		return 2
 	}
 	if !rebaseBlockID.MatchString(id) {
-		fmt.Fprintln(stderr, "code-forge-native: block-rebase-landed requires a valid --block <id>")
+		fmt.Fprintln(stderr, "block rebase: --accept-landed needs a valid block id")
 		return 2
 	}
 	result, err := rebase.Run(home, run, id)
 	if err != nil {
-		text := strings.TrimSpace(rebaseLineEnd.ReplaceAllString("code-forge-native: "+err.Error(), " "))
+		message := err.Error()
+		var se *state.Error
+		if errors.As(err, &se) && se.Code != "" {
+			message = strings.TrimPrefix(message, se.Code+": ")
+		}
+		text := strings.TrimSpace(rebaseLineEnd.ReplaceAllString("block rebase: "+message, " "))
 		fmt.Fprintln(stderr, text)
 		return 1
 	}

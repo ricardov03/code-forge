@@ -26,7 +26,7 @@ func TestB735RebaseLandedQueueFileIsQueueUnreadable(t *testing.T) {
 	rowsBefore := len(f.rows())
 
 	code, stdout, stderr := f.call("A", "--run", "r-rebase-unit", "--accept-landed", "--json")
-	if code != 1 || stdout != "" || stderr != "code-forge-native: queue-unreadable\n" {
+	if code != 1 || stdout != "" || stderr != "block rebase: queue-unreadable\n" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 	if got := f.git(f.tree, "rev-parse", "HEAD"); got != treeHead {
