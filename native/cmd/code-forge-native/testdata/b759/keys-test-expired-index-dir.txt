@@ -4,3 +4,4 @@ exit 1
 WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store
 foo: index: removal of the expired entry failed (EISDIR)
 foo: not found
+next: code-forge keys set foo
