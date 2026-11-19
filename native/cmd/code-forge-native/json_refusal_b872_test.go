@@ -88,9 +88,9 @@ func TestB872JSONRefusalsPrintOneLine(t *testing.T) {
 	defer func() { _ = os.Chdir(here) }()
 	for _, tc := range []b872Case{
 		{[]string{"docs", "path", "--json"}, 1, "code-forge docs sync"},
-		{[]string{"run", "end", "--run", "r-missing", "--json"}, 1, nil},
-		{[]string{"block", "open", "B1", "--run", "r-missing", "--owned", "src/a.txt", "--acceptance", "plans/acc.yml", "--json"}, 1, nil},
-		{[]string{"report", "--slug", "repon", "--json"}, 1, nil},
+		{[]string{"run", "end", "--run", "r-missing", "--json"}, 1, "code-forge status"},                                                                   // B875: the refusal names its next command
+		{[]string{"block", "open", "B1", "--run", "r-missing", "--owned", "src/a.txt", "--acceptance", "plans/acc.yml", "--json"}, 1, "code-forge status"}, // B875
+		{[]string{"report", "--slug", "repon", "--json"}, 1, "code-forge run start"},                                                                       // B875
 		{[]string{"queue", "run", "--json", "--", "true"}, 2, "code-forge queue --help"},
 	} {
 		b872Check(t, tc)

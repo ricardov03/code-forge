@@ -66,6 +66,10 @@ func b826Fixture(t *testing.T, cfg string) (b884Fix, string) {
 	if err := os.WriteFile(filepath.Join(f.repo, ".code-forge.yml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// B828: the .gitignore line init writes; run start refuses while git would see .code-forge/.
+	if err := os.WriteFile(filepath.Join(f.repo, ".gitignore"), []byte(".code-forge/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	f.must(t, gitc+" add -A && "+gitc+" commit -q -m cfg")
 	out := f.must(t, "code-forge run start 2>&1")
 	m := regexp.MustCompile(`run (\S+) started`).FindStringSubmatch(out)

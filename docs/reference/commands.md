@@ -2427,10 +2427,20 @@ None of its own; see its sub-commands.
 code-forge decisions --help
 ```
 
-Exit 2. Output:
+Exit 0. Output:
 
 ```text
-usage: code-forge decisions list [--run <r>] [--json]
+Description:
+  Show the decisions the autopilot signed
+
+Usage:
+  usage: code-forge decisions list [--run <r>] [--json]
+
+Available commands:
+  decisions list  List the close decisions the autopilot signed
+
+Options:
+  -h, --help  Show this help
 ```
 
 #### Exit codes
@@ -2520,10 +2530,21 @@ None of its own; see its sub-commands.
 code-forge docs --help
 ```
 
-Exit 2. Output:
+Exit 0. Output:
 
 ```text
-usage: code-forge docs sync|path [--json]
+Description:
+  Get the docs of the installed version
+
+Usage:
+  usage: code-forge docs sync|path [--json]
+
+Available commands:
+  docs path  Print the path of the best local docs copy
+  docs sync  Fetch the docs for the installed version
+
+Options:
+  -h, --help  Show this help
 ```
 
 #### Exit codes
@@ -2548,7 +2569,7 @@ Takes `--json`; the examples above refuse, so no shape is recorded.
 Fetch the docs for the installed version
 
 ```text
-usage: code-forge docs sync|path [--json]
+usage: code-forge docs sync [--json]
 ```
 
 #### When to use
@@ -2599,7 +2620,7 @@ Prints one JSON line: an object with these keys.
 Print the path of the best local docs copy
 
 ```text
-usage: code-forge docs sync|path [--json]
+usage: code-forge docs path [--json]
 ```
 
 #### When to use
@@ -5827,10 +5848,11 @@ Queue one finished file for review, or wait for the reviews of a block.
 code-forge review-file src/a.txt --block B1 --run <run>
 ```
 
-Exit 3. Output:
+Exit 0. Output:
 
 ```text
-{"status":"worker_down","file":"src/a.txt"}
+{"ticket":"<ticket>","status":"queued","file":"src/a.txt","content_hash":"<sha256>"}
+review-file: no live worker for run <run>; started worker pid <pid>
 ```
 
 #### Exit codes
@@ -5987,7 +6009,7 @@ code-forge run status --run <run>
 Exit 0. Output:
 
 ```text
-{"run_id":"<run>","status":"active","engine":"auto","worker_pinned":true,"worker_live":false,"workers":[{"pid": <pid>,"alive":false,"started_at":"Thu Nov 19 15:57:44 2026"}],"blocks":{},"orphans":[],"spent_usd":0.5,"budget_usd":null,"unknown_usd_sessions":0}
+{"run_id":"<run>","status":"active","engine":"auto","worker_pinned":true,"worker_live":false,"workers":[{"pid": <pid>,"alive":false,"started_at":"Thu Nov 19 16:05:00 2026"}],"blocks":{},"orphans":[],"spent_usd":0.5,"budget_usd":null,"unknown_usd_sessions":0}
 run <run>: no live worker; fix: code-forge run start --add-worker --run <run>
 ```
 

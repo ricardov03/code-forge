@@ -1040,8 +1040,8 @@
       "examples": [
         {
           "args": "decisions --help",
-          "exit": 2,
-          "out": "usage: code-forge decisions list [--run <r>] [--json]"
+          "exit": 0,
+          "out": "Description:\n  Show the decisions the autopilot signed\n\nUsage:\n  usage: code-forge decisions list [--run <r>] [--json]\n\nAvailable commands:\n  decisions list  List the close decisions the autopilot signed\n\nOptions:\n  -h, --help  Show this help"
         }
       ]
     },
@@ -1063,8 +1063,8 @@
       "examples": [
         {
           "args": "docs --help",
-          "exit": 2,
-          "out": "usage: code-forge docs sync|path [--json]"
+          "exit": 0,
+          "out": "Description:\n  Get the docs of the installed version\n\nUsage:\n  usage: code-forge docs sync|path [--json]\n\nAvailable commands:\n  docs path  Print the path of the best local docs copy\n  docs sync  Fetch the docs for the installed version\n\nOptions:\n  -h, --help  Show this help"
         }
       ]
     },
@@ -1995,8 +1995,8 @@
       "examples": [
         {
           "args": "review-file src/a.txt --block B1 --run {run}",
-          "exit": 3,
-          "out": "{\"status\":\"worker_down\",\"file\":\"src/a.txt\"}"
+          "exit": 0,
+          "out": "{\"ticket\":\"<ticket>\",\"status\":\"queued\",\"file\":\"src/a.txt\",\"content_hash\":\"<sha256>\"}\nreview-file: no live worker for run <run>; started worker pid <pid>"
         }
       ]
     },
@@ -2082,7 +2082,7 @@
         {
           "args": "run status --run {run}",
           "exit": 0,
-          "out": "{\"run_id\":\"<run>\",\"status\":\"active\",\"engine\":\"auto\",\"worker_pinned\":true,\"worker_live\":false,\"workers\":[{\"pid\": <pid>,\"alive\":false,\"started_at\":\"Thu Nov 19 15:57:44 2026\"}],\"blocks\":{},\"orphans\":[],\"spent_usd\":0.5,\"budget_usd\":null,\"unknown_usd_sessions\":0}\nrun <run>: no live worker; fix: code-forge run start --add-worker --run <run>"
+          "out": "{\"run_id\":\"<run>\",\"status\":\"active\",\"engine\":\"auto\",\"worker_pinned\":true,\"worker_live\":false,\"workers\":[{\"pid\": <pid>,\"alive\":false,\"started_at\":\"Thu Nov 19 16:05:00 2026\"}],\"blocks\":{},\"orphans\":[],\"spent_usd\":0.5,\"budget_usd\":null,\"unknown_usd_sessions\":0}\nrun <run>: no live worker; fix: code-forge run start --add-worker --run <run>"
         }
       ]
     },
