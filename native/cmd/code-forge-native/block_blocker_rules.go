@@ -61,6 +61,11 @@ func blockerPlainClose(in blockerFixInput) []string {
 
 // blockerRules is the one table: the fix command and clears_by of each code.
 var blockerRules = map[string]blockerRule{
+	// B884: no pinned worker is alive, so --reattach has nothing to pin;
+	// a new worker is the fix (until B826 starts one on its own).
+	"worker.down": {clearsByOrchestrator, func(in blockerFixInput) []string {
+		return []string{"code-forge", "run", "start", "--add-worker", "--run", in.run}
+	}, nil},
 	"unowned_change": {clearsByOrchestrator, func(in blockerFixInput) []string {
 		if in.p.File == "" {
 			return nil
@@ -68,8 +73,13 @@ var blockerRules = map[string]blockerRule{
 		return []string{"code-forge", "block", "claim", in.id, in.p.File, "--run", in.run}
 	}, nil},
 	"unreviewed": {clearsByOrchestrator, func(in blockerFixInput) []string {
+		if strings.Contains(in.p.Detail, wexitUnsupportedMark) {
+			return nil // B884: the text below
+		}
 		return []string{"code-forge", "review-file", "--wait-block", in.id, "--run", in.run}
-	}, nil},
+	}, func(in blockerFixInput, _ string) string {
+		return wexitUnsupportedFix(in)
+	}},
 	"unsigned": {clearsByOrchestrator, func(in blockerFixInput) []string {
 		return []string{"code-forge", "review-file", "--wait-block", in.id, "--run", in.run}
 	}, nil},

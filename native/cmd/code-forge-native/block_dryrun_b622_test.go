@@ -341,7 +341,11 @@ func TestB622BlockerTableClearsBy(t *testing.T) {
 			t.Errorf("%s: clears_by %s, want orchestrator", code, by)
 		}
 	}
-	if fix, _ := blockerFix(blockerFixInput{p: gatecheck.Blocker{Code: "worker.down"}, id: "B1", run: "r"}); fix != "code-forge run start --reattach --run r" {
+	// B884: a down worker gets a new one (--reattach needs a live worker)
+	if fix, _ := blockerFix(blockerFixInput{p: gatecheck.Blocker{Code: "worker.down"}, id: "B1", run: "r"}); fix != "code-forge run start --add-worker --run r" {
 		t.Errorf("worker fix %q", fix)
+	}
+	if fix, _ := blockerFix(blockerFixInput{p: gatecheck.Blocker{Code: "worker.replaced"}, id: "B1", run: "r"}); fix != "code-forge run start --reattach --run r" {
+		t.Errorf("worker.replaced fix %q", fix)
 	}
 }

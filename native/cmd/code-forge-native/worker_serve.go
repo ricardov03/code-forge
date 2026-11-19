@@ -297,6 +297,10 @@ func startNativeDaemon(run string, cfg map[string]any) (func(), error) {
 // (B561); runWorkerVerb runs it after the B690a refusal.
 var workerHandOverUndo func()
 
+// workerHandOverDetail is the hand-over text for the handovers.jsonl row and
+// workerLogFile the worker's stderr log to trim at exit (B884).
+var workerHandOverDetail, workerLogFile string
+
 // workerSetRunRoot is tmp.mjs setRunRoot (loop.mjs, right after runRoot):
 // the worker's later children are recorded in <run root>/pids (B573).
 func workerSetRunRoot(dir string) {
@@ -384,15 +388,20 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 	loop := &worker.Loop{Worker: wk, Pool: pool, Runner: runner, PollMs: a.pollMs,
 		CleanOrphans: workerOrphans(a.runID, wk.Stopping)}
 	pool.RunOne = loop.RunOne
-	pool.Stop = loop.Stop
+	pool.Stop = func() {
+		loop.StopWith("run-record-missing", "the run record is gone (the run was ended or its record removed)")
+	}
 	loop.ApprovalsServed = workerApprovalsServed(home, a.runID)
 	loop.CheckApprovals = workerCheckApprovals(home, a.runID)
 	pool.ExpiryCheck = loop.ExpiryCheck
 	pool.WatchTick = (&worker.Watch{Runner: runner, HandOff: loop.HandOff}).Tick
+	workerLogFile = wexitLogPath(runner.RepoRoot, pid)
 	if a.once {
 		done, err := loop.Once()
 		if reason := loop.Handoff(); reason != "" {
+			_ = runner.ExitRow("handover", reason, identity)
 			workerHandOverUndo = wk.RetractHandOver
+			workerHandOverDetail = reason
 			return 0, workerHandoffReason(reason)
 		}
 		if err != nil {
@@ -412,8 +421,8 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 	signals := make(chan os.Signal, 2)
 	stopSignals := workerSignals(signals)
 	go func() {
-		for range signals {
-			loop.Stop()
+		for sig := range signals {
+			loop.StopWith("signal", "stopped by signal "+sig.String())
 		}
 	}()
 	jevState := "absent (fallback)"
@@ -424,8 +433,15 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 	workerServing(loop)
 	loop.Run()
 	stopSignals()
+	// B884: one signed worker.exit row says why the serving worker stopped.
+	exitReason, exitDetail := loop.ExitReason()
+	if exitReason == "" {
+		exitReason, exitDetail = "stopped", "the worker was asked to stop"
+	}
+	_ = runner.ExitRow(exitReason, exitDetail, identity)
 	if reason := loop.Handoff(); reason != "" {
 		workerHandOverUndo = wk.RetractHandOver
+		workerHandOverDetail = reason
 		return 0, workerHandoffReason(reason)
 	}
 	o.err("worker: stopped\n")

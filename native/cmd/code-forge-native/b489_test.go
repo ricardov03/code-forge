@@ -193,27 +193,42 @@ func TestB489WorkerOnceServesInGo(t *testing.T) {
 	}
 }
 
-// The split rule end to end: an unported ticket hands the whole worker to
-// Node (worker-ticket-unported); the ticket stays queued, unclaimed, for
-// Node to review once.
-func TestB489WorkerUnportedTicketHandsOver(t *testing.T) {
+// B884 (was the B489 split rule end to end): an unported ticket fails only
+// itself. The worker closes it as unsupported (done marker with the reason,
+// one signed review.unsupported row, no review result), exits 0 and writes no
+// hand-over; nothing is left queued for the next worker (the poison loop).
+func TestB884WorkerUnsupportedTicketKeepsServing(t *testing.T) {
 	f := newB489Fix(t)
 	id := f.unported(t)
-	code, out, _ := b460Call(t, "worker", "--run", "r1", "--once")
-	if code != 1 || out != "" {
-		t.Fatalf("worker = %d %q, want the Go refusal (exit 1)", code, out)
+	code, out, errText := b460Call(t, "worker", "--run", "r1", "--once")
+	if code != 0 || out != "" || !strings.HasSuffix(errText, "worker: drained 1 ticket(s)\n") {
+		t.Fatalf("worker = %d %q %q, want the drain to go on (exit 0)", code, out, errText)
 	}
-	if got := strings.Join(b460Handovers(t, f.home), ","); got != "worker worker-ticket-unported" {
-		t.Fatalf("hand-overs %s", got)
+	if got := b460Handovers(t, f.home); len(got) != 0 {
+		t.Fatalf("hand-overs %v", got)
 	}
-	if b489Exists(filepath.Join(worker.QueueDir(f.root), id+".done")) || !b489Exists(filepath.Join(worker.QueueDir(f.root), id+".json")) {
-		t.Fatal("the unported ticket is not left pending")
+	data, err := os.ReadFile(filepath.Join(worker.QueueDir(f.root), id+".done"))
+	if err != nil || !strings.Contains(string(data), `"status":"unsupported"`) || !strings.Contains(string(data), "reopened_at Date.parse undecided") {
+		t.Fatalf("done marker %s %v", data, err)
 	}
-	if p := worker.Pending(f.root); len(p) != 1 || p[0] != id {
+	if p := worker.Pending(f.root); len(p) != 0 {
 		t.Fatalf("pending %v", p)
 	}
 	if n := f.results(t, id); n != 0 {
 		t.Fatalf("Go wrote %d result rows for the unported ticket", n)
+	}
+	found := 0
+	for _, r := range f.rows(t) {
+		if r["event"] == "review.unsupported" && r["ticket"] == id && r["run"] == "r1" && strings.Contains(fmt.Sprint(r["reason"]), "reopened_at") {
+			found++
+		}
+	}
+	if found != 1 {
+		t.Fatalf("%d review.unsupported rows, want 1", found)
+	}
+	// A second worker finds nothing to claim: no poison ticket.
+	if code, _, errText := b460Call(t, "worker", "--run", "r1", "--once"); code != 0 || !strings.HasSuffix(errText, "worker: drained 0 ticket(s)\n") {
+		t.Fatalf("second worker = %d %q", code, errText)
 	}
 }
 

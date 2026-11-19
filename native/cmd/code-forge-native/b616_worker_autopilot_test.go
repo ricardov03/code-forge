@@ -147,25 +147,33 @@ func TestB616WorkerAutopilotMatchesNode(t *testing.T) {
 }
 
 // Three approvals due at once each reload the run: the restore Go runs
-// (B536) serves one reload per pass, so the worker hands the drain to Node
-// before it writes anything (the grant expiry included).
-func TestB616WorkerManyReloadsHandOver(t *testing.T) {
+// (B536) serves one reload per pass, so the drain skips its autopilot work
+// before it writes anything (the grant expiry included). B884: the worker
+// is not stopped for it; it writes one signed worker.autopilot_unsupported
+// row and drains on (exit 0, no hand-over).
+func TestB884WorkerManyReloadsSkipAutopilotOnly(t *testing.T) {
 	base := b616Setup(t, "approvals")
 	runFile := filepath.Join(base, "home", ".code-forge", "runs", "r-fix.json")
 	recordBefore := b616Read(t, runFile)
 	ymlBefore := b616Read(t, filepath.Join(base, "ws", ".code-forge.yml"))
-	code, out, _ := b460Call(t, "worker", "--run", "r-fix", "--once")
-	if code != 1 || out != "" {
-		t.Fatalf("worker = %d %q, want the Go refusal", code, out)
+	code, out, errText := b460Call(t, "worker", "--run", "r-fix", "--once")
+	if code != 0 || out != "" {
+		t.Fatalf("worker = %d %q %q, want the drain to go on", code, out, errText)
 	}
-	if rows := b460Handovers(t, filepath.Join(base, "home")); len(rows) != 1 || rows[0] != "worker worker-ticket-unported" {
+	if rows := b460Handovers(t, filepath.Join(base, "home")); len(rows) != 0 {
 		t.Fatalf("hand-overs %v", rows)
 	}
 	if b616Read(t, runFile) != recordBefore || b616Read(t, filepath.Join(base, "ws", ".code-forge.yml")) != ymlBefore {
-		t.Fatal("wrote before handing over")
+		t.Fatal("the autopilot work wrote the record or the config")
 	}
-	if files, _ := filepath.Glob(filepath.Join(base, "home", ".code-forge", "ledger", "*.jsonl")); len(files) != 0 {
-		t.Fatalf("ledger written: %v", files)
+	files, _ := filepath.Glob(filepath.Join(base, "home", ".code-forge", "ledger", "*.jsonl"))
+	text := ""
+	for _, f := range files {
+		text += b616Read(t, f)
+	}
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], `"event":"worker.autopilot_unsupported"`) || !strings.Contains(lines[0], `"reason":"autopilot approvals: `) || !strings.Contains(lines[0], `"mac":"`) {
+		t.Fatalf("ledger %q", text)
 	}
 }
 

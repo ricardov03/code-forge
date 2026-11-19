@@ -98,7 +98,10 @@ plan -> code -> review -> proof -> land
 
 The skill checks and hardens the plan before your approval. Coders work in blocks with explicit
 owned files and acceptance clauses; independent blocks can run in parallel. A worker runs fresh
-reviewer sessions outside the coder's sandbox. Fix rounds are bounded; unresolved work stops.
+reviewer sessions outside the coder's sandbox. A file the worker cannot review fails only itself
+(`unsupported`, with the reason in `block ready`); the worker keeps serving, and every worker exit
+leaves a signed `worker.exit` row and `.code-forge/logs/worker-<pid>.log`. Fix rounds are bounded;
+unresolved work stops.
 Tests and red→green proof establish that a change meets its acceptance clauses before closing.
 You control the final merge and publish permissions; coders cannot push or open draft PRs by
 default. See [the workflow](docs/how-it-works.md) and [concepts](docs/concepts.md).

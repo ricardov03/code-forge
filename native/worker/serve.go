@@ -3,25 +3,20 @@ package worker
 // B489: loop.mjs run() and once() in Go — drain, orphan clean-up after a
 // drain that completed tickets, the idle exit, the poll wait and the stop.
 //
-// The ticket split rule (B477 step 3). Go claims a ticket, then RunTicket
-// either finishes it (done marker written, claim released) or returns
-// ErrUnsupported having written nothing and holding no lock. On the first
-// unsupported ticket the loop hands the WHOLE worker to Node:
-//   1. the worker stops: no new ticket starts (the claimed ticket's claim is
-//      released by the pool with no done marker, so it stays pending);
-//   2. the tickets already running in Go finish (each writes its own done
-//      marker, so Node's queue scan skips them);
-//   3. the worker releases its daemon and swaps its announcement for the
-//      hand-over one (B561: a waiter keeps seeing the queue served; Node's
-//      boot prunes it), and the CLI replaces this process (same pid, same
-//      start time) with the Node worker.
-// Node then boots on the same pin and reviews every pending ticket, the
-// unported one included, once. A ticket is never lost (its file stays queued)
-// and never reviewed twice (a done marker exists only for Go's own reviews,
-// and Go takes no ticket after the hand-over begins).
+// B884: a ticket RunTicket cannot serve (ErrUnsupported) fails only that
+// ticket: it is closed as `unsupported` (TicketRunner.Unsupported: done
+// marker, signed review.unsupported row) and the worker goes on serving.
+// An autopilot grant or approval shape Go cannot read stops the autopilot
+// work of the drain only (one signed worker.autopilot_unsupported row per
+// streak), never the worker. Before, either stopped the whole worker (the
+// B477 hand-over, a plain exit since B690a) and a ticket left queued killed
+// every new worker the same way. The commit watch hand-over (B534) is the
+// one hand-over left; the loop records why it stopped (ExitReason) so the
+// CLI writes one signed worker.exit row.
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -55,6 +50,31 @@ type Loop struct {
 	mu      sync.Mutex
 	handoff string
 	wake    chan struct{}
+	// exitReason/exitDetail: why the loop stopped (the first reason wins).
+	exitReason, exitDetail string
+	// autopilotStuck is the autopilot shape reported this streak ("" none).
+	autopilotStuck string
+}
+
+// StopWith stops the loop and records why (the first reason wins).
+func (l *Loop) StopWith(reason, detail string) {
+	l.mu.Lock()
+	if l.exitReason == "" {
+		l.exitReason, l.exitDetail = reason, detail
+	}
+	l.mu.Unlock()
+	l.Stop()
+}
+
+// ExitReason is why the loop stopped: the hand-over, else StopWith's reason
+// ("" when nothing recorded one).
+func (l *Loop) ExitReason() (reason, detail string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.handoff != "" {
+		return "handover", l.handoff
+	}
+	return l.exitReason, l.exitDetail
 }
 
 // Handoff is the reason the loop stopped to hand the worker to Node ("" none).
@@ -101,21 +121,55 @@ func (l *Loop) now() time.Time {
 	return time.Now()
 }
 
-// RunOne is the pool's runOne over RunTicket; an unsupported ticket starts
-// the hand-over and counts as not completed.
+// RunOne is the pool's runOne over RunTicket. B884: a ticket Go cannot
+// serve is closed as unsupported (done marker, signed row) and counts as
+// completed; when even that cannot be written it is skipped for this
+// worker's life. The worker never stops for it.
 func (l *Loop) RunOne(id string) (int, bool) {
 	n, poison, err := l.Runner.RunTicket(id)
 	if err != nil {
-		l.HandOff("ticket " + id + ": " + err.Error())
-		return 0, false
+		if l.Runner.Unsupported(id, err.Error()) != nil {
+			return 0, true
+		}
+		return 1, false
 	}
 	return n, poison
 }
 
+// AutopilotUnsupportedEvent is the signed row of an autopilot shape the
+// worker cannot read (B884).
+const AutopilotUnsupportedEvent = "worker.autopilot_unsupported"
+
+// autopilotUnsupported skips the autopilot work of this drain: one signed
+// worker.autopilot_unsupported row per streak, the worker keeps serving.
+func (l *Loop) autopilotUnsupported(reason string) {
+	l.mu.Lock()
+	repeat := l.autopilotStuck == reason
+	l.autopilotStuck = reason
+	l.mu.Unlock()
+	if repeat {
+		return
+	}
+	_ = l.Runner.Ledger(ledger.Object{{Key: "event", Value: AutopilotUnsupportedEvent}, {Key: "ts", Value: ISO(l.now())},
+		{Key: "reason", Value: reason}, {Key: "worker", Value: l.Runner.Worker}})
+}
+
+func (l *Loop) autopilotServed() {
+	l.mu.Lock()
+	l.autopilotStuck = ""
+	l.mu.Unlock()
+}
+
+// The reasons of worker.autopilot_unsupported.
+const (
+	AutopilotGrantUnsupported     = "autopilot grant: the run's grant has a shape the Go worker cannot read; grant expiry is skipped until it is fixed (autopilot stop, then start a new grant)"
+	AutopilotApprovalsUnsupported = "autopilot approvals: an approval the Go worker cannot decide; approval expiry and restore are skipped until it is fixed (autopilot approve or revert it by hand)"
+)
+
 // ExpiryCheck is expiryChecks for the pool (B48): the grant's lazy expiry,
 // then checkApprovals and its restore (B616: both in Go). A grant until or
-// an approval Go does not read like Node hands the worker to Node, decided
-// before anything is written.
+// an approval Go does not read like Node skips the autopilot work of the
+// drain, decided before anything is written (B884: never the worker).
 func (l *Loop) ExpiryCheck() error {
 	home, run := l.Runner.Home, l.Runner.RunID
 	now := l.now()
@@ -127,16 +181,16 @@ func (l *Loop) ExpiryCheck() error {
 		return err
 	}
 	if !autopilot.ExpireSupported(record, now) {
-		l.HandOff("autopilot grant")
+		l.autopilotUnsupported(AutopilotGrantUnsupported)
 		return nil
 	}
 	if !approvalsQuiet(record) && (l.CheckApprovals == nil || l.ApprovalsServed == nil || !l.ApprovalsServed(record, now)) {
-		l.HandOff("autopilot approvals")
+		l.autopilotUnsupported(AutopilotApprovalsUnsupported)
 		return nil
 	}
 	if err := autopilot.ExpireAny(home, run, now); err != nil {
 		if errors.Is(err, autopilot.ErrUnsupported) {
-			l.HandOff("autopilot grant") // the record changed between the reads
+			l.autopilotUnsupported(AutopilotGrantUnsupported) // the record changed between the reads
 			return nil
 		}
 		if !autopilot.IsNoRun(err) {
@@ -148,8 +202,11 @@ func (l *Loop) ExpiryCheck() error {
 	}
 	handOver, err := l.CheckApprovals(now)
 	if handOver {
-		l.HandOff("autopilot approvals")
+		l.autopilotUnsupported(AutopilotApprovalsUnsupported)
 		return nil
+	}
+	if err == nil {
+		l.autopilotServed()
 	}
 	return err
 }
@@ -289,7 +346,7 @@ func (c *Idle) Check(l *Loop) {
 			return
 		}
 	}
-	l.Stop()
+	l.StopWith("idle", fmt.Sprintf("no activity for %v hour(s) and no pending ticket", hours))
 	if c.Row != nil {
 		_ = c.Row(ledger.Object{{Key: "event", Value: "worker.idle_exit"}, {Key: "ts", Value: ISO(at)}, {Key: "idle_hours", Value: hours}, {Key: "worker", Value: c.Identity}})
 	}

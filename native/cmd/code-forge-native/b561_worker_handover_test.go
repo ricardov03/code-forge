@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -15,10 +16,10 @@ import (
 )
 
 // B561: a Go worker that met a ticket it does not serve used to replace
-// itself (same pid) with the Node worker. B690a: Go never starts Node; the
-// worker prints the refusal, writes the hand-over row, withdraws its
-// announcement and exits 1, and a `review-file --wait` already polling
-// answers worker_down (no worker serves the queue any more).
+// itself (same pid) with the Node worker; B690a made that an exit 1, and a
+// `review-file --wait` already polling answered worker_down. B884: the
+// worker closes that ticket as unsupported and keeps serving, so the waiter
+// gets the ticket's done answer; a forced stop writes worker.exit.
 
 // TestB561WorkerChild runs `worker` with the arguments after "--".
 func TestB561WorkerChild(t *testing.T) {
@@ -38,7 +39,7 @@ func TestB561WorkerChild(t *testing.T) {
 	os.Exit(runWorkerVerb(args))
 }
 
-func TestB561WaitSurvivesWorkerHandOverToNode(t *testing.T) {
+func TestB884WaitSurvivesUnsupportedTicket(t *testing.T) {
 	f := newB489Fix(t)
 	schema, _ := session.FindingSchemaPath()
 	lenses, _ := review.LensDir()
@@ -81,35 +82,50 @@ func TestB561WaitSurvivesWorkerHandOverToNode(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	// A waiter polls the ticket, then the unported ticket arrives and the Go
-	// worker refuses it (B690a) and stops.
+	// A waiter polls the ticket, then the unported ticket arrives. B884: the
+	// Go worker closes it as unsupported and keeps serving; the waiter gets
+	// the done answer at once (never worker_down).
 	waited := make(chan reviewFileRun, 1)
 	go func() { waited <- reviewFileExec(t, f.root, f.home, false, "--wait", ticket, "--max", "120s") }()
 	time.Sleep(300 * time.Millisecond)
 	f.unported(t)
 
-	select {
-	case <-exited:
-	case <-time.After(60 * time.Second):
-		t.Fatal("the Go worker did not stop")
-	}
-	want := "code-forge: worker is not supported in this case yet (worker-ticket-unported). Please report it: code-forge logs report\n"
-	if code := cmd.ProcessState.ExitCode(); code != 1 || !strings.HasSuffix(workerErr.String(), want) {
-		t.Fatalf("worker exit %d (%v) stderr %q; want exit 1 ending in %q", code, waitErr, workerErr.String(), want)
-	}
 	var got reviewFileRun
 	select {
 	case got = <-waited:
 	case <-time.After(150 * time.Second):
 		t.Fatal("the waiter did not return")
 	}
-	if got.code != 3 || got.stdout != `{"ticket":"`+ticket+`","status":"worker_down"}`+"\n" {
+	if got.code != 0 || !strings.HasPrefix(got.stdout, `{"ticket":"`+ticket+`","status":"done"`) || !strings.Contains(got.stdout, `"status":"unsupported"`) {
 		t.Fatalf("waiter = %d %q %q; worker stderr %s", got.code, got.stdout, got.stderr, workerErr.String())
 	}
-	if rows := strings.Join(b460Handovers(t, f.home), ","); rows != "worker worker-ticket-unported" {
-		t.Fatalf("hand-overs %s", rows)
+	select {
+	case <-exited:
+		t.Fatalf("the Go worker stopped on one unsupported ticket: %s", workerErr.String())
+	case <-time.After(500 * time.Millisecond):
 	}
-	// The refused worker withdrew its announcement.
+	if rows := b460Handovers(t, f.home); len(rows) != 0 {
+		t.Fatalf("hand-overs %v", rows)
+	}
+	// A forced stop: the worker writes its signed worker.exit row.
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-exited:
+	case <-time.After(60 * time.Second):
+		t.Fatal("the Go worker did not stop on SIGTERM")
+	}
+	exits := 0
+	for _, r := range f.rows(t) {
+		if r["event"] == "worker.exit" && r["reason"] == "signal" && r["detail"] == "stopped by signal terminated" {
+			exits++
+		}
+	}
+	if exits != 1 {
+		t.Fatalf("%d worker.exit rows (exit %v); stderr %s", exits, waitErr, workerErr.String())
+	}
+	// The stopped worker withdrew its announcement.
 	if names, _ := os.ReadDir(worker.WorkersDir(f.root)); len(names) != 0 {
 		t.Fatalf("announcements left: %v", names)
 	}

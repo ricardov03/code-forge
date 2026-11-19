@@ -949,6 +949,17 @@ The first worker also writes `queue/worker.json` for older readers. Its timer be
 and a clean stop removes its announcements. `worker_down` means no registered worker is live.
 An unreadable or malformed registry entry blocks a new worker. Doctor names its path.
 
+A ticket the Go worker cannot serve fails only that ticket (B884). The worker writes its done marker
+with `status: "unsupported"` and the reason, one signed `review.unsupported` row (ticket, block, file,
+reason, redacted), and goes on serving. The file stays unreviewed: `block ready` and `block close`
+add the reason to its `unreviewed` line, with the fix `code-forge review-file <file> --block <id> --run <r>`
+once the cause is fixed (or the owner's waive or `--decide`). An autopilot grant or approval the
+worker cannot read skips only the autopilot checks, with one signed `worker.autopilot_unsupported` row.
+Every worker exit writes a signed `worker.exit` row with its reason and detail (`signal`, `idle`,
+`handover`, ...). A worker that `run start` launched keeps the last 50 lines of its stderr in
+`<repo>/.code-forge/logs/worker-<pid>.log` (the newest 20 logs are kept). When no pinned worker is
+live, the `worker.down` blocker names the last exit and the fix `code-forge run start --add-worker --run <r>`.
+
 Forgotten workers exit after `worker.idle_exit_hours` without run activity (default 24, `0` disables);
 `sweep` and `doctor` flag idle workers, and `status` hints when all open branches are merged so
 you can end the run.

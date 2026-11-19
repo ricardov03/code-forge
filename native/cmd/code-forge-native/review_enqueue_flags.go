@@ -20,6 +20,7 @@ import (
 	"github.com/ricardov03/code-forge/native/reviewq"
 	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/ticket"
+	"github.com/ricardov03/code-forge/native/worker"
 )
 
 func init() { routes["review-file"] = runReviewFileWait }
@@ -257,7 +258,9 @@ func reviewEnqueueFresh(root string, p ticket.Parts, id string, retry bool) (led
 		resultStatus, resultOK := result.Get("status").(string)
 		if markerOK && resultOK && markerStatus == resultStatus {
 			switch resultStatus {
-			case "stale", "unavailable", "split_required":
+			case "stale", "unavailable", "split_required", worker.UnsupportedStatus:
+				// B884: an unsupported ticket (the Go worker could not serve
+				// it) runs again on the next review-file.
 				verdict = "rerun"
 			case "approved":
 				// B635: the owner reverted this substitute review (autopilot

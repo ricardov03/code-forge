@@ -658,6 +658,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 		return fail(err)
 	}
+	reason = wexitDownDetail(rows, run, event, reason)
 	if event == "" {
 		if why := blockclose.Tamper(run, id, rows, key); why != "" {
 			event, reason = "ledger.tamper", why
@@ -834,6 +835,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			if closeLandThrows(preview.Blockers, stderr) {
 				return 1
 			}
+			wexitUnsupportedNote(preview.Blockers, rows, run, id)
 			blockers := closeBlockersJSON(preview.Blockers, id, run, flags, entry)
 			if flags["json"] == true {
 				out := ledger.Object{{Key: "block", Value: id}, {Key: "ok", Value: false}, {Key: "reason", Value: preview.Reason}, {Key: "blockers", Value: blockers}}
@@ -926,6 +928,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	if closeLandThrows(result.Blockers, stderr) {
 		return 1
 	}
+	wexitUnsupportedNote(result.Blockers, rows, run, id)
 	blockers := closeBlockersJSON(result.Blockers, id, run, flags, entry)
 	if !result.OK && !jsonFlag {
 		for _, b := range blockers {

@@ -20,6 +20,7 @@ import (
 	"github.com/ricardov03/code-forge/native/reviewq"
 	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/ticket"
+	"github.com/ricardov03/code-forge/native/worker"
 )
 
 var reviewEnqueueSafeUnknown = regexp.MustCompile(`^--[A-Za-z][A-Za-z0-9-]{0,24}$`)
@@ -499,5 +500,6 @@ func reviewEnqueueCached(root, id string) bool {
 		return false
 	}
 	result, _ := r.(ledger.Object)
-	return result.Get("status") != "unavailable" && result.Get("status") != "split_required" && result.Get("stopped") != "split_required"
+	// B884: an unsupported result is not a cached review; it runs again.
+	return result.Get("status") != "unavailable" && result.Get("status") != "split_required" && result.Get("stopped") != "split_required" && result.Get("status") != worker.UnsupportedStatus
 }
