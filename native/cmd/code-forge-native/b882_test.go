@@ -23,6 +23,7 @@ func TestB882RunEndStopsTheDetachedWorkerOfItsTest(t *testing.T) {
 	if out, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v %s", err, out)
 	}
+	b828Exclude(t, repo) // B828: run start refuses a workspace where git would see .code-forge/
 	if err := os.WriteFile(filepath.Join(repo, ".code-forge.yml"), []byte("project:\n  slug: unit\ntmp:\n  root: "+tmpRoot+"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
