@@ -19,8 +19,8 @@ func TestHandoverTelemetry(t *testing.T) {
 	// B690a: an unknown verb writes nothing; a refusal (here with the
 	// default unrouted reason) writes one private-safe row, exit 1
 	code, _ := run([]string{"private-verb", "private-value"})
-	if code != 1 {
-		t.Fatalf("unknown verb exit = %d, want 1", code)
+	if code != 2 {
+		t.Fatalf("unknown verb exit = %d, want 2 (B878)", code)
 	}
 	if _, err := os.Stat(handoverLogPath()); err == nil {
 		t.Fatal("an unknown verb wrote a hand-over row")

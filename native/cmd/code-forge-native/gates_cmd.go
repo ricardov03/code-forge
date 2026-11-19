@@ -271,6 +271,12 @@ func runGates(args []string) int {
 	if len(args) == 0 || args[0] != "run" {
 		return gatesOther(args)
 	}
+	// B878: an unknown flag is a usage error (exit 2), before any config read or gate.
+	if flag := gatesUnknownFlag("run", args); flag != "" {
+		gatesRefuseUnknownFlag("run", flag)
+		gatesFinish(args, 2)
+		return 2
+	}
 	// B402: refuse gates.extra.invariants before any hand-over; Node would
 	// skip its script silently too.
 	cwd, given, _ := gatesFlag(args, "--cwd")

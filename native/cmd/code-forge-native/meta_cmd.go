@@ -159,6 +159,18 @@ func runVersionVerb(args []string) int {
 	if metaHelp(args, versionUsage, nil) {
 		return 0
 	}
+	// B878: version takes no argument; an unknown flag or a stray word is a
+	// usage error (exit 2) instead of being ignored.
+	if len(args) > 0 {
+		return metaServe("version", "", args, func(_, stderr io.Writer) int {
+			what := "unexpected argument "
+			if strings.HasPrefix(args[0], "-") {
+				what = "unknown flag "
+			}
+			fmt.Fprint(stderr, "version: "+what+statusQuote(args[0])+"\n"+versionUsage)
+			return 2
+		})
+	}
 	root, err := metaPackageRoot()
 	if err != nil {
 		return metaHandover("version", args, hVersionPackage)
