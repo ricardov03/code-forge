@@ -691,6 +691,26 @@ var helpRefs = map[string]helpRef{
 		exits:    map[int]string{1: "The command's own exit code (shown here for a failing command)."},
 		examples: []helpRefExample{helpRefEx("none", "queue run -- true"), helpRefEx("none", "queue run -- false")},
 	},
+	"release": {
+		when:     "Before you cut a release: ask whether this project is ready, in one read-only command.",
+		related:  []string{"release check", "status", "doctor"},
+		examples: []helpRefExample{helpRefEx("none", "release --help")},
+	},
+	"release check": {
+		when:    "Before `npm run release`: check the tree is clean, HEAD is pushed, GitHub CI is green for the HEAD sha, CHANGELOG [Unreleased] has one heading per kind and `npm ls` is clean; it suggests the bump and prints the release steps in order. It only reads; it never releases.",
+		related: []string{"status", "doctor", "audit commands"},
+		flags: map[string]string{
+			"--cwd": "Project folder to check (default: the current folder); the check runs at its git top level.",
+		},
+		exits: map[int]string{
+			1: "Not ready: at least one check failed; each failing check names what to do (for example push HEAD, wait for CI, npm prune).",
+			2: "Usage error: no check sub-command, an unknown or repeated option, or --cwd is not a folder.",
+		},
+		examples: []helpRefExample{
+			helpRefEx("none", "release check --json"),
+			helpRefEx("outside", "release check"),
+		},
+	},
 	"remove": {
 		when:     "Uninstall the code-forge skill from a harness.",
 		related:  []string{"list", "init"},
