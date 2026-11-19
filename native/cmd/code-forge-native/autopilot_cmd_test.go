@@ -130,10 +130,10 @@ func TestAutopilotVerbHelpAndUsage(t *testing.T) {
 		{[]string{"status", "--run"}, "autopilot status: --run needs a value\n"},
 		{[]string{"status", "--run="}, "autopilot status: --run needs a value\n"},
 		{[]string{"status", "--run", "r-a", "extra"}, "autopilot status: unexpected argument \"extra\"\n"},
-		{[]string{"status", "--run", "r-a", "--bogus"}, "autopilot status: unknown flag \"--bogus\"\n"},
+		{[]string{"status", "--run", "r-a", "--bogus"}, "autopilot status: unknown flag \"--bogus\"\n" + usageText("autopilot status")},
 		{[]string{"status", "--run", "r-a", "--json=1"}, "autopilot status: --json takes no value\n"},
 		{[]string{"stop", "--run", "r-a", "--run", "r-b"}, "autopilot stop: --run given more than once\n"},
-		{[]string{"waive", "--run", "r-a", "--nope"}, "autopilot waive: unknown flag \"--nope\"\n"},
+		{[]string{"waive", "--run", "r-a", "--nope"}, "autopilot waive: unknown flag \"--nope\"\n" + usageText("autopilot waive")},
 		{[]string{"approve", "--run", "r-a", "--yes"}, autopilotApproveNoYes + "\n"},
 		{[]string{"approve", "--yes=no"}, autopilotApproveNoYes + "\n"},
 	}

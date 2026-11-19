@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 	"unicode/utf16"
 
@@ -58,6 +59,9 @@ func prepareModels(args []string) (func(stdout, stderr io.Writer) int, handoverR
 			refresh = true
 		} else if arg == "--from-cli-caches" {
 			fromCaches = true
+		} else if strings.HasPrefix(arg, "-") {
+			// B895: an unknown flag is refused like every verb's; the router adds the usage.
+			return usageUnknownFlag("models", arg), 0, true
 		} else {
 			usageError = "unknown argument: " + arg
 			break

@@ -46,6 +46,12 @@ The command works in three steps:
    which Go decodes as Node does (each bad byte becomes U+FFFD). Text that
    looks like a secret in a refusal line or in the unknown-verb text is
    masked only when the command registered that secret, as in Node.
+   Since B895 every unknown-flag refusal also prints the command's usage
+   (the usage `code-forge <command> --help` shows) and exits 2:
+   `<command>: unknown flag "<flag>"`, then the usage lines. `models`,
+   `validate` and `resolve` print that line for a flag instead of
+   `[code-forge:error] unknown argument` or `unknown level`, and
+   `block settle` quotes the flag like every other verb.
 
 The skill's `forge <verb>` shim (`skill/scripts/forge`) starts this same shell
 entry, `bin/code-forge`, so skill verbs run in Go too (B547). With

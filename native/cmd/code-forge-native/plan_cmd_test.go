@@ -25,8 +25,8 @@ func TestB471PlanUsageAndReadsMatchNode(t *testing.T) {
 		{[]string{"plan", "check", "plan.md", "--facts", "missing"}, 2, "", "plan: --facts cannot be read: missing\nnext: code-forge plan check plan.md --facts <path of a readable facts sheet>\n"},
 		{[]string{"plan", "check", "plan.md", "--facts"}, 2, "", "plan: --facts needs a value\n"},
 		{[]string{"plan", "check", "plan.md", "--facts="}, 2, "", "plan: --facts needs a value\n"},
-		{[]string{"plan", "check", "plan.md", "--bogus"}, 2, "", "plan: unknown flag \"--bogus\"\n"},
-		{[]string{"plan", "check", "plan.md", "--help"}, 2, "", "plan: unknown flag \"--help\"\n"},
+		{[]string{"plan", "check", "plan.md", "--bogus"}, 2, "", "plan: unknown flag \"--bogus\"\n" + usageText("plan check")},
+		{[]string{"plan", "check", "plan.md", "--help"}, 2, "", "plan: unknown flag \"--help\"\n" + usageText("plan check")},
 		{[]string{"plan", "check", "plan.md", "--slug", "a", "--slug", "b"}, 2, "", "plan: --slug given more than once\n"},
 	})
 }

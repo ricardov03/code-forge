@@ -171,7 +171,7 @@ func TestB460SpawnAnswersInGo(t *testing.T) {
 		{[]string{"spawn", "--level", "L1", "--role", "coder"}, 2, "", spawnUsage},
 		{with("extra"), 2, "", spawnUsage},
 		{with("--print-argv", "--background"), 2, "", spawnUsage},
-		{with("--nope"), 2, "", "spawn: unknown flag \"--nope\"\n"},
+		{with("--nope"), 2, "", "spawn: unknown flag \"--nope\"\n" + usageText("spawn")},
 		{with("--timeout", "0"), 2, "", "spawn: --timeout must be a positive integer\n"},
 		{with("--schema", "missing.json"), 2, "", "spawn: --schema cannot be read\n"},
 		{with("--schema", "bad.json"), 2, "", "spawn: --schema is not a valid JSON file\n"},

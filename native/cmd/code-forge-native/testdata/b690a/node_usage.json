@@ -260,7 +260,7 @@
   ],
   "exit": 2,
   "stdout": "",
-  "stderr": "block close: unknown flag \"--bogus\"\n",
+  "stderr": "block close: unknown flag \"--bogus\"\nusage: code-forge block close <id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide] [--dry-run] [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n",
   "breadcrumbs": "[\"block close\"]\n",
   "error_row": {
    "verb": "block",
@@ -289,7 +289,7 @@
   ],
   "exit": 2,
   "stdout": "",
-  "stderr": "block waive: unknown flag \"--zz=<TOKEN>\"\n",
+  "stderr": "block waive: unknown flag \"--zz=<TOKEN>\"\nusage: code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes] [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n",
   "breadcrumbs": "[\"block waive\"]\n",
   "error_row": {
    "verb": "block",
@@ -318,7 +318,7 @@
   ],
   "exit": 2,
   "stdout": "",
-  "stderr": "block ready: unknown flag \"--zz=<TOKEN>\"\n",
+  "stderr": "block ready: unknown flag \"--zz=<TOKEN>\"\nusage: code-forge block ready <id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n  Read-only close checks: list every blocker and its fix; exit 1 while any remain.\n",
   "breadcrumbs": "[\"block\"]\n",
   "error_row": {
    "verb": "block",
@@ -350,7 +350,7 @@
   ],
   "exit": 2,
   "stdout": "",
-  "stderr": "block attempt: unknown flag \"--bogus=a b\"\n",
+  "stderr": "block attempt: unknown flag \"--bogus=a b\"\nusage: code-forge block attempt <id> --run <r> [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n",
   "breadcrumbs": "[\"block attempt\"]\n",
   "error_row": {
    "verb": "block",

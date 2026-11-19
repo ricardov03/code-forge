@@ -271,7 +271,7 @@ func TestB622DryRunUsage(t *testing.T) {
 		args   []string
 		stderr string
 	}{
-		{[]string{"block", "close", "B1", "--run", f.run, "--dry-run", "--decide", "--reason", "x"}, "block close: unknown flag \"--dry-run\"\n"}, // B744: Node's text (Node has no --dry-run),
+		{[]string{"block", "close", "B1", "--run", f.run, "--dry-run", "--decide", "--reason", "x"}, "block close: unknown flag \"--dry-run\"\n" + usageText("block close")}, // B744: Node's text (Node has no --dry-run),
 		{[]string{"block", "close", "B1", "--run", f.run, "--dry-run", "--auto-claim"}, "block close: --dry-run cannot be combined with --auto-claim\n"},
 		{[]string{"block", "close", "B1", "--run", f.run, "--dry-run", "--no-require-reviews"}, "block close: --dry-run cannot be combined with --no-require-reviews\n"},
 		{[]string{"block", "close", "B1", "--run", f.run, "--dry-run=yes"}, "block close: --dry-run takes no value\n"},

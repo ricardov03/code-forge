@@ -47,7 +47,11 @@ func run(args []string) (int, error) {
 			if name, ok := helpTarget(args); ok {
 				return helpWrap(name, args[1:], route), nil
 			}
-			return route(args[1:]), nil
+			// B895: an unknown-flag refusal also prints the command's usage.
+			usageReset()
+			code := route(args[1:])
+			usageAfterRefusal(args, code)
+			return code, nil
 		}
 	}
 	verb := ""

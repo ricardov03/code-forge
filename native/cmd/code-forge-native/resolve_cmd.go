@@ -37,6 +37,10 @@ func prepareResolve(args []string) (func(stdout, stderr io.Writer) int, handover
 		}, 0, true
 	}
 	level := args[0]
+	if strings.HasPrefix(level, "-") {
+		// B895: a flag is not a level; refused like every verb's, the router adds the usage.
+		return usageUnknownFlag("resolve", level), 0, true
+	}
 	if level != "L0" && level != "L1" && level != "L2" && level != "L3" {
 		return func(_, stderr io.Writer) int {
 			nodeLog(stderr, "error", maskTokens("unknown level \""+level+"\" — expected one of L0, L1, L2, L3"))

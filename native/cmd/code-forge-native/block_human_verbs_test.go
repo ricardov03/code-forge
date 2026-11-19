@@ -583,7 +583,7 @@ func TestBlockHumanVerbsNonASCIILogGo(t *testing.T) {
 	})
 	t.Run("accept-hit unknown flag", func(t *testing.T) {
 		f := newHVFixture(t, nil, nil)
-		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--line|2|--transcript|t.txt|--reason|ok|--ñandú'x=1").want(t, 2, "", "block accept-hit: unknown flag \"--ñandú'x=1\"\n")
+		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--line|2|--transcript|t.txt|--reason|ok|--ñandú'x=1").want(t, 2, "", "block accept-hit: unknown flag \"--ñandú'x=1\"\n"+usageText("block accept-hit"))
 		check(t, entry(t, f), nil, 2, "usage", "block accept-hit: unknown flag \"--ñandú'x=1\"", "6c9b55a865f6")
 	})
 	t.Run("accept-hit cancelled on a block with accents, a quote and emoji", func(t *testing.T) {
@@ -607,21 +607,21 @@ func TestBlockHumanVerbsNonASCIILogGo(t *testing.T) {
 	}
 	t.Run("a no-break space in a flag name is logged by Go", func(t *testing.T) {
 		f := newHVFixture(t, nil, nil)
-		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--x\u00a0y=1").want(t, 2, "", "block accept-hit: unknown flag \"--x\u00a0y=1\"\n")
+		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--x\u00a0y=1").want(t, 2, "", "block accept-hit: unknown flag \"--x\u00a0y=1\"\n"+usageText("block accept-hit"))
 		row := entry(t, f)
 		check(t, row, nil, 2, "usage", "block accept-hit: unknown flag \"--x\u00a0y=1\"", "6c9b55a865f6")
 		flagsOf(t, row, `{"cleaned":[],"flags":["--run"]}`)
 	})
 	t.Run("an op ref ending in a no-break space is scrubbed like Node", func(t *testing.T) {
 		f := newHVFixture(t, nil, nil)
-		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--x=op://v/i/f\u00a0tail_abcdefghijklmnopqrstuvwxyz").want(t, 2, "", "block accept-hit: unknown flag \"--x=op://v/i/f\u00a0tail_abcdefghijklmnopqrstuvwxyz\"\n")
+		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--run|r-test|--x=op://v/i/f\u00a0tail_abcdefghijklmnopqrstuvwxyz").want(t, 2, "", "block accept-hit: unknown flag \"--x=op://v/i/f\u00a0tail_abcdefghijklmnopqrstuvwxyz\"\n"+usageText("block accept-hit"))
 		row := entry(t, f)
 		check(t, row, nil, 2, "usage", "block accept-hit: unknown flag \"--x=op://<ref>\u00a0tail_<item-id>\"", "6c9b55a865f6")
 		flagsOf(t, row, `{"cleaned":[{"count":1,"rule":"op_ref"},{"count":1,"rule":"item_id"}],"flags":["--run","--x"]}`)
 	})
 	t.Run("an op ref with a vertical tab is scrubbed like Node", func(t *testing.T) {
 		f := newHVFixture(t, nil, nil)
-		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--x=op://v/i/f\u000btail_abcdefghijklmnopqrstuvwxyz").want(t, 2, "", "block accept-hit: unknown flag \"--x=op://v/i/f\\u000btail_abcdefghijklmnopqrstuvwxyz\"\n")
+		f.runLogged("TestBlockHumanVerbsNonASCIILogGo", "yes", "block|accept-hit|B1|--x=op://v/i/f\u000btail_abcdefghijklmnopqrstuvwxyz").want(t, 2, "", "block accept-hit: unknown flag \"--x=op://v/i/f\\u000btail_abcdefghijklmnopqrstuvwxyz\"\n"+usageText("block accept-hit"))
 		row := entry(t, f)
 		check(t, row, nil, 2, "usage", "block accept-hit: unknown flag \"--x=op://<ref>\"", "6c9b55a865f6")
 		flagsOf(t, row, `{"cleaned":[{"count":1,"rule":"op_ref"}],"flags":["--x"]}`)
