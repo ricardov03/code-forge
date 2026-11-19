@@ -3,7 +3,8 @@ exit 0
 --- stdout
 npm serves @example/pkg@0.21.0
 Docs pin docs-site/site/docs-source.json not found; the site docs pin was not moved
-Running gate: build:site
+site tests and design checks run during development (site gates), not at release
+Running: npm run build:site
 built site with {
   "version": "0.21.0",
   "date": "2026-11-01",
@@ -36,10 +37,7 @@ built site with {
     "date": "2026-11-01"
   }
 }
-Running gate: lint
-lint strict CI=1 yes=false
-Running gate: test
-fake npm test
+Smoke check: dist/index.html names @example/pkg@0.21.0
 Would commit src/data/site-data.json on release-site/v0.21.0
 Would deploy: npx wrangler pages deploy dist --project-name code-forge-ai --branch main
 Owner next steps (nothing was pushed):
@@ -151,7 +149,6 @@ no
 <CASE>/repo npm view @example/pkg@0.21.0 version
 <CASE>/code-forge-site/.code-forge-tmp/release-site-0.21.0/docs-site/site npm ci
 <CASE>/code-forge-site/.code-forge-tmp/release-site-0.21.0 npm run build:site
-<CASE>/code-forge-site/.code-forge-tmp/release-site-0.21.0 npm test
 --- repo .code-forge-tmp
 --- seen
 --- repo HEAD

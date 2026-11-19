@@ -48,7 +48,7 @@ func TestB775ReleaseSiteMovesDocsPin(t *testing.T) {
 	}
 }
 
-// --dry-run writes the pin into the temporary tree (the gates build with it) and names both files.
+// --dry-run writes the pin into the temporary tree (the build uses it) and names both files.
 func TestB775ReleaseSiteDryRunNamesPin(t *testing.T) {
 	f := newFixture(t, fixtureOpts{site: true})
 	b775SitePin(f, b775Pin)

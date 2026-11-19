@@ -1,8 +1,10 @@
 package main
 
 // `npm run release:site`: wait for npm to serve the release, write the site data into a detached
-// worktree of the site repository, run the site gates, commit on release-site/vX.Y.Z and deploy.
-// It never pushes. Port of scripts/release-site.mjs (B570).
+// worktree of the site repository, move the docs pin, build the site once, check that the built
+// site names the release, commit on release-site/vX.Y.Z and deploy. It never pushes. Port of
+// scripts/release-site.mjs (B570). B780: the site's own gates (npm test, design fidelity) run
+// during development as the site's code-forge gates, not at release.
 
 import (
 	"errors"
@@ -14,8 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -248,174 +248,74 @@ func (a *app) waitForNpm(root, name, version string, waitMin float64) error {
 	return errors.New("Timed out after " + jsNumberString(waitMin) + " min waiting for npm to serve " + name + "@" + version + "; nothing changed")
 }
 
-type siteGate struct {
-	name string
-	argv []string
-	env  [][2]string
+// B780: release:site builds once and runs no site gate; it says so in one line.
+const (
+	siteSkipped      = "site tests and design checks run during development (site gates), not at release"
+	siteBuildTimeout = 600 * time.Second
+)
+
+// siteSmokeExts are the built files the smoke check reads for the release name.
+var siteSmokeExts = map[string]bool{".html": true, ".md": true, ".txt": true}
+
+func siteSmokeWordByte(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || strings.IndexByte("_+-", c) >= 0
 }
 
-func argvOf(value any, name string) ([]string, error) {
-	bad := errors.New("Invalid site gate " + name + ": expected a nonempty argv array")
-	list, ok := value.([]any)
-	if !ok || len(list) == 0 {
-		return nil, bad
-	}
-	out := make([]string, len(list))
-	for i, v := range list {
-		s, isStr := v.(string)
-		if !isStr || s == "" {
-			return nil, bad
+// siteSmokeHas reports whether text names want as a whole word: "pkg@1.2.3" matches "pkg@1.2.3."
+// at the end of a sentence but not "pkg@1.2.30", "pkg@1.2.3.4", "pkg@1.2.3-rc" or "mypkg@1.2.3".
+func siteSmokeHas(text []byte, want string) bool {
+	for from := 0; ; {
+		i := strings.Index(string(text[from:]), want)
+		if i < 0 {
+			return false
 		}
-		out[i] = s
+		start, end := from+i, from+i+len(want)
+		from = start + 1
+		if start > 0 && (siteSmokeWordByte(text[start-1]) || text[start-1] == '.' || text[start-1] == '/') {
+			continue
+		}
+		if end < len(text) {
+			c := text[end]
+			if siteSmokeWordByte(c) || c == '.' && end+1 < len(text) && text[end+1] >= '0' && text[end+1] <= '9' {
+				continue
+			}
+		}
+		return true
 	}
-	return out, nil
 }
 
-// yamlMap decodes a mapping node keeping its key order.
-type yamlMap struct {
-	keys []string
-	vals map[string]any
-}
-
-func yamlValue(n *yaml.Node) any {
-	switch n.Kind {
-	case yaml.DocumentNode:
-		if len(n.Content) == 0 {
+// siteNamesRelease is the release smoke check (B780): some built .html, .md or .txt file in the
+// deploy folder names <package>@<version> (the docs pages pinned to the release tag do, through
+// docs/step-by-step.md). It returns that file, relative to the site root.
+func siteNamesRelease(tree, dir, want string) (string, error) {
+	root := filepath.Join(tree, dir)
+	found := ""
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !d.Type().IsRegular() || !siteSmokeExts[strings.ToLower(filepath.Ext(p))] {
 			return nil
 		}
-		return yamlValue(n.Content[0])
-	case yaml.AliasNode:
-		return yamlValue(n.Alias)
-	case yaml.MappingNode:
-		m := &yamlMap{vals: map[string]any{}}
-		for i := 0; i+1 < len(n.Content); i += 2 {
-			k := n.Content[i].Value
-			if _, seen := m.vals[k]; !seen {
-				m.keys = append(m.keys, k)
-			}
-			m.vals[k] = yamlValue(n.Content[i+1])
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
 		}
-		return m
-	case yaml.SequenceNode:
-		out := make([]any, len(n.Content))
-		for i, c := range n.Content {
-			out[i] = yamlValue(c)
+		if siteSmokeHas(data, want) {
+			rel, _ := filepath.Rel(tree, p)
+			found = filepath.ToSlash(rel)
+			return filepath.SkipAll
 		}
-		return out
-	}
-	var v any
-	if err := n.Decode(&v); err != nil {
-		return n.Value
-	}
-	return v
-}
-
-// yamlNumber is Number(value) for a decoded YAML scalar.
-func yamlNumber(v any) float64 {
-	switch t := v.(type) {
-	case int:
-		return float64(t)
-	case int64:
-		return float64(t)
-	case uint64:
-		return float64(t)
-	case float64:
-		return t
-	case bool:
-		if t {
-			return 1
-		}
-		return 0
-	case string:
-		return jsNumber(t)
-	case nil:
-		return 0
-	}
-	return math.NaN()
-}
-
-func siteGates(tree string) ([]siteGate, time.Duration, error) {
-	file := filepath.Join(tree, ".code-forge.yml")
-	data, err := os.ReadFile(file)
+		return nil
+	})
 	if err != nil {
-		return nil, 0, fsErr("open", file, err)
+		return "", err
 	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, 0, err
+	if found == "" {
+		return "", errors.New("Smoke check failed: no .html, .md or .txt file in deploy folder " + dir + " names " + want +
+			" after the build (is the docs pin on the release tag?); no commit or deploy; the old site remains live")
 	}
-	config := yamlValue(&doc)
-	var gates *yamlMap
-	if m, ok := config.(*yamlMap); ok {
-		gates, _ = m.vals["gates"].(*yamlMap)
-		if _, isList := m.vals["gates"].([]any); isList {
-			gates = &yamlMap{vals: map[string]any{}} // an array is an object with no gates fields
-		}
-	}
-	if gates == nil {
-		return nil, 0, errors.New("Site .code-forge.yml must define gates")
-	}
-	var custom []siteGate
-	if c := gates.vals["custom"]; c != nil {
-		list, ok := c.([]any)
-		if !ok {
-			return nil, 0, errors.New("Invalid site gates.custom: expected an array")
-		}
-		for _, g := range list {
-			gate, _ := g.(*yamlMap)
-			var name string
-			if gate != nil {
-				name, _ = gate.vals["name"].(string)
-			}
-			if name == "" {
-				return nil, 0, errors.New("Invalid site custom gate: missing name")
-			}
-			var env [][2]string
-			if e := gate.vals["env"]; e != nil {
-				em, ok := e.(*yamlMap)
-				if !ok {
-					return nil, 0, errors.New("Invalid site gate " + name + ": env must contain strings")
-				}
-				for _, k := range em.keys {
-					s, isStr := em.vals[k].(string)
-					if !isStr {
-						return nil, 0, errors.New("Invalid site gate " + name + ": env must contain strings")
-					}
-					env = append(env, [2]string{k, s})
-				}
-			}
-			argv, err := argvOf(gate.vals["argv"], name)
-			if err != nil {
-				return nil, 0, err
-			}
-			custom = append(custom, siteGate{name, argv, env})
-		}
-	}
-	if t := gates.vals["test"]; t != nil {
-		argv, err := argvOf(t, "test")
-		if err != nil {
-			return nil, 0, err
-		}
-		var kept []any
-		for _, arg := range argv {
-			if arg != "{test_files}" && arg != "{changed_files}" {
-				kept = append(kept, arg)
-			}
-		}
-		argv, err = argvOf(kept, "test")
-		if err != nil {
-			return nil, 0, err
-		}
-		custom = append(custom, siteGate{name: "test", argv: argv})
-	}
-	timeout := 300000.0
-	if t := gates.vals["timeout_s"]; t != nil {
-		timeout = yamlNumber(t) * 1000
-	}
-	if !finite(timeout) || timeout <= 0 {
-		return nil, 0, errors.New("Invalid site gates.timeout_s")
-	}
-	return custom, time.Duration(timeout * float64(time.Millisecond)), nil
+	return found, nil
 }
 
 func shQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'" }
@@ -599,10 +499,6 @@ func (a *app) releaseSite(argv []string, root string) (err error) {
 	} else {
 		a.out("Docs pin " + siteDocsPin + " not found; the site docs pin was not moved\n")
 	}
-	custom, timeout, err := siteGates(tree)
-	if err != nil {
-		return err
-	}
 	files, err := checked(tree, []string{"git", "ls-files", "-z", "--", "package.json", "*/package.json"}, 0)
 	if err != nil {
 		return err
@@ -631,33 +527,30 @@ func (a *app) releaseSite(argv []string, root string) (err error) {
 			return err
 		}
 	}
-	var failures []string
-	gates := append([]siteGate{{name: "build:site", argv: []string{"npm", "run", "build:site"}}}, custom...)
-	for _, gate := range gates {
-		a.out("Running gate: " + gate.name + "\n")
-		set := append([][2]string{{"GIT_TERMINAL_PROMPT", "0"}, {"CI", "1"}, {"npm_config_yes", "false"}}, gate.env...)
-		r := siteRun(tree, gate.argv, timeout, envWith(repoEnvKeys, set...))
-		a.out(r.stdout)
-		a.err(r.stderr)
-		if r.failed() || r.code != 0 {
-			failures = append(failures, gate.name)
-			why := " (" + r.errMsg + ")"
-			if !r.failed() {
-				code := strconv.Itoa(r.code)
-				if r.code < 0 {
-					code = "null"
-				}
-				why = " (exit " + code + ")"
+	a.out(siteSkipped + "\n")
+	a.out("Running: npm run build:site\n")
+	set := [][2]string{{"GIT_TERMINAL_PROMPT", "0"}, {"CI", "1"}, {"npm_config_yes", "false"}}
+	r := siteRun(tree, []string{"npm", "run", "build:site"}, siteBuildTimeout, envWith(repoEnvKeys, set...))
+	a.out(r.stdout)
+	a.err(r.stderr)
+	if r.failed() || r.code != 0 {
+		why := r.errMsg
+		if !r.failed() {
+			why = "exit " + strconv.Itoa(r.code)
+			if r.code < 0 {
+				why = "exit null"
 			}
-			a.err("Gate failed: " + gate.name + why + "\n")
 		}
-	}
-	if len(failures) > 0 {
-		return errors.New("Site gates failed: " + strings.Join(failures, ", ") + "; no commit or deploy; the old site remains live")
+		return errors.New("Site build failed: npm run build:site (" + why + "); no commit or deploy; the old site remains live")
 	}
 	if err := checkDeployDir(tree, opts.deployDir); err != nil {
 		return err
 	}
+	named, err := siteNamesRelease(tree, opts.deployDir, name+"@"+version)
+	if err != nil {
+		return err
+	}
+	a.out("Smoke check: " + named + " names " + name + "@" + version + "\n")
 	deploy := deployArgv(opts.deployDir)
 	if opts.dryRun {
 		a.out("Would commit " + strings.Join(commitFiles, " and ") + " on " + branch + "\nWould deploy: npx " + strings.Join(deploy, " ") + "\n")

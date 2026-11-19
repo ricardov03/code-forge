@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+- `npm run release:site` is fast: it builds the site once (`npm run build:site`), checks that the deploy folder holds `index.html` and that a built `.html`, `.md` or `.txt` file names `<package>@<version>`, then commits and deploys; it no longer reads or runs the site's `gates.test` and `gates.custom` (the site's `npm test` and design-fidelity checks run during development as site gates) and prints one line saying so; a failed build reads `Site build failed: npm run build:site (exit N)` (B780)
+
 ## [0.25.0] — 2026-11-18
 
 - The `evals/` folder is retired: its harness (`evals/run.mjs`) and scenarios 15-19 imported the Node `src/` files B760 removed, so a live eval run failed with `ERR_MODULE_NOT_FOUND`; the folder and the plugin manifest's `experimental.evals` entry are gone (B773)

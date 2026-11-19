@@ -1,9 +1,9 @@
-=== step 1: release-site
 exit 1
 --- stdout
 npm serves @example/pkg@0.21.0
 Docs pin docs-site/site/docs-source.json not found; the site docs pin was not moved
-Running gate: build:site
+site tests and design checks run during development (site gates), not at release
+Running: npm run build:site
 built site with {
   "version": "0.21.0",
   "date": "2026-11-01",
@@ -36,13 +36,8 @@ built site with {
     "date": "2026-11-01"
   }
 }
-Running gate: lint
-lint failed
-Running gate: test
-fake npm test
 --- stderr
-Gate failed: lint (exit 3)
-release:site: Site gates failed: lint; no commit or deploy; the old site remains live
+release:site: Site build failed: npm run build:site (exit 3); no commit or deploy; the old site remains live
 --- repo refs
 refs/heads/main 753a68e025cc278c24a6d7fb71d6a18b09e5c202 docs: stamp
 refs/remotes/origin/main 753a68e025cc278c24a6d7fb71d6a18b09e5c202 docs: stamp
@@ -135,11 +130,11 @@ refs/heads/main 753a68e025cc278c24a6d7fb71d6a18b09e5c202
 refs/tags/v0.21.0 2a779826596e64c91b6dd4b6c8c9dac16b5b2f43
 --- release temp files
 --- site refs
-refs/heads/main 5ba3648cc4647f9d306e39e466105ea7d3fbb6bc red lint
+refs/heads/main e72d30d8daf9435ea1a071207c8f1a41399643d5 site
 --- site status
 --- site worktrees
 worktree <CASE>/code-forge-site
-HEAD 5ba3648cc4647f9d306e39e466105ea7d3fbb6bc
+HEAD e72d30d8daf9435ea1a071207c8f1a41399643d5
 branch refs/heads/main
 
 --- site .code-forge-tmp exists
@@ -148,43 +143,3 @@ no
 <CASE>/repo npm view @example/pkg@0.21.0 version
 <CASE>/code-forge-site/.code-forge-tmp/release-site-0.21.0/docs-site/site npm ci
 <CASE>/code-forge-site/.code-forge-tmp/release-site-0.21.0 npm run build:site
-<CASE>/code-forge-site/.code-forge-tmp/release-site-0.21.0 npm test
---- repo .code-forge-tmp
---- seen
---- repo HEAD
-docs: stamp
-
-docs/release-docs.json
---- site files
-# .code-forge.yml
-"gates:\n  test: [npm, test, \"{test_files}\"]\n  custom:\n    - name: lint\n      argv: [sh, -c, \"echo lint failed; exit 3\"]\n      env:\n        LINT_MODE: strict\n  timeout_s: 60\n"
-# .gitignore
-"node_modules/\n"
-# docs-site/site/package.json
-"{\n  \"name\": \"docs\",\n  \"private\": true\n}\n"
-# node_modules/.bin/tool
-"#!/bin/sh\n"
-# node_modules/.cache/state
-"local\n"
-# node_modules/.package-lock.json
-"{}\n"
-# node_modules/@scope/x/index.js
-"module.exports = 2;\n"
-# node_modules/left-pad/index.js
-"module.exports = 1;\n"
-# package.json
-"{\n  \"name\": \"site\",\n  \"private\": true\n}\n"
-# src/data/site-data.json
-"{\"version\":\"0.20.0\"}\n"
-# src/pages/docs/start.astro
-"<h1>start</h1>\n"
-# src/pages/index.astro
-"<h1>home</h1>\n"
---- site index
-100644 cab3e1deeaae038a29b7eb9b234f5ce2c5a64d22 0	.code-forge.yml
-100644 c2658d7d1b31848c3b71960543cb0368e56cd4c7 0	.gitignore
-100644 1ef62557c8d678ead3481ac99ea161af378eded5 0	docs-site/site/package.json
-100644 331f844045962eb47ae41279c7aad8d0cbf8e827 0	package.json
-100644 378ddcf657ba949c39627fbecc405e3af17f0ae1 0	src/data/site-data.json
-100644 b329f0337f68f39eaeedfbb4a1221c03542bb4fe 0	src/pages/docs/start.astro
-100644 415b7b290db0a2a5b4ed90402b2d64f3b8192cdd 0	src/pages/index.astro

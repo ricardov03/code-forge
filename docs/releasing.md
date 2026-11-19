@@ -84,7 +84,7 @@ npm publish dist/npm/darwin-x64
 npm publish dist/npm/linux-x64
 npm publish dist/npm/linux-arm64
 npm publish                             # then the main package, from your machine
-npm run release:site                    # wait for npm, move the docs pin, check and deploy the site
+npm run release:site                    # wait for npm, move the docs pin, build, smoke check, deploy
 git push origin main --follow-tags      # then push; CI only creates the GitHub release
 ```
 
@@ -270,15 +270,23 @@ prints `Docs pin docs-site/site/docs-source.json: <old> -> vX.Y.Z` (B775). The d
 the docs pages from `docs/<page>.md` at that commit, so the site docs show the released text. A
 site without that file releases as before, with one line `Docs pin
 docs-site/site/docs-source.json not found; the site docs pin was not moved`; a pin file that is
-not a JSON object stops the release before any gate, commit or deploy. It then
+not a JSON object stops the release before any build, commit or deploy. It then
 links installed dependencies from the main checkout's `node_modules` if available, or runs
 `npm ci` when dependencies are missing. Cache directories such as `node_modules/.vite`,
-`.astro`, and `.cache` stay local to the temporary tree. It runs `npm run build:site`, every `gates.custom` entry (including its environment),
-and `gates.test` from that worktree's `.code-forge.yml`.
+`.astro`, and `.cache` stay local to the temporary tree. It runs `npm run build:site` once.
 
-Any failing gate is named, prevents both the commit and deploy, and leaves the old site live.
-After all gates pass, the deploy folder must exist and hold `index.html`; otherwise the command
-exits 1 with no commit and no deploy. The deploy folder defaults to `docs-site/site/.pages-out`,
+The release does not run the site's own tests or design checks: it neither reads nor runs
+`gates.test` or `gates.custom` from the site's `.code-forge.yml`, and prints `site tests and
+design checks run during development (site gates), not at release` (B780). Those checks run as
+the site's code-forge gates on every site block, so a release is a build, a smoke check and a
+deploy. A failed build prints `Site build failed: npm run build:site (exit N)`, prevents both the
+commit and deploy, and leaves the old site live.
+After the build, the deploy folder must exist and hold `index.html`, and the smoke check must
+find `<package>@<version>` (for example `@codedology/code-forge@0.25.0`) as a whole word in a
+built `.html`, `.md` or `.txt` file of the deploy folder; the docs pages pinned to the release
+tag name it through `docs/step-by-step.md`, so the merged site's `llms-full.txt` does. It prints
+`Smoke check: <file> names <package>@<version>`. Otherwise the command exits 1 with no commit and
+no deploy. The deploy folder defaults to `docs-site/site/.pages-out`,
 the full site that `build:site` merges (marketing pages plus `/docs`, `llms.txt` and `_headers`);
 `dist` alone holds only the marketing pages. `--deploy-dir <path>` picks another folder; it must
 be relative to the site root and may not contain `..`. Then it creates `release-site/vX.Y.Z`,
@@ -289,8 +297,8 @@ the deploy URL. `--dry-run` prints this command as its `Would deploy:` line. Wra
 on success or failure. An existing release branch is refused; a deployment failure keeps
 the commit available for the owner to inspect and retry manually.
 
-`--dry-run` still waits for npm, generates data, installs or links dependencies, builds, and
-runs every gate; it prints the commit and deploy plan with no new branch, commit or deployment.
+`--dry-run` still waits for npm, generates data, installs or links dependencies, builds and
+runs the smoke check; it prints the commit and deploy plan with no new branch, commit or deployment.
 The command never pushes. After a real release, run the printed commands to merge
 `release-site/vX.Y.Z` in the main site checkout and push it when your open work allows it.
 

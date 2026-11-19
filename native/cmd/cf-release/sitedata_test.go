@@ -294,7 +294,7 @@ func TestB690dReleaseSiteStartsNoNode(t *testing.T) {
 	if !strings.Contains(r.stdout, "Would commit src/data/site-data.json") {
 		t.Errorf("no dry-run commit line:\n%s", r.stdout)
 	}
-	// The site's own gates (fake npm) run as before; only node must not.
+	// The site build (fake npm) runs; node must not.
 	if calls, err := os.ReadFile(marker); err == nil && strings.TrimSpace(string(calls)) != "" {
 		t.Fatalf("release-site ran node: %q", calls)
 	} else if err != nil && !os.IsNotExist(err) {

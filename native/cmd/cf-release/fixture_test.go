@@ -55,12 +55,17 @@ run)
   case "$2" in
   typecheck) seen typecheck; [ "${FAKE_NPM_TYPECHECK_EXIT:-0}" = 0 ] || echo "type error in src/x.js" >&2; exit "${FAKE_NPM_TYPECHECK_EXIT:-0}" ;;
   build:site)
+    # B780: the built docs name the release (<package>@<version> from the site data) unless
+    # FAKE_BUILD_NOVERSION is set; a docs page with a near miss (0.21.01) never counts.
+    v=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' src/data/site-data.json | head -n 1)
     case "$FAKE_BUILD_MERGED" in
     none) ;;
     noindex) mkdir -p docs-site/site/.pages-out/docs ;;
-    *) mkdir -p docs-site/site/.pages-out && echo '<h1>site</h1>' > docs-site/site/.pages-out/index.html ;;
+    *) mkdir -p docs-site/site/.pages-out/docs && echo '<h1>site</h1>' > docs-site/site/.pages-out/index.html
+       echo "npm i @example/pkg@${v}1" > docs-site/site/.pages-out/docs/near.md
+       [ -n "$FAKE_BUILD_NOVERSION" ] || echo "npm i @example/pkg@$v" > docs-site/site/.pages-out/llms-full.txt ;;
     esac
-    [ -z "$FAKE_BUILD_DIST" ] || { mkdir -p dist && echo 'marketing only' > dist/index.html; }
+    [ -z "$FAKE_BUILD_DIST" ] || { mkdir -p dist && echo "marketing only @example/pkg@$v." > dist/index.html; }
     echo "built site with $(cat src/data/site-data.json)"; exit "${FAKE_BUILD_EXIT:-0}" ;;
   esac ;;
 pack)

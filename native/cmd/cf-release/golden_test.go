@@ -102,7 +102,7 @@ var parityCases = []parityCase{
 
 	{name: "site-dry", opts: fixtureOpts{site: true}, args: []string{"release-site", "--dry-run"}},
 	{name: "site-real", opts: fixtureOpts{site: true}, args: []string{"release-site"}},
-	{name: "site-gate-fails", opts: fixtureOpts{site: true}, env: map[string]string{"FAKE_BUILD_EXIT": "3"},
+	{name: "site-build-fails", opts: fixtureOpts{site: true}, env: map[string]string{"FAKE_BUILD_EXIT": "3"},
 		args: []string{"release-site"}},
 	{name: "site-deploy-dir-missing", opts: fixtureOpts{site: true}, args: []string{"release-site", "--deploy-dir", "out/site"}},
 	{name: "site-branch-exists", opts: fixtureOpts{site: true},

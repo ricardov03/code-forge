@@ -262,13 +262,13 @@ var flowCases = []flowCase{
 		flowCommitFile(f, "CHANGELOG.md", flowEmptyUnreleased)
 	}, steps: flowBothModes("release", "patch")},
 
-	// test/release-site.test.mjs.
-	{name: "site-custom-gate-fails", opts: fixtureOpts{site: true}, prep: func(f *fixture) {
+	// test/release-site.test.mjs. B780: the site gates no longer run at release, so red gates release.
+	{name: "site-custom-gate-red-releases", opts: fixtureOpts{site: true}, prep: func(f *fixture) {
 		f.write(filepath.Join(f.site, ".code-forge.yml"), strings.Replace(siteConfig, `"echo lint $LINT_MODE CI=$CI yes=$npm_config_yes"`,
 			`"echo lint failed; exit 3"`, 1))
 		f.git(f.site, "commit", "-q", "-am", "red lint")
 	}, steps: flowOne("release-site")},
-	{name: "site-test-gate-fails", opts: fixtureOpts{site: true},
+	{name: "site-test-gate-red-releases", opts: fixtureOpts{site: true},
 		steps: []flowStep{flowEnvStep(map[string]string{"FAKE_NPM_TEST_EXIT": "1", "FAKE_NPM_ALONE_EXIT": "1"}, "release-site")}},
 	{name: "site-dirty-main", opts: fixtureOpts{site: true}, prep: func(f *fixture) {
 		f.write(filepath.Join(f.site, "src/pages/index.astro"), "staged open work\n")
