@@ -367,8 +367,7 @@ func doctorKeysResolve(cfg map[string]any, home string, now float64) (func() doc
 
 // jevKeyChain is the one resolveKey chain doctor and the worker share
 // (B533). opOK false: a chain that would run `op read` returns
-// hDoctorKeyRefresh instead (the worker leaves a live 1Password read to
-// Node).
+// hDoctorKeyRefresh instead (since B788 the worker passes true too).
 //
 // B715: every value the resolver reads (Node's store registers each key it
 // reads, an expired one too) joins the verb's safe-output set when the
