@@ -51,7 +51,7 @@ Here, a critical waiver means the delegate's `autopilot waive` action; the evide
 
 - plan approval (`plan.md` §4.1) and design approval;
 - a budget raise (`code.md` §6, `review.md` §7);
-- a threshold edit or any other limit or rule change — only the owner's own `forge autopilot approve` at a terminal;
+- a threshold edit or any other limit or rule change — only the owner's own `forge autopilot approve` at a terminal (a config shape it cannot edit safely, such as an anchor or a tab, or a change that would leave an invalid config, is refused before the prompt with what to change by hand — B781);
 - a critical waiver, a proof waiver, or closing a block without its reviews;
 - merges and destructive actions.
 

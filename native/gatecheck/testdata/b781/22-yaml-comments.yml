@@ -1,0 +1,24 @@
+# project config
+version: 1 # schema
+project:
+  name: Audit # name
+  slug: audit
+provider: anthropic
+# levels
+levels:
+  L0:
+    model: claude-haiku-4-5-20251001 # cheap
+  L1:
+    model: claude-sonnet-5
+  L2:
+    model: claude-opus-5-5
+  L3:
+    model: claude-fable-5-2
+gates:
+  # tests
+  test: ["sh", "-c", "exit 0"]
+  lint: null
+  types: null
+  format: null
+review:
+  close_wait_s: 3 # short

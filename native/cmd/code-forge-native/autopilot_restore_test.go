@@ -362,21 +362,21 @@ func TestAutopilotApproveAtTerminalInGo(t *testing.T) {
 	}
 	answerErr = nil
 	// the file changed while the owner was asked: Go decides again under the
-	// lock; B536: this config (no provider, no levels) is one Node calls
-	// invalid with key paths Go does not carry, so Node runs it
+	// lock; B781: this config (no provider, no levels) is invalid, so Go
+	// refuses it with no hand-over
 	during = func() { apWriteConfig(t, f, "review:\n  max_rounds_per_file: 2\n") }
 	if code, out, _ = approve("4"); code != 1 || out != "" {
 		t.Fatalf("changed during prompt = %d %q", code, out)
 	}
 	during = func() {}
 	asked = nil
-	// B536: a change Go cannot reload like Node (the invalid config above)
-	// goes to Node before any prompt
+	// B781: a change that leaves the config invalid (the config above) is
+	// refused in Go before any prompt, with no hand-over
 	if code, _, _ = approve("5"); code != 1 {
 		t.Fatalf("write = %d", code)
 	}
-	// B732: a lone surrogate is a value Go holds now; this invalid config
-	// still goes to Node at the reload check, before any prompt
+	// B732: a lone surrogate is a value Go holds now; B781: this invalid
+	// config is refused in Go at the config check, before any prompt
 	if code, _, _ = approve(`"\ud800"`); code != 1 {
 		t.Fatalf("surrogate = %d", code)
 	}
@@ -387,7 +387,7 @@ func TestAutopilotApproveAtTerminalInGo(t *testing.T) {
 	if len(asked) != 0 {
 		t.Fatalf("asked = %q", asked)
 	}
-	want := []string{"autopilot-approve-reload-shape", "autopilot-approve-reload-shape", "autopilot-approve-reload-shape", "autopilot-approve-value"}
+	want := []string{"autopilot-approve-value"}
 	if got := apHandoverReasons(t, f); strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("reasons = %v, want %v", got, want)
 	}

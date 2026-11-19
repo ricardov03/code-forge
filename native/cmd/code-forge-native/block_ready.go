@@ -108,8 +108,10 @@ func runBlockReady(args []string) int {
 	if !ok {
 		return p.fallback()
 	}
-	highPaths, ok := closeHighPaths(workspace, base)
-	if !ok {
+	highPaths, err := closeHighPaths(workspace, base)
+	if refusal, isRefusal := closeConfigRefusal(err); isRefusal {
+		return p.refusal(refusal.Code, refusal.Message)
+	} else if err != nil {
 		return p.fallback()
 	}
 	prefix := gatecheck.Prefix(mainTop, workspace)

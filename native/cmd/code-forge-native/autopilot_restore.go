@@ -274,9 +274,9 @@ func autopilotRevert(text, key string, segs []string, a ledger.Object) (out, rea
 		default:
 			return "", "", true // i < "2" coerces: left to Node
 		}
-		out, err = yamledit.Remove(text, segs, prune)
+		out, err = yamledit.RemoveOrSplice(text, segs, prune)
 	} else {
-		out, err = yamledit.Set(text, segs, a.Get("old"))
+		out, err = yamledit.SetOrSplice(text, segs, a.Get("old"))
 	}
 	switch {
 	case err == nil:

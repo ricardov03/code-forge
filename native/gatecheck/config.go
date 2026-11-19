@@ -1,49 +1,68 @@
 package gatecheck
 
 import (
-	"encoding/json"
-	"io"
-	"regexp"
+	"errors"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/gitx"
-	"gopkg.in/yaml.v3"
 )
 
-// HighPaths reads both sides, with the base checked as a commit even if neither
-// side has configuration. Unsupported configuration dialects request handover.
-func HighPaths(workspace, base, version string) ([]any, bool) {
+// ErrHighPathsHandOver is HighPaths' answer when the base commit itself
+// cannot be read (no base, or git cannot resolve or show it). No config
+// shape reaches it.
+var ErrHighPathsHandOver = errors.New("high paths: base commit unreadable")
+
+// ConfigRefusal is a config HighPaths will not read: it does not load, it
+// fails the shared schema, or it holds what looks like a raw secret (B781).
+// Message names the file side, the key path and what to change; it never
+// holds the secret itself.
+type ConfigRefusal struct{ Message string }
+
+func (e *ConfigRefusal) Error() string { return e.Message }
+
+// HighPaths reads proof.tiers.high.paths from both sides: the workspace's
+// .code-forge.yml and the one committed at base. Each side must load and pass
+// the shared schema check, and must hold no raw secret; nothing else about
+// the config matters here (B781: keys, review.routes, review.second_* and the
+// other former Node-only settings no longer stop a close).
+func HighPaths(workspace, base, version string) ([]any, error) {
 	if base == "" || strings.HasPrefix(base, "-") {
-		return nil, false
+		return nil, ErrHighPathsHandOver
 	}
 	paths := []any{}
 	current, err := config.Load(workspace)
 	if err == nil {
-		if !validConfig(current, version) {
-			return nil, false
+		if refusal := hpCheck(current, version, ".code-forge.yml", "fix the file"); refusal != nil {
+			return nil, refusal
 		}
 		paths = append(paths, highPaths(current)...)
 	} else if e, ok := err.(*config.Error); !ok || e.Kind != "not-found" {
-		return nil, false
+		return nil, &ConfigRefusal{Message: ".code-forge.yml cannot be read: " + config.MaskSecrets(err.Error()) + "; fix the file and close again; nothing was recorded"}
 	}
 	if _, err := gitx.Run(workspace, "rev-parse", "--verify", "--quiet", base+"^{commit}"); err != nil {
-		return nil, false
+		return nil, ErrHighPathsHandOver
 	}
 	listed, err := gitx.Run(workspace, "ls-tree", base, "--", ".code-forge.yml")
 	if err != nil {
-		return nil, false
+		return nil, ErrHighPathsHandOver
 	}
 	if strings.TrimSpace(listed) != "" {
 		shown, err := gitx.Run(workspace, "show", base+":.code-forge.yml")
 		if err != nil {
-			return nil, false
+			return nil, ErrHighPathsHandOver
 		}
-		baseConfig, ok := plainYAML(shown)
-		if !ok || !validConfig(baseConfig, version) {
-			return nil, false
+		side := ".code-forge.yml at the block's base " + hpShort(base)
+		fix := "commit the fix on main and rebase the block (code-forge block rebase)"
+		baseConfig, _, err := config.ParseTextOrdered(shown, side)
+		if err != nil {
+			return nil, &ConfigRefusal{Message: side + " cannot be read: " + config.MaskSecrets(err.Error()) + "; " + fix + ", then close again; nothing was recorded"}
+		}
+		if refusal := hpCheck(baseConfig, version, side, fix); refusal != nil {
+			return nil, refusal
 		}
 		for _, p := range highPaths(baseConfig) {
 			if !slices.Contains(paths, p) {
@@ -51,171 +70,67 @@ func HighPaths(workspace, base, version string) ([]any, bool) {
 			}
 		}
 	}
-	return paths, true
+	return paths, nil
 }
 func highPaths(cfg map[string]any) []any {
 	return array(mapping(mapping(mapping(cfg["proof"])["tiers"])["high"])["paths"])
 }
 func mapping(v any) map[string]any { m, _ := v.(map[string]any); return m }
 
-// Domain validation is deliberately bounded to the ordinary single-reviewer
-// configuration. Shape validation uses the shared schema. Configuration with
-// consensus, routes, runners, sandbox directories or custom gates stays in Node.
-func validConfig(cfg map[string]any, version string) bool {
-	if config.ValidateSchema(cfg, version) != nil {
-		return false
+func hpShort(base string) string {
+	if len(base) > 12 {
+		return base[:12]
 	}
-	encoded, _ := json.Marshal(cfg)
-	if regexp.MustCompile(`sk-|xai-|xox[baprs]-|gh[opsu]_|github_pat_|AKIA|AIza|eyJ`).Match(encoded) {
-		return false
-	}
-	for _, key := range []string{"coder", "system1", "shadow", "keys"} {
-		if cfg[key] != nil {
-			return false
-		}
-	}
-	if value := mapping(cfg["escalation"])["stop_at"]; value != nil && value != "L3" {
-		return false
-	}
-	review := mapping(cfg["review"])
-	for _, key := range []string{"routes", "second_levels", "second_provider", "judge"} {
-		if review[key] != nil {
-			return false
-		}
-	}
-	if review["multimodel"] == true || review["mode"] == "consensus" {
-		return false
-	}
-	if mapping(cfg["proof"])["runners"] != nil {
-		return false
-	}
-	seen := map[string]bool{}
-	for _, name := range []string{"L0", "L1", "L2", "L3"} {
-		level := mapping(mapping(cfg["levels"])[name])
-		model := Text(level["model"])
-		provider := level["provider"]
-		if provider == nil {
-			provider = cfg["provider"]
-		}
-		if model == "" || !slices.Contains([]string{"anthropic", "openai", "xai"}, Text(provider)) {
-			return false
-		}
-		if level["fallback"] != nil {
-			return false
-		}
-		effort := Text(level["effort"])
-		if level["effort"] != nil {
-			if provider == "anthropic" && !slices.Contains([]string{"low", "medium", "high", "xhigh", "max"}, effort) || provider == "openai" && !slices.Contains([]string{"minimal", "low", "medium", "high"}, effort) || effort == "" {
-				return false
-			}
-		}
-		// Closed-book policy has provider-dependent errors; keep that setting in Node.
-		for _, key := range []string{"no_tools", "closed_book"} {
-			if level[key] != nil {
-				return false
-			}
-		}
-		tuple := Text(provider) + "\x00" + model + "\x00" + effort
-		if seen[tuple] {
-			return false
-		}
-		seen[tuple] = true
-	}
-	for key, value := range mapping(cfg["gates"]) {
-		if value == nil {
-			continue
-		}
-		if !slices.Contains([]string{"test", "lint", "typecheck", "build"}, key) {
-			return false
-		}
-		argv, ok := value.([]any)
-		if !ok || len(argv) == 0 || Text(argv[0]) == "" || argv[0] == "{test_files}" || argv[0] == "{changed_files}" {
-			return false
-		}
-		for _, v := range argv {
-			if _, ok := v.(string); !ok {
-				return false
-			}
-		}
-	}
-	return true
+	return base
 }
 
-var yamlNumber = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
+// hpCheck is the only domain check HighPaths keeps: the shared schema, then
+// the secret scan.
+func hpCheck(cfg map[string]any, version, side, fix string) error {
+	if err := config.ValidateSchema(cfg, version); err != nil {
+		return &ConfigRefusal{Message: side + " fails the config schema: " + config.MaskSecrets(strings.ReplaceAll(err.Error(), "\n", "; ")) + "; " + fix + " (code-forge validate shows each issue), then close again; nothing was recorded"}
+	}
+	if path, found := hpSecretPath(cfg, ""); found {
+		return &ConfigRefusal{Message: side + " holds what looks like a raw secret at " + path + "; remove it and store the key with code-forge keys set <name> (the config may hold only an env: or op:// reference); " + fix + ", then close again; nothing was recorded"}
+	}
+	return nil
+}
 
-// Decode only YAML nodes whose core-schema value is unambiguous in both YAML
-// libraries. Advanced tags, aliases and multiple documents hand over read-only.
-func plainYAML(source string) (map[string]any, bool) {
-	var doc yaml.Node
-	decoder := yaml.NewDecoder(strings.NewReader(source))
-	if decoder.Decode(&doc) != nil || len(doc.Content) != 1 {
-		return nil, false
-	}
-	var extra yaml.Node
-	if decoder.Decode(&extra) != io.EOF {
-		return nil, false
-	}
-	var decode func(*yaml.Node) (any, bool)
-	decode = func(n *yaml.Node) (any, bool) {
-		if n.Anchor != "" || n.Style&yaml.TaggedStyle != 0 {
-			return nil, false
-		}
-		switch n.Kind {
-		case yaml.MappingNode:
-			out := map[string]any{}
-			for i := 0; i < len(n.Content); i += 2 {
-				k := n.Content[i]
-				if k.Kind != yaml.ScalarNode || k.Tag != "!!str" || k.Value == "<<" {
-					return nil, false
-				}
-				if _, had := out[k.Value]; had {
-					return nil, false
-				}
-				value, ok := decode(n.Content[i+1])
-				if !ok {
-					return nil, false
-				}
-				out[k.Value] = value
-			}
-			return out, true
-		case yaml.SequenceNode:
-			out := []any{}
-			for _, child := range n.Content {
-				value, ok := decode(child)
-				if !ok {
-					return nil, false
-				}
-				out = append(out, value)
-			}
-			return out, true
-		case yaml.ScalarNode:
-			switch n.Tag {
-			case "!!str":
-				return n.Value, true
-			case "!!null":
-				return nil, true
-			case "!!bool":
-				return strings.EqualFold(n.Value, "true"), true
-			case "!!int", "!!float":
-				if !yamlNumber.MatchString(n.Value) {
-					return nil, false
-				}
-				number, err := strconv.ParseFloat(n.Value, 64)
-				return number, err == nil
+// hpSecretPath walks keys and values in a fixed (sorted) order and returns the
+// dotted path of the first one config.LooksLikeSecret flags. An env: or
+// op:// reference is never a secret.
+func hpSecretPath(node any, path string) (string, bool) {
+	switch v := node.(type) {
+	case string:
+		return path, config.LooksLikeSecret(v)
+	case []any:
+		for i, item := range v {
+			if found, ok := hpSecretPath(item, path+"["+strconv.Itoa(i)+"]"); ok {
+				return found, true
 			}
 		}
-		return nil, false
+	case map[string]any:
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			child := key
+			if path != "" {
+				child = path + "." + key
+			}
+			if config.LooksLikeSecret(key) {
+				// The key itself is the secret: name its parent only.
+				if path == "" {
+					return "a top-level key", true
+				}
+				return "a key under " + path, true
+			}
+			if found, ok := hpSecretPath(v[key], child); ok {
+				return found, true
+			}
+		}
 	}
-	value, ok := decode(doc.Content[0])
-	cfg, mapping := value.(map[string]any)
-	if !ok || !mapping {
-		return nil, false
-	}
-	if cfg["version"] == nil {
-		cfg["version"] = float64(1)
-	}
-	if cfg["version"] != float64(1) {
-		return nil, false
-	}
-	return cfg, true
+	return "", false
 }

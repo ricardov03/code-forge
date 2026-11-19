@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/yamledit"
+	"gopkg.in/yaml.v3"
 )
 
 // B536: approveChange and the restore of a due approval on an active run
@@ -66,7 +68,7 @@ func apdWithoutKey(obj ledger.Object, segs []string) ledger.Object {
 // run lock.
 func apdReloadDecide(home, runID string, record ledger.Object, workspace, text string, allow []string, now time.Time) (reloadInput, bool) {
 	in := reloadInput{home: home, runID: runID, now: now, allow: allow}
-	if rrWorkspaceHoldsRuns(home, workspace) || strings.Contains(text, "!!") {
+	if rrWorkspaceHoldsRuns(home, workspace) || apdHasTag(text) {
 		return in, false
 	}
 	file := filepath.Join(workspace, config.Filename)
@@ -83,14 +85,12 @@ func apdReloadDecide(home, runID string, record ledger.Object, workspace, text s
 	if len(config.SchemaIssues(cfgMap, "")) > 0 || configHoldsSecretShape(cfgMap) {
 		return in, false
 	}
-	if sandbox, ok := objAt(cfgMap, "coder", "sandbox"); ok {
-		if dirs, ok := sandbox["add_dirs"].([]any); ok && len(dirs) > 0 {
-			return in, false
-		}
+	if proofSandboxIssues(cfgMap) > 0 {
+		return in, false // B781: add_dirs entries are checked in Go (validate rule 19)
 	}
 	v := configValidator{cfg: cfgMap, order: order, seen: config.LoadSeenInCache(home), hasCli: hasCliOnPath}
 	if errs, _ := v.run(); len(errs) > 0 {
-		return in, false // Node's invalid outcome names each error's key path, which Go's issues do not carry
+		return in, false // approve words these first (apdConfigRefusal)
 	}
 	in.cfg, _ = order.Object(cfgMap).(ledger.Object)
 	in.effectiveSlug = planSlugFor(cfgMap, workspace)
@@ -175,20 +175,106 @@ func apdApproveDecide(home, runID string, record ledger.Object, key string, valu
 	} else {
 		step.prune = apdMissing(js, segs)
 	}
-	edited, err := yamledit.Set(text, segs, value)
+	edited, err := yamledit.SetOrSplice(text, segs, value)
 	switch {
 	case errors.Is(err, yamledit.ErrNotMapping):
 		return nil, autopilotUsageFail(key + " cannot be set: a parent of it is not a mapping in .code-forge.yml"), 0
+	case yamledit.IsUnsupported(err):
+		// B781: neither the model nor the splice edit can write this text
+		// safely; no runtime is left to hand it to.
+		return nil, apdShapeRefusal(key, err), 0
 	case err != nil:
-		return nil, nil, write // a YAML shape yamledit does not write like the yaml package
+		return nil, nil, write
 	}
 	step.edited = edited
+	if refusal := apdConfigRefusal(home, workspace, edited); refusal != nil {
+		return nil, refusal, 0
+	}
 	in, ok := apdReloadDecide(home, runID, record, workspace, edited, segs, now)
 	if !ok {
 		return nil, nil, hAutopilotApproveReloadShape
 	}
 	step.in = in
 	return step, nil, 0
+}
+
+// apdShapeRefusal is approve's answer for a .code-forge.yml it cannot edit
+// without changing other lines: what to change by hand instead.
+func apdShapeRefusal(key string, err error) error {
+	reason := err.Error()
+	var u *yamledit.Unsupported
+	if errors.As(err, &u) {
+		reason = u.Reason
+	}
+	return &state.Error{Code: "yaml-shape", Message: key + " cannot be changed safely in .code-forge.yml (it holds " + reason + "); set " + key + " by hand and run code-forge run reload, or rewrite that part of the file in plain block style and approve again; nothing was changed"}
+}
+
+// apdConfigRefusal is approve's answer when .code-forge.yml would not be a
+// valid config after the change (B781; 0.25.0 handed these over with
+// autopilot-approve-reload-shape): a YAML tag, a schema issue, a raw
+// secret, a refused sandbox dir or a validate error. Nothing is written.
+func apdConfigRefusal(home, workspace, text string) error {
+	refuse := func(why string) error {
+		return &state.Error{Code: "config-invalid", Message: "with that change .code-forge.yml " + why + "; nothing was changed; run code-forge validate"}
+	}
+	if apdHasTag(text) {
+		return refuse("holds a YAML tag (!!...), which code-forge does not read")
+	}
+	cfgMap, order, err := config.ParseTextOrdered(text, filepath.Join(workspace, config.Filename))
+	if err != nil {
+		return refuse("does not load: " + config.MaskSecrets(err.Error()))
+	}
+	if issues := config.SchemaIssues(cfgMap, ""); len(issues) > 0 {
+		lines := make([]string, 0, len(issues))
+		for _, issue := range issues {
+			lines = append(lines, issue.Text)
+		}
+		return refuse("fails the config schema (" + config.MaskSecrets(strings.Join(lines, "; ")) + ")")
+	}
+	if configHoldsSecretShape(cfgMap) {
+		return refuse("holds what looks like a raw secret; store the key with code-forge keys set <name> (the config may hold only an env: or op:// reference)")
+	}
+	if n := proofSandboxIssues(cfgMap); n > 0 {
+		return refuse("lists a coder.sandbox.add_dirs entry code-forge refuses")
+	}
+	v := configValidator{cfg: cfgMap, order: order, seen: config.LoadSeenInCache(home), hasCli: hasCliOnPath}
+	if errs, _ := v.run(); len(errs) > 0 {
+		var lines strings.Builder
+		for _, issue := range errs {
+			lines.WriteString("\n  [" + issue.rule + "] " + issue.message)
+		}
+		noun := "errors"
+		if len(errs) == 1 {
+			noun = "error"
+		}
+		return &state.Error{Code: "config-invalid", Message: "with that change .code-forge.yml is invalid (" + strconv.Itoa(len(errs)) + " " + noun + "); nothing was changed; run code-forge validate" + config.MaskSecrets(lines.String())}
+	}
+	return nil
+}
+
+// apdHasTag reports an explicit YAML tag (!!str, !!binary, ...) on any node;
+// a "!!" inside a comment or a quoted string is not one.
+func apdHasTag(text string) bool {
+	if !strings.Contains(text, "!") {
+		return false
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(text), &doc); err != nil {
+		return true // the loader words the error; nothing is guessed here
+	}
+	var walk func(n *yaml.Node) bool
+	walk = func(n *yaml.Node) bool {
+		if n.Style&yaml.TaggedStyle != 0 {
+			return true
+		}
+		for _, c := range n.Content {
+			if walk(c) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(&doc)
 }
 
 // apdOrderedAt is the value at segs of a config read as ledger.Object.
