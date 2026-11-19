@@ -21,6 +21,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - CHANGELOG.md: the 0.25.0 section had 61 entries before its first `###` heading and four `### Changed` headings, and 0.24.0 had two `### Fixed` headings, so the site's changelog page showed a nameless group and repeated groups; each entry now sits under one `### Added`, `Changed`, `Fixed` or `Removed` heading (entry text unchanged). `npm run release` now refuses a new section with an entry before its first `###` heading or a `###` kind that appears twice, naming the line (B785)
 - `code-forge run status --run <id>` panicked (a `go-panic` refusal, exit 1) for every run whose `.code-forge.yml` has no `budget:` block; it now prints the status and exits 0, with `"budget_usd": null` when no `budget.usd` is set (B786)
 - `run start` with a 1Password Jev key (`keys.jev: op://…`) and no unexpired cached key no longer says "the worker did not start": the worker reads the key with `op read` and caches it like `doctor`; when `op` fails it serves without Jev and prints one warning naming the fix (`op signin`, then `code-forge keys test jev`) (B788)
+- `block land` works with `native.daemon: false`: it runs the review join in its own process (the same join as `review-file --wait-block`), and a retry of a block that `block close` already closed needs no join at all. Before, every land with the daemon off stopped with `code-forge: block land is not supported in this case yet (land-config-daemon)`, even right after a passing `block close` in a worktree run (B789)
 
 ## [0.25.0] — 2026-11-18
 
