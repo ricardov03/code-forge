@@ -26,7 +26,7 @@ What it does:
 
 ## §1 The author job
 
-`forge author --job plan --brief <brief> --facts <sheet> --out <plan>` runs a fresh L3 closed-book session (empty cwd, the packet on stdin) and returns `{draft, questions[], cost}`. It refuses without `--facts` (exit 2, `facts sheet required: run forge facts first`) and refuses a sheet older than the brief. The draft follows `templates/plan.md`; its §0 **is** the facts sheet, verbatim, and it must contain the section "Acceptance clauses the facts sheet cannot back" — `none` when empty, never absent. The author's packet carries the exact required headings from the same list `plan check` reads (`src/session/plan-sections.mjs`).
+`forge author --job plan --brief <brief> --facts <sheet> --out <plan>` runs a fresh L3 closed-book session (empty cwd, the packet on stdin) and returns `{draft, questions[], cost}`. It refuses without `--facts` (exit 2, `facts sheet required: run code-forge facts --brief <brief> first, then pass the sheet with --facts <file>`) and refuses a sheet older than the brief. The draft follows `templates/plan.md`; its §0 **is** the facts sheet, verbatim, and it must contain the section "Acceptance clauses the facts sheet cannot back" — `none` when empty, never absent. The author's packet carries the exact required headings from the same list `plan check` reads (`src/session/plan-sections.mjs`).
 
 ## §2 Decomposition — what every block carries
 

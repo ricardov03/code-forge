@@ -181,7 +181,7 @@ func TestB633RunEndNoHumanChecksUnchanged(t *testing.T) {
 	f.setStatus("B1", "open")
 	f.clearRow("B2", "C1", "sound plays")
 	f.setStatus("B2", "closed")
-	b633Refused(t, f, []string{"end", "--run", "r-test"}, "", "run end: run r-test still has open blocks: B1\n")
+	b633Refused(t, f, []string{"end", "--run", "r-test"}, "", "run end: run r-test still has open blocks: B1; stop or close each first: code-forge block stop B1 --run r-test\n")
 }
 
 // The binnacle names the open checks and does not call the closed block ready.

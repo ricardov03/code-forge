@@ -242,8 +242,11 @@ func b550AuthorPlan(cwd string, flags map[string]any) (*b550Plan, handoverReason
 		return refuse("--job must be one of plan, harden")
 	}
 	factsPath, hasFacts := abs("facts")
+	// B881 (P10): name the real command, with the brief the caller gave.
+	typed, _ := flags["brief"].(string)
+	factsFirst := "run code-forge facts --brief " + typed + " first, then pass the sheet with --facts <file>"
 	if !hasFacts && job == "plan" {
-		return refuse("facts sheet required: run forge facts first")
+		return refuse("facts sheet required: " + factsFirst)
 	}
 	if hasFacts {
 		text, ok, bad := b550Read(factsPath)
@@ -255,7 +258,7 @@ func b550AuthorPlan(cwd string, flags map[string]any) (*b550Plan, handoverReason
 		}
 		sheet, ok := parseSheet(text)
 		if !ok {
-			return refuse("facts sheet is not a facts sheet: run forge facts first")
+			return refuse("facts sheet is not a facts sheet: " + factsFirst)
 		}
 		data, err := os.ReadFile(brief)
 		if err != nil {

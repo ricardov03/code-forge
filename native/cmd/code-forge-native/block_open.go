@@ -225,6 +225,14 @@ func runBlockOpen(args []string) int {
 	if err := blockopen.WhitespacePaths(root, tests, "tests"); err != nil {
 		return failure(err)
 	}
+	// B881 (P17): a block that is already open says so before the level
+	// lookup (whose "no autopilot level recorded" hid the real reason).
+	switch blockObject(blockObject(record.Get("blocks")).Get(id)).Get("status") {
+	case "open":
+		return failure(&state.Error{Code: "already-open", Message: "block " + id + " is already open"})
+	case "awaiting_human_check":
+		return failure(&state.Error{Code: "already-open", Message: "block " + id + " is awaiting a human check"})
+	}
 	cfg, _ := blockSnapshot(record)
 	level, source, decision, err := blockopen.PickLevel(home, run, id, flags, record, cfg)
 	if err != nil {

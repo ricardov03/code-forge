@@ -26,22 +26,36 @@ func init() { routes["heal"] = runHeal }
 
 const healUsage = "usage: code-forge heal list [--run R] [--json] | show <id> [--run R] [--json] | run --run R [--once|--watch] [--max-tries N] [--json]"
 
+// healSubUsage is one usage per subcommand (B881 P14): `heal <sub> --help`
+// and a refused sub print only the flags that sub takes.
+var healSubUsage = map[string]string{
+	"list": "usage: code-forge heal list [--run R] [--json]",
+	"show": "usage: code-forge heal show <id> [--run R] [--json]",
+	"run":  "usage: code-forge heal run --run R [--once|--watch] [--max-tries N] [--json]",
+}
+
 // healPoll is how often `heal run --watch` looks for due items.
 const healPoll = 15 * time.Second
 
 func healHome() string { return os.Getenv("HOME") }
 
 func runHeal(args []string) int {
+	text := healUsage
+	if len(args) > 0 {
+		if sub, ok := healSubUsage[args[0]]; ok {
+			text = sub
+		}
+	}
 	usage := func(message string) int {
 		if message != "" {
 			fmt.Fprintln(safeStderr, "heal: "+message)
 		}
-		fmt.Fprintln(safeStderr, healUsage)
+		fmt.Fprintln(safeStderr, text)
 		return 2
 	}
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
-			fmt.Fprintln(safeStdout, healUsage)
+			fmt.Fprintln(safeStdout, text)
 			return 0
 		}
 	}

@@ -125,7 +125,7 @@ func TestBlockRebaseAcceptLandedRunsInGo(t *testing.T) {
 	f.save("a.go")
 
 	code, stdout, stderr := f.call("A", "--run", "R_bad", "--accept-landed")
-	if code != 2 || stdout != "" || stderr != "code-forge-native: block-rebase-landed requires --home <dir> and a valid --run <id>\n" {
+	if code != 2 || stdout != "" || stderr != "block rebase: --accept-landed needs a valid --run <id>\n" {
 		t.Fatalf("bad run: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 	code, stdout, stderr = f.call("A", "--run", "r-rebase-unit", "--accept-landed")

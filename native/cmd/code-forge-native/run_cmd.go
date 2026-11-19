@@ -47,6 +47,12 @@ type runFail struct {
 
 func (e *runFail) Error() string { return e.msg }
 
+// runOpenBlocks is run end's open-blocks refusal (exit 1) with the command
+// that clears the first one; run end --json prints it as one ok:false line.
+type runOpenBlocks struct{ msg, next string }
+
+func (e *runOpenBlocks) Error() string { return e.msg }
+
 // errRunHandover ends a read-only step that Node must decide (before any write).
 var errRunHandover = errors.New("run: hand over to node")
 
@@ -258,6 +264,11 @@ func runRun(args []string) int {
 		code = runReport(o, sub, parseErr)
 	case plan != nil:
 		code = plan(o)
+	case sub == "status" || sub == "reload" || sub == "end":
+		// B881 (P16): a sub missing its required --run names the sub and
+		// prints its own usage, not the whole run usage.
+		o.err("run " + sub + " needs --run <id>\n" + runSubUsage[sub])
+		code = 2
 	default:
 		o.err(runUsage)
 		code = 2
@@ -617,7 +628,9 @@ func runEndPlan(home, runID string, asJSON bool) (func(o *runOut) int, handoverR
 				return &runFail{fmt.Sprintf("run %s has blocks awaiting human check: %s; human-pass or stop them first", runID, strings.Join(awaiting, ", ")), false}
 			}
 			if len(open) > 0 {
-				return &runFail{fmt.Sprintf("run %s still has open blocks: %s", runID, strings.Join(open, ", ")), false}
+				// B881 (P13): name the next step; --json prints it as next.
+				next := "code-forge block stop " + open[0] + " --run " + runID
+				return &runOpenBlocks{fmt.Sprintf("run %s still has open blocks: %s; stop or close each first: %s", runID, strings.Join(open, ", "), next), next}
 			}
 			workers := current.Get("workers")
 			hasWorkers := workers != nil
@@ -690,6 +703,16 @@ func runEndPlan(home, runID string, asJSON bool) (func(o *runOut) int, handoverR
 			} else {
 				o.err("run end: " + rehRefusalText(runID, held.record, held.held))
 			}
+			return 1
+		}
+		var openBlocks *runOpenBlocks
+		if errors.As(err, &openBlocks) {
+			text := "run end: " + openBlocks.msg
+			if asJSON {
+				data, _ := ledger.Stringify(ledger.Object{{Key: "ok", Value: false}, {Key: "error", Value: text}, {Key: "next", Value: openBlocks.next}}, false)
+				o.out(string(data) + "\n")
+			}
+			o.err(text + "\n")
 			return 1
 		}
 		if err != nil {
