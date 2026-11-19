@@ -5,9 +5,10 @@ package main
 // only when every part it reaches is ported; the rest goes to Node as a whole
 // worker, before anything is written:
 //   - the System 1 (Jev) key comes from a source Go does not read like
-//     Node (B533: the OS keychain, a live 1Password read, a ref Node throws
-//     on, a store entry Go cannot judge); an env or file-store key is
-//     resolved here and the review round asks Jev in Go;
+//     Node (B533: the OS keychain, a ref Node throws on, a store entry Go
+//     cannot judge); an env, file-store or 1Password key (B788: `op read`,
+//     else the worker starts without Jev and warns) is resolved here and
+//     the review round asks Jev in Go;
 //   - the run has no config snapshot (loadProjectConfig is not ported here);
 //   - a read Go cannot judge like Node (record shape, key, registry).
 // While serving, the first ticket RunTicket leaves to Node (or an autopilot
@@ -76,7 +77,7 @@ type workerServeArgs struct {
 // The last result is the Jev key resolver (B533): it runs resolveJevKey's
 // side effects (an expired entry deleted, an entry cut to the cache hours)
 // and gives the key ("" none) and every value Node registers for redaction.
-func workerServePlan(home string, a workerServeArgs) (*worker.TicketRunner, map[string]any, func(o *runOut) int, handoverReason, func() (string, []string)) {
+func workerServePlan(home string, a workerServeArgs) (*worker.TicketRunner, map[string]any, func(o *runOut) int, handoverReason, func() (string, []string, string)) {
 	fail := func(message string) func(o *runOut) int {
 		return func(o *runOut) int { o.err("worker: " + message + "\n"); return 1 }
 	}
@@ -131,23 +132,79 @@ func workerServePlan(home string, a workerServeArgs) (*worker.TicketRunner, map[
 // store run in Go (doctor's jevKeyChain); where Go cannot open the keychain
 // (not macOS, `security` failing) a key Go proves absent is none, any other
 // goes to Node.
-func workerJevResolver(cfg map[string]any, home string) (func() (string, []string), handoverReason) {
-	chain, plan, reason := jevKeyChain(cfg, home, float64(workerNow().UnixMilli()), false)
+//
+// B788: a 1Password `op://` reference with no unexpired cached key is read
+// with `op read` and cached as doctor does (each attempt capped by
+// workerOpBudget, so the worker announces inside run start's wait). When op
+// fails, or the key store index cannot be rewritten, the worker starts
+// without Jev and the third result is one warning line naming the fix.
+func workerJevResolver(cfg map[string]any, home string) (func() (string, []string, string), handoverReason) {
+	chain, plan, reason := jevKeyChain(cfg, home, float64(workerNow().UnixMilli()), true)
+	opRef := workerJevOpRef(cfg)
 	switch {
 	case plan.badRef:
 		return nil, hWorkerJevRef
 	case chain != nil:
-		return func() (string, []string) {
+		return func() (string, []string, string) {
+			restore := workerCapOpTimeout()
 			r := chain()
-			return r.key, r.secrets
+			restore()
+			warning := ""
+			if !r.hasKey && opRef != "" {
+				why := strings.TrimSuffix(strings.TrimPrefix(r.row.detail, "jev key not resolved"), "; System 1 falls back to rules")
+				warning = "worker: warning: jev key not read from 1Password" + why +
+					"; reviews run without Jev (System 1 falls back to rules). Fix: sign in to 1Password (op signin, or unlock the app) and run code-forge keys test jev; the next worker start uses the cached key\n"
+			}
+			return r.key, r.secrets, warning
+		}, 0
+	case reason == hDoctorKeyRefresh:
+		return func() (string, []string, string) {
+			return "", nil, "worker: warning: jev key not resolved (the key store index " +
+				filepath.Join(home, ".code-forge", "store", "index.json") +
+				" cannot be updated); reviews run without Jev (System 1 falls back to rules). Fix: run code-forge keys test jev\n"
 		}, 0
 	case reason == hDoctorKeyStore && os.Getenv("CODE_FORGE_KEY_BACKEND") != "file":
 		if worker.JevKeyAbsent(cfg, workerJevProbe) {
-			return func() (string, []string) { return "", nil }, 0
+			return func() (string, []string, string) { return "", nil, "" }, 0
 		}
 		return nil, hWorkerJevKeychain
 	}
 	return nil, hWorkerJevStore
+}
+
+// workerOpBudget caps each `op read` attempt the worker makes (B788): run
+// start waits runLaunchTimeout (15 s) for the announce, and op retries once.
+var workerOpBudget = 6 * time.Second
+
+// workerCapOpTimeout caps opAttemptTimeout at workerOpBudget until the
+// returned restore runs.
+func workerCapOpTimeout() func() {
+	prev := opAttemptTimeout
+	opAttemptTimeout = func(attempt int) time.Duration {
+		if d := prev(attempt); d < workerOpBudget {
+			return d
+		}
+		return workerOpBudget
+	}
+	return func() { opAttemptTimeout = prev }
+}
+
+// workerJevOpRef is the config's Jev reference (system1.key, else keys.jev)
+// when it is an op:// reference, else "".
+func workerJevOpRef(cfg map[string]any) string {
+	var value any
+	if sys, ok := cfg["system1"].(map[string]any); ok {
+		value = sys["key"]
+	}
+	if value == nil {
+		if keys, ok := cfg["keys"].(map[string]any); ok {
+			value = keys["jev"]
+		}
+	}
+	if ref, ok := value.(string); ok && strings.HasPrefix(ref, "op://") {
+		return ref
+	}
+	return ""
 }
 
 // workerRunRoot is tmp.mjs runRoot: the run's root, made if missing, with
@@ -285,7 +342,10 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 	runner.RunRootDir = runRootDir
 	runner.Secrets = []string{hex.EncodeToString(key)}
 	// loop.mjs createWorker: resolveJevKey before the boot lock (B533)
-	jevValue, jevSecrets := jevKey()
+	jevValue, jevSecrets, jevWarning := jevKey()
+	if jevWarning != "" {
+		o.err(jevWarning)
+	}
 	runner.JevKey = jevValue
 	runner.JevOpts = workerJevOpts
 	runner.Secrets = append(runner.Secrets, jevSecrets...)
