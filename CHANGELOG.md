@@ -6,7 +6,11 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
 - The site's `/proof` page shows real ledger data from each release: `cf-release site-data` (and so `npm run release:site`) adds `overnight`, `single`, `stopped`, `finding` and `gate` samples to `proof` in `site-data.json`, each picked from code-forge's own ledger by a fixed rule in docs/releasing.md and `null` when the ledger has none; only short ids, counts, times and spend are exported (B784)
+
+### Changed
 
 - `npm run release:site` is fast: it builds the site once (`npm run build:site`), checks that the deploy folder holds `index.html` and that a built `.html`, `.md` or `.txt` file names `<package>@<version>`, then commits and deploys; it no longer reads or runs the site's `gates.test` and `gates.custom` (the site's `npm test` and design-fidelity checks run during development as site gates) and prints one line saying so; a failed build reads `Site build failed: npm run build:site (exit N)` (B780)
 
