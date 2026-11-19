@@ -99,6 +99,9 @@ plan -> code -> review -> proof -> land
 The skill checks and hardens the plan before your approval. Coders work in blocks with explicit
 owned files and acceptance clauses; independent blocks can run in parallel. A worker runs fresh
 reviewer sessions outside the coder's sandbox. Fix rounds are bounded; unresolved work stops.
+Under autopilot, a problem found during the work (a red gate, a coder's leftover, a flaky test)
+becomes a queued block of the same run with `code-forge autopilot found`; findings about scope,
+security, deletes or publishing wait for you ([autopilot](docs/autopilot.md)).
 Tests and red→green proof establish that a change meets its acceptance clauses before closing.
 You control the final merge and publish permissions; coders cannot push or open draft PRs by
 default. See [the workflow](docs/how-it-works.md) and [concepts](docs/concepts.md).

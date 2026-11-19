@@ -49,6 +49,14 @@ TESTS npm test exit=0
 
 The `TESTS` line stays ABOVE the sentinel; only the test summary comes after it.
 
+A problem you found outside this block (a flaky test, a wrong doc, a bug in a file you do not own) is not fixed here: write it on its own line above the `TESTS` line, with the line that shows it:
+
+```
+FOUND flaky TestLandRetry fails one run in five :: --- FAIL: TestLandRetry land_test.go:88: lock busy
+```
+
+`FOUND [<source>] [<label>,…] <title> :: <evidence>`: the source is one of `gate`, `land`, `coder`, `flaky`, `handover`, `review` (`coder` when left out). The orchestrator turns each line into a block of this run.
+
 End with `===BLOCK <id> COMPLETE===`, the test summary and `git diff --stat`.
 
 The final report needs no `reviewed <path> ticket <id>` lines: `block close` prints one for every file the review gate accepts (approved, waived or answered), with the queue's ticket. The close prints the reviewed lines, then the `reviewed_by_waiver` lines, then the `closed` line. With `--report`, a hand line that names another ticket prints `WARN report ticket mismatch <path>` on stderr when the block closes, and the close goes on. A file with a `review.waived` finding still gets a line; only a close whose every review the human waived, or a `review.external` close, prints none. The printed line has no `via`: `--json` and the block's done file carry the lines as `reviewed: [{file, ticket, via}]`, with `via: approved` for a file with a signed approval, `via: waiver` when at least one of its open findings was waived (also when the others were answered), and `via: answered` when every one was answered. Every changed file still needs a review through the selected file loop: a file the review did not accept keeps the block open. "All findings addressed" is not a report.

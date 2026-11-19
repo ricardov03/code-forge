@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `code-forge autopilot found --run <id>` turns a problem found during a run (source `gate`, `land`, `coder`, `flaky`, `handover` or `review`, with its evidence) into a block of the same run: `--source/--title/--evidence` records one, `--report <file>` reads every `FOUND [<source>] [<label>,…] <title> :: <evidence>` line of a coder's report, `--list` prints found → block → state. A new finding gets the next free block id, a brief and an acceptance file ("a red test from the evidence") under `~/.code-forge/runs/<run>/found/`, the `block open` command, and joins the run's planned blocks, so an until-done grant runs until it closes; a repeat (same fingerprint: title and evidence with numbers and hashes folded) is counted, not queued again; findings labelled or worded as scope, security or secrets, deletes or publishing, and those past the new `autopilot.max_found_blocks` (default 10), wait for the owner and never run. Each writes a signed `autopilot.found` row; the binnacle adds a Found work table and lists the waiting ones under Actions only you can take (B800)
+
 ## [0.25.1] — 2026-11-19
 
 ### Added
