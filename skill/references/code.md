@@ -4,6 +4,8 @@ Small changes may use `block open <id> --kind light`. Close allows at most `ligh
 
 For website checks, configure `gates.custom` with up to 20 unique named `{name, argv, env?, evidence?}` gates, such as build, lighthouse and links. They run independently after the four fixed gates, including on light blocks and with `--changed`; custom argv refuses `{test_files}` and `{changed_files}`. The `gates-not-argv-array` error rule validates entries. Evidence paths/globs stay under cwd; after pass or fail, up to 200 sorted regular files are recorded as path, bytes and SHA-256 without copying content. Missing patterns are listed without failing the gate. `gate.done` carries custom summaries and, with `--run/--block`, the evidence map; red custom gates carry their name and `custom: true`.
 
+A code-forge command's flags, exit codes and `--json` keys are in `docs/reference/commands.json` in the installed package (one entry per command: `usage`, `flags`, `examples` with their recorded output, `exit_codes`, `json`, `related`). Read it before calling a command you have not called in this run; never guess a flag or a key, and never run `--help` to discover one.
+
 ## §1 The coder's first deliverable is a facts diff
 
 Before any forecast or code, the coder reads the code it will call and reports **every contradiction between the plan and the code** in one message — a signature, a flag, a key, a version. One stop for facts, never one per discovery. Contract corrections (a key, a rule, a signature) are the architect's alone and are recorded, not asked; a ruling reaches the human only when it changes user-visible behaviour, money semantics or an approved decision. A coder that stops three times for three true facts did nothing wrong; the protocol did.

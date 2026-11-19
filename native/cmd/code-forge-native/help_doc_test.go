@@ -75,11 +75,15 @@ func TestB648CommittedCommandsDocIsCurrent(t *testing.T) {
 			t.Errorf("page lacks %q", want)
 		}
 	}
-	// Sub-commands that only repeat their verb's usage get no section.
-	for _, absent := range []string{"### heal list\n", "### queue run\n", "### docs sync\n", "\x1b["} {
-		if strings.Contains(doc, absent) {
-			t.Errorf("page has %q", absent)
+	// B801: every sub-command gets its own section with its reference, also
+	// one that repeats its verb's usage.
+	for _, want := range []string{"### heal list\n", "### queue run\n", "### docs sync\n"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("page lacks %q", want)
 		}
+	}
+	if strings.Contains(doc, "\x1b[") {
+		t.Error("page has a color code")
 	}
 }
 
@@ -89,7 +93,7 @@ func TestB648GoOnlyHelpChangeReachesCommandsDoc(t *testing.T) {
 	b613Env(t)
 	root := b648Root(t)
 	code, stdout, stderr := b613Call(t, "help", "--commands-doc", "--root", root)
-	if code != 0 || stdout != "wrote docs/reference/commands.md\n" || stderr != "" {
+	if code != 0 || stdout != "wrote docs/reference/commands.md\nwrote docs/reference/commands.json\n" || stderr != "" {
 		t.Fatalf("write: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 	page := filepath.Join(root, "docs", "reference", "commands.md")

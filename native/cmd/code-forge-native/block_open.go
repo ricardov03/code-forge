@@ -74,6 +74,9 @@ func runBlockOpen(args []string) int {
 		if se != nil && (se.Code == "usage" || se.Code == "api-fit") {
 			return logged(2, "block open: "+err.Error())
 		}
+		if se != nil && se.Code == "no-run" {
+			return logged(1, "block open: "+err.Error()+"\n"+strings.TrimSuffix(refusalNext("code-forge status"), "\n")) // B875
+		}
 		return logged(1, "block open: "+err.Error())
 	}
 	usage := func(message string) int { return failure(&state.Error{Code: "usage", Message: message}) }

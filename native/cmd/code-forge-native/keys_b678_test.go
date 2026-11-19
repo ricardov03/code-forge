@@ -45,6 +45,7 @@ func b678Prompt(t *testing.T, project string, keys []string, args ...string) (in
 	if err != nil {
 		t.Fatal(err)
 	}
+	b880StdinTTY(t, true)
 	saved := keysPromptOpen
 	keysPromptOpen = func() (keysTTY, bool) {
 		return keysTTY{initWizEnv{in: &b528Keys{keys: keys}, out: file, cols: 80, rows: 24}, true}, true
@@ -152,6 +153,7 @@ func TestB678KeysSetPromptWriteFails(t *testing.T) {
 // Cases Go does not draw like Node still go to Node, before anything runs.
 func TestB678KeysSetPromptHandsOver(t *testing.T) {
 	_, project, _ := b678PromptHome(t)
+	b880StdinTTY(t, true)
 	saved := keysPromptOpen
 	t.Cleanup(func() { keysPromptOpen = saved })
 	keysPromptOpen = func() (keysTTY, bool) { return keysTTY{}, false }
@@ -273,7 +275,7 @@ func TestB678KeysOpMatchesNode(t *testing.T) {
 			"foo: ok source=op expires=2027-01-15T16:00:00.000Z\n", b678Approve + b678Warn,
 			"read op://v/i/f owner=set\n", b678OpRow(at8h, "op://v/i/f")},
 		{"test ref op fails", "fail", "", []string{"test", "foo", "--ref", "op://v/i/f"}, 1,
-			"", b678Approve + b678Warn + "foo: 1Password CLI failed (exit 3); run `op read op://v/i/f` yourself to see why\nfoo: not found\n",
+			"", b678Approve + b678Warn + "foo: 1Password CLI failed (exit 3); run `op read op://v/i/f` yourself to see why\nfoo: not found\nnext: code-forge keys set foo\n",
 			"read op://v/i/f owner=set\n", "<none>"},
 		{"test item id", "ok", b678Item, []string{"test", "foo", "--ref", b678ItemID}, 0,
 			b678Resolve + "foo: ok source=op expires=2027-01-15T16:00:00.000Z\n", b678Approve + b678Warn,

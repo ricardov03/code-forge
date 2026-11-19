@@ -233,7 +233,7 @@ func TestRunVerbStatus(t *testing.T) {
 	}
 
 	for _, tc := range []struct{ id, errs string }{
-		{"r-none", "run status: no run record for r-none\n"},
+		{"r-none", "run status: no run record for r-none\nnext: code-forge status\n"},
 		{"Bad!", "run status: run id must match /^[a-z0-9][a-z0-9-]{0,63}$/\n"},
 	} {
 		code, out, errs = runVerbCall(t, "status", "--run", tc.id)
@@ -339,7 +339,7 @@ func TestRunVerbEnd(t *testing.T) {
 		}
 		f := newRunFixture(t)
 		for _, tc := range []struct{ id, errs string }{
-			{"r-none", "run end: no run record for r-none\n"},
+			{"r-none", "run end: no run record for r-none\nnext: code-forge status\n"},
 			{"Bad!", "run end: run id must match /^[a-z0-9][a-z0-9-]{0,63}$/\n"},
 		} {
 			code, out, errs := runVerbCall(t, "end", "--run", tc.id)

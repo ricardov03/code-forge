@@ -198,7 +198,7 @@ func ledgerCalibration(args []string, slug string, failed func(string) ledgerRes
 	if !ok {
 		return ledgerResult{code: 2, err: "ledger calibration: --question requires a value\n"}
 	}
-	dir, message, ok := ledgerMissing(slug)
+	dir, message, ok := ledgerMissing(slug, "calibration")
 	if !ok {
 		return ledgerHandedOver(hLedgerRowsFormat)
 	}

@@ -70,6 +70,7 @@ var hex12 = regexp.MustCompile(`[0-9a-f]{12}`)
 
 type engineRun struct {
 	result   ledger.Object
+	raw      ledger.Object // result before b514WithoutB876
 	err      error
 	rows     []string
 	spawns   []ledger.Object
@@ -125,6 +126,8 @@ func runEngine(t *testing.T, in Input, script []any, writer bool, more ...func(*
 		f(&deps)
 	}
 	run.result, run.err = File(in, deps)
+	// The Node recordings predate B876: compare without its session fields.
+	run.raw, run.result = run.result, b514WithoutB876(run.result)
 	return run
 }
 

@@ -15,12 +15,14 @@ import (
 	"github.com/ricardov03/code-forge/native/procguard"
 )
 
-// b529Foreign starts `sleep 30` the way a stranger's daemon runs: its shell
+// b529Foreign starts `sleep 3600` the way a stranger's daemon runs: its shell
 // exits at once, so the sleep's parent is init and it is no descendant of
-// this test. The test (not the code under test) kills it at cleanup.
+// this test. The test (not the code under test) kills it at cleanup. B909:
+// it outlives any loaded test (a `sleep 30` ended on its own when a test ran
+// 30 s under load, which read as "stopped by the code under test").
 func b529Foreign(t *testing.T) (int, string) {
 	t.Helper()
-	out, err := exec.Command("/bin/sh", "-c", "/bin/sleep 30 >/dev/null 2>&1 </dev/null & echo $!").Output()
+	out, err := exec.Command("/bin/sh", "-c", "/bin/sleep 3600 >/dev/null 2>&1 </dev/null & echo $!").Output()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -35,6 +35,9 @@ const keysNoWrap = 1 << 30
 var (
 	// keysPromptOpen is the terminal the prompt draws on; tests stand in.
 	keysPromptOpen = func() (keysTTY, bool) { return keysOpen(os.Stdin, os.Stdout) }
+	// keysStdinTTY says stdin is a terminal the hidden prompt can read
+	// (B880); tests stand in.
+	keysStdinTTY = func() bool { return humanask.IsTTY(os.Stdin) }
 	// keysEnded is set when the input ended at the prompt: Node exits 13
 	// with no error-log row.
 	keysEnded bool
@@ -216,5 +219,16 @@ func keysPromptDecide(name string, w keysWriter, storeWarning string, r *keysRed
 		}
 		r.write(stdout, "stored "+name+" in "+w.name()+" (source=user, expires=never)\n")
 		return 0
+	}
+}
+
+// keysSetNoTTY is B880's refusal for `keys set <name>` with no terminal on
+// stdin: the usage, why, and the --op form (exit 2, nothing drawn or stored).
+func keysSetNoTTY(name string, r *keysRedactor) keysRun {
+	return func(_, stderr io.Writer) int {
+		r.write(stderr, keysSubUsage["set"])
+		r.write(stderr, "keys set: stdin is not a terminal, so the value of "+name+" cannot be asked (input hidden); run it in a terminal, or store a 1Password reference with --op\n"+
+			refusalNext("code-forge keys set "+refusalShellArg(name)+" --op <item-id|link|op://ref>"))
+		return 2
 	}
 }

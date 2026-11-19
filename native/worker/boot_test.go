@@ -222,11 +222,12 @@ func TestB485BootAnnouncesAndCleanStopRetracts(t *testing.T) {
 func TestB485BootRefusesLiveWorkers(t *testing.T) {
 	cases := []struct {
 		name, file, body, cfg, want string
+		holder                      [3]string // B875: pid, run, file name
 	}{
-		{"same run at limit 1", "workers/5151-S2.json", `{"pid":5151,"start_time":"S2","run":"r1","started_at":"2026-11-11T10:00:00.000Z","heartbeat_at":"2026-11-11T10:00:00.000Z"}`, "", "review.workers limit 1: a live or unreadable worker entry already serves this queue"},
-		{"other run", "workers/5151-S2.json", `{"pid":5151,"start_time":"S2","run":"r0","started_at":"2026-11-11T10:00:00.000Z","heartbeat_at":"2026-11-11T10:00:00.000Z"}`, "3", "review.workers limit 3: a live or unreadable worker entry already serves this queue"},
-		{"unreadable entry", "workers/x.json", `{`, "3", "review.workers limit 3: a live or unreadable worker entry already serves this queue"},
-		{"legacy other run", "queue/worker.json", `{"pid":5151,"start_time":"S2","run":"r0","heartbeat_at":"2026-11-11T10:00:00.000Z"}`, "3", "review.workers limit 3: a live or unreadable worker entry already serves this queue"},
+		{"same run at limit 1", "workers/5151-S2.json", `{"pid":5151,"start_time":"S2","run":"r1","started_at":"2026-11-11T10:00:00.000Z","heartbeat_at":"2026-11-11T10:00:00.000Z"}`, "", "review.workers limit 1: a live or unreadable worker entry already serves this queue", [3]string{"5151", "r1", ""}},
+		{"other run", "workers/5151-S2.json", `{"pid":5151,"start_time":"S2","run":"r0","started_at":"2026-11-11T10:00:00.000Z","heartbeat_at":"2026-11-11T10:00:00.000Z"}`, "3", "review.workers limit 3: a live or unreadable worker entry already serves this queue", [3]string{"5151", "r0", ""}},
+		{"unreadable entry", "workers/x.json", `{`, "3", "review.workers limit 3: a live or unreadable worker entry already serves this queue", [3]string{"", "", "x.json"}},
+		{"legacy other run", "queue/worker.json", `{"pid":5151,"start_time":"S2","run":"r0","heartbeat_at":"2026-11-11T10:00:00.000Z"}`, "3", "review.workers limit 3: a live or unreadable worker entry already serves this queue", [3]string{"5151", "r0", ""}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -241,6 +242,9 @@ func TestB485BootRefusesLiveWorkers(t *testing.T) {
 			var we *Error
 			if !errors.As(err, &we) || we.Code != "worker-running" || we.Message != c.want {
 				t.Fatalf("got %v", err)
+			}
+			if got := [3]string{we.HolderPid, we.HolderRun, filepath.Base(we.HolderFile)}; we.HolderFile == "" && got != [3]string{c.holder[0], c.holder[1], "."} || we.HolderFile != "" && got != c.holder {
+				t.Fatalf("holder %q (file %q), want %q", got, we.HolderFile, c.holder)
 			}
 			if _, err := os.Stat(filepath.Join(f.root, ".code-forge", "workers", "4242-S1.json")); !os.IsNotExist(err) {
 				t.Fatal("a refused boot announced itself")

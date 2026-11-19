@@ -314,7 +314,13 @@ func runReport(o *runOut, sub string, err error) int {
 		}
 		return 1
 	case errors.As(err, &stateErr):
-		o.err(fmt.Sprintf("run %s: %s\n", sub, stateErr.Message))
+		text := fmt.Sprintf("run %s: %s\n", sub, stateErr.Message)
+		// B875: the next step; run start (--reattach, --add-worker) is left
+		// to the run start work (B871-B874)
+		if stateErr.Code == "no-run" && sub != "start" {
+			text += refusalNext("code-forge status")
+		}
+		o.err(text)
 		return 1
 	default:
 		o.err(fmt.Sprintf("run %s: %s\n", sub, blockIOMessage(err)))

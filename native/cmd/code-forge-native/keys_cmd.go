@@ -689,6 +689,11 @@ func keysDecide(args []string, cwd string) keysRun {
 			return 0
 		}
 	case "set":
+		// B880 (B801 audit P15): the hidden prompt needs a terminal on stdin;
+		// without one, refuse before anything is drawn or stored.
+		if !p.hasFlag && !keysStdinTTY() {
+			return keysSetNoTTY(p.name, r)
+		}
 		// B678: the writer is the keychain through `security`, or the file
 		var w keysWriter
 		w.dir, w.indexFile = dir, indexFile
@@ -824,7 +829,7 @@ func keysDecide(args []string, cwd string) keysRun {
 			for _, e := range errs {
 				r.write(stderr, p.name+": "+e+"\n")
 			}
-			r.write(stderr, p.name+": not found\n")
+			r.write(stderr, p.name+": not found\n"+refusalNext("code-forge keys set "+p.name)) // B875
 			return 1
 		}
 		if value := os.Getenv(envName); value != "" {

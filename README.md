@@ -45,6 +45,9 @@ When ready, use `--jev-ref <1Password item ID|link|op://vault/item/field>` or
   [references](skill/references/). Model IDs, efforts, commands, thresholds, and paths come from
   config or the CLI.
 - A JSON Schema for `.code-forge.yml` and its generated [configuration reference](docs/reference/config.md).
+- A generated [command reference](docs/reference/commands.md): per command its purpose, when to use it,
+  flags, examples with real output, exit codes, the `--json` shape and related commands; agents read the
+  same data in [commands.json](docs/reference/commands.json).
 - An [example repository](examples/) and a [build-block map](docs/reference/blocks.json).
 
 ## 5-minute quickstart
@@ -64,7 +67,9 @@ code-forge version
 
 `resolve` prints the provider, model, effort, fallback, and CLI for a level. `doctor --quick`
 checks config, links, and key resolution; `keys list` prints sources and expiry, never values,
-and warns with less than one hour left.
+and warns with less than one hour left. `keys set <name>` asks for the value with the input
+hidden, so it needs a terminal; from a script, store a 1Password reference with
+`keys set <name> --op <item-id|link|op://ref>`.
 
 Write a brief describing the change and how you will know it works. In your agent, invoke
 `/code-forge full path/to/brief.md`: it plans, hardens, asks you to approve the plan, then codes.

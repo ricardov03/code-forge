@@ -19,6 +19,11 @@ import (
 type Error struct {
 	Code    string
 	Message string
+	// HolderPid and HolderRun name the worker that holds the queue when a
+	// boot is refused (B875), empty when no live entry names one.
+	HolderPid, HolderRun string
+	// HolderFile is the registry file of an unreadable holder entry.
+	HolderFile string
 }
 
 func (e *Error) Error() string { return e.Message }
@@ -148,23 +153,47 @@ func (w *Worker) Boot() error {
 			return err
 		}
 		refuse := float64(count) >= limit
+		holder := &Error{Code: "worker-running", Message: fmt.Sprintf("review.workers limit %s: a live or unreadable worker entry already serves this queue", jsNumber(limit))}
+		hold := func(worker ledger.Object, file string) {
+			if holder.HolderPid != "" || holder.HolderFile != "" {
+				return
+			}
+			if worker == nil {
+				holder.HolderFile = file
+				return
+			}
+			if pid, ok := worker.Get("pid").(float64); ok {
+				holder.HolderPid = jsNumber(pid)
+			}
+			holder.HolderRun, _ = worker.Get("run").(string)
+		}
 		if legacy != nil && legacy.Get("run") != w.o.RunID {
 			refuse = true
+			hold(legacy, "")
 		}
 		for _, e := range entries {
 			if e.Live && (e.Worker == nil || e.Worker.Get("run") != w.o.RunID) {
 				refuse = true
+				hold(e.Worker, e.File)
 			}
 		}
 		if refuse {
-			return &Error{"worker-running", fmt.Sprintf("review.workers limit %s: a live or unreadable worker entry already serves this queue", jsNumber(limit))}
+			for _, e := range entries {
+				if e.Live {
+					hold(e.Worker, e.File)
+				}
+			}
+			if legacy != nil {
+				hold(legacy, "")
+			}
+			return holder
 		}
 		alive, dead, err := w.pinAtBoot()
 		if err != nil {
 			return err
 		}
 		if alive != nil {
-			return &Error{"worker-running", fmt.Sprintf("another worker (pid %s) is pinned to run %s and still alive", jsNumber(*alive), w.o.RunID)}
+			return &Error{Code: "worker-running", Message: fmt.Sprintf("another worker (pid %s) is pinned to run %s and still alive", jsNumber(*alive), w.o.RunID), HolderPid: jsNumber(*alive), HolderRun: w.o.RunID}
 		}
 		// Startup must finish before worker.json signals readiness.
 		err = func() error {

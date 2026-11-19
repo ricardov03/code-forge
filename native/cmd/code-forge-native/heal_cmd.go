@@ -136,7 +136,11 @@ func runHeal(args []string) int {
 			fmt.Fprintf(safeStdout, "detail:\n%s\n", it.Detail)
 			return 0
 		}
-		fmt.Fprintf(safeStderr, "heal: no item %s\n", opts.pos[0])
+		next := "code-forge heal list" // B875: one write, the refusal then its next line
+		if opts.run != "" {
+			next += " --run " + opts.run
+		}
+		fmt.Fprint(safeStderr, "heal: no item "+opts.pos[0]+"\n"+refusalNext(next))
 		return 1
 	case "run":
 		if len(opts.pos) != 0 || opts.run == "" {
