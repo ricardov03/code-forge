@@ -856,6 +856,11 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 	if _, err := state.WriteSigned(home, run, row); err != nil {
 		return err
 	}
+	// B798: a Go test that passed only on its reruns is reported and listed.
+	owner := ledger.Object{{Key: "run", Value: run}, {Key: "block", Value: block.id}, {Key: "worktree", Value: block.tree.Path}}
+	if err := gatesFlakyGo(home, owner, results, func(r ledger.Object) error { _, e := state.WriteSigned(home, run, r); return e }); err != nil {
+		return err
+	}
 	if !all || ctx.Err() != nil {
 		return fmt.Errorf("changed gates failed: %s", landSuiteFailure(home, run, block.id, landResult{code: 1, data: ledger.Object{{Key: "results", Value: results}}}))
 	}

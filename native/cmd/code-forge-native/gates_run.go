@@ -980,6 +980,17 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 			return failure(e)
 		}
 	}
+	// B798: each Go test that passed only on its reruns: WARN, test.flaky
+	// row, and a finding in the run's list.
+	if !cancelled {
+		write := appendRow
+		if slug == "" {
+			write = func(ledger.Object) error { return nil }
+		}
+		if e := gatesFlakyGo(home, owner, results, write); e != nil {
+			return failure(e)
+		}
+	}
 	out := ledger.Object{{Key: "stack", Value: p.Stack}}
 	if tree != nil {
 		out.Set("worktree", tree.Path)
