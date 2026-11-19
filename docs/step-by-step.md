@@ -360,18 +360,13 @@ code-forge run start --run demo-1
 ```
 
 For brief mode, use the start command in step 5 instead.
-After a worker stops, start its replacement in another terminal; leave that terminal open:
-
-```sh
-code-forge worker --run demo-1
-```
-
-When the pinned worker is dead, the new worker re-pins the run to itself and prints `worker: re-pinned run <id> from dead pid <old> to <new>`; a pinned worker that is still alive is never replaced.
-Then attach the run to that live worker from your first terminal:
+After a worker stops (it died, or left after `worker.idle_exit_hours`), one command starts its replacement and pins it:
 
 ```sh
 code-forge run start --reattach --run demo-1
 ```
+
+With no live worker, `--reattach` starts the run's worker as `run start --add-worker` does (same `review.workers` limit) and prints `run start: no live worker served run demo-1; started worker pid <pid>` on stderr (B826). With a live worker (for example one you started by hand with `code-forge worker --run demo-1`), it pins that one. When the pinned worker is dead, a new worker re-pins the run to itself and prints `worker: re-pinned run <id> from dead pid <old> to <new>`; a pinned worker that is still alive is never replaced. `review-file` also starts the worker itself when none is live (step 10).
 
 **You see** — Output shortened (source form; live worker not run):
 
@@ -568,7 +563,7 @@ Review only ends its temporary run and stops its worker by default. It does not 
 **If it fails**
 
 An `unavailable` result is not approval. Check provider login, budget, and L2/L3 settings.
-For `worker_down`, restart and reattach as in step 7. For findings, follow step 12.
+`review-file` starts the run's worker itself when none is live and prints `review-file: no live worker for run <r>; started worker pid <n>` (B826). A `worker_down` answer now means that start failed too: its JSON carries `start_error` and `fix: code-forge run start --add-worker --run <r>`; run that fix (step 7). An ended run also answers `worker_down`. For findings, follow step 12.
 
 **Next:** [Run the gates](#11-run-the-gates).
 
