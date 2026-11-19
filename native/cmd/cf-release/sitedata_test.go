@@ -204,7 +204,8 @@ func TestB690dSiteDataRotatedLedgerProof(t *testing.T) {
 		b690dWrite(t, filepath.Join(s.ledger, name), `{"event":"session","run":"excluded-run","usd":999}`+"\n")
 	}
 	data, text := b690dDocument(t, s)
-	want := map[string]any{"runs": 3.0, "blocks": 3.0, "spend": 3.59, "date": "2026-11-06"}
+	want := map[string]any{"runs": 3.0, "blocks": 3.0, "spend": 3.59, "date": "2026-11-06",
+		"overnight": nil, "single": nil, "stopped": nil, "finding": nil, "gate": nil}
 	if !reflect.DeepEqual(data["proof"], want) {
 		t.Errorf("proof %v, want %v", data["proof"], want)
 	}
@@ -234,7 +235,8 @@ func TestB690dSiteDataBadLedgerRow(t *testing.T) {
 func TestB690dSiteDataStableBytes(t *testing.T) {
 	s := b690dSiteFixture(t)
 	data, first := b690dDocument(t, s)
-	if !reflect.DeepEqual(data["proof"], map[string]any{"runs": 0.0, "blocks": 0.0, "spend": 0.0, "date": "2026-11-06"}) {
+	if !reflect.DeepEqual(data["proof"], map[string]any{"runs": 0.0, "blocks": 0.0, "spend": 0.0, "date": "2026-11-06",
+		"overnight": nil, "single": nil, "stopped": nil, "finding": nil, "gate": nil}) {
 		t.Errorf("empty ledger proof %v", data["proof"])
 	}
 	_, second := b690dDocument(t, s)
@@ -242,7 +244,7 @@ func TestB690dSiteDataStableBytes(t *testing.T) {
 		t.Error("two runs gave different bytes")
 	}
 	wantStart := "{\n  \"version\": \"1.10.0\",\n  \"date\": \"2026-11-06\",\n  \"changelog\": [\n    {\n"
-	wantEnd := "  \"proof\": {\n    \"runs\": 0,\n    \"blocks\": 0,\n    \"spend\": 0,\n    \"date\": \"2026-11-06\"\n  }\n}\n"
+	wantEnd := "  \"proof\": {\n    \"runs\": 0,\n    \"blocks\": 0,\n    \"spend\": 0,\n    \"date\": \"2026-11-06\",\n    \"overnight\": null,\n    \"single\": null,\n    \"stopped\": null,\n    \"finding\": null,\n    \"gate\": null\n  }\n}\n"
 	if !strings.HasPrefix(first, wantStart) || !strings.HasSuffix(first, wantEnd) || strings.HasSuffix(first, "\n\n") {
 		t.Errorf("not JSON.stringify(data, null, 2) + newline:\n%s", first)
 	}

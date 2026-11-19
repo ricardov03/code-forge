@@ -33,7 +33,12 @@ built site with {
     "runs": 0,
     "blocks": 0,
     "spend": 0,
-    "date": "2026-11-01"
+    "date": "2026-11-01",
+    "overnight": null,
+    "single": null,
+    "stopped": null,
+    "finding": null,
+    "gate": null
   }
 }
 Smoke check: docs-site/site/.pages-out/llms-full.txt names @example/pkg@0.21.0

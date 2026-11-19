@@ -384,6 +384,7 @@ func sdProof(dir, date string) (*jsObject, error) {
 	proof.set("blocks", jsNum(len(blocks)))
 	proof.set("spend", jsNum(sdRound2(runstatus.RoundUSD(sum))))
 	proof.set("date", date)
+	sdpSamples(proof, rows)
 	return proof, nil
 }
 

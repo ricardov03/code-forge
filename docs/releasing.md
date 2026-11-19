@@ -327,6 +327,30 @@ contribute no spend. Proof uses the release date. Identical tag and ledger input
 bytes. It includes all supplied ledger history, including work after the tag. No other ledger
 fields are copied. The script is excluded from the npm package.
 
+Proof also holds the samples the site's `/proof` page shows (B784). Each is picked by a fixed
+rule; a sample with no matching rows is `null`, and the page hides its card instead of showing a
+made-up number. Durations use the report's text (`45s`, `13m 19s`, `1h 18m 46s`), `usd` is
+rounded to four decimals, and `date` is the UTC day. Only ids that look like `r-...`, `B123` or
+`F1` (letters, digits, `-` and `_`, no slash, at most 64 characters) are exported; a row with
+any other id is skipped, and no file name, path, prompt, model or finding text leaves the ledger.
+
+- `overnight`: the latest-started ended run (it has `run.end`; its start is `run.start`, else its
+  first timed row) with 3 or more blocks closed `complete` and a wall time of 12 hours at most.
+  Fields: `run`, `date`, `wall_ms`, `wall`, `usd` (the run's spend), `closed`, `stopped` (blocks
+  with `block.stop` and no later complete close in that run).
+- `single`: the latest-started ended run with exactly 1 block closed and none stopped; same fields.
+- `stopped`: the latest stop of a block whose last state row is `block.stop`, with a `dispatch`
+  before it and spend above $0. Fields: `run`, `block`, `date`, `wall_ms` and `wall` (dispatch to
+  stop), `usd`.
+- `finding`: the latest review where a file had an open `warning` finding, a later
+  `review.result` approved that file, the finding was not waived, and the block closed
+  `complete`. Fields: `run`, `block`, `finding` (its id), `severity`, `rounds` (review rounds of
+  that file up to the approval), `date`. The ledger keeps no finding text.
+- `gate`: the latest `gate.done` with `all_ok`, not cancelled, of a block that closed `complete`.
+  Fields: `run`, `block`, `date`, `scope`, and `results` in ledger order, each `gate`, `result`
+  (`ok`, `skipped` or `failed`), `wall_ms` and `wall` (`null` when skipped). The ledger keeps no
+  pass counts.
+
 ## Rollback
 
 If a check fails (or the commit fails), every file the tool changed is written back byte for

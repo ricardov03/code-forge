@@ -33,7 +33,12 @@ built site with {
     "runs": 0,
     "blocks": 0,
     "spend": 0,
-    "date": "2026-11-01"
+    "date": "2026-11-01",
+    "overnight": null,
+    "single": null,
+    "stopped": null,
+    "finding": null,
+    "gate": null
   }
 }
 Smoke check: docs-site/site/.pages-out/llms-full.txt names @example/pkg@0.21.0
@@ -137,7 +142,7 @@ refs/tags/v0.21.0 2a779826596e64c91b6dd4b6c8c9dac16b5b2f43
 --- release temp files
 --- site refs
 refs/heads/main e72d30d8daf9435ea1a071207c8f1a41399643d5 site
-refs/heads/release-site/v0.21.0 d2a6f9581b7ca69a77ea7b59cdd64308a91971b3 Release site v0.21.0
+refs/heads/release-site/v0.21.0 176782476acdc52992e71a17062b49f50d55c50c Release site v0.21.0
 --- site status
 --- site worktrees
 worktree <CASE>/code-forge-site
@@ -174,7 +179,12 @@ branch refs/heads/main
     "runs": 0,
     "blocks": 0,
     "spend": 0,
-    "date": "2026-11-01"
+    "date": "2026-11-01",
+    "overnight": null,
+    "single": null,
+    "stopped": null,
+    "finding": null,
+    "gate": null
   }
 }
 --- site .code-forge-tmp exists
