@@ -161,12 +161,12 @@
         {
           "args": "autopilot binnacle --run {run} --json",
           "exit": 0,
-          "out": "{\n  \"title\": \"Autopilot run <run>\",\n  \"byline\": {\n    \"date\": \"2026-11-19\",\n    \"owner\": \"T\"\n  },\n  \"status\": [\n    {\n      \"item\": \"Result\",\n      \"value\": \"0 of 1 block closed\"\n    },\n    {\n      \"item\": \"Stack/PRs\",\n      \"value\": \"none recorded\"\n    },\n…"
+          "out": "{\"title\":\"Autopilot run <run>\",\"byline\":{\"date\":\"2026-11-19\",\"owner\":\"T\"},\"status\":[{\"item\":\"Result\",\"value\":\"0 of 1 block closed\"},{\"item\":\"Stack/PRs\",\"value\":\"none recorded\"},{\"item\":\"Full suite\",\"value\":\"green\"},{\"item\":\"Reviews\",\"value\":\"1 result · 0 files approved · 0 waived by autopilot\"},{\"it…"
         }
       ],
       "json": {
         "kind": "object",
-        "lines": "several",
+        "lines": "one",
         "keys": [
           {
             "key": "title",
@@ -325,12 +325,12 @@
         {
           "args": "autopilot log --run {run} --json",
           "exit": 0,
-          "out": "[\n  {\n    \"time\": \"2026-01-01T00:00:00Z\",\n    \"event\": \"Question to the owner\",\n    \"block\": null,\n    \"file\": null,\n    \"detail\": \"waive:nit · to owner (session-failed) · ad-<id>\",\n    \"link\": null\n  },\n  {\n    \"time\": \"2026-01-01T00:00:00Z\",\n    \"event\": \"Delegate session\",\n    \"block\": null,\n    \"file\": null,\n    \"detail\": \"L2 · anthropic · status failed\",\n…"
+          "out": "[{\"time\":\"2026-01-01T00:00:00Z\",\"event\":\"Question to the owner\",\"block\":\"B1\",\"file\":\"src/a.txt\",\"detail\":\"review:substitute · to owner (scope review:substitute not-allowed; the owner grants it with code-forge autopilot start --run <run> --until <time> --delegate L2 --allow review:substitute, else th…"
         }
       ],
       "json": {
         "kind": "array of objects",
-        "lines": "several",
+        "lines": "one",
         "keys": [
           {
             "key": "time",
@@ -342,11 +342,11 @@
           },
           {
             "key": "block",
-            "type": "null"
+            "type": "string"
           },
           {
             "key": "file",
-            "type": "null"
+            "type": "string"
           },
           {
             "key": "detail",
@@ -364,18 +364,54 @@
         {
           "args": "autopilot ratify row-missing --run {run} --json",
           "exit": 1,
-          "out": "autopilot ratify: digest-row-not-open: run <run> has no open digest row row-missing (autopilot digest --run <run> lists them); nothing was recorded"
+          "out": "{\"ok\":false,\"error\":\"autopilot ratify: digest-row-not-open: run <run> has no open digest row row-missing (autopilot digest --run <run> lists them); nothing was recorded\",\"next\":null}\nautopilot ratify: digest-row-not-open: run <run> has no open digest row row-missing (autopilot digest --run <run> lists them); nothing was recorded"
         }
-      ]
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "error",
+            "type": "string"
+          },
+          {
+            "key": "next",
+            "type": "null"
+          }
+        ]
+      }
     },
     "autopilot revert": {
       "examples": [
         {
           "args": "autopilot revert row-missing --run {run} --json",
           "exit": 1,
-          "out": "autopilot revert: digest-row-not-open: run <run> has no open digest row row-missing (autopilot digest --run <run> lists them); nothing was recorded"
+          "out": "{\"ok\":false,\"error\":\"autopilot revert: digest-row-not-open: run <run> has no open digest row row-missing (autopilot digest --run <run> lists them); nothing was recorded\",\"next\":null}\nautopilot revert: digest-row-not-open: run <run> has no open digest row row-missing (autopilot digest --run <run> lists them); nothing was recorded"
         }
-      ]
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "error",
+            "type": "string"
+          },
+          {
+            "key": "next",
+            "type": "null"
+          }
+        ]
+      }
     },
     "autopilot round": {
       "examples": [
@@ -400,12 +436,12 @@
         {
           "args": "autopilot status --run {run} --json",
           "exit": 0,
-          "out": "{\n  \"run\": \"<run>\",\n  \"state\": \"active\",\n  \"grant_id\": \"ap-<id>\",\n  \"delegate\": \"L2\",\n  \"until\": \"2026-01-01T00:00:00Z\",\n  \"time_left_s\": 3599,\n  \"scopes\": [\n    \"waive:nit\"\n  ],\n  \"deny\": [],\n  \"fixed_deny\": [\n    \"waive:critical\",\n    \"waive:proof\",\n    \"reviews:skip\",\n…"
+          "out": "{\"run\":\"<run>\",\"state\":\"active\",\"grant_id\":\"ap-<id>\",\"delegate\":\"L2\",\"until\":\"2026-01-01T00:00:00Z\",\"time_left_s\":3599,\"scopes\":[\"waive:nit\"],\"deny\":[],\"fixed_deny\":[\"waive:critical\",\"waive:proof\",\"reviews:skip\",\"limits:change\",\"plan:approve\",\"design:approve\",\"pr:merge\",\"destructive\",\"budget:raise\"]…"
         }
       ],
       "json": {
         "kind": "object",
-        "lines": "several",
+        "lines": "one",
         "keys": [
           {
             "key": "run",
@@ -514,27 +550,81 @@
         {
           "args": "block accept-hit B1 --run {run} --line 1 --transcript plans/tr.txt --reason ok --json",
           "exit": 2,
-          "out": "block accept-hit needs the human at a terminal to confirm; nothing was recorded (there is no --yes)"
+          "out": "{\"ok\":false,\"error\":\"block accept-hit needs the human at a terminal to confirm; nothing was recorded (there is no --yes)\",\"next\":null}\nblock accept-hit needs the human at a terminal to confirm; nothing was recorded (there is no --yes)"
         }
-      ]
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "error",
+            "type": "string"
+          },
+          {
+            "key": "next",
+            "type": "null"
+          }
+        ]
+      }
     },
     "block ack-waivers": {
       "examples": [
         {
           "args": "block ack-waivers B1 --run {run} --json",
           "exit": 1,
-          "out": "block ack-waivers: ack-waivers-none: the block has no counted agent waivers; nothing was recorded"
+          "out": "{\"ok\":false,\"error\":\"block ack-waivers: ack-waivers-none: the block has no counted agent waivers; nothing was recorded\",\"next\":null}\nblock ack-waivers: ack-waivers-none: the block has no counted agent waivers; nothing was recorded"
         }
-      ]
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "error",
+            "type": "string"
+          },
+          {
+            "key": "next",
+            "type": "null"
+          }
+        ]
+      }
     },
     "block amend-acceptance": {
       "examples": [
         {
           "args": "block amend-acceptance B1 --run {run} --acceptance plans/acc.yml --reason same --json",
           "exit": 2,
-          "out": "block amend-acceptance needs the human at a terminal to confirm; nothing was recorded (there is no --yes)"
+          "out": "{\"ok\":false,\"error\":\"block amend-acceptance needs the human at a terminal to confirm; nothing was recorded (there is no --yes)\",\"next\":null}\nblock amend-acceptance needs the human at a terminal to confirm; nothing was recorded (there is no --yes)"
         }
-      ]
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "error",
+            "type": "string"
+          },
+          {
+            "key": "next",
+            "type": "null"
+          }
+        ]
+      }
     },
     "block attempt": {
       "examples": [
@@ -817,9 +907,27 @@
         {
           "args": "block reopen B1 --run {run} --file src/a.txt --reason again --yes --json",
           "exit": 1,
-          "out": "block reopen: reopen-not-stopped: src/a.txt has no review state; only a stopped or lost file is reopened; nothing was recorded"
+          "out": "{\"ok\":false,\"error\":\"block reopen: reopen-not-stopped: src/a.txt has no review state; only a stopped or lost file is reopened; nothing was recorded\",\"next\":null}\nblock reopen: reopen-not-stopped: src/a.txt has no review state; only a stopped or lost file is reopened; nothing was recorded"
         }
-      ]
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "error",
+            "type": "string"
+          },
+          {
+            "key": "next",
+            "type": "null"
+          }
+        ]
+      }
     },
     "block settle": {
       "examples": [
@@ -896,18 +1004,54 @@
         {
           "args": "block unwaive B1 F1 --run {run} --file src/a.txt --reason undo --json",
           "exit": 1,
-          "out": "block unwaive: unwaive-no-agent-waiver: no verified agent waiver for this block, file and finding; nothing was recorded"
+          "out": "{\"ok\":false,\"error\":\"block unwaive: unwaive-no-agent-waiver: no verified agent waiver for this block, file and finding; nothing was recorded\",\"next\":null}\nblock unwaive: unwaive-no-agent-waiver: no verified agent waiver for this block, file and finding; nothing was recorded"
         }
-      ]
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "error",
+            "type": "string"
+          },
+          {
+            "key": "next",
+            "type": "null"
+          }
+        ]
+      }
     },
     "block waive": {
       "examples": [
         {
           "args": "block waive B1 F1 --run {run} --file src/a.txt --reason test --json",
           "exit": 2,
-          "out": "block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)"
+          "out": "{\"ok\":false,\"error\":\"block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)\",\"next\":null}\nblock waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)"
         }
-      ]
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "error",
+            "type": "string"
+          },
+          {
+            "key": "next",
+            "type": "null"
+          }
+        ]
+      }
     },
     "ci": {
       "examples": [
@@ -1067,9 +1211,27 @@
         {
           "args": "docs path --json",
           "exit": 1,
-          "out": "docs: none; run code-forge docs sync"
+          "out": "{\"ok\":false,\"error\":\"docs: none; run code-forge docs sync\",\"next\":\"code-forge docs sync\"}\ndocs: none; run code-forge docs sync"
         }
-      ]
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "error",
+            "type": "string"
+          },
+          {
+            "key": "next",
+            "type": "string"
+          }
+        ]
+      }
     },
     "docs sync": {
       "examples": [
@@ -1257,9 +1419,27 @@
         {
           "args": "heal show h-missing --json",
           "exit": 1,
-          "out": "heal: no item h-missing\nnext: code-forge heal list"
+          "out": "{\"ok\":false,\"error\":\"heal: no item h-missing\\nnext: code-forge heal list\",\"next\":\"code-forge heal list\"}\nheal: no item h-missing\nnext: code-forge heal list"
         }
-      ]
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ok",
+            "type": "boolean"
+          },
+          {
+            "key": "error",
+            "type": "string"
+          },
+          {
+            "key": "next",
+            "type": "string"
+          }
+        ]
+      }
     },
     "help": {
       "examples": [
@@ -1883,12 +2063,12 @@
         {
           "args": "report --slug demo --json",
           "exit": 0,
-          "out": "{\n  \"cost_per_block\": [\n    {\n      \"run\": \"<run>\",\n      \"block\": \"R-<id>\",\n      \"level\": \"L2\",\n      \"lane\": null,\n      \"completed\": false,\n      \"reviewUsd\": 0.0134,\n      \"coderUsd\": 0,\n      \"s1s2Usd\": 0,\n      \"factsUsd\": 0,\n      \"otherUsd\": 0,\n      \"proofTimeMs\": 0,\n      \"wallMs\": 0,\n…"
+          "out": "{\"cost_per_block\":[{\"run\":\"<run>\",\"block\":\"R-<id>\",\"level\":\"L2\",\"lane\":null,\"completed\":false,\"reviewUsd\":0.0134,\"coderUsd\":0,\"s1s2Usd\":0,\"factsUsd\":0,\"otherUsd\":0,\"proofTimeMs\":0,\"wallMs\":0,\"humanWaitMs\":null,\"totalUsd\":0.0134,\"unknownUsdSessions\":0,\"reviewTimeMs\":0,\"stopped\":true},{\"run\":\"<run>\",\"…"
         }
       ],
       "json": {
         "kind": "object",
-        "lines": "several",
+        "lines": "one",
         "keys": [
           {
             "key": "cost_per_block",
@@ -2025,8 +2205,8 @@
       "examples": [
         {
           "args": "review-file src/a.txt --block B1 --run {run}",
-          "exit": 3,
-          "out": "{\"status\":\"worker_down\",\"file\":\"src/a.txt\"}"
+          "exit": 0,
+          "out": "{\"ticket\":\"<ticket>\",\"status\":\"queued\",\"file\":\"src/a.txt\",\"content_hash\":\"<sha256>\"}\nreview-file: no live worker for run <run>; started worker pid <pid>"
         }
       ]
     },
@@ -2112,7 +2292,7 @@
         {
           "args": "run status --run {run}",
           "exit": 0,
-          "out": "{\n  \"run_id\": \"<run>\",\n  \"status\": \"active\",\n  \"engine\": \"auto\",\n  \"worker_pinned\": true,\n  \"worker_live\": false,\n  \"workers\": [\n    {\n      \"pid\": <pid>,\n      \"alive\": false,\n      \"started_at\": \"Thu Jan  1 00:00:00 2026\"\n    }\n  ],\n  \"blocks\": {},\n  \"orphans\": [],\n…"
+          "out": "{\"run_id\":\"<run>\",\"status\":\"active\",\"engine\":\"auto\",\"worker_pinned\":true,\"worker_live\":false,\"workers\":[{\"pid\": <pid>,\"alive\":false,\"started_at\":\"Thu Jan  1 00:00:00 2026\"}],\"blocks\":{},\"orphans\":[],\"spent_usd\":0.5,\"budget_usd\":null,\"unknown_usd_sessions\":0}\nrun <run>: no live worker; fix: code-forge run start --add-worker --run <run>"
         }
       ]
     },
