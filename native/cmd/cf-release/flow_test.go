@@ -234,7 +234,7 @@ var flowCases = []flowCase{
 	// test/release-readme.test.mjs: only the Latest line changes; legacy lists stay.
 	{name: "readme-latest-patch", prep: flowReadmeWith(flowReadmeLatest()), steps: flowDryThenReal("patch")},
 	{name: "readme-latest-minor", prep: flowReadmeWith(flowReadmeLatest()), steps: flowDryThenReal("minor")},
-	{name: "readme-latest-major", prep: flowReadmeWith(flowReadmeLatest()), steps: flowDryThenReal("major")},
+	{name: "readme-latest-major", prep: b802CleanAudit(flowReadmeWith(flowReadmeLatest())), steps: flowDryThenReal("major")},
 	{name: "readme-latest-explicit-patch", prep: flowReadmeWith(flowReadmeLatest()), steps: flowDryThenReal("0.21.3")},
 	{name: "readme-latest-explicit-minor", prep: flowReadmeWith(flowReadmeLatest()), steps: flowDryThenReal("0.22.2")},
 	{name: "readme-no-latest-intro", prep: flowReadmeWith(flowReadmeIntro), steps: flowOne("release", "patch")},

@@ -2,6 +2,7 @@
 
 This page lists the CLI commands and their usage. It is generated from the Go help table. Regenerate it with `sh scripts/gen-commands-doc.sh`.
 
+- [audit](#audit)
 - [author](#author)
 - [autopilot](#autopilot)
 - [block](#block)
@@ -46,6 +47,22 @@ This page lists the CLI commands and their usage. It is generated from the Go he
 - [validate](#validate)
 - [version](#version)
 - [worker](#worker)
+
+## audit
+
+Audit every command before a major release
+
+```text
+usage: code-forge audit commands [--json] [--out <file>]
+```
+
+### audit commands
+
+Run every command in a throwaway HOME and write the audit report
+
+```text
+usage: code-forge audit commands [--json] [--out <file>]
+```
 
 ## author
 

@@ -6,6 +6,13 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- **`code-forge audit commands [--json] [--out <file>]`** runs every command with `--help` and an unknown flag in a
+  throwaway HOME (stubbed tools, network blocked) and writes `docs/audits/audit-<version>.md`; `npm run release --
+  major` refuses a major bump until that file is committed with no open high problem (each one names a landed block);
+  `--no-checks` does not skip it, `--allow-no-audit` does with a loud warning (B802).
+
 ## [0.25.1] — 2026-11-19
 
 ### Added

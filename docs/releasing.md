@@ -78,10 +78,41 @@ in X.Y.Z…" (a second run finds its own marker and does nothing). Every Monday 
 the open `error-report` issues by `kind:` label and by fingerprint label and writes the tables to
 that run's job summary; it never changes an issue.
 
+## Major release: run the full audit
+
+A major release (`npm run release -- major`, or an explicit `x.y.z` with a higher major number)
+needs the command audit of the new version committed first (B802). Run it from the repository
+root with the binary you are about to release, then commit the report:
+
+```
+code-forge audit commands --out docs/audits/audit-<version>.md   # e.g. docs/audits/audit-1.0.0.md
+git add docs/audits/audit-<version>.md && git commit -m "docs: command audit <version>"
+npm run release -- major --dry-run
+```
+
+`code-forge audit commands [--json] [--out <file>]` runs every command of `code-forge help` with
+`--help` and with an unknown flag, each in a throwaway HOME and git repository. `op`, `security`,
+`claude`, `codex`, `grok`, `gemini`, `gh`, `curl`, `npm`, `npx` and `node` are stubs that exit 1,
+the network goes to a closed proxy port, and keys use the file store, so no paid API, keychain,
+1Password or real `~/.code-forge` is touched. Each check is a row of the report with a result
+(`ok` or `problem`), a severity (`high`, `medium`, `low`), a detail and a Block column. A panic, a
+hand-over to the removed Node engine, a binary that does not start, a `--help` that hangs or exits
+non-zero with no usage is `high`. It exits 1 while any high problem is in the report, 2 on a usage
+error. With no `--out` the Markdown goes to stdout; `--json` prints one line with the counts and
+rows.
+
+`npm run release` refuses the major release, naming the command to run, when the file is missing,
+not committed at HEAD, not written by the audit tool, or has an open high problem. A high problem
+is closed when its Block column names a block whose commit has landed (a commit subject on HEAD
+starting `<block>:`, for example `B900: fix status --help`): edit the Block cells, commit, release
+again. Patch and minor releases do not need the audit. `--no-checks` does not skip it; only
+`--allow-no-audit` does, with a loud warning.
+
 ## The one-command flow
 
 ```
 (cd native && go test -count=1 -run TestB690bKnownFixes ./cmd/code-forge-native)  # if this release fixes reported errors
+code-forge audit commands --out docs/audits/audit-<version>.md  # major only: run, commit (see above)
 npm run release -- minor --dry-run      # see the plan and the diffs; writes nothing
 npm run release -- minor                # bump, CHANGELOG, README, checks, commit, tag
 npm publish dist/npm/darwin-arm64       # the four platform packages first (B606)
@@ -102,6 +133,7 @@ The version argument is `patch`, `minor`, `major` or an explicit `x.y.z`. Option
 | `--dry-run` | run the preflight, print the plan and the diffs, change nothing (no file, no commit, no tag, no fetch). Preflight failures are listed and the exit code is 1 |
 | `--date YYYY-MM-DD` | the date for the CHANGELOG heading (default: today, local time) |
 | `--no-checks` | skip the docs block preflight and the checks in step 4 (the CI run for HEAD, npm pack, npm ls, plugin validate), with loud warnings. For emergencies only |
+| `--allow-no-audit` | a major release skips the command audit check (see "Major release: run the full audit"), with a loud warning. `--no-checks` alone does not skip it |
 | `--allow-branch <name>` | release from a branch other than `main` |
 
 ### The release tools run in Go
