@@ -138,7 +138,7 @@ func TestB456KeysConfigCacheHours(t *testing.T) {
 		t.Fatalf("set: exit %d stderr %q", code, stderr)
 	}
 	code, _, stderr = b456Keys(t, project, "test", "zz")
-	if code != 1 || !strings.HasPrefix(stderr, "WARN keys: keys.cache_hours must be a whole number of hours from 1 to 24 (.code-forge.yml); caching for the default 8 h\n") || !strings.HasSuffix(stderr, "zz: not found\n") {
+	if code != 1 || !strings.HasPrefix(stderr, "WARN keys: keys.cache_hours must be a whole number of hours from 1 to 24 (.code-forge.yml); caching for the default 8 h\n") || !strings.HasSuffix(stderr, "zz: not found\nnext: code-forge keys set zz\n") {
 		t.Fatalf("test: exit %d stderr %q", code, stderr)
 	}
 	if err := os.WriteFile(filepath.Join(project, ".code-forge.yml"), []byte("a: [\n"), 0600); err != nil {
@@ -195,7 +195,7 @@ func TestB456KeysTestFileBackend(t *testing.T) {
 	}
 	// an expired entry is deleted with its index row, and reads as not found
 	code, _, stderr = b456Keys(t, project, "test", "old")
-	if code != 1 || !strings.HasSuffix(stderr, "old: not found\n") {
+	if code != 1 || !strings.HasSuffix(stderr, "old: not found\nnext: code-forge keys set old\n") {
 		t.Fatalf("old: exit %d stderr %q", code, stderr)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "old.key")); !os.IsNotExist(err) {

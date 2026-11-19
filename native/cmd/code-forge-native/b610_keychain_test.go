@@ -217,7 +217,7 @@ func TestB610KeysTestAndRemove(t *testing.T) {
 	// an expired item is dropped with its index row: not found
 	kc.put(t, "jev", `{"v":"old","exp":1000}`)
 	code, stdout, stderr = b456Keys(t, project, "test", "jev")
-	if code != 1 || stdout != "" || stderr != "jev: not found\n" || kc.item("jev") != "<none>" {
+	if code != 1 || stdout != "" || stderr != "jev: not found\nnext: code-forge keys set jev\n" || kc.item("jev") != "<none>" {
 		t.Fatalf("test expired: exit %d stdout %q stderr %q item %q", code, stdout, stderr, kc.item("jev"))
 	}
 	if data, _ := os.ReadFile(filepath.Join(dir, "index.json")); string(data) != "{}" {
