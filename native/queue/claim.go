@@ -55,8 +55,15 @@ func claimCode(err error) string {
 
 // DropDone mirrors dropDoneIf without a retry marker: classification happens
 // before this call, exclusion is rename, and restoration is no-overwrite link.
+//
+// B918: the ticket's finish timings are cleared before its marker is
+// claimed, so the rerun is never taken for a finished ticket whose done
+// marker was lost (the worker closes those, recoverFinished).
 func DropDone(dir, id string, seen []byte) (string, error) {
 	marker := filepath.Join(dir, id+".done")
+	if err := ResetTimings(dir, id); err != nil {
+		return "", &ClaimError{"fresh-claim-failed", fmt.Sprintf("the finish time of ticket %s could not be cleared (%s); nothing was queued", id, claimCode(err))}
+	}
 	var random [4]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return "", err
@@ -115,4 +122,28 @@ func DropDone(dir, id string, seen []byte) (string, error) {
 		return "", &ClaimError{"fresh-restore-failed", unread + "; " + left + "; nothing was queued"}
 	}
 	return "changed", nil
+}
+
+// ResetTimings clears the finish timings (finished_at, duration_ms) of
+// ticket id before a re-queue drops its done marker (B918): a ticket with
+// finished_at and no done marker is a finished one the worker closes. A
+// missing or unreadable ticket, or one with no finish time, is left as is.
+func ResetTimings(dir, id string) error {
+	if !ticketID.MatchString(id) {
+		return nil
+	}
+	target := filepath.Join(dir, id+".json")
+	data, err := os.ReadFile(target)
+	if os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	t, err := ledger.ParseObject(data)
+	if err != nil || t == nil || t.Get("finished_at") == nil {
+		return nil
+	}
+	t.Set("finished_at", nil)
+	t.Set("duration_ms", nil)
+	return publishFile(dir, target, t, true)
 }

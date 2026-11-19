@@ -179,6 +179,10 @@ func reviewEnqueueAnswers(home, root, run, block, tree, file, byFile string, ids
 	}
 	retry := false
 	if r, _ := result.(ledger.Object); r.Get("status") == "unavailable" {
+		// B918: clear the finish time first, so the retry is served
+		if err := queue.ResetTimings(dir, id); err != nil {
+			return reviewEnqueueRefusal("error", err.Error()), 1, true
+		}
 		if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
 			return reviewEnqueueRefusal("error", err.Error()), 1, true
 		}
@@ -258,9 +262,10 @@ func reviewEnqueueFresh(root string, p ticket.Parts, id string, retry bool) (led
 		resultStatus, resultOK := result.Get("status").(string)
 		if markerOK && resultOK && markerStatus == resultStatus {
 			switch resultStatus {
-			case "stale", "unavailable", "split_required", worker.UnsupportedStatus:
+			case "stale", "unavailable", "split_required", worker.UnsupportedStatus, worker.RecoveredStatus:
 				// B884: an unsupported ticket (the Go worker could not serve
-				// it) runs again on the next review-file.
+				// it) runs again on the next review-file; B918: so does a
+				// recovered one (finished with no result).
 				verdict = "rerun"
 			case "approved":
 				// B635: the owner reverted this substitute review (autopilot

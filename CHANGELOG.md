@@ -26,6 +26,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- A queue ticket with `finished_at` but no done marker is no longer picked first by every new worker: the worker writes the finish time only after the result and the done marker, re-queues clear it, and the drain closes such a leftover ticket (done marker rebuilt from its result, else `status: "recovered"`, one signed `review.recovered` row) and serves the next ticket. B918
 - `TestB788WorkerOpFailureStartsWithoutJev/signed_out` no longer fails on a loaded machine: only the hanging-`op` case uses the short 300 ms budget, and the `run start` worker tests wait up to 60 s for a worker that announces or exits at once (B794, B798)
 - Three tests no longer fail at random on a loaded machine (B909). The process-sweep tests (`TestB511SweepStopsGoWorkersOfEndedRuns`, `TestRunStartSweepStops`) wait for a stopped child to be reaped before the fake clock moves on. Before, a late SIGTERM let the fake 2 s grace end after about 80 ms of real time, so the sweep also sent SIGKILL (`[terminated killed]`). The test that builds the native binary now builds it once per test process and retries one failed build. A Go build cache trim running at the same time had failed it with `could not import ... no such file`. The B529 foreign process now lives 1 h instead of 30 s, and the hanging-`op` case of B788 is bounded at 60 s instead of 10 s.
 
