@@ -426,8 +426,10 @@ func TestRunVerbReattach(t *testing.T) {
 			t.Fatalf("git init: %v %s", err, out)
 		}
 		f.record(t, "r-test", "active", `,"blocks":{}`)
+		// B826: with no live worker --reattach starts one as --add-worker
+		// does; this workspace has no config, so the start is refused.
 		code, out, errs := runVerbCall(t, "start", "--reattach", "--run", "r-test")
-		if code != 1 || out != "" || errs != "run start: no live worker serves this queue\n" {
+		if code != 1 || out != "" || errs != "run start: the project config cannot be loaded\n" {
 			t.Fatalf("no worker = %d %q %q", code, out, errs)
 		}
 		sleeper, started := startSleeper(t)
