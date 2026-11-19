@@ -19,8 +19,8 @@ func TestB619NativeStatusNeverHandsOverToTheCompanion(t *testing.T) {
 		out, err   string
 		stdinLines string
 	}{
-		{nil, 1, "", b501RouterLine, ""},
-		{[]string{"x"}, 1, "{\"ok\":false,\"error\":\"status-unreadable\"}\n", b501RouterLine, "{}\n"},
+		{nil, 0, "", "", ""},
+		{[]string{"x"}, 2, "", b501Refusal("x"), "{}\n"},
 		{[]string{"--help"}, 0, nativeStatusUsageText, "", "{}\n"},
 		{[]string{"-h"}, 0, nativeStatusUsageText, "", "{}\n"},
 	}
@@ -28,7 +28,7 @@ func TestB619NativeStatusNeverHandsOverToTheCompanion(t *testing.T) {
 		b501Stdin(t, c.stdinLines)
 		code, out, errText := runCaptured(t, append([]string{"native-status"}, c.args...)...)
 		want := c.out
-		if c.code == 0 { // B613: --help and -h print the wrapped help page
+		if c.code == 0 && len(c.args) > 0 { // B613: --help and -h print the wrapped help page
 			want = helpExpect(t, append([]string{"native-status"}, c.args...), 0, c.out)
 		}
 		if code != c.code || out != want || errText != c.err {
