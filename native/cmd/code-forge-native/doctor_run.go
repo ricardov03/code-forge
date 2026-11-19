@@ -193,6 +193,7 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 		return handover(reason)
 	}
 	rows = append(rows, review...)
+	rows = append(rows, rwlDoctorRows(home)...) // B885: the run status probe
 	rows = append(rows, dfReviewConcurrencyRow(cfg, order))
 	rows = append(rows, dfCoderSandboxRows(cfg)...)
 

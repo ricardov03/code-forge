@@ -395,6 +395,10 @@ If `block ready` says `worker.down`, the line names the last worker exit (`last 
 Start a new worker with `code-forge run start --add-worker --run demo-1`. Its stderr log is `.code-forge/logs/worker-<pid>.log`.
 A file the worker could not review shows as `unreviewed <file> ...; the Go worker could not review it: <reason>`.
 The worker keeps serving the other files. Fix the cause, then run `review-file` for that file again.
+`code-forge run status --run demo-1` shows the same check: `worker_live` (true or false) and `workers`
+(each pin with `pid`, `alive` and `started_at`). With no live worker it prints
+`run demo-1: no live worker; fix: code-forge run start --add-worker --run demo-1` on stderr;
+`code-forge status` and `code-forge doctor` (`run-worker` row) say the same.
 
 **Next:** [Open a block](#8-open-a-block).
 

@@ -232,6 +232,10 @@ func directStatus(args []string) (int, bool) {
 		}
 		workerWarnings, _ := statusWorkerWarnings(record)
 		warnings = append(warnings, workerWarnings...)
+		// B885: a live unpinned worker already has its fix (--reattach).
+		if line := rwlStatusLine(record); line != "" && len(workerWarnings) == 0 {
+			warnings = append(warnings, line)
+		}
 	}
 	var output string
 	if jsonFlag {
@@ -556,67 +560,10 @@ func statusTruthy(v any) bool {
 // statusNormal is normalizeStartTime: trimmed, inner whitespace folded.
 func statusNormal(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// statusSignalable is isSignalablePid: an integer > 1.
-func statusSignalable(v any) bool {
-	n, ok := v.(float64)
-	return ok && n > 1 && n == math.Trunc(n)
-}
-
 // statusCheckPin ports checkWorkerPin without a live pid. threw reports a
 // case where Node throws (a null pin, a non-text start time on a running pid).
 func statusCheckPin(record map[string]any) (good bool, reason string, threw bool) {
-	pin := record["worker"]
-	if pins, ok := record["workers"].([]any); ok && len(pins) > 1 {
-		for _, p := range pins {
-			if p == nil {
-				return false, "", true
-			}
-			m, _ := p.(map[string]any)
-			if !statusSignalable(m["pid"]) {
-				return false, "replaced", false
-			}
-		}
-		alive := false
-		for _, p := range pins {
-			m := p.(map[string]any)
-			pid, _ := m["pid"].(float64)
-			start := statusStart(pid)
-			if start == "" {
-				continue
-			}
-			s, ok := m["started_at"].(string)
-			if !ok {
-				return false, "", true
-			}
-			if start == statusNormal(s) {
-				alive = true
-			}
-		}
-		if alive {
-			return true, "", false
-		}
-		return false, "down", false
-	}
-	if !statusTruthy(pin) {
-		return false, "down", false
-	}
-	m, _ := pin.(map[string]any)
-	if !statusSignalable(m["pid"]) {
-		return false, "replaced", false
-	}
-	pid, _ := m["pid"].(float64)
-	start := statusStart(pid)
-	if start == "" {
-		return false, "down", false
-	}
-	s, ok := m["started_at"].(string)
-	if !ok {
-		return false, "", true
-	}
-	if start != statusNormal(s) {
-		return false, "replaced", false
-	}
-	return true, "", false
+	return rwlStatusPin(record) // B885: the probe run status and doctor use
 }
 
 // statusRunID is String(record.run_id).

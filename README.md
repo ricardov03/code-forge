@@ -100,7 +100,8 @@ The skill checks and hardens the plan before your approval. Coders work in block
 owned files and acceptance clauses; independent blocks can run in parallel. A worker runs fresh
 reviewer sessions outside the coder's sandbox. A file the worker cannot review fails only itself
 (`unsupported`, with the reason in `block ready`); the worker keeps serving, and every worker exit
-leaves a signed `worker.exit` row and `.code-forge/logs/worker-<pid>.log`. Fix rounds are bounded;
+leaves a signed `worker.exit` row and `.code-forge/logs/worker-<pid>.log`. `run status` says whether a
+pinned worker is alive (`worker_live`), the same way `block ready` checks it. Fix rounds are bounded;
 unresolved work stops.
 Tests and red→green proof establish that a change meets its acceptance clauses before closing.
 You control the final merge and publish permissions; coders cannot push or open draft PRs by

@@ -158,7 +158,7 @@ var helpCommands = []helpEntry{
 	{name: "review-file", summary: "Queue a file review or wait for the results"},
 	{name: "run", summary: "Start, check, reload or end a run", namespace: true},
 	{name: "run start", summary: "Start a run, or add or reattach a worker"},
-	{name: "run status", summary: "Show the state of a run"},
+	{name: "run status", summary: "Show the state of a run and whether its worker is alive"},
 	{name: "run reload", summary: "Load the changed settings into a run"},
 	{name: "run end", summary: "End a run"},
 	{name: "run human-checks", summary: "List the open human checks of a run, or clear one (owner)"},

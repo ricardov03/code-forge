@@ -109,7 +109,7 @@
   {"name":"run human-checks","summary":"List the open human checks of a run, or clear one (owner)","owner":false,"group":"run"},
   {"name":"run reload","summary":"Load the changed settings into a run","owner":false,"group":"run"},
   {"name":"run start","summary":"Start a run, or add or reattach a worker","owner":false,"group":"run"},
-  {"name":"run status","summary":"Show the state of a run","owner":false,"group":"run"},
+  {"name":"run status","summary":"Show the state of a run and whether its worker is alive","owner":false,"group":"run"},
   {"name":"s2","summary":"Answer a decision packet with a System 2 session","owner":false,"group":""},
   {"name":"setup","summary":"Check the Go binary for this system","owner":false,"group":""},
   {"name":"spawn","summary":"Run a model session at a level and role","owner":false,"group":""},
