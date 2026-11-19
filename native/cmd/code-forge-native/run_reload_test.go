@@ -132,6 +132,7 @@ func b473Expect(t *testing.T, code int, stdout, stderr string, wantCode int, wan
 }
 
 // Group 1: help, usage and flag errors print Node's words with Node's exits.
+// B881 (P16): run reload with no --run names what is missing and its own usage.
 func TestB473RunUsageAndFlagErrors(t *testing.T) {
 	smallProject(t, "")
 	reload := "usage: code-forge run reload --run <id>\n"
@@ -143,9 +144,9 @@ func TestB473RunUsageAndFlagErrors(t *testing.T) {
 		{[]string{"run", "status", "--help"}, 0, "usage: code-forge run status --run <id>\n", ""},
 		{[]string{"run"}, 2, "", b473Usage},
 		{[]string{"run", "bogus"}, 2, "", b473Usage},
-		{[]string{"run", "reload"}, 2, "", b473Usage},
-		{[]string{"run", "reload", "x"}, 2, "", b473Usage},
-		{[]string{"run", "reload", "--cwd=/x"}, 2, "", b473Usage},
+		{[]string{"run", "reload"}, 2, "", "run reload needs --run <id>\n" + reload},
+		{[]string{"run", "reload", "x"}, 2, "", "run reload needs --run <id>\n" + reload},
+		{[]string{"run", "reload", "--cwd=/x"}, 2, "", "run reload needs --run <id>\n" + reload},
 		{[]string{"run", "reload", "--run", "x", "--help"}, 2, "", "run reload: unknown flag \"--help\"\n"},
 		{[]string{"run", "reload", "--bogus"}, 2, "", "run reload: unknown flag \"--bogus\"\n"},
 		{[]string{"run", "reload", "--"}, 2, "", "run reload: unknown flag \"--\"\n"},
