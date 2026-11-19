@@ -29,8 +29,8 @@ The command works in three steps:
    "Refused in Go" column below and every "goes to Node" or "hands over" case
    on this page) is refused instead: Go prints one line on stderr,
    `code-forge: <command> is not supported in this case yet (<reason>). Please report it: code-forge logs report`,
-   writes nothing on stdout, changes no state, ledger or queue file, and
-   exits 1. The exit code is the number that tells the shell whether a
+   writes nothing on stdout (with `--json`, the one refusal line below),
+   changes no state, ledger or queue file, and exits 1. The exit code is the number that tells the shell whether a
    command succeeded. Go still records the case in the hand-over log (see
    [See hand-overs](#see-hand-overs)).
    Where Node answers with a usage error (exit 2), Go prints the same usage
@@ -43,6 +43,15 @@ The command works in three steps:
    which Go decodes as Node does (each bad byte becomes U+FFFD). Text that
    looks like a secret in a refusal line or in the unknown-verb text is
    masked only when the command registered that secret, as in Node.
+
+Since B872 every refusal of a command run with `--json` (before any `--`) that
+prints nothing on stdout also prints exactly one compact line there:
+`{"ok":false,"error":<the refusal text>,"next":<command or null>}`. The exit
+code and the stderr text are unchanged. `error` is the stderr text (a
+registered secret masked); `next` is the first `code-forge <command>` that
+text names, `code-forge <verb> --help` for a usage error (exit 2), or null.
+A command that already answered on stdout (its own `ok:false` JSON) keeps
+its answer, and without `--json` nothing changes.
 
 The skill's `forge <verb>` shim (`skill/scripts/forge`) starts this same shell
 entry, `bin/code-forge`, so skill verbs run in Go too (B547). With

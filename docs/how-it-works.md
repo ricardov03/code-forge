@@ -384,10 +384,11 @@ Every block verb also takes `--json`. On success stdout is exactly one line,
 | `stop` | `stopped` | none; with `hooks.on_block_end` set, `done_file` |
 | `waive` | `waived` | `finding`, `file`, `by` |
 
-On failure the exit code and stderr are unchanged and stdout stays empty, except a close the gate
-refused, which also prints `{"block":<id>,"ok":false,"reason":<text>}`; every other close refusal
-(a usage error, a block not open, a cancelled `--no-require-reviews`, a failed worktree removal)
-leaves stdout empty. Without `--json` the output
+On failure the exit code and stderr are unchanged. A close the gate refused prints
+`{"block":<id>,"ok":false,"reason":<text>}`; every other refusal (a usage error, a block not
+open, a cancelled `--no-require-reviews`, a failed worktree removal) prints one line
+`{"ok":false,"error":<the stderr text>,"next":<command or null>}` (B872, for every verb's
+`--json`). Without `--json` the output
 is byte-identical to before.
 
 ### When a block ends: the done file and the hook
