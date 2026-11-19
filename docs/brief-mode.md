@@ -72,6 +72,7 @@ gates:
   types: null
   format: null
   full_suite_threshold_files: 10
+  ram_tmp: auto
 proof:
   isolation: worktree
   worktree:
