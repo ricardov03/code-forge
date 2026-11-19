@@ -60,6 +60,9 @@ several with `forge block land <id> <id>... --run <r>`; the merge gate uses the 
 never the full suite. Add `--push --watch-ci` to push main and watch CI. With `land.require_ci: github`
 a block lands only when GitHub CI is green for its own tip (B765). Retry queued lock and git
 failures with `forge heal run --run <r>`; see the test queue with `forge queue` (`references/code.md` §5.1).
+Before you call the work release-ready, run `forge release check` (`--json` for scripts): it checks the
+tree, the push, GitHub CI for HEAD, the CHANGELOG `[Unreleased]` shape and `npm ls`, and prints the bump and the
+release steps; exit 0 means ready. Never run the steps it prints; the owner releases.
 
 ## §4 Hard rules (the headings of `references/rules-core.md`)
 

@@ -81,6 +81,7 @@ var handoverCommands = map[string]string{
 	"plan":          "check",
 	"proof":         "tier export lock unlock restore red-green baseline",
 	"queue":         "status run",
+	"release":       "check",
 	"remove":        "",
 	"report":        "",
 	"resolve":       "",

@@ -85,7 +85,7 @@ pack)
   fi
   printf '[{"name":"%s","version":"%s","size":%s,"entryCount":7,"files":[%s]}]\n' "$name" "$version" "$size" "$files"
   exit 0 ;;
-ls) echo '{"name":"x","dependencies":{"a":{"version":"1.0.0","dependencies":{"b":{"version":"2.0.0"}}}}}'; exit 0 ;;
+ls) if [ -n "$FAKE_NPM_LS" ]; then cat "$FAKE_NPM_LS"; exit 1; fi; echo '{"name":"x","dependencies":{"a":{"version":"1.0.0","dependencies":{"b":{"version":"2.0.0"}}}}}'; exit 0 ;;
 ci) echo "fake npm ci"; exit 0 ;;
 esac
 echo "fake npm: unexpected $*" >&2

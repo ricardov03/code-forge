@@ -30,6 +30,7 @@ This page lists the CLI commands and their usage. It is generated from the Go he
 - [plan](#plan)
 - [proof](#proof)
 - [queue](#queue)
+- [release](#release)
 - [remove](#remove)
 - [report](#report)
 - [resolve](#resolve)
@@ -893,6 +894,22 @@ usage: code-forge queue [status] [--json]
        code-forge queue run [--kind full|changed] [--label X] -- <cmd> [args]
   The machine-wide FIFO test queue ($HOME/.code-forge/queue). Gates take a slot by themselves;
   wrap any other test command in `queue run`. CODE_FORGE_TEST_QUEUE=off disables it.
+```
+
+## release
+
+Check a project is ready to release
+
+```text
+usage: code-forge release check [--cwd <dir>] [--json]
+```
+
+### release check
+
+Check tree, push, CI, CHANGELOG and npm ls; print the bump and steps
+
+```text
+usage: code-forge release check [--cwd <dir>] [--json]
 ```
 
 ## remove

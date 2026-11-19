@@ -99,6 +99,8 @@
   {"name":"queue","summary":"Show the machine-wide test queue","owner":false,"group":"queue"},
   {"name":"queue run","summary":"Run a test command in a queue slot","owner":false,"group":"queue"},
   {"name":"queue status","summary":"Show the test queue (the same as queue)","owner":false,"group":"queue"},
+  {"name":"release","summary":"Check a project is ready to release","owner":false,"group":"release"},
+  {"name":"release check","summary":"Check tree, push, CI, CHANGELOG and npm ls; print the bump and steps","owner":false,"group":"release"},
   {"name":"remove","summary":"Remove skill installations","owner":false,"group":""},
   {"name":"report","summary":"Show or export the project ledger report","owner":false,"group":""},
   {"name":"resolve","summary":"Show the model, effort and CLI of a level","owner":false,"group":""},
