@@ -236,6 +236,46 @@ refused while a grant is active (stop it first). Each writes one signed `autopil
 `autopilot.revert` row, and the row leaves the digest. Ratify works on an ended run too; revert
 needs an active run, except for a temporary config change.
 
+## Found work becomes a block of the same run
+
+A problem found while the run works should be fixed in the same run, not left for later. Record it
+with `code-forge autopilot found` (Go engine, B800):
+
+```bash
+# one finding: a red gate, a failed land, a flaky test, a hand-over hit, a review finding
+code-forge autopilot found --run <run> --source gate --title "go vet fails on x.go" \
+  --evidence "vet: x.go:41:2: unreachable code" [--label docs] [--from B4]
+# every FOUND line of a coder's report
+code-forge autopilot found --run <run> --report coder-report.txt --from B4
+# found → block → state
+code-forge autopilot found --run <run> --list [--json]
+```
+
+`--source` is one of `gate`, `land`, `coder`, `flaky`, `handover` or `review`. A coder writes its
+leftovers in its report as `FOUND [<source>] [<label>,…] <title> :: <evidence>` (the source is
+`coder` when it is left out); a FOUND line without ` :: <evidence>` is skipped with a WARN.
+
+For each finding the autopilot:
+
+- gives it an id (`F1`, `F2`, …) and a fingerprint from the title and the evidence, with numbers,
+  times and hashes folded. The same finding again (or the same `--fingerprint <key>`) adds nothing;
+  its `seen` count goes up.
+- keeps it for you when it is out of scope for the autopilot: a label `scope`, `product`,
+  `security`, `secret(s)`, `delete`, `destructive`, `publish` or `release`; a secret in the text
+  (it is masked); a title or evidence that names a secret, a credential, a password or a key; a
+  title that names a publish, a tag, a delete, a force push or a scope change. Such a finding
+  waits for the owner and never runs.
+- queues the rest, up to `autopilot.max_found_blocks` per run (default 10; past it a finding waits
+  for the owner): the next free block id of the run (one past the highest of its blocks), a brief
+  and an acceptance file under `~/.code-forge/runs/<run>/found/`, and the exact
+  `code-forge block open` command to run. The acceptance asks for a red test from the evidence;
+  name that test in the file before `block open`.
+- writes one signed `autopilot.found` row.
+
+A queued block joins the run's planned blocks at once, so an until-done grant does not end while it
+is open. The binnacle shows a **Found work** table (found, source, title, block, state), and every
+finding that waits for you is listed under **Actions only you can take**.
+
 ## Stop it
 
 ```bash

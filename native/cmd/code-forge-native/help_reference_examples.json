@@ -15,7 +15,7 @@
         {
           "args": "autopilot --help",
           "exit": 0,
-          "out": "Description:\n  Let a delegate decide for the owner within a grant\n\nUsage:\n  usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run …\n\nAvailable commands:\n  autopilot approve   Change one setting until a set time (owner)\n  autopilot ask       Ask the delegate one question inside the grant\n  autopilot binnacle  Print or write the autopilot run summary\n  autopilot digest    List what the autopilot decided, with ratify and revert commands\n  autopilot extend    Move the grant end time or deadline later (owner)\n  autopilot level     Record the lane (level) the delegate chose\n  autopilot log       Print every autopilot event of a run\n  autopilot ratify    Accept one autopilot decision from the digest (owner)\n…"
+          "out": "Description:\n  Let a delegate decide for the owner within a grant\n\nUsage:\n  usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run …\n\nAvailable commands:\n  autopilot approve   Change one setting until a set time (owner)\n  autopilot ask       Ask the delegate one question inside the grant\n  autopilot binnacle  Print or write the autopilot run summary\n  autopilot digest    List what the autopilot decided, with ratify and revert commands\n  autopilot extend    Move the grant end time or deadline later (owner)\n  autopilot found     Turn a problem found during the run into a queued block of the same run\n  autopilot level     Record the lane (level) the delegate chose\n  autopilot log       Print every autopilot event of a run\n…"
         }
       ]
     },
@@ -177,6 +177,78 @@
           "out": "autopilot run <run>: grant ap-<id> now runs until 2026-01-01T00:00:00Z (1h 59m; was 2026-01-01T00:00:00Z)"
         }
       ]
+    },
+    "autopilot found": {
+      "examples": [
+        {
+          "args": "autopilot found --run {run} --source gate --title 'gates run is red on main' --evidence 'TestB1 failed' --json",
+          "exit": 0,
+          "out": "{\"finding\":\"F1\",\"fingerprint\":\"fp-56e705e225e22ac0\",\"source\":\"gate\",\"title\":\"gates run is red on main\",\"labels\":[],\"from_block\":null,\"block\":\"B2\",\"state\":\"queued\",\"reason\":null,\"seen\":1,\"brief\":\"~/.code-forge/runs/<run>/found/B2.brief.md\",\"acceptance\":\"~/.code-forge/runs/<run>/found/B2.acceptance.ym…"
+        },
+        {
+          "args": "autopilot found --run {run} --list",
+          "exit": 0,
+          "out": "run <run>: 1 found (found → block → state)\nF1 gate → B2 → not opened: gates run is red on main"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "finding",
+            "type": "string"
+          },
+          {
+            "key": "fingerprint",
+            "type": "string"
+          },
+          {
+            "key": "source",
+            "type": "string"
+          },
+          {
+            "key": "title",
+            "type": "string"
+          },
+          {
+            "key": "labels",
+            "type": "array (empty in the example)"
+          },
+          {
+            "key": "from_block",
+            "type": "null"
+          },
+          {
+            "key": "block",
+            "type": "string"
+          },
+          {
+            "key": "state",
+            "type": "string"
+          },
+          {
+            "key": "reason",
+            "type": "null"
+          },
+          {
+            "key": "seen",
+            "type": "number"
+          },
+          {
+            "key": "brief",
+            "type": "string"
+          },
+          {
+            "key": "acceptance",
+            "type": "string"
+          },
+          {
+            "key": "duplicate",
+            "type": "boolean"
+          }
+        ]
+      }
     },
     "autopilot level": {
       "examples": [
@@ -462,7 +534,7 @@
         {
           "args": "block close B1 --run {run} --dry-run --json",
           "exit": 1,
-          "out": "{\"block\":\"B1\",\"dry_run\":true,\"verb\":\"close\",\"ready\":false,\"blockers\":[{\"code\":\"worker.down\",\"file\":null,\"detail\":\"pinned worker pid <pid> is not running\",\"fix\":\"code-forge run start --reattach --run <run>\",\"clears_by\":\"orchestrator\"},{\"code\":\"unreviewed\",\"file\":\"src/a.txt\",\"detail\":\"no review.approv…"
+          "out": "{\"block\":\"B1\",\"dry_run\":true,\"verb\":\"close\",\"ready\":false,\"blockers\":[{\"code\":\"worker.down\",\"file\":null,\"detail\":\"pinned worker pid <pid> is not running; last worker exit: signal (stopped by signal terminated) at 2026-01-01T00:00:00Z\",\"fix\":\"code-forge run start --add-worker --run <run>\",\"clears_by\"…"
         }
       ],
       "json": {
@@ -626,7 +698,7 @@
         {
           "args": "block ready B1 --run {run} --json",
           "exit": 1,
-          "out": "{\"block\":\"B1\",\"ready\":false,\"blockers\":[{\"code\":\"worker.down\",\"file\":null,\"detail\":\"pinned worker pid <pid> is not running\",\"fix\":\"code-forge run start --reattach --run <run>\",\"clears_by\":\"orchestrator\"},{\"code\":\"no_green_gates\",\"file\":null,\"detail\":\"no green gates run; run: code-forge gates run --r…"
+          "out": "{\"block\":\"B1\",\"ready\":false,\"blockers\":[{\"code\":\"worker.down\",\"file\":null,\"detail\":\"pinned worker pid <pid> is not running; last worker exit: signal (stopped by signal terminated) at 2026-01-01T00:00:00Z\",\"fix\":\"code-forge run start --add-worker --run <run>\",\"clears_by\":\"orchestrator\"},{\"code\":\"no_g…"
         }
       ],
       "json": {
@@ -862,7 +934,7 @@
         {
           "args": "context pack --run {run} --block B1 --json",
           "exit": 0,
-          "out": "{\"path\":\"<tmp>/cf-tmp/<run>/context/B1.md\",\"tokens\":1355,\"lines\":60,\"cut\":0,\"sha256\":\"<sha256>\"}"
+          "out": "{\"path\":\"<tmp>/cf-tmp/<run>/context/B1.md\",\"tokens\":1499,\"lines\":65,\"cut\":0,\"sha256\":\"<sha256>\"}"
         }
       ],
       "json": {
@@ -1825,7 +1897,7 @@
         {
           "args": "run --help",
           "exit": 0,
-          "out": "Description:\n  Start, check, reload or end a run\n\nUsage:\n  usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id> [--json] | human-checks list --run <id> [--json…\n\nAvailable commands:\n  run end           End a run\n  run human-checks  List the open human checks of a run, or clear one (owner)\n  run reload        Load the changed settings into a run\n  run start         Start a run, or add or reattach a worker\n  run status        Show the state of a run\n\nOptions:\n  -h, --help  Show this help"
+          "out": "Description:\n  Start, check, reload or end a run\n\nUsage:\n  usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id> [--json] | human-checks list --run <id> [--json…\n\nAvailable commands:\n  run end           End a run\n  run human-checks  List the open human checks of a run, or clear one (owner)\n  run reload        Load the changed settings into a run\n  run start         Start a run, or add or reattach a worker\n  run status        Show the state of a run and whether its worker is alive\n\nOptions:\n  -h, --help  Show this help"
         }
       ]
     },
@@ -1902,7 +1974,7 @@
         {
           "args": "run status --run {run}",
           "exit": 0,
-          "out": "{\n  \"run_id\": \"<run>\",\n  \"status\": \"active\",\n  \"engine\": \"auto\",\n  \"worker_pinned\": true,\n  \"blocks\": {},\n  \"orphans\": [],\n  \"spent_usd\": 0.5,\n  \"budget_usd\": null,\n  \"unknown_usd_sessions\": 0\n}"
+          "out": "{\n  \"run_id\": \"<run>\",\n  \"status\": \"active\",\n  \"engine\": \"auto\",\n  \"worker_pinned\": true,\n  \"worker_live\": false,\n  \"workers\": [\n    {\n      \"pid\": <pid>,\n      \"alive\": false,\n      \"started_at\": \"Thu Jan  1 00:00:00 2026\"\n    }\n  ],\n  \"blocks\": {},\n  \"orphans\": [],\n…"
         }
       ]
     },
@@ -1938,7 +2010,7 @@
         {
           "args": "status --json",
           "exit": 0,
-          "out": "{\"runs\":[{\"run_id\":\"<run>\",\"status\":\"active\",\"mode\":\"plan\",\"spent_usd\":0.5,\"unknown_usd_sessions\":0,\"budget_usd\":null,\"blocks\":[],\"more\":0,\"closed\":0,\"stopped\":0},{\"run_id\":\"<run>\",\"status\":\"active\",\"mode\":\"plan\",\"spent_usd\":0.0134,\"unknown_usd_sessions\":0,\"budget_usd\":null,\"blocks\":[],\"more\":0,\"clo…"
+          "out": "{\"runs\":[{\"run_id\":\"<run>\",\"status\":\"active\",\"mode\":\"plan\",\"spent_usd\":0.5,\"unknown_usd_sessions\":0,\"budget_usd\":null,\"blocks\":[],\"more\":0,\"closed\":0,\"stopped\":0},{\"run_id\":\"<run>\",\"status\":\"active\",\"mode\":\"plan\",\"spent_usd\":0.0134,\"unknown_usd_sessions\":0,\"budget_usd\":null,\"blocks\":[],\"more\":0,\"clo…\nrun <run>: no live worker; fix: code-forge run start --add-worker --run <run>\nrun <run>: no live worker; fix: code-forge run start --add-worker --run <run>"
         }
       ],
       "json": {

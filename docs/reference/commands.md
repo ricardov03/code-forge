@@ -103,7 +103,7 @@ author: facts sheet required: run forge facts first
 Let a delegate decide for the owner within a grant
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes] | digest --run <id> [--json] | ratify <row-id> --run <id> [--json] | revert <row-id> --run <id> [--json]
+usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes] | digest --run <id> [--json] | ratify <row-id> --run <id> [--json] | revert <row-id> --run <id> [--json] | found --run <id> (--source <gate|land|coder|flaky|handover|review> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--fingerprint <key>] | --report <file> | --list) [--from <block>] [--json]
 ```
 
 #### When to use
@@ -135,9 +135,9 @@ Available commands:
   autopilot binnacle  Print or write the autopilot run summary
   autopilot digest    List what the autopilot decided, with ratify and revert commands
   autopilot extend    Move the grant end time or deadline later (owner)
+  autopilot found     Turn a problem found during the run into a queued block of the same run
   autopilot level     Record the lane (level) the delegate chose
   autopilot log       Print every autopilot event of a run
-  autopilot ratify    Accept one autopilot decision from the digest (owner)
 …
 ```
 
@@ -962,6 +962,67 @@ Takes `--json`; the examples above refuse, so no shape is recorded.
 - [`autopilot digest`](#autopilot-digest)
 - [`autopilot ratify`](#autopilot-ratify)
 
+### autopilot found
+
+Turn a problem found during the run into a queued block of the same run
+
+```text
+usage: code-forge autopilot found --run <id> (--source <gate|land|coder|flaky|handover|review> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--fingerprint <key>]
+```
+
+#### When to use
+
+During an autopilot run: turn a problem you found (a red gate, a land failure, a coder's leftover, a flaky test, a hand-over, a review) into a queued block of the same run instead of fixing it on the side.
+
+#### Flags
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--run <id>` | string | not set | Run id (r-...). |
+| `--source <gate\|land\|coder\|flaky\|handover\|review>` | enum | not set | Where the problem was found: gate, land, coder, flaky, handover or review. |
+| `--title <text>` | string | not set | One line that names the problem; it becomes the block title. |
+| `--evidence <text>` | string | not set | What shows the problem (a failing test, an error line); goes into the brief. |
+| `--evidence-file <path>` | path | not set | File with the evidence, instead of --evidence. |
+| `--label <label,…>` | list | not set | Labels for the found block, comma separated. |
+| `--fingerprint <key>` | string | not set | Key that marks repeats of the same problem (default: made from source and title). |
+
+#### Examples
+
+```sh
+code-forge autopilot found --run <run> --source gate --title 'gates run is red on main' --evidence 'TestB1 failed' --json
+```
+
+Exit 0. Output:
+
+```text
+{"finding":"F1","fingerprint":"fp-56e705e225e22ac0","source":"gate","title":"gates run is red on main","labels":[],"from_block":null,"block":"B2","state":"queued","reason":null,"seen":1,"brief":"~/.code-forge/runs/<run>/found/B2.brief.md","acceptance":"~/.code-forge/runs/<run>/found/B2.acceptance.ym…
+```
+
+```sh
+code-forge autopilot found --run <run> --list
+```
+
+Exit 0. Output:
+
+```text
+run <run>: 1 found (found → block → state)
+F1 gate → B2 → not opened: gates run is red on main
+```
+
+#### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | Refused or failed; the message says why. |
+| 2 | Usage error: a missing, unknown or bad argument (the usage is printed). |
+
+#### Related
+
+- [`autopilot status`](#autopilot-status)
+- [`autopilot binnacle`](#autopilot-binnacle)
+- [`autopilot start`](#autopilot-start)
+
 ## block
 
 Open, check, close and land the blocks of a run
@@ -1325,7 +1386,7 @@ code-forge block ready B1 --run <run> --json
 Exit 1. Output:
 
 ```text
-{"block":"B1","ready":false,"blockers":[{"code":"worker.down","file":null,"detail":"pinned worker pid <pid> is not running","fix":"code-forge run start --reattach --run <run>","clears_by":"orchestrator"},{"code":"no_green_gates","file":null,"detail":"no green gates run; run: code-forge gates run --r…
+{"block":"B1","ready":false,"blockers":[{"code":"worker.down","file":null,"detail":"pinned worker pid <pid> is not running; last worker exit: signal (stopped by signal terminated) at 2026-01-01T00:00:00Z","fix":"code-forge run start --add-worker --run <run>","clears_by":"orchestrator"},{"code":"no_g…
 ```
 
 #### Exit codes
@@ -1455,7 +1516,7 @@ code-forge block close B1 --run <run> --dry-run --json
 Exit 1. Output:
 
 ```text
-{"block":"B1","dry_run":true,"verb":"close","ready":false,"blockers":[{"code":"worker.down","file":null,"detail":"pinned worker pid <pid> is not running","fix":"code-forge run start --reattach --run <run>","clears_by":"orchestrator"},{"code":"unreviewed","file":"src/a.txt","detail":"no review.approv…
+{"block":"B1","dry_run":true,"verb":"close","ready":false,"blockers":[{"code":"worker.down","file":null,"detail":"pinned worker pid <pid> is not running; last worker exit: signal (stopped by signal terminated) at 2026-01-01T00:00:00Z","fix":"code-forge run start --add-worker --run <run>","clears_by"…
 ```
 
 #### Exit codes
@@ -2366,7 +2427,7 @@ code-forge context pack --run <run> --block B1 --json
 Exit 0. Output:
 
 ```text
-{"path":"<tmp>/cf-tmp/<run>/context/B1.md","tokens":1355,"lines":60,"cut":0,"sha256":"<sha256>"}
+{"path":"<tmp>/cf-tmp/<run>/context/B1.md","tokens":1499,"lines":65,"cut":0,"sha256":"<sha256>"}
 ```
 
 #### Exit codes
@@ -5868,7 +5929,7 @@ Available commands:
   run human-checks  List the open human checks of a run, or clear one (owner)
   run reload        Load the changed settings into a run
   run start         Start a run, or add or reattach a worker
-  run status        Show the state of a run
+  run status        Show the state of a run and whether its worker is alive
 
 Options:
   -h, --help  Show this help
@@ -5976,12 +6037,17 @@ Exit 0. Output:
   "status": "active",
   "engine": "auto",
   "worker_pinned": true,
+  "worker_live": false,
+  "workers": [
+    {
+      "pid": <pid>,
+      "alive": false,
+      "started_at": "Thu Jan  1 00:00:00 2026"
+    }
+  ],
   "blocks": {},
   "orphans": [],
-  "spent_usd": 0.5,
-  "budget_usd": null,
-  "unknown_usd_sessions": 0
-}
+…
 ```
 
 #### Exit codes
@@ -6329,6 +6395,8 @@ Exit 0. Output:
 
 ```text
 {"runs":[{"run_id":"<run>","status":"active","mode":"plan","spent_usd":0.5,"unknown_usd_sessions":0,"budget_usd":null,"blocks":[],"more":0,"closed":0,"stopped":0},{"run_id":"<run>","status":"active","mode":"plan","spent_usd":0.0134,"unknown_usd_sessions":0,"budget_usd":null,"blocks":[],"more":0,"clo…
+run <run>: no live worker; fix: code-forge run start --add-worker --run <run>
+run <run>: no live worker; fix: code-forge run start --add-worker --run <run>
 ```
 
 #### Exit codes

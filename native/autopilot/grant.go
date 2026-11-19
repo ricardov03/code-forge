@@ -219,20 +219,23 @@ func validUntilDone(g ledger.Object) bool {
 // Planned (B634) lists the planned blocks of an until-done grant: the ids
 // the owner named with --blocks, else every block the run record holds
 // (record.blocks, the blocks opened in the run). The run record has no other
-// plan list.
+// plan list. B800: the blocks the autopilot queued from found work
+// (FoundQueued) join the list, opened or not, after the other ids.
 func Planned(record, grant ledger.Object) []string {
+	out := []string{}
 	if ids, ok := grant.Get("planned_blocks").([]any); ok {
-		out := []string{}
 		for _, id := range ids {
 			s, _ := id.(string)
 			out = append(out, s)
 		}
-		return out
-	}
-	out := []string{}
-	if blocks, ok := record.Get("blocks").(ledger.Object); ok {
+	} else if blocks, ok := record.Get("blocks").(ledger.Object); ok {
 		for _, f := range blocks {
 			out = append(out, f.Key)
+		}
+	}
+	for _, id := range FoundQueued(record) {
+		if !slices.Contains(out, id) {
+			out = append(out, id)
 		}
 	}
 	return out

@@ -581,6 +581,15 @@ func bnDescribe(row any) (string, string, any) {
 		return "Extra fix round", "grant " + bnU(g("grant_id"), "unknown") + " · decision " + bnU(g("decision_id"), "unknown"), nil
 	case "autopilot.level":
 		return "Coder level chosen", bnU(g("level"), "unknown") + " · lane " + bnCo(g("lane"), "none") + " · plan " + bnCo(g("plan_level"), "none") + " · decision " + bnU(g("decision_id"), "unknown"), nil
+	case "autopilot.found": // B800
+		target := "waits for the owner (" + bnCo(g("reason"), "unknown") + ")"
+		if bnStr(g("block")) {
+			target = "block " + bnU(g("block"), "unknown") + " queued"
+		}
+		if g("duplicate") == true {
+			target = "seen again · " + target
+		}
+		return "Work found", bnU(g("finding"), "unknown") + " · " + bnCo(g("source"), "unknown source") + " · " + bnCo(g("title"), "untitled") + " → " + target, nil
 	case "autopilot.issue_failed":
 		return "Waiver issue failed", "finding " + bnU(g("finding"), "unknown finding") + " · no issue opened", nil
 	case "review.waived":
@@ -1269,6 +1278,11 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 	} else if approx > 1 {
 		status = append(status, item("Clock note", strconv.Itoa(approx)+" rows carry no valid timestamp and take the time of the rows before them"))
 	}
+	// B800: found work (autopilot found), only for a run that has some
+	foundRows, foundActions := apfBinnacle(b.runID, record)
+	for _, text := range foundActions {
+		action(text)
+	}
 	var ownerValue any
 	if owner != "" {
 		ownerValue = owner
@@ -1279,6 +1293,9 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 		{Key: "status", Value: status}, {Key: "decisions", Value: decisions}, {Key: "blocks", Value: blocks},
 		{Key: "open_questions", Value: questions}, {Key: "owner_actions", Value: ownerActions},
 		{Key: "incidents", Value: incidents}, {Key: "timeline", Value: timeline},
+	}
+	if foundRows != nil {
+		out = append(out, ledger.Field{Key: "found", Value: foundRows})
 	}
 	return bnDeepScrub(out, scrub).(ledger.Object)
 }
@@ -1357,6 +1374,10 @@ func bnRenderBinnacle(b ledger.Object, scrub func(string) string) string {
 	lines = append(lines, bnTable([]string{"Time", "Decision", "Why", "What would reverse it"}, bnRows(b.Get("decisions"), "time", "decision", "why", "reverse"))...)
 	lines = append(lines, "## Blocks", "")
 	lines = append(lines, bnTable([]string{"Block", "Branch / PR", "Review", "Tests", "Gates", "State"}, bnRows(b.Get("blocks"), "block", "branch", "review", "tests", "gates", "state"))...)
+	if found, ok := b.Get("found").([]any); ok && len(found) > 0 { // B800
+		lines = append(lines, "## Found work", "")
+		lines = append(lines, bnTable([]string{"Found", "Source", "Title", "Block", "State"}, bnRows(found, "found", "source", "title", "block", "state"))...)
+	}
 	lines = append(lines, "## Open questions", "")
 	questions, _ := b.Get("open_questions").([]any)
 	if len(questions) == 0 {

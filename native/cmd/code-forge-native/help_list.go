@@ -56,6 +56,7 @@ var helpCommands = []helpEntry{
 	{name: "autopilot digest", summary: "List what the autopilot decided, with ratify and revert commands"},
 	{name: "autopilot ratify", summary: "Accept one autopilot decision from the digest", owner: true},
 	{name: "autopilot revert", summary: "Undo one autopilot decision from the digest", owner: true},
+	{name: "autopilot found", summary: "Turn a problem found during the run into a queued block of the same run"},
 	{name: "block", summary: "Open, check, close and land the blocks of a run", namespace: true,
 		options: []helpOption{helpJSONOption}},
 	{name: "block open", summary: "Start a block: owned files, acceptance tests, brief",

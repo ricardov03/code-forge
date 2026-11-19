@@ -269,6 +269,8 @@ var (
 	helpRefMsRe    = regexp.MustCompile(`"(\w*_ms|\w*Ms|ms)":( ?)\d+`)
 	helpRefLeftRe  = regexp.MustCompile(`"time_left_s":( ?)\d+`)
 	helpRefDigitRe = regexp.MustCompile(`\d+`)
+	// ps lstart time of a worker (run status workers[].started_at, B885).
+	helpRefLstartRe = regexp.MustCompile(`"started_at":( ?)"[A-Z][a-z]{2} [A-Z][a-z]{2} +\d+ \d\d:\d\d:\d\d \d{4}"`)
 )
 
 // normalize makes an output the same on every machine and every run.
@@ -288,6 +290,7 @@ func (s *helpRefSandbox) normalize(out string) string {
 	out = helpRefPidRe.ReplaceAllString(out, "$1 <pid>")
 	out = helpRefMsRe.ReplaceAllString(out, `"$1":${2}0`)
 	out = helpRefLeftRe.ReplaceAllString(out, `"time_left_s":${1}3599`)
+	out = helpRefLstartRe.ReplaceAllString(out, `"started_at":${1}"Thu Jan  1 00:00:00 2026"`)
 	out = strings.ReplaceAll(out, runtime.GOOS+"-"+runtime.GOARCH, "<platform>")
 	if s.version != "" {
 		out = strings.ReplaceAll(out, s.version, "<version>")

@@ -6,6 +6,7 @@
   {"name":"autopilot binnacle","summary":"Print or write the autopilot run summary","owner":false,"group":"autopilot"},
   {"name":"autopilot digest","summary":"List what the autopilot decided, with ratify and revert commands","owner":false,"group":"autopilot"},
   {"name":"autopilot extend","summary":"Move the grant end time or deadline later","owner":true,"group":"autopilot"},
+  {"name":"autopilot found","summary":"Turn a problem found during the run into a queued block of the same run","owner":false,"group":"autopilot"},
   {"name":"autopilot level","summary":"Record the lane (level) the delegate chose","owner":false,"group":"autopilot"},
   {"name":"autopilot log","summary":"Print every autopilot event of a run","owner":false,"group":"autopilot"},
   {"name":"autopilot ratify","summary":"Accept one autopilot decision from the digest","owner":true,"group":"autopilot"},

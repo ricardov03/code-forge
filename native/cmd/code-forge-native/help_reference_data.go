@@ -250,6 +250,25 @@ var helpRefs = map[string]helpRef{
 		related:  []string{"autopilot digest", "autopilot revert"},
 		examples: []helpRefExample{helpRefEx("autopilot", "autopilot ratify row-missing --run {run} --json")},
 	},
+	"autopilot found": {
+		when:    "During an autopilot run: turn a problem you found (a red gate, a land failure, a coder's leftover, a flaky test, a hand-over, a review) into a queued block of the same run instead of fixing it on the side.",
+		related: []string{"autopilot status", "autopilot binnacle", "autopilot start"},
+		flags: map[string]string{
+			"--source":        "Where the problem was found: gate, land, coder, flaky, handover or review.",
+			"--title":         "One line that names the problem; it becomes the block title.",
+			"--evidence":      "What shows the problem (a failing test, an error line); goes into the brief.",
+			"--evidence-file": "File with the evidence, instead of --evidence.",
+			"--label":         "Labels for the found block, comma separated.",
+			"--fingerprint":   "Key that marks repeats of the same problem (default: made from source and title).",
+			"--report":        "Coder report file: every FOUND line in it becomes a finding.",
+			"--list":          "List the run's findings and the block each one became.",
+			"--from":          "Block the problem was found in.",
+		},
+		examples: []helpRefExample{
+			helpRefEx("autopilot", "autopilot found --run {run} --source gate --title 'gates run is red on main' --evidence 'TestB1 failed' --json"),
+			helpRefEx("autopilot", "autopilot found --run {run} --list"),
+		},
+	},
 	"autopilot revert": {
 		when:     "The owner undoes a delegate decision from the digest.",
 		related:  []string{"autopilot digest", "autopilot ratify"},

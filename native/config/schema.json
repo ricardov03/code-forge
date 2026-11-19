@@ -645,7 +645,8 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "min_confidence": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.7, "description": "B46: the lowest confidence at which the autopilot delegate's answer is acted on; below it the question goes to the owner." }
+        "min_confidence": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.7, "description": "B46: the lowest confidence at which the autopilot delegate's answer is acted on; below it the question goes to the owner." },
+        "max_found_blocks": { "type": "integer", "minimum": 0, "maximum": 100, "default": 10, "description": "B800: how many findings of one run `code-forge autopilot found` turns into queued blocks of that run. Past the cap a finding waits for the owner and is listed in the binnacle. 0 queues none. Read from the run's config in force (the run-start snapshot, or the last run reload)." }
       }
     },
     "coder": {

@@ -108,6 +108,9 @@ reviewer sessions outside the coder's sandbox. A file the worker cannot review f
 leaves a signed `worker.exit` row and `.code-forge/logs/worker-<pid>.log`. `run status` says whether a
 pinned worker is alive (`worker_live`), the same way `block ready` checks it. Fix rounds are bounded;
 unresolved work stops.
+Under autopilot, a problem found during the work (a red gate, a coder's leftover, a flaky test)
+becomes a queued block of the same run with `code-forge autopilot found`; findings about scope,
+security, deletes or publishing wait for you ([autopilot](docs/autopilot.md)).
 Tests and red→green proof establish that a change meets its acceptance clauses before closing.
 You control the final merge and publish permissions; coders cannot push or open draft PRs by
 default. See [the workflow](docs/how-it-works.md) and [concepts](docs/concepts.md).

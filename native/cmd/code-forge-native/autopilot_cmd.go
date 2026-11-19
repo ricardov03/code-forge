@@ -31,7 +31,7 @@ import (
 // reasons, and so does a binnacle whose data Go cannot read the way Node does.
 func init() { routes["autopilot"] = runAutopilot }
 
-const autopilotUsage = "usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes] | digest --run <id> [--json] | ratify <row-id> --run <id> [--json] | revert <row-id> --run <id> [--json]\n"
+const autopilotUsage = "usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes] | digest --run <id> [--json] | ratify <row-id> --run <id> [--json] | revert <row-id> --run <id> [--json] | found --run <id> (--source <gate|land|coder|flaky|handover|review> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--fingerprint <key>] | --report <file> | --list) [--from <block>] [--json]\n"
 
 const autopilotApproveNoYes = "autopilot approve: --yes is not accepted — only the owner approves a limit change, at a terminal; a flag could be passed by the orchestrator or a script, so approve always asks"
 
@@ -46,7 +46,7 @@ var autopilotSubUsage = func() map[string]string {
 	return out
 }()
 
-var autopilotSubs = []string{"start", "status", "stop", "ask", "waive", "round", "level", "approve", "binnacle", "log", "extend", "digest", "ratify", "revert"}
+var autopilotSubs = []string{"start", "status", "stop", "ask", "waive", "round", "level", "approve", "binnacle", "log", "extend", "digest", "ratify", "revert", "found"}
 
 var autopilotSpecs = map[string][2][]string{
 	"start":    {{"run", "until", "deadline", "blocks", "delegate", "allow", "deny", "budget", "stop-at"}, {"yes", "until-done"}},
@@ -60,6 +60,7 @@ var autopilotSpecs = map[string][2][]string{
 	"binnacle": {{"run", "link"}, {"json", "markdown"}},
 	"log":      {{"run"}, {"json", "markdown"}},
 	"extend":   {{"run", "until", "deadline"}, {"yes"}},
+	"found":    {{"run", "source", "title", "evidence", "evidence-file", "label", "fingerprint", "report", "from"}, {"list", "json"}},
 }
 
 // Seams for tests: the clock, the terminal probe and the grant id.
@@ -170,6 +171,9 @@ func runAutopilot(args []string) int {
 		} else if apdgSub(sub) {
 			autopilotRestored, autopilotLate = nil, 0
 			plan = func(o *runOut) int { return apdgRun(o, home, sub, args[1:]) }
+		} else if apfSub(sub) {
+			autopilotRestored, autopilotLate = nil, 0
+			plan = func(o *runOut) int { return apfRun(o, home, args[1:]) }
 		} else {
 			var flags autopilotFlags
 			flags, parseErr = autopilotParse(sub, args[1:])
