@@ -35,6 +35,8 @@
   {"name":"ci","summary":"Watch the CI runs of one commit","owner":false,"group":"ci"},
   {"name":"ci watch","summary":"Wait for the CI runs of a commit; name failed tests","owner":false,"group":"ci"},
   {"name":"cloud-coder","summary":"Send a block to the cloud coder and commit its patch","owner":false,"group":""},
+  {"name":"config","summary":"Check and fix the project configuration","owner":false,"group":"config"},
+  {"name":"config fix","summary":"Rewrite old config shapes this release refuses","owner":false,"group":"config"},
   {"name":"context","summary":"Build the context a coder gets","owner":false,"group":"context"},
   {"name":"context pack","summary":"Build the context pack of a block","owner":false,"group":"context"},
   {"name":"decisions","summary":"Show the decisions the autopilot signed","owner":false,"group":"decisions"},

@@ -247,6 +247,8 @@ func prepareUpgrade(args []string) (func(stdout, stderr io.Writer) int, handover
 		}
 		writeInstallsFile(file, rows)
 		fmt.Fprint(stdout, head.String()+line)
+		// B791: fix the cwd's .code-forge.yml old shapes; never fails upgrade.
+		fmt.Fprint(stdout, cfxUpgradeLines(cwd))
 		return 0
 	}, 0, true
 }

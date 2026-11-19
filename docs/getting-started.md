@@ -318,13 +318,38 @@ switch. Your `.code-forge.yml` settings are kept; install records track the link
 summary of a newer `init`, run `code-forge init` again in the project; it keeps the values you set
 by hand. What changed in each version is in [CHANGELOG.md](../CHANGELOG.md).
 
+Run `upgrade` in the project folder. After a successful upgrade it checks that folder's
+`.code-forge.yml` for shapes an older release accepted and this one refuses, and fixes them the way
+`code-forge config fix` does (below). It prints `config: fixed <rule> (<reason>)`, or `config ok`.
+It never fails the upgrade because of the config: when the file holds a YAML anchor, alias or tag,
+or does not load, nothing is changed and the line names the command to run.
+
+### Fix an old config
+
+```bash
+code-forge config fix --dry-run   # print the diff, write nothing
+code-forge config fix             # write the fix
+code-forge validate
+```
+
+Each fix is a named rule with a one-line reason. Only the lines of the old key change: comments,
+blank lines and key order stay. Unknown keys are listed (`unknown key review.judge: left in place`),
+never deleted. The fixer never adds a value, so it never writes a secret. A file with YAML anchors,
+aliases or tags (`&a`, `*a`, `<<`, `!!str`) is never edited: the command prints the change to make by
+hand and exits 1. `--file <path>` checks another file. Exit 0 means the file passes the schema.
+
+| Rule | Old shape | Fix |
+|---|---|---|
+| `gates-extra-invariants` | `gates.extra.invariants: <script>` (accepted before 0.22.0, never run) | removes the key, and `gates.extra` when it is left empty; to run the script as a gate, add it to `gates.custom` as `{name, argv}` |
+
 Tagged but not on npm yet? A maintainer can install the exact release from the repository:
 `git checkout vX.Y.Z && npm pack && npm install -g ./codedology-code-forge-X.Y.Z.tgz`, then
 `code-forge upgrade`. Switch back to the npm package with the first command above once it is published.
 
 | Command | Does |
 |---|---|
-| `code-forge upgrade [--source <path>]` | re-points every recorded skill install at this package's `skill/` folder (or at `--source`): symlinks are re-made, copies re-copied |
+| `code-forge upgrade [--source <path>]` | re-points every recorded skill install at this package's `skill/` folder (or at `--source`): symlinks are re-made, copies re-copied; then fixes old shapes in this folder's `.code-forge.yml` |
+| `code-forge config fix [--dry-run] [--file <path>]` | rewrites `.code-forge.yml` shapes an older release accepted and this one refuses; `--dry-run` prints the diff only |
 | `code-forge models --refresh --from-cli-caches` | refreshes the model catalog from the Codex and Grok CLI caches on this machine |
 | `code-forge remove [<harness>] [--scope project\|global]` | removes the skill links that `init` recorded |
 

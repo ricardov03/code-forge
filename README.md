@@ -120,12 +120,13 @@ default. See [the workflow](docs/how-it-works.md) and [concepts](docs/concepts.m
 | `code-forge outcome seal\|check` | Seal a specialist result and check its files before a caller uses it |
 | `code-forge pipeline status\|next` | See specialist step states and the next ready step |
 | `code-forge logs` | Inspect local errors; `logs report` previews a public issue |
-| `code-forge upgrade` | Refresh installed skill copies after upgrading the package |
+| `code-forge upgrade` | Refresh installed skill copies after upgrading the package, then fix the project config |
+| `code-forge config fix [--dry-run]` | Rewrite `.code-forge.yml` shapes an older release accepted and this one refuses |
 | `code-forge --help` | List every verb; each verb prints its own usage on bad arguments |
 
 The skill normally calls `run`, `block`, `worker`, `spawn`, `s2`, `author`, `facts`, and
 `review-file` for you. See the [workflow](docs/how-it-works.md) for these lower-level operations.
-To upgrade, run `npm install -g @codedology/code-forge@latest`, then `code-forge upgrade` for a version summary and release notes; add `--plain` for just the install lines.
+To upgrade, run `npm install -g @codedology/code-forge@latest`, then `code-forge upgrade` for a version summary and release notes; add `--plain` for just the install lines. Run it in the project folder: it then fixes old shapes in `.code-forge.yml` (as `code-forge config fix` does) and prints what it changed, or `config ok`.
 
 ### Configuration reference
 

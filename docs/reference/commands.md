@@ -7,6 +7,7 @@ This page lists the CLI commands and their usage. It is generated from the Go he
 - [block](#block)
 - [ci](#ci)
 - [cloud-coder](#cloud-coder)
+- [config](#config)
 - [context](#context)
 - [decisions](#decisions)
 - [docs](#docs)
@@ -399,6 +400,22 @@ Send a block to the cloud coder and commit its patch
 
 ```text
 usage: code-forge cloud-coder --run <r> --block <id>
+```
+
+## config
+
+Check and fix the project configuration
+
+```text
+usage: code-forge config fix [--dry-run] [--file <path>]
+```
+
+### config fix
+
+Rewrite old config shapes this release refuses
+
+```text
+usage: code-forge config fix [--dry-run] [--file <path>]
 ```
 
 ## context
