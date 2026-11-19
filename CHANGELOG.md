@@ -8,6 +8,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- `gates run --run <r> --block <id>` whose test gate runs the full suite in the shared checkout while other blocks of the run are open prints `gates run: full suite in a shared tree (N other open blocks); for this block's tests use --changed, or proof.isolation: worktree` and `gate.done` records `shared_tree: N`; `init` for a Laravel project or `review.workers` > 1 prints the worktree hint under the isolation line (JSON `settings."proof.isolation".hint`) (B870)
 - `block land` with `land.require_ci: github` no longer needs a human between a rebase and green CI: a tip with no CI run is pushed (never forced) to its CI branch, or after a rebase to a new `ci-<block>-<n>` branch with a draft PR "Replaces #N (rebased onto <sha>)" that closes the old PR; land waits for CI on that sha up to `land.ci_wait` (default `30m`, one progress line a minute) and a timeout refuses with the same land command to resume; a red run names the failed jobs; an SSH push (CI branch or main) that fails on auth is retried once over HTTPS with the gh credential helper; after the land the block's CI PRs are closed. New keys `land.ci_wait`, `land.ci_branch_prefix` (default `ci-`), `land.ci_remote` (default `origin`) (B796).
 
 ### Added

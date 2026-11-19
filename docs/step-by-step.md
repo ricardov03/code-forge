@@ -581,7 +581,13 @@ For a fix round:
 code-forge gates run --run demo-1 --block B1 --changed
 ```
 
-Run the command without `--changed` again before close. To run only named block tests,
+Run the command without `--changed` again before close. In a shared checkout (`proof.isolation`
+`export` or `lock`) that full suite also tests the other open blocks' half-done edits: the run
+prints `gates run: full suite in a shared tree (N other open blocks); for this block's tests use
+--changed, or proof.isolation: worktree` and `gate.done` records `shared_tree: N`. With several
+coders, `--changed` runs only the block's tests in any language (a Laravel block's `*Test.php`
+files and the stem-paired tests of its changed `.php` files are appended to `php artisan test`),
+and `proof.isolation: worktree` gives every block its own tree. To run only named block tests,
 set `gates.test: [node, --test, "{test_files}"]` in the config. Without that whole argument,
 the configured test command runs as written. `{changed_files}` can narrow lint and format checks.
 The **baseline** is the saved file content from the last passing checks.

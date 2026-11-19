@@ -40,6 +40,7 @@ const gatesUsage = "usage: code-forge gates detect|run|secret-scan|safe-edit|sco
 	"  gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.\n" +
 	"  gates run --run --block --changed: the Go test selection (the block's tests, tests that import a changed file); never the full suite; an empty selection skips the test gate.\n" +
 	"  gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.\n" +
+	"  gates run --run --block: a full suite in the shared checkout while other blocks of the run are open there prints 'full suite in a shared tree (N other open blocks)' and records shared_tree: N on gate.done; use --changed for the block's tests, or proof.isolation: worktree.\n" +
 	"  gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.\n"
 
 var gatesSubUsage = map[string]string{
