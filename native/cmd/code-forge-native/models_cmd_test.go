@@ -35,7 +35,7 @@ func TestB455ModelsMatchesNode(t *testing.T) {
 		{[]string{"models", "-h"}, 0, modelsUsage, ""},
 		{[]string{"models", "--refresh"}, 2, "", "[code-forge:error] models --refresh requires --from-cli-caches (the only refresh source in 0.1)\n"},
 		{[]string{"models", "--from-cli-caches"}, 2, "", "[code-forge:error] --from-cli-caches requires --refresh\n"},
-		{[]string{"models", "--refresh", "--bogus"}, 2, "", "[code-forge:error] unknown argument: --bogus\n"},
+		{[]string{"models", "--refresh", "--bogus"}, 2, "", "models: unknown flag \"--bogus\"\n" + usageText("models")},
 		{[]string{"models", "--refresh", "--from-cli-caches"}, 0, "[code-forge:info] refreshed from 2 CLI cache(s) -> " + cache + " (status: seen-in-cache)\n" + listing, ""},
 	})
 	data, _ := os.ReadFile(cache)

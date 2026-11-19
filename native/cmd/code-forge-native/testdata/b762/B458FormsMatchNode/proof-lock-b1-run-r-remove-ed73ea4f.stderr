@@ -1,1 +1,2 @@
 proof lock: unknown flag "--remove"
+usage: code-forge proof lock <block> --run <r>

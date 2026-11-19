@@ -115,9 +115,9 @@ func TestB878EveryCommandHelpAndUnknownFlag(t *testing.T) {
 		}
 		t.Run(entry.name+" --bogus-flag", func(t *testing.T) {
 			res, _ := b690aInRepo(t, append(words, "--bogus-flag")...)
-			usage := strings.Contains(strings.ToLower(res.stderr), "usage:")
-			if res.code != 2 || res.err != nil || res.stdout != "" || !(usage || strings.Contains(res.stderr, "--bogus-flag")) {
-				t.Fatalf("code=%d err=%v stdout=%q stderr=%q; want exit 2, no stdout, and stderr naming --bogus-flag or the usage", res.code, res.err, res.stdout, res.stderr)
+			// B895: every visible verb prints its usage line with the refusal.
+			if res.code != 2 || res.err != nil || res.stdout != "" || !strings.Contains(strings.ToLower(res.stderr), "usage:") {
+				t.Fatalf("code=%d err=%v stdout=%q stderr=%q; want exit 2, no stdout, and the usage on stderr", res.code, res.err, res.stdout, res.stderr)
 			}
 		})
 	}

@@ -189,7 +189,7 @@ func TestB635RatifyOwnerOnly(t *testing.T) {
 	if code, _, errText := apdgSettleCall(t, f, "ratify", id, "--run", "r-test"); code != 2 || errText != "autopilot ratify needs the human at a terminal to confirm; nothing was recorded (there is no --yes)\n" {
 		t.Fatalf("no tty = %d %q", code, errText)
 	}
-	if code, _, errText := apdgSettleCall(t, f, "ratify", id, "--run", "r-test", "--yes"); code != 2 || errText != "autopilot ratify: unknown flag \"--yes\"\n" {
+	if code, _, errText := apdgSettleCall(t, f, "ratify", id, "--run", "r-test", "--yes"); code != 2 || errText != "autopilot ratify: unknown flag \"--yes\"\n"+usageText("autopilot ratify") {
 		t.Fatalf("--yes = %d %q", code, errText)
 	}
 	b493HumanSeam(t, true, humanask.Cancelled)

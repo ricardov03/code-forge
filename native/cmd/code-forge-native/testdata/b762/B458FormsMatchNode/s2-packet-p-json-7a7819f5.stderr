@@ -1,1 +1,2 @@
 s2: unknown flag "--json"
+usage: code-forge s2 --packet <file.json> [--run <id>] [--block <id>] [--timeout <seconds>]

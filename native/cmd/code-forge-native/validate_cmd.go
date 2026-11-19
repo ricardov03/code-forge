@@ -38,6 +38,10 @@ func prepareValidate(args []string) (func(stdout, stderr io.Writer) int, handove
 	cwd := physicalCwd()
 	file := filepath.Join(cwd, config.Filename)
 	for i := 0; i < len(args); i++ {
+		if args[i] != "--file" && strings.HasPrefix(args[i], "-") {
+			// B895: an unknown flag is refused like every verb's; the router adds the usage.
+			return usageUnknownFlag("validate", args[i]), 0, true
+		}
 		if args[i] != "--file" {
 			return usage("unknown argument: " + args[i])
 		}

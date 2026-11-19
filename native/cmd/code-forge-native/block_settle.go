@@ -88,7 +88,7 @@ func settleParse(args []string) (settleOptions, bool, string) {
 			}
 		default:
 			if strings.HasPrefix(arg, "-") {
-				return o, false, "unknown flag " + arg
+				return o, false, "unknown flag " + statusQuote(arg) // B895: quoted like every verb
 			}
 			pos = append(pos, arg)
 		}
