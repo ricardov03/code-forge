@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\Feature\StatusTest" file="tests/Feature/StatusTest.php" tests="2" assertions="5" errors="0" failures="0" skipped="0" time="0.667924">
+    <testcase name="it reports (v1.0) [ok] status + a/b?" file="tests/Feature/StatusTest.php::it reports (v1.0) [ok] status + a/b?" class="Tests\Feature\StatusTest" classname="Tests.Feature.StatusTest" assertions="2" time="0.648464"/>
+    <testcase name="it reports a json body" file="tests/Feature/StatusTest.php::it reports a json body" class="Tests\Feature\StatusTest" classname="Tests.Feature.StatusTest" assertions="3" time="0.019460"/>
+  </testsuite>
+</testsuites>

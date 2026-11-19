@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -34,8 +33,9 @@ import (
 // set, the export and its signed row, the journal, the revert from a
 // temporary index or the assertion deletion, the filtered node:test command
 // (RED, then GREEN), the restore, the signed red-green row and the JSON.
-// A configured proof.runners list and the Pest default runner hand over
-// (proof-runner).
+// B827: a test a proof.runners entry matches, and a .php test in a
+// Pest/Laravel project (the default JUnit runner), run their runner with
+// src/proof/runners.mjs, junit.mjs and xcresult.mjs (proof_runners.go).
 
 var (
 	proofTestPath     = regexp.MustCompile(`(?:^|/)(?:test|tests|__tests__|spec)/|\.(?:test|spec)\.[cm]?[jt]sx?$|Test\.php$`)
@@ -59,6 +59,9 @@ type proofRG struct {
 	setup                                                   [][]string
 	linkDirs, copyUntracked                                 []string
 	exp                                                     *proofExported
+	runners                                                 []prRunner
+	hook                                                    *prHook
+	timeout                                                 time.Duration
 }
 
 // proofRGFail is the refusal of an error Node words the same way; anything
@@ -126,23 +129,42 @@ func proofRedGreenPlan(runID, blockID, file, testCase string, hasCase bool, mech
 		if len(list) == 0 {
 			return nil, proofRefuse(sub, fmt.Sprintf("run %s: proof.runners in the run snapshot is an empty list", proofJSText(record.Get("run_id"))), 1), 0
 		}
-		return nil, nil, hProofRunner
+		checked, err := prCheckedRunners(list)
+		if err != nil {
+			return nil, proofRefuse(sub, err.Error(), 1), 0
+		}
+		rg.runners = checked
 	}
-	if strings.HasSuffix(file, ".php") && proofHasPest(rg.dir) {
-		return nil, nil, hProofRunner
+	// Explicit commands come from the snapshot; unmatched PHP tests get the Pest default.
+	entry := prSelectRunner(rg.runners, file)
+	if entry == nil {
+		entry = prPestRunner(rg.dir, file, hasCase)
 	}
-	if !proofNodeTestFile.MatchString(file) {
-		return nil, proofRefuse(sub, "only node:test files (.mjs, .cjs, .js) have a filtered test command in this version — add a proof.runners entry for it (see proof.md §2)", 1), 0
+	if entry != nil {
+		hook, err := prNewHook(entry, file, testCase, hasCase, runID)
+		if err != nil {
+			code := 1
+			if pe, ok := err.(*proofError); ok && pe.code == "usage" {
+				code = 2
+			}
+			return nil, proofRefuse(sub, err.Error(), code), 0
+		}
+		rg.hook, rg.timeout = hook, entry.timeout
+	} else {
+		if !proofNodeTestFile.MatchString(file) {
+			return nil, proofRefuse(sub, "only node:test files (.mjs, .cjs, .js) have a filtered test command in this version — add a proof.runners entry for it (see proof.md §2)", 1), 0
+		}
+		node, err := proofNode()
+		if err != nil {
+			return nil, nil, hProofRedGreen
+		}
+		rg.argv = []string{node, "--test"}
+		if hasCase {
+			rg.argv = append(rg.argv, "--test-name-pattern", "^"+proofRegexMeta.ReplaceAllString(testCase, `\$0`)+"$")
+		}
+		rg.argv = append(rg.argv, file)
+		rg.timeout = proofTestTimeout
 	}
-	node, err := proofNode()
-	if err != nil {
-		return nil, nil, hProofRedGreen
-	}
-	rg.argv = []string{node, "--test"}
-	if hasCase {
-		rg.argv = append(rg.argv, "--test-name-pattern", "^"+proofRegexMeta.ReplaceAllString(testCase, `\$0`)+"$")
-	}
-	rg.argv = append(rg.argv, file)
 	rg.label = file
 	if hasCase {
 		rg.label = file + "::" + testCase
@@ -195,12 +217,18 @@ func proofRedGreenPlan(runID, blockID, file, testCase string, hasCase bool, mech
 				}
 			}
 		}
-		if mechanism != "assertion-deletion" && f != file && !proofTestPath.MatchString(f) {
+		if mechanism != "assertion-deletion" && f != file && !proofTestPath.MatchString(f) && !prRunnerCovers(rg.runners, f) {
 			rg.sources = append(rg.sources, f)
 		}
 	}
 	if mechanism == "revert" && len(rg.sources) == 0 {
 		return nil, proofRefuse(sub, "block "+blockID+" changed no non-test source file to revert — use --mechanism assertion-deletion", 2), 0
+	}
+	// the adapter's precheck runs before the export is built and before any file is reverted
+	if rg.hook != nil {
+		if err := prPrecheck(rg.hook.runner, runID); err != nil {
+			return nil, proofRefuse(sub, err.Error(), 1), 0
+		}
 	}
 	if rg.isolation == "export" {
 		exportCfg := jsObject(jsObject(cfg["proof"])["export"])
@@ -225,34 +253,6 @@ func proofRedGreenPlan(runID, blockID, file, testCase string, hasCase bool, mech
 		}
 	}
 	return rg, nil, 0
-}
-
-// proofHasPest is defaultPestRunner's detection: an artisan file, a
-// vendor/bin/pest file, or pestphp/pest in composer.json.
-func proofHasPest(dir string) bool {
-	isFile := func(rel string) bool {
-		info, err := os.Stat(filepath.Join(dir, rel))
-		return err == nil && info.Mode().IsRegular()
-	}
-	if isFile("artisan") || isFile("vendor/bin/pest") {
-		return true
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "composer.json"))
-	if err != nil {
-		return false
-	}
-	var composer map[string]any
-	if json.Unmarshal(data, &composer) != nil {
-		return false
-	}
-	for _, key := range []string{"require", "require-dev"} {
-		if section, ok := composer[key].(map[string]any); ok {
-			if _, ok := section["pestphp/pest"].(string); ok {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func proofAssertTestFile(dir, file string) *proofOutcome {
@@ -305,6 +305,7 @@ type proofRGResult struct {
 	proven     bool
 	setup      bool
 	outputTail string
+	runnerRed  *prRed
 }
 
 // run is the rest of the verb after the export: the red→green proof, its
@@ -359,6 +360,20 @@ func (rg *proofRG) run(stdout, stderr io.Writer) int {
 		{Key: "red_kind", Value: redKind}, {Key: "red", Value: redVerdict}, {Key: "green", Value: result.green},
 		{Key: "proven", Value: proven}, {Key: "failed", Value: failed}, {Key: "covers", Value: proofList(coverList)},
 	}
+	// only when a runner really ran: its adapter, the bounded failed test
+	// names and the env variable names (row and JSON alike)
+	var runnerFields ledger.Object
+	if rg.hook != nil {
+		failedTests := []string{}
+		if result.runnerRed != nil {
+			failedTests = result.runnerRed.failedTests
+		}
+		runnerFields = ledger.Object{
+			{Key: "runner", Value: rg.hook.runner.adapter}, {Key: "failed_tests", Value: proofList(failedTests)},
+			{Key: "env_keys", Value: proofList(rg.hook.runner.envKeys())},
+		}
+	}
+	fields = append(fields, runnerFields...)
 	if result.setup {
 		fields = append(fields, ledger.Field{Key: "reason", Value: "setup"}, ledger.Field{Key: "output_tail", Value: result.outputTail})
 	}
@@ -370,6 +385,7 @@ func (rg *proofRG) run(stdout, stderr io.Writer) int {
 		{Key: "isolation", Value: rg.isolation}, {Key: "red", Value: redVerdict}, {Key: "red_kind", Value: redKind},
 		{Key: "green", Value: result.green}, {Key: "proven", Value: proven},
 	}
+	out = append(out, runnerFields...)
 	if result.setup {
 		out = append(out, ledger.Field{Key: "reason", Value: "setup"}, ledger.Field{Key: "output_tail", Value: result.outputTail})
 	}
@@ -412,7 +428,7 @@ func (rg *proofRG) redGreen(workDir string, stderr io.Writer) (*proofRGResult, e
 	}
 	env := proofTestEnv()
 	for _, argv := range rg.setup {
-		res := proofExec(argv, workDir, env, rg.runID, proofTestTimeout)
+		res := proofExec(argv, workDir, env, rg.runID, rg.timeout)
 		if res.ok() {
 			continue
 		}
@@ -468,6 +484,7 @@ func (rg *proofRG) redGreen(workDir string, stderr io.Writer) (*proofRGResult, e
 	if err := proofWriteJournal(workDir, paths, mechanism, label); err != nil {
 		return nil, err
 	}
+	var runnerRed *prRed
 	red, err := func() (red *proofRedParse, err error) {
 		defer func() {
 			if _, restoreErr := proofRestoreJournal(workDir); restoreErr != nil {
@@ -488,7 +505,15 @@ func (rg *proofRG) redGreen(workDir string, stderr io.Writer) (*proofRGResult, e
 				}
 			}
 		}
-		parsed := proofParseRed(proofExec(rg.argv, workDir, env, rg.runID, proofTestTimeout))
+		if rg.hook != nil {
+			r, err := rg.hook.red(workDir, env, rg.timeout)
+			if err != nil {
+				return nil, err
+			}
+			runnerRed = r
+			return &proofRedParse{verdict: r.verdict, kind: r.kind, failed: r.failed}, nil
+		}
+		parsed := proofParseRed(proofExec(rg.argv, workDir, env, rg.runID, rg.timeout))
 		return &parsed, nil
 	}()
 	if err != nil {
@@ -502,12 +527,18 @@ func (rg *proofRG) redGreen(workDir string, stderr io.Writer) (*proofRGResult, e
 	var green any
 	if red.verdict == "RED" {
 		green = "NOT_GREEN"
-		if proofExec(rg.argv, workDir, env, rg.runID, proofTestTimeout).ok() {
+		if rg.hook != nil {
+			// GREEN needs exit 0 AND a report in which every test that
+			// failed at RED passed; only the exact word GREEN proves
+			if rg.hook.green(workDir, env, rg.timeout, runnerRed) == "GREEN" {
+				green = "GREEN"
+			}
+		} else if proofExec(rg.argv, workDir, env, rg.runID, rg.timeout).ok() {
 			green = "GREEN"
 		}
 		fmt.Fprint(stderr, green.(string)+" "+label+"\n")
 	}
-	return &proofRGResult{mechanism: mechanism, red: red, green: green, proven: red.verdict == "RED" && green == "GREEN"}, nil
+	return &proofRGResult{mechanism: mechanism, red: red, green: green, proven: red.verdict == "RED" && green == "GREEN", runnerRed: runnerRed}, nil
 }
 
 // proofReadBaseFiles is readBaseFiles: each file's bytes at base, or nil

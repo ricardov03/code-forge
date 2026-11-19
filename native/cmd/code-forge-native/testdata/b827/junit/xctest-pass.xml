@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<testsuites>
+<testsuite name="TestResults" errors="0" tests="2" failures="0" time="0.163505541">
+<testcase classname="KitTests.ClampXCTests" name="testKeepsInside" time="0.081750458">
+</testcase>
+<testcase classname="KitTests.ClampXCTests" name="testCapsHigh" time="0.081755083">
+</testcase>
+</testsuite>
+</testsuites>

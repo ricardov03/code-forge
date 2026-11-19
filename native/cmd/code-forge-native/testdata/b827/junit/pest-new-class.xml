@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\Unit\GreetingTest" file="tests/Unit/GreetingTest.php" tests="1" assertions="0" errors="1" failures="0" skipped="0" time="0.007324">
+    <testcase name="greeting comes from the owned class" file="tests/Unit/GreetingTest.php::greeting comes from the owned class" class="Tests\Unit\GreetingTest" classname="Tests.Unit.GreetingTest" assertions="0" time="0.007324">
+      <error type="Error">greeting comes from the owned classError: Class "App\Support\Greeting" not found
+at tests/Unit/GreetingTest.php:6</error>
+    </testcase>
+  </testsuite>
+</testsuites>

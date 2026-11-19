@@ -1,0 +1,22 @@
+
+  [39;41;1m FAIL [39;49;22m[39m Tests\Feature\GreetingTest[39m
+  [31;1m⨯[39;22m[90m [39m[90mit greets from the owned class[39m[90m                                      [39m [90m0.36s[39m  
+  [31m────────────────────────────────────────────────────────────────────────────[39m  
+  [41;1m FAILED [49;22m [1mTests\Feature\GreetingTest[22m [90m>[39m it greets from the owned clas… [41;1m Error [49;22m  
+[39;1m  Class "App\Support\Greeting" not found[39;22m
+
+  at [32mtests/Feature/GreetingTest.php[39m:[32m6[39m
+      2▕ 
+      3▕ use App\Support\Greeting;
+      4▕ 
+      5▕ it('greets from the owned class', function () {
+  ➜   6▕     expect(Greeting::text())->toBe('hello');
+      7▕ });
+      8▕
+
+  [33m1   [39m[39;1mtests/Feature/GreetingTest.php[39;22m:[39;1m6[39;22m
+
+
+  [90mTests:[39m    [31;1m1 failed[39;22m[90m (0 assertions)[39m
+  [90mDuration:[39m [39m1.56s[39m
+

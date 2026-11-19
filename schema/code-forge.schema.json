@@ -484,7 +484,7 @@
         "runners": {
           "type": "array",
           "minItems": 1,
-          "description": "How proof red-green runs tests. The first matching entry wins. With no match, Node files use node:test and PHP tests in Pest/Laravel projects use a default JUnit runner. run reload may append runners but cannot change, reorder or remove existing entries. With runners set no block may own .code-forge.yml. An empty list is refused: leave the key out for defaults.",
+          "description": "How proof red-green runs tests. The first matching entry wins. With no match, Node files use node:test and PHP tests in Pest/Laravel projects use a default JUnit runner (php artisan test, or vendor/bin/pest without artisan). Runners run in the Go engine with no Node (B827). run reload may append runners but cannot change, reorder or remove existing entries. With runners set no block may own .code-forge.yml. An empty list is refused: leave the key out for defaults.",
           "items": {
             "type": "object",
             "additionalProperties": false,

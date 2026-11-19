@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\Feature\GreetingTest" file="tests/Feature/GreetingTest.php" tests="1" assertions="1" errors="0" failures="0" skipped="0" time="0.168135">
+    <testcase name="it greets from the owned class" file="tests/Feature/GreetingTest.php::it greets from the owned class" class="Tests\Feature\GreetingTest" classname="Tests.Feature.GreetingTest" assertions="1" time="0.168135"/>
+  </testsuite>
+</testsuites>
