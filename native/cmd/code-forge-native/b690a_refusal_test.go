@@ -111,16 +111,23 @@ func TestB690aRefusalWritesHandOverRow(t *testing.T) {
 // file names at B690b), which the unknown-verb text keeps.
 var b690bNodeVerbs = []string{"author", "autopilot", "block", "ci", "cloud-coder", "context", "decisions", "docs", "doctor", "facts", "gates", "heal", "help", "init", "jev", "keys", "land", "ledger", "list", "logs", "models", "native-status", "outcome", "pipeline", "plan", "proof", "queue", "remove", "report", "resolve", "review", "review-file", "run", "s2", "setup", "spawn", "status", "sweep", "tools", "upgrade", "validate", "version", "worker"}
 
-// An unknown verb prints Node's text (the verb list is the old src/cli's
-// verb file names, sorted), exit 1, and writes nothing at all.
+// An unknown verb prints the unknown-verb text (since B878: the usage line
+// and the visible verbs of the help table, sorted), exits 2 (a usage error)
+// and writes nothing at all.
 func TestB690aUnknownVerbMatchesNode(t *testing.T) {
-	// config is the first verb added after Node (B791); the list names it.
-	verbs := append(append([]string(nil), b690bNodeVerbs...), "config")
+	// The visible verbs: the Node router's list (B690b) and config (B791),
+	// without the hidden land and native-status.
+	verbs := []string{"config"}
+	for _, verb := range b690bNodeVerbs {
+		if verb != "land" && verb != "native-status" {
+			verbs = append(verbs, verb)
+		}
+	}
 	sort.Strings(verbs)
-	want := "code-forge: unknown verb \"private-verb\"\nVerbs:\n  " + strings.Join(verbs, "\n  ") + "\n"
+	want := "code-forge: unknown verb \"private-verb\"\nusage: code-forge <command> [options] [arguments]\nVerbs:\n  " + strings.Join(verbs, "\n  ") + "\nRun code-forge help for what each one does.\n"
 	res, repo := b690aInRepo(t, "private-verb", "private-value")
-	if res.code != 1 || res.err != nil || res.stdout != "" || res.stderr != want {
-		t.Fatalf("code=%d err=%v stdout=%q stderr=%q; want exit 1 and %q", res.code, res.err, res.stdout, res.stderr, want)
+	if res.code != 2 || res.err != nil || res.stdout != "" || res.stderr != want {
+		t.Fatalf("code=%d err=%v stdout=%q stderr=%q; want exit 2 and %q", res.code, res.err, res.stdout, res.stderr, want)
 	}
 	if files := append(b690aFiles(t, repo), b690aFiles(t, res.home)...); len(files) != 0 {
 		t.Errorf("files written %q; want none", files)
@@ -156,9 +163,9 @@ func TestB690aUnknownVerbRedactsLikeNode(t *testing.T) {
 	t.Run("nothing registered prints the verb as Node does", func(t *testing.T) {
 		res, _ := b690aInRepo(t, token)
 		// Recorded: node bin/code-forge.mjs <token> (HOME empty), first two lines.
-		want := "code-forge: unknown verb \"sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\nVerbs:\n"
-		if res.code != 1 || !strings.HasPrefix(res.stderr, want) {
-			t.Fatalf("code=%d stderr=%q; want exit 1 and prefix %q", res.code, res.stderr, want)
+		want := "code-forge: unknown verb \"sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\nusage: code-forge <command> [options] [arguments]\nVerbs:\n"
+		if res.code != 2 || !strings.HasPrefix(res.stderr, want) {
+			t.Fatalf("code=%d stderr=%q; want exit 2 and prefix %q", res.code, res.stderr, want)
 		}
 	})
 	t.Run("a registered secret is masked", func(t *testing.T) {
@@ -169,9 +176,9 @@ func TestB690aUnknownVerbRedactsLikeNode(t *testing.T) {
 			return unknownVerb(token)
 		})
 		// Recorded: redact() of the same text after registerSecret(token).
-		want := "code-forge: unknown verb \"[REDACTED]\"\nVerbs:\n"
-		if code != 1 || !strings.HasPrefix(stderr, want) || strings.Contains(stderr, token) {
-			t.Fatalf("code=%d stderr=%q; want exit 1, prefix %q and no raw token", code, stderr, want)
+		want := "code-forge: unknown verb \"[REDACTED]\"\nusage: code-forge <command> [options] [arguments]\nVerbs:\n"
+		if code != 2 || !strings.HasPrefix(stderr, want) || strings.Contains(stderr, token) {
+			t.Fatalf("code=%d stderr=%q; want exit 2, prefix %q and no raw token", code, stderr, want)
 		}
 	})
 }

@@ -18,6 +18,7 @@ import (
 	"path"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,57 @@ var gatesSubUsage = map[string]string{
 	"scope":           "usage: code-forge gates scope [--cwd <dir>] --base <sha>\n",
 	"acceptance":      "usage: code-forge gates acceptance --clauses <file.json> --tap <file>\n",
 	"transcript-grep": "usage: code-forge gates transcript-grep --file <path> [--cwd <dir>]\n",
+}
+
+// gatesSubFlags lists the flags each gates subcommand reads (B878): the
+// flags that take a value, then the flags that stand alone.
+var gatesSubFlags = map[string][2][]string{
+	"detect":          {{"--cwd"}, nil},
+	"run":             {{"--cwd", "--timeout-ms", "--slug", "--run", "--block"}, {"--full", "--changed", "--auto-rebase", "--allow-stale-base", "--preflight", "--no-preflight", "--json"}},
+	"secret-scan":     {{"--cwd", "--file"}, nil},
+	"safe-edit":       {{"--cwd", "--base"}, nil},
+	"scope":           {{"--cwd", "--base"}, nil},
+	"acceptance":      {{"--clauses", "--tap"}, nil},
+	"transcript-grep": {{"--file", "--cwd"}, nil},
+}
+
+// gatesUnknownFlag is the first flag of args (after the subcommand) that sub
+// does not read, or "" (B878: an unknown flag was ignored, so a typo such as
+// `gates run --chnaged` ran the full suite and exited 0). A value flag takes
+// the next argument unless it starts with "--" (gatesFlag's rule); a known
+// flag written as --name=value keeps its own handling; "--" ends the flags.
+func gatesUnknownFlag(sub string, args []string) string {
+	spec, ok := gatesSubFlags[sub]
+	if !ok {
+		return ""
+	}
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			return ""
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			continue
+		}
+		name, _, inline := strings.Cut(arg, "=")
+		switch {
+		case slices.Contains(spec[0], name):
+			if !inline && i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+				i++
+			}
+		case slices.Contains(spec[1], name):
+		default:
+			return arg
+		}
+	}
+	return ""
+}
+
+// gatesRefuseUnknownFlag writes the B878 refusal of an unknown flag: one
+// line naming it, then the subcommand's usage, as one write (the error-log
+// message keeps both).
+func gatesRefuseUnknownFlag(sub, flag string) {
+	gatesErrf("gates %s: unknown flag %s\n%s", sub, statusQuote(flag), gatesSubUsage[sub])
 }
 
 // gatesKnownSubs is breadcrumbs.mjs SUBCOMMANDS.gates.
@@ -117,7 +169,16 @@ func gatesOther(args []string) int {
 	var value ledger.Object
 	code := 0
 	var err error
+	if flag := gatesUnknownFlag(sub, args); flag != "" {
+		gatesRefuseUnknownFlag(sub, flag)
+		sub, code = "", 2
+	}
 	switch sub {
+	case "":
+		if code == 0 {
+			gatesErrf("%s", gatesUsage)
+			code = 2
+		}
 	case "detect":
 		value, code, err = gatesDetectSub(args)
 	case "secret-scan":

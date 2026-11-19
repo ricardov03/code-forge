@@ -17,6 +17,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Fixed
 
 - `status --help`, `decisions [list] --help` and `docs [sync|path] --help` (also `-h`) print the help page (Description, Usage, Options) and exit 0, like every other command; before they exited 2 with `unknown flag "--help"` or the bare usage line on stderr (B877)
+- An unknown flag is a usage error everywhere: `gates run`, `gates detect` and the other `gates` subcommands print `gates <sub>: unknown flag "<flag>"` and their usage and exit 2 before any gate runs (a typo such as `--chnaged` used to run the full suite and exit 0), and `version` with any argument prints its usage and exits 2. An unknown verb now exits 2 with a usage line and lists only the visible verbs (no `land` or `native-status`). A test runs every command of the help table with `--help` and with an unknown flag (B878)
 
 ## [0.25.1] — 2026-11-19
 
