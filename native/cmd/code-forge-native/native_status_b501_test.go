@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -57,7 +56,10 @@ func b501Stdin(t *testing.T, data string) {
 	t.Cleanup(func() { os.Stdin = saved; _ = file.Close() })
 }
 
-const b501RouterLine = "code-forge: verb \"native-status\" has no default export function\n"
+// b501Refusal is B879's usage error for an argument.
+func b501Refusal(arg string) string {
+	return nativeStatusUsageText + "native-status: takes no arguments (got " + arg + "); it reads status records piped on stdin\nnext: code-forge status\n"
+}
 
 var b501NativeStatusCases = []struct{ in, want string }{
 	{`{"record":{"run_id":"r1","status":"active","blocks":{"B1":{"status":"open","level":"L2"},"B2":{"status":"closed"},"B3":{"status":"open","attempt":2}}},"rows":[{"run":"r1","block":"B1","event":"gate.red","gate":"tests","reason":"timeout"},{"run":"r1","event":"gate.done","block":"B1","flaky":["a"]},{"run":"r1","block":"B3","event":"session","role":"coder","provider":"openai","model":"gpt","tokens_in":1000,"tokens_out":1000,"level":"L1"}]}`,
@@ -123,8 +125,8 @@ var b501NativeStatusCases = []struct{ in, want string }{
 }
 
 // Every line shape Node's companion answers (statusOf with gateDetails false:
-// no timeout result, no flaky list), then the router's line, exit 1, the
-// breadcrumb and the error-log entry, all in Go.
+// no timeout result, no flaky list), exit 0 (B879: no router line), the
+// breadcrumb and no error-log entry, all in Go.
 func TestB501NativeStatusServesEveryLineInGo(t *testing.T) {
 	home := b501NativeStatusFixture(t, true)
 	input, want := "", ""
@@ -133,18 +135,16 @@ func TestB501NativeStatusServesEveryLineInGo(t *testing.T) {
 		want += c.want + "\n"
 	}
 	b501Stdin(t, input)
-	code, out, errText := runCaptured(t, "native-status", "a", "--x")
-	if code != 1 || out != want || errText != b501RouterLine {
+	code, out, errText := runCaptured(t, "native-status")
+	if code != 0 || out != want || errText != "" {
 		t.Fatalf("code=%d\nstdout=%s\nwant  =%s\nstderr=%q", code, out, want, errText)
 	}
 	crumbs, _ := os.ReadFile(filepath.Join(home, ".code-forge", "logs", "breadcrumbs.json"))
 	if string(crumbs) != "[\"native-status\"]\n" {
 		t.Fatalf("breadcrumbs = %q", crumbs)
 	}
-	log, _ := os.ReadFile(filepath.Join(home, ".code-forge", "logs", "errors.jsonl"))
-	entry := string(log)
-	if strings.Count(entry, "\n") != 1 || !strings.Contains(entry, `"verb":"native-status","sub":null,"flags":["--x"],"exit":1,"kind":"error","message":"code-forge: verb \"native-status\" has no default export function","stack":null,"cleaned":[],"fp":"72c04116089e","before":[]}`) {
-		t.Fatalf("errors.jsonl = %s", entry)
+	if _, err := os.Stat(filepath.Join(home, ".code-forge", "logs", "errors.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("errors.jsonl written: %v", err)
 	}
 }
 
@@ -159,18 +159,18 @@ func TestB501NativeStatusLineEndingsAsReadline(t *testing.T) {
 		`{"runs":[{"run_id":"b","status":null,"mode":"plan","spent_usd":0,"unknown_usd_sessions":0,"budget_usd":5,"blocks":[],"more":0,"closed":0,"stopped":0}]}` + "\n" +
 		`{"runs":[{"run_id":"c","status":null,"mode":"plan","spent_usd":null,"unknown_usd_sessions":null,"budget_usd":5,"blocks":[],"more":0,"closed":0,"stopped":0}]}` + "\n"
 	code, out, errText := runCaptured(t, "native-status")
-	if code != 1 || out != want || errText != b501RouterLine {
+	if code != 0 || out != want || errText != "" {
 		t.Fatalf("code=%d\nstdout=%s\nwant  =%s\nstderr=%q", code, out, want, errText)
 	}
 	b501Stdin(t, "")
 	code, out, errText = runCaptured(t, "native-status")
-	if code != 1 || out != "" || errText != b501RouterLine {
+	if code != 0 || out != "" || errText != "" {
 		t.Fatalf("empty stdin: code=%d stdout=%q stderr=%q", code, out, errText)
 	}
 }
 
 // The router prints USAGE for native-status --help and -h; with a word first
-// there is no SUB_USAGE, so the companion serves.
+// it is a usage error (B879).
 func TestB501NativeStatusHelpInGo(t *testing.T) {
 	b501NativeStatusFixture(t, false)
 	for _, flag := range []string{"--help", "-h"} {
@@ -182,7 +182,7 @@ func TestB501NativeStatusHelpInGo(t *testing.T) {
 	}
 	b501Stdin(t, "{}\n")
 	code, out, errText := runCaptured(t, "native-status", "x", "--help")
-	if code != 1 || out != "{\"ok\":false,\"error\":\"status-unreadable\"}\n" || errText != b501RouterLine {
+	if code != 2 || out != "" || errText != b501Refusal("x") {
 		t.Fatalf("x --help: code=%d stdout=%q stderr=%q", code, out, errText)
 	}
 }

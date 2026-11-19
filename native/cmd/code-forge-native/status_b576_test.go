@@ -37,7 +37,7 @@ func TestB576NativeStatusOneListedNonASCIIBlockRunsInGo(t *testing.T) {
 	want := `{"runs":[{"run_id":"r1","status":null,"mode":"plan","spent_usd":0,"unknown_usd_sessions":0,"budget_usd":5,"blocks":[{"id":"Bé","state":"open","level":null,"model":null,"gate":{"result":"none","name":null},"findings":0}],"more":0,"closed":1,"stopped":1}]}` + "\n" +
 		`{"runs":[{"run_id":"r1","status":null,"mode":"plan","spent_usd":0,"unknown_usd_sessions":0,"budget_usd":5,"blocks":[{"id":"B2","state":"open","level":null,"model":null,"gate":{"result":"none","name":null},"findings":0},{"id":"B10","state":"open","level":null,"model":null,"gate":{"result":"none","name":null},"findings":0}],"more":0,"closed":1,"stopped":0}]}` + "\n"
 	code, out, errText := runCaptured(t, "native-status")
-	if code != 1 || out != want || errText != b501RouterLine {
+	if code != 0 || out != want || errText != "" {
 		t.Fatalf("code=%d\nstdout=%s\nwant  =%s\nstderr=%q", code, out, want, errText)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".code-forge", "native", "handovers.jsonl")); !os.IsNotExist(err) {
