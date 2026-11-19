@@ -3,6 +3,7 @@ exit=1
 --- stderr
 level=L0 provider=openai model=gpt-x effort=medium fallback_step=0
 facts: timeout (killed after 1000 ms)
+next: code-forge doctor (checks each provider CLI and its login; code-forge logs --last 5 shows the error log)
 --- log/codex.argv
 exec
 -m

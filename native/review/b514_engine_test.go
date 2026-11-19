@@ -214,3 +214,30 @@ func TestB514DecodeUTF8MatchesNode(t *testing.T) {
 		}
 	}
 }
+
+// b514WithoutB876 drops what B876 added after the Node recordings: a failed
+// session's detail and stderr_tail (Go only; Node kept neither). runEngine
+// applies it; TestB876EngineKeepsTheFailureTail checks the fields.
+func b514WithoutB876(result ledger.Object) ledger.Object {
+	if result == nil {
+		return nil
+	}
+	out := result.Clone()
+	sessions, ok := out.Get("sessions").([]any)
+	if !ok {
+		return out
+	}
+	kept := make([]any, len(sessions))
+	for i, s := range sessions {
+		if meta, ok := s.(ledger.Object); ok {
+			meta = meta.Clone()
+			meta.Delete("detail")
+			meta.Delete("stderr_tail")
+			kept[i] = meta
+			continue
+		}
+		kept[i] = s
+	}
+	out.Set("sessions", kept)
+	return out
+}
