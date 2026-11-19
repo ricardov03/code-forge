@@ -1,0 +1,43 @@
+
+  [39;41;1m FAIL [39;49;22m[39m Tests\Feature\StatusTest[39m
+  [31;1m⨯[39;22m[90m [39m[90mit reports (v1.0) [ok] status + a/b?[39m[90m                                [39m [90m0.96s[39m  
+  [32;1m✓[39;22m[90m [39m[90mit reports a json body[39m[90m                                              [39m [90m0.09s[39m  
+  [31m────────────────────────────────────────────────────────────────────────────[39m  
+  [41;1m FAILED [49;22m [1mTests\Feature\StatusTest[22m [90m>[39m it reports (v1.0) [ok] status + a/b?      
+[39;1m  Unable to find JSON: 
+
+[{
+    "status": "ok"
+}]
+
+within response JSON:
+
+[{
+    "status": "broken"
+}].
+
+
+Failed asserting that an array has the subset Array &0 [
+    'status' => 'ok',
+].
+  [39;22m[32m array ([39m[39;1m
+  [39;22m[31m-  'status' => 'ok',[39m[39;1m
+  [39;22m[32m+  'status' => 'broken',[39m[39;1m
+  [39;22m[32m )[39m[39;1m
+  [39;22m
+
+  at [32mtests/Feature/StatusTest.php[39m:[32m4[39m
+      1▕ <?php
+      2▕ 
+      3▕ it('reports (v1.0) [ok] status + a/b?', function () {
+  ➜   4▕     $this->get('/status')->assertOk()->assertJson(['status' => 'ok']);
+      5▕ });
+      6▕ 
+      7▕ it('reports a json body', function () {
+      8▕     $this->get('/status')->assertOk()->assertHeader('content-type', 'application/json');
+      9▕ });
+
+
+  [90mTests:[39m    [31;1m1 failed[39;22m[90m,[39m[39m [39m[32;1m1 passed[39;22m[90m (5 assertions)[39m
+  [90mDuration:[39m [39m1.59s[39m
+

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\Feature\StatusTest" file="tests/Feature/StatusTest.php" tests="2" assertions="5" errors="0" failures="1" skipped="0" time="0.472761">
+    <testcase name="it reports (v1.0) [ok] status + a/b?" file="tests/Feature/StatusTest.php::it reports (v1.0) [ok] status + a/b?" class="Tests\Feature\StatusTest" classname="Tests.Feature.StatusTest" assertions="2" time="0.463787">
+      <failure type="PHPUnit\Framework\ExpectationFailedException">it reports (v1.0) [ok] status + a/b?Unable to find JSON: 
+
+[{
+    "status": "ok"
+}]
+
+within response JSON:
+
+[{
+    "status": "broken"
+}].
+
+
+Failed asserting that an array has the subset Array &amp;0 [
+    'status' =&gt; 'ok',
+].
+at vendor/laravel/framework/src/Illuminate/Testing/Constraints/ArraySubset.php:80
+at vendor/laravel/framework/src/Illuminate/Testing/Assert.php:36
+at vendor/laravel/framework/src/Illuminate/Testing/AssertableJsonString.php:334
+at vendor/laravel/framework/src/Illuminate/Testing/TestResponse.php:859
+at tests/Feature/StatusTest.php:4</failure>
+    </testcase>
+    <testcase name="it reports a json body" file="tests/Feature/StatusTest.php::it reports a json body" class="Tests\Feature\StatusTest" classname="Tests.Feature.StatusTest" assertions="3" time="0.008974"/>
+  </testsuite>
+</testsuites>

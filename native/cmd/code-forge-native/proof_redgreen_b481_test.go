@@ -257,21 +257,26 @@ func TestB481ProofRedGreenGo(t *testing.T) {
 
 // TestB481ProofRedGreenHandsOver: what Go has no port for keeps a named
 // hand-over: a configured runner and the Pest default runner.
+// TestB481ProofRedGreenHandsOver (B827: no longer hands over): an invalid
+// proof.runners entry refuses before anything runs, and a .php test in a
+// Laravel project plans the default Pest runner in Go.
 func TestB481ProofRedGreenHandsOver(t *testing.T) {
 	c := b481Case{name: "runners", extra: ledger.Object{{Key: "config", Value: b481Snapshot(t, `{"version":1,"proof":{"runners":[{"adapter":"phpunit","match":"**/*.php","command":["vendor/bin/phpunit"]}]}}`)}}}
-	home, repo := b481Fixture(t, c)
+	home, _ := b481Fixture(t, c)
 	t.Setenv("HOME", home)
-	if rg, out, reason := proofRedGreenPlan(b462Run, "B1", "t/x.test.mjs", "", false, ""); rg != nil || out != nil || reason != hProofRunner {
-		t.Fatalf("runners: got %v %v %v, want hand-over proof-runner", rg, out, reason)
+	rg, out, reason := proofRedGreenPlan(b462Run, "B1", "t/x.test.mjs", "", false, "")
+	if rg != nil || reason != 0 || out == nil || out.code != 1 || !strings.HasPrefix(out.stderr, "proof red-green: the run snapshot's proof.runners is invalid (") || !strings.HasSuffix(out.stderr, "); no proof was run\n") {
+		t.Fatalf("runners: got %v %+v %v, want the invalid-runners refusal", rg, out, reason)
 	}
-	home, repo = b481Fixture(t, b481Case{prepare: func(t *testing.T, repo string) {
+	home, _ = b481Fixture(t, b481Case{prepare: func(t *testing.T, repo string) {
 		b462Write(t, filepath.Join(repo, "artisan"), []byte("<?php\n"), 0o644)
+		b462Write(t, filepath.Join(repo, "tests/XTest.php"), []byte("<?php\n"), 0o644)
 	}})
 	t.Setenv("HOME", home)
-	if rg, out, reason := proofRedGreenPlan(b462Run, "B1", "tests/XTest.php", "", false, ""); rg != nil || out != nil || reason != hProofRunner {
-		t.Fatalf("pest: got %v %v %v, want hand-over proof-runner", rg, out, reason)
+	rg, out, reason = proofRedGreenPlan(b462Run, "B1", "tests/XTest.php", "", false, "")
+	if rg == nil || out != nil || reason != 0 || rg.hook == nil {
+		t.Fatalf("pest: got %v %v %v, want a Go plan with the Pest runner", rg, out, reason)
 	}
-	_ = repo
 }
 
 // b481Lex are assertion-deletion inputs: statements over lines, chains,

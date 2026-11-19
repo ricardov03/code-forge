@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\Feature\ClampTest" file="Clamp (Tests\Feature\Clamp)" tests="1" assertions="1" errors="0" failures="0" skipped="0" time="0.263182">
+    <testcase name="Caps high" file="Clamp (Tests\Feature\Clamp)::Caps high" class="Tests\Feature\ClampTest" classname="Tests.Feature.ClampTest" assertions="1" time="0.263182"/>
+  </testsuite>
+</testsuites>

@@ -1,0 +1,59 @@
+{
+  "devices" : [
+    {
+      "architecture" : "arm64",
+      "deviceId" : "B34751C7-0149-456C-B4E6-1529B94F6C66",
+      "deviceName" : "iPhone 17",
+      "modelName" : "iPhone 17",
+      "osBuildNumber" : "23F77",
+      "osVersion" : "26.5",
+      "platform" : "iOS Simulator"
+    }
+  ],
+  "testNodes" : [
+    {
+      "children" : [
+        {
+          "children" : [
+            {
+              "children" : [
+                {
+                  "children" : [
+                    {
+                      "name" : "ClampSwiftTests.swift:6: Expectation failed: (clamp(12, 0, 10) → 12) == 10",
+                      "nodeType" : "Failure Message"
+                    }
+                  ],
+                  "duration" : "0.0046s",
+                  "durationInSeconds" : 0.0045909881591796875,
+                  "name" : "capsHigh()",
+                  "nodeIdentifier" : "ClampSwiftTests/capsHigh()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/Kit/KitTests/ClampSwiftTests/capsHigh()",
+                  "nodeType" : "Test Case",
+                  "result" : "Failed"
+                }
+              ],
+              "name" : "ClampSwiftTests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/Kit/KitTests/ClampSwiftTests",
+              "nodeType" : "Test Suite",
+              "result" : "Failed"
+            }
+          ],
+          "name" : "KitTests",
+          "nodeIdentifierURL" : "test://com.apple.xcode/Kit/KitTests",
+          "nodeType" : "Unit test bundle",
+          "result" : "Failed"
+        }
+      ],
+      "name" : "Kit",
+      "nodeType" : "Test Plan",
+      "result" : "Failed"
+    }
+  ],
+  "testPlanConfigurations" : [
+    {
+      "configurationId" : "1",
+      "configurationName" : "Test Scheme Action"
+    }
+  ]
+}

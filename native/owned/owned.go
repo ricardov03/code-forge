@@ -67,6 +67,12 @@ func Kinds(root string, entries []any) ledger.Object {
 	return out
 }
 
+// GlobMatch is registry.mjs globMatch: one glob (no braces), "**" for any
+// number of path segments, "*" and "?" within one segment.
+func GlobMatch(file, pattern string) bool {
+	return glob(strings.Split(file, "/"), strings.Split(pattern, "/"))
+}
+
 func glob(file, pattern []string) bool {
 	if len(pattern) == 0 {
 		return len(file) == 0

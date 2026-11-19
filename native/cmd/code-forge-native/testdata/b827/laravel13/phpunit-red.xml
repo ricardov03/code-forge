@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\Feature\ClampTest" file="Clamp (Tests\Feature\Clamp)" tests="1" assertions="1" errors="0" failures="1" skipped="0" time="0.947461">
+    <testcase name="Caps high" file="Clamp (Tests\Feature\Clamp)::Caps high" class="Tests\Feature\ClampTest" classname="Tests.Feature.ClampTest" assertions="1" time="0.947461">
+      <failure type="PHPUnit\Framework\ExpectationFailedException">Caps highUnable to find JSON: 
+
+[{
+    "status": "ok"
+}]
+
+within response JSON:
+
+[{
+    "status": "broken"
+}].
+
+
+Failed asserting that an array has the subset Array &amp;0 [
+    'status' =&gt; 'ok',
+].
+at vendor/laravel/framework/src/Illuminate/Testing/Constraints/ArraySubset.php:80
+at vendor/laravel/framework/src/Illuminate/Testing/Assert.php:36
+at vendor/laravel/framework/src/Illuminate/Testing/AssertableJsonString.php:334
+at vendor/laravel/framework/src/Illuminate/Testing/TestResponse.php:859
+at tests/Feature/ClampTest.php:11</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
