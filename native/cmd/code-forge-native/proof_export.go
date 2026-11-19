@@ -225,6 +225,11 @@ func proofBuildExport(cwdGiven, blockID string, baseValue, ownedValue, kindsValu
 			return nil, &proofError{"bad-path", "proof.export.copy_untracked: nothing under .code-forge/ is ever exported"}
 		}
 	}
+	// B828: the export holds copies of .env and the like; it is never
+	// built where git would see it.
+	if err := proofExportIgnored(dir); err != nil {
+		return nil, err
+	}
 	baseRef := "undefined"
 	if baseValue != nil {
 		if baseRef, ok = baseValue.(string); !ok {
@@ -624,6 +629,17 @@ func proofRetargetLinks(copy string, roots []string, dir string) error {
 				break
 			}
 		}
+	}
+	return nil
+}
+
+// proofExportIgnored refuses an export dir (<workspace>/.code-forge/export/
+// <block>) that git would see (B828): the copied .env files would sit
+// unignored in the work tree. Outside a git work tree nothing is refused.
+func proofExportIgnored(dir string) error {
+	workspace := filepath.Dir(filepath.Dir(filepath.Dir(dir)))
+	if visible, known := gitx.StateVisible(workspace); known && visible {
+		return &proofError{"state-visible", gitx.StateIgnoreLine + " is not ignored by git, so the export (copies of .env) would be visible to git; nothing was exported. Fix: add the line " + gitx.StateIgnoreLine + " to " + gitx.StateIgnoreFile(workspace) + " (code-forge upgrade adds it), then re-run"}
 	}
 	return nil
 }
