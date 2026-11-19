@@ -3,12 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // B765: opt-in land gate. With `land.require_ci: github` in the run-start
@@ -104,40 +106,21 @@ func landCIRedList(path string) ([]landCIRedLine, error) {
 	return lines, nil
 }
 
-// landCIGate checks the CI of one block tip. It returns the lines to print
-// when the land may go on, or a refusal ("" = pass) and its next command.
-func landCIGate(cfg map[string]any, main, id, sha string) (notes []string, refusal, next string) {
-	provider, bad := landCIRequired(cfg)
-	if bad != "" {
-		return nil, bad, ""
-	}
-	if provider == "" {
-		return nil, "", ""
-	}
-	short := sha
-	if len(short) > 8 {
-		short = short[:8]
-	}
-	next = closeCommand([]string{"code-forge", "ci", "watch", "--sha", sha, "--cwd", main})
-	if _, err := exec.LookPath("gh"); err != nil {
-		return nil, "land.require_ci: github reads CI runs with the gh CLI, and gh is not on PATH; install gh and run gh auth login (B765)", "gh auth status"
-	}
-	land := blockMap(cfg["land"])
+// landCIPoll reads the CI runs of sha once: the runs, the workflows still
+// running and the red ones. err is "" when gh answered.
+func landCIPoll(land map[string]any, main, sha string) (runs []ciRun, running []string, red []ciRun, err string) {
 	args := []string{"run", "list", "--commit", sha}
 	if workflow, _ := land["ci_workflow"].(string); workflow != "" {
 		args = append(args, "--workflow", workflow)
 	}
 	args = append(args, "--limit", "100", "--json", "databaseId,status,conclusion,name")
-	out, err := ciGh(main, args...)
-	if err != nil {
-		return nil, "cannot read CI runs for tip " + short + ": " + strings.SplitN(err.Error(), "\n", 2)[0], next
+	out, gherr := ciGh(main, args...)
+	if gherr != nil {
+		return nil, nil, nil, strings.SplitN(gherr.Error(), "\n", 2)[0]
 	}
-	runs := []ciRun{}
-	if err := json.Unmarshal([]byte(out), &runs); err != nil {
-		return nil, "cannot read CI runs for tip " + short + ": gh run list: unreadable JSON", next
-	}
-	if len(runs) == 0 {
-		return nil, "tip " + short + " has no CI run; push it and wait for green CI (land.require_ci: github)", next
+	runs = []ciRun{}
+	if json.Unmarshal([]byte(out), &runs) != nil {
+		return nil, nil, nil, "gh run list: unreadable JSON"
 	}
 	// One workflow is green when any of its completed runs (a rerun too)
 	// concluded green; the land needs every workflow green.
@@ -148,7 +131,7 @@ func landCIGate(cfg map[string]any, main, id, sha string) (notes []string, refus
 		}
 		byName[r.Name] = append(byName[r.Name], r)
 	}
-	running, red := []string{}, []ciRun{}
+	running, red = []string{}, []ciRun{}
 	for _, name := range order {
 		green, going := false, false
 		var failed *ciRun
@@ -169,6 +152,116 @@ func landCIGate(cfg map[string]any, main, id, sha string) (notes []string, refus
 			red = append(red, *failed)
 		}
 	}
+	return runs, running, red, ""
+}
+
+// landCIFailedJobs names the jobs of red runs that did not pass (B796).
+func landCIFailedJobs(main string, red []ciRun) string {
+	names := []string{}
+	for _, r := range red {
+		out, err := ciGh(main, "run", "view", fmt.Sprint(r.DatabaseID), "--json", "jobs")
+		if err != nil {
+			continue
+		}
+		var view struct {
+			Jobs []struct {
+				Name       string `json:"name"`
+				Conclusion string `json:"conclusion"`
+			} `json:"jobs"`
+		}
+		if json.Unmarshal([]byte(out), &view) != nil {
+			continue
+		}
+		for _, job := range view.Jobs {
+			if job.Conclusion != "" && !ciGreen(job.Conclusion) {
+				names = append(names, job.Name)
+			}
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return "; failed jobs: " + strings.Join(names, ", ")
+}
+
+// landCIGate checks the CI of one block tip. It returns the lines to print
+// when the land may go on, or a refusal ("" = pass) and its next command.
+// B796: a tip with no CI run is pushed to a CI branch with a draft PR, and
+// pending CI is waited for up to land.ci_wait (progress lines go to out);
+// resume is the land command that picks a timed-out wait up again.
+func landCIGate(cfg map[string]any, main, id, sha, base, resume string, out io.Writer) (notes []string, refusal, next string) {
+	provider, bad := landCIRequired(cfg)
+	if bad != "" {
+		return nil, bad, ""
+	}
+	if provider == "" {
+		return nil, "", ""
+	}
+	settings, bad := landCIConfig(cfg)
+	if bad != "" {
+		return nil, bad, ""
+	}
+	short := landCIShort(sha)
+	next = closeCommand([]string{"code-forge", "ci", "watch", "--sha", sha, "--cwd", main})
+	if resume == "" {
+		resume = next
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		return nil, "land.require_ci: github reads CI runs with the gh CLI, and gh is not on PATH; install gh and run gh auth login (B765)", "gh auth status"
+	}
+	land := blockMap(cfg["land"])
+	if base == "" {
+		base = "main"
+	}
+	started := landCINow()
+	deadline, line, interval, pushed := started.Add(settings.wait), started, landCIPollStart, false
+	var runs []ciRun
+	var running []string
+	var red []ciRun
+	for {
+		var gherr string
+		runs, running, red, gherr = landCIPoll(land, main, sha)
+		waiting := ""
+		switch {
+		case gherr != "":
+			return nil, "cannot read CI runs for tip " + short + ": " + gherr, next
+		case len(runs) == 0 && !pushed:
+			pushed = true
+			if refusal := landCIEnsureBranch(main, id, sha, base, settings, out); refusal != "" {
+				return nil, refusal, next
+			}
+			waiting = "no CI run yet"
+		case len(runs) == 0:
+			waiting = "no CI run yet"
+		case len(red) == 0 && len(running) > 0:
+			waiting = "running: " + strings.Join(running, ", ")
+		}
+		if waiting == "" {
+			break
+		}
+		if settings.wait == 0 {
+			if len(runs) == 0 {
+				return nil, "tip " + short + " has no CI run yet; wait for green CI (land.require_ci: github)", next
+			}
+			return nil, fmt.Sprintf("tip %s has no green CI run yet (running: %s); wait for green CI (land.require_ci: github)", short, strings.Join(running, ", ")), next
+		}
+		now := landCINow()
+		if !now.Before(deadline) {
+			return nil, fmt.Sprintf("tip %s CI not green after %s (%s); nothing was merged, land again to keep waiting (land.ci_wait)", short, settings.wait, waiting), resume
+		}
+		if now.Sub(line) >= time.Minute {
+			fmt.Fprintf(out, "ci: waiting for tip %s (%s), %s of %s\n", short, waiting, now.Sub(started).Truncate(time.Second), settings.wait)
+			line = now
+		}
+		pause := interval
+		if left := deadline.Sub(now); left < pause {
+			pause = left
+		}
+		landCISleep(pause)
+		if interval *= 2; interval > landCIPollMax {
+			interval = landCIPollMax
+		}
+	}
 	if len(red) == 0 && len(running) == 0 {
 		return []string{fmt.Sprintf("ci: tip %s green (%d runs)", short, len(runs))}, "", ""
 	}
@@ -180,9 +273,12 @@ func landCIGate(cfg map[string]any, main, id, sha string) (notes []string, refus
 		redText = append(redText, fmt.Sprintf("%s: %s, run %d", r.Name, r.Conclusion, r.DatabaseID))
 	}
 	what := fmt.Sprintf("tip %s CI is red (%s)", short, strings.Join(redText, "; "))
+	// B796: a red refusal names the failed jobs and points at the failed log.
+	next = closeCommand([]string{"gh", "run", "view", fmt.Sprint(red[0].DatabaseID), "--log-failed"})
+	failedJobs := landCIFailedJobs(main, red)
 	if len(running) > 0 {
 		what += fmt.Sprintf(" and still running (%s)", strings.Join(running, ", "))
-		return nil, what + "; fix it and wait for green CI (land.require_ci: github)", next
+		return nil, what + failedJobs + "; fix it and wait for green CI (land.require_ci: github)", next
 	}
 	named, allowed := false, []string{}
 	for _, b := range strings.FieldsFunc(os.Getenv(landCIRedBlocksEnv), func(r rune) bool { return r == ',' || r == ' ' }) {
@@ -193,9 +289,9 @@ func landCIGate(cfg map[string]any, main, id, sha string) (notes []string, refus
 	}
 	if len(allowed) == 0 {
 		if named {
-			return nil, what + "; a block never covers its own red (" + id + " dropped from " + landCIRedBlocksEnv + ")", next
+			return nil, what + failedJobs + "; a block never covers its own red (" + id + " dropped from " + landCIRedBlocksEnv + ")", next
 		}
-		return nil, what + "; fix it, or name the fix blocks of known reds in " + landCIRedBlocksEnv + " with lines in land.ci_red_list", next
+		return nil, what + failedJobs + "; fix it, or name the fix blocks of known reds in " + landCIRedBlocksEnv + " with lines in land.ci_red_list", next
 	}
 	listPath, _ := land["ci_red_list"].(string)
 	if listPath == "" {

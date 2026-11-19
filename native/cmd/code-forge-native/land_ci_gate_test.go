@@ -142,7 +142,8 @@ const (
 	landCIKnownReds = "# known reds\nB9 ^TestOld$\n"
 )
 
-var landCIOn = map[string]any{"require_ci": "github"}
+// B796: ci_wait off keeps these B765 checks to one CI read (no waiting).
+var landCIOn = map[string]any{"require_ci": "github", "ci_wait": "off"}
 
 // landCIRefused checks a refusal at step ci that merged and wrote nothing.
 func landCIRefused(t *testing.T, f *landBatchFixture, want string) string {
@@ -180,9 +181,15 @@ func TestB765LandCIGreenLands(t *testing.T) {
 		t.Fatalf("exit=%d, want 0: %s", code, output)
 	}
 	f.checkMain([]string{"B1", "B2"})
-	calls := landCICalls(t, gh)
+	// B796: after the land, `pr list` looks for CI PRs to close; count run lists.
+	calls := []string{}
+	for _, call := range landCICalls(t, gh) {
+		if strings.HasPrefix(call, "run list ") {
+			calls = append(calls, call)
+		}
+	}
 	if len(calls) != 2 {
-		t.Fatalf("gh calls=%q, want one run list per block", calls)
+		t.Fatalf("gh run list calls=%q, want one per block", calls)
 	}
 	for i, id := range []string{"B1", "B2"} {
 		want := "run list --commit " + heads[id] + " --limit 100 --json databaseId,status,conclusion,name"
@@ -231,7 +238,9 @@ func TestB765LandCISelfCoverRefused(t *testing.T) {
 func TestB765LandCINoRunRefused(t *testing.T) {
 	f := landCIBatch(t, landCIOn, "", "")
 	landCIFakeGh(t, `[]`, nil)
-	landCIRefused(t, f, "has no CI run; push it and wait for green CI")
+	// B796: a tip without a CI run is pushed to a CI branch; this fake gh
+	// cannot list pull requests, so the land refuses before any push.
+	landCIRefused(t, f, "cannot list the CI pull requests of block B1: gh pr list: fake gh: unexpected pr list")
 }
 
 func TestB765LandCIRunningRefused(t *testing.T) {
@@ -301,7 +310,7 @@ func TestB765LandCISingleBlock(t *testing.T) {
 			landWrite(t, filepath.Join(f.home, ".code-forge/runs", run+".key"), strings.Repeat("0", 32))
 			tip := landGit(t, f.tree, "rev-parse", "HEAD")
 			landDone(t, f.home, run, tip)
-			landCISnapshot(t, f.home, run, f.cfg, map[string]any{"require_ci": "github"})
+			landCISnapshot(t, f.home, run, f.cfg, landCIOn)
 			t.Setenv(landCIRedBlocksEnv, "")
 			gh := landCIFakeGh(t, tc.runs, map[string]string{"7": landCIRedLog})
 			saved, err := state.ReadRun(f.home, run)
@@ -331,7 +340,7 @@ func TestB765LandCISingleBlock(t *testing.T) {
 			}
 			moved := landGit(t, f.repo, "rev-parse", "main") != main
 			if tc.code == 1 {
-				if moved || !strings.Contains(string(data), "block B1 land stopped at ci: tip "+tip[:8]+" CI is red") || !strings.Contains(string(data), "next: code-forge ci watch --sha "+tip) {
+				if moved || !strings.Contains(string(data), "block B1 land stopped at ci: tip "+tip[:8]+" CI is red") || !strings.Contains(string(data), "next: gh run view 7 --log-failed") {
 					t.Errorf("red: moved=%v output=%q, want a ci refusal with nothing merged", moved, data)
 				}
 			} else if !moved || !strings.Contains(string(data), "block B1 landed") {

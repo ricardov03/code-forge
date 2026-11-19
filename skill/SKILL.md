@@ -58,7 +58,9 @@ and is refused during an active grant; foreign changes remain `owned-conflict`.
 Fail fast with `forge block ready <id> --run <r> --preflight`. Land one block with `--merge` or
 several with `forge block land <id> <id>... --run <r>`; the merge gate uses the Go test selection,
 never the full suite. Add `--push --watch-ci` to push main and watch CI. With `land.require_ci: github`
-a block lands only when GitHub CI is green for its own tip (B765). Retry queued lock and git
+a block lands only when GitHub CI is green for its own tip (B765); land pushes a stale tip to a new
+CI branch and draft PR, waits for CI (`land.ci_wait`, default 30m) and closes the block's CI PRs
+after the land (B796). Retry queued lock and git
 failures with `forge heal run --run <r>`; see the test queue with `forge queue` (`references/code.md` §5.1).
 
 ## §4 Hard rules (the headings of `references/rules-core.md`)

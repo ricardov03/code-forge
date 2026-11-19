@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -39,6 +40,9 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		fmt.Fprintln(safeStdout, string(data))
 	}
 	stoppedID, step := ids[0], "preflight"
+	requestedIDs := append([]string{}, ids...)
+	var landedCfg map[string]any
+	landedMain := ""
 	stop := func(reason string) int {
 		fmt.Fprintf(safeStderr, "block %s land stopped at %s: %s\n", stoppedID, step, strings.TrimSpace(reason))
 		if json {
@@ -147,11 +151,19 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			// B765: land.require_ci checks each block's own tip before any
 			// rebase, gate or write.
 			cfg, _ := blockSnapshot(record)
-			notes, refusal, _ := landCIGate(cfg, main, id, strings.TrimSpace(head))
+			ciOut := io.Writer(safeStdout)
+			if json {
+				ciOut = safeStderr
+			}
+			notes, refusal, ciNext := landCIGate(cfg, main, id, strings.TrimSpace(head), base, landCIResume(requestedIDs, run, flags), ciOut)
 			if refusal != "" {
 				step = "ci"
+				if ciNext != "" {
+					refusal += "\nnext: " + ciNext
+				}
 				return fmt.Errorf("%s", refusal)
 			}
+			landedCfg, landedMain = cfg, main
 			for _, line := range notes {
 				if json {
 					fmt.Fprintln(safeStderr, line)
@@ -482,6 +494,17 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 	if pushed, err := landBatchPush(flags, home, run, ids); err != nil {
 		stoppedID, step = pushed, "push"
 		return stop(err.Error())
+	}
+	// B796: close the open CI pull requests of each landed block.
+	if landedMain != "" {
+		if record, err := state.ReadRun(home, run); err == nil {
+			blocks := blockObject(record.Get("blocks"))
+			for _, id := range requestedIDs {
+				if entry := blockObject(blocks.Get(id)); entry != nil && entry.Get("landed") != nil {
+					landCICloseLanded(landedCfg, landedMain, id, blockString(entry.Get("base_branch")), safeStderr)
+				}
+			}
+		}
 	}
 	return code
 }

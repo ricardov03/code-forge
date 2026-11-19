@@ -170,14 +170,15 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 				step = "ci"
 				return stop("cannot resolve the tip of block branch " + branch)
 			}
-			notes, refusal, ciNext := landCIGate(cfg, main, id, strings.TrimSpace(sha))
-			if refusal != "" {
-				step, next = "ci", landFirst(ciNext, next)
-				return stop(refusal)
-			}
 			out := io.Writer(safeStdout)
 			if json {
 				out = stderr
+			}
+			resume := landCIResume([]string{id}, run, flags)
+			notes, refusal, ciNext := landCIGate(cfg, main, id, strings.TrimSpace(sha), blockString(entry.Get("base_branch")), resume, out)
+			if refusal != "" {
+				step, next = "ci", landFirst(ciNext, next)
+				return stop(refusal)
 			}
 			for _, line := range notes {
 				fmt.Fprintln(out, line)
@@ -473,6 +474,8 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 			return stop(err.Error())
 		}
 	}
+	// B796: the block's open CI pull requests are done once it landed.
+	landCICloseLanded(cfg, main, id, base, print)
 	if json {
 		landed := ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "landed"}, {Key: "merge", Value: command}}
 		if mergeGateReason != "" {
