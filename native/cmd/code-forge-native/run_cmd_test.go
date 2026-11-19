@@ -195,35 +195,7 @@ func TestRunVerbStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errs := runVerbCall(t, "status", "--run", "r-test")
-	want := `{
-  "run_id": "r-test",
-  "status": "active",
-  "engine": "claude",
-  "worker_pinned": true,
-  "blocks": {
-    "B2": {
-      "status": "awaiting_human_check"
-    },
-    "B1": {
-      "status": "awaiting_human_check",
-      "owned_files": []
-    },
-    "B3": {
-      "status": "open"
-    }
-  },
-  "orphans": [
-    "keep"
-  ],
-  "spent_usd": 0.75,
-  "budget_usd": 12,
-  "unknown_usd_sessions": 1,
-  "awaiting_human_check": [
-    "B1",
-    "B2"
-  ]
-}
-`
+	want := `{"run_id":"r-test","status":"active","engine":"claude","worker_pinned":true,"blocks":{"B2":{"status":"awaiting_human_check"},"B1":{"status":"awaiting_human_check","owned_files":[]},"B3":{"status":"open"}},"orphans":["keep"],"spent_usd":0.75,"budget_usd":12,"unknown_usd_sessions":1,"awaiting_human_check":["B1","B2"]}` + "\n" // B874: one compact line
 	if code != 0 || out != want || errs != "1 session has no known price; the budget does not count it\n" {
 		t.Fatalf("status = %d\n%s\nstderr %q", code, out, errs)
 	}
@@ -236,7 +208,7 @@ func TestRunVerbStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errs = runVerbCall(t, "status", "--run", "r-two")
-	want = "{\n  \"run_id\": \"r-two\",\n  \"status\": \"ended\",\n  \"worker_pinned\": false,\n  \"blocks\": {},\n  \"spent_usd\": 0,\n  \"budget_usd\": null,\n  \"unknown_usd_sessions\": 0\n}\n"
+	want = `{"run_id":"r-two","status":"ended","worker_pinned":false,"blocks":{},"spent_usd":0,"budget_usd":null,"unknown_usd_sessions":0}` + "\n"
 	if code != 0 || out != want || errs != "" {
 		t.Fatalf("bare status = %d %q %q", code, out, errs)
 	}

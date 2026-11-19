@@ -182,7 +182,7 @@ func TestAutopilotVerbStatus(t *testing.T) {
 		t.Fatalf("status with link = %d\n%s\nwant\n%s\n%q", code, out, want, errText)
 	}
 	code, out, _ = autopilotCall(t, "status", "--run", "r-link", "--json")
-	if code != 0 || !strings.Contains(out, "\"time_left_s\": 9000,") || !strings.Contains(out, "\"spend\": {\n    \"coding\": 1.2346,\n    \"review\": 0.2725\n  },") || !strings.HasSuffix(out, "\"expired_at\": null\n}\n") {
+	if code != 0 || !strings.Contains(out, `"time_left_s":9000,`) || !strings.Contains(out, `"spend":{"coding":1.2346,"review":0.2725},`) || !strings.HasSuffix(out, "\"expired_at\":null}\n") {
 		t.Fatalf("status json = %d %s", code, out)
 	}
 

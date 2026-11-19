@@ -53,6 +53,11 @@ text names, `code-forge <verb> --help` for a usage error (exit 2), or null.
 A command that already answered on stdout (its own `ok:false` JSON) keeps
 its answer, and without `--json` nothing changes.
 
+Since B874 every `--json` answer is one compact JSON line: `autopilot status --json`,
+`autopilot log --json`, `autopilot binnacle --json`, `report --json` and `run status --run <id>`
+(JSON with no flag) no longer print indented JSON over many lines. Files written by
+`report --export`, `outcome seal` and the run records stay indented.
+
 The skill's `forge <verb>` shim (`skill/scripts/forge`) starts this same shell
 entry, `bin/code-forge`, so skill verbs run in Go too (B547). With
 `CODE_FORGE_BIN` set to `bin/code-forge`, or to a `bin/code-forge.mjs` that has

@@ -449,7 +449,7 @@ func runStatusPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 		}
 		out.Set("awaiting_human_check", list)
 	}
-	data, err := ledger.Stringify(out, true)
+	data, err := ledger.Stringify(out, false) // B874: one compact line
 	if err != nil {
 		return nil, hRunShape
 	}

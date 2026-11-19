@@ -1786,7 +1786,11 @@ func reportDecide(args []string) reportRun {
 	}
 	for _, arg := range args {
 		if arg == "--json" {
-			return func(stdout, _ io.Writer) int { fmt.Fprint(stdout, rpPretty(reported)); return 0 }
+			return func(stdout, _ io.Writer) int { // B874: one compact line
+				line, _ := ledger.Stringify(reported, false)
+				fmt.Fprintf(stdout, "%s\n", line)
+				return 0
+			}
 		}
 	}
 	return func(stdout, _ io.Writer) int {
