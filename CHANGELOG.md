@@ -14,6 +14,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - `npm run release:site` is fast: it builds the site once (`npm run build:site`), checks that the deploy folder holds `index.html` and that a built `.html`, `.md` or `.txt` file names `<package>@<version>`, then commits and deploys; it no longer reads or runs the site's `gates.test` and `gates.custom` (the site's `npm test` and design-fidelity checks run during development as site gates) and prints one line saying so; a failed build reads `Site build failed: npm run build:site (exit N)` (B780)
 
+### Fixed
+
+- `block land` works with `native.daemon: false`: it runs the review join in its own process (the same join as `review-file --wait-block`), and a retry of a block that `block close` already closed needs no join at all. Before, every land with the daemon off stopped with `code-forge: block land is not supported in this case yet (land-config-daemon)`, even right after a passing `block close` in a worktree run (B789)
+
 ## [0.25.0] — 2026-11-18
 
 - The `evals/` folder is retired: its harness (`evals/run.mjs`) and scenarios 15-19 imported the Node `src/` files B760 removed, so a live eval run failed with `ERR_MODULE_NOT_FOUND`; the folder and the plugin manifest's `experimental.evals` entry are gone (B773)
