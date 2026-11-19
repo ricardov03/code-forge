@@ -19,6 +19,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - `status --help`, `decisions [list] --help` and `docs [sync|path] --help` (also `-h`) print the help page (Description, Usage, Options) and exit 0, like every other command; before they exited 2 with `unknown flag "--help"` or the bare usage line on stderr (B877)
 - An unknown flag is a usage error everywhere: `gates run`, `gates detect` and the other `gates` subcommands print `gates <sub>: unknown flag "<flag>"` and their usage and exit 2 before any gate runs (a typo such as `--chnaged` used to run the full suite and exit 0), and `version` with any argument prints its usage and exits 2. An unknown verb now exits 2 with a usage line and lists only the visible verbs (no `land` or `native-status`). A test runs every command of the help table with `--help` and with an unknown flag (B878)
+- `run end` of a test (a binary built with the test signal guard) stops the worker its `run start` launched: the detached worker carries `CODE_FORGE_TEST_SIGNAL_OWNED` naming the test root, so the guard lets that worker be signalled after init adopts it; before, `run end` printed `run end: kill EPERM` (exit 1) and the worker, and a `review` run's worker, outlived the test. Product builds are unchanged. (B882)
 
 ## [0.25.1] — 2026-11-19
 
