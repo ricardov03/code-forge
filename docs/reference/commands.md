@@ -242,22 +242,7 @@ code-forge autopilot status --run <run> --json
 Exit 0. Output:
 
 ```text
-{
-  "run": "<run>",
-  "state": "active",
-  "grant_id": "ap-<id>",
-  "delegate": "L2",
-  "until": "2026-01-01T00:00:00Z",
-  "time_left_s": 3599,
-  "scopes": [
-    "waive:nit"
-  ],
-  "deny": [],
-  "fixed_deny": [
-    "waive:critical",
-    "waive:proof",
-    "reviews:skip",
-…
+{"run":"<run>","state":"active","grant_id":"ap-<id>","delegate":"L2","until":"2026-01-01T00:00:00Z","time_left_s":3599,"scopes":["waive:nit"],"deny":[],"fixed_deny":["waive:critical","waive:proof","reviews:skip","limits:change","plan:approve","design:approve","pr:merge","destructive","budget:raise"]…
 ```
 
 #### Exit codes
@@ -270,7 +255,7 @@ Exit 0. Output:
 
 #### JSON output
 
-Prints JSON over several lines (pretty-printed): an object with these keys.
+Prints one JSON line: an object with these keys.
 
 | Key | Type |
 |---|---|
@@ -689,22 +674,7 @@ code-forge autopilot binnacle --run <run> --json
 Exit 0. Output:
 
 ```text
-{
-  "title": "Autopilot run <run>",
-  "byline": {
-    "date": "2026-11-19",
-    "owner": "T"
-  },
-  "status": [
-    {
-      "item": "Result",
-      "value": "0 of 1 block closed"
-    },
-    {
-      "item": "Stack/PRs",
-      "value": "none recorded"
-    },
-…
+{"title":"Autopilot run <run>","byline":{"date":"2026-11-19","owner":"T"},"status":[{"item":"Result","value":"0 of 1 block closed"},{"item":"Stack/PRs","value":"none recorded"},{"item":"Full suite","value":"green"},{"item":"Reviews","value":"0 results · 0 files approved · 0 waived by autopilot"},{"i…
 ```
 
 #### Exit codes
@@ -717,7 +687,7 @@ Exit 0. Output:
 
 #### JSON output
 
-Prints JSON over several lines (pretty-printed): an object with these keys.
+Prints one JSON line: an object with these keys.
 
 | Key | Type |
 |---|---|
@@ -765,22 +735,7 @@ code-forge autopilot log --run <run> --json
 Exit 0. Output:
 
 ```text
-[
-  {
-    "time": "2026-01-01T00:00:00Z",
-    "event": "Question to the owner",
-    "block": null,
-    "file": null,
-    "detail": "waive:nit · to owner (session-failed) · ad-<id>",
-    "link": null
-  },
-  {
-    "time": "2026-01-01T00:00:00Z",
-    "event": "Delegate session",
-    "block": null,
-    "file": null,
-    "detail": "L2 · anthropic · status failed",
-…
+[{"time":"2026-01-01T00:00:00Z","event":"Question to the owner","block":null,"file":null,"detail":"waive:nit · to owner (session-failed) · ad-<id>","link":null},{"time":"2026-01-01T00:00:00Z","event":"Delegate session","block":null,"file":null,"detail":"L2 · anthropic · status failed","link":null},{…
 ```
 
 #### Exit codes
@@ -793,7 +748,7 @@ Exit 0. Output:
 
 #### JSON output
 
-Prints JSON over several lines (pretty-printed): an array of objects with these keys.
+Prints one JSON line: an array of objects with these keys.
 
 | Key | Type |
 |---|---|
@@ -892,6 +847,7 @@ code-forge autopilot ratify row-missing --run <run> --json
 Exit 1. Output:
 
 ```text
+{"ok":false,"error":"autopilot ratify: digest-row-not-open: run <run> has no open digest row row-missing (autopilot digest --run <run> lists them); nothing was recorded","next":null}
 autopilot ratify: digest-row-not-open: run <run> has no open digest row row-missing (autopilot digest --run <run> lists them); nothing was recorded
 ```
 
@@ -905,7 +861,13 @@ autopilot ratify: digest-row-not-open: run <run> has no open digest row row-miss
 
 #### JSON output
 
-Takes `--json`; the examples above refuse, so no shape is recorded.
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `ok` | boolean |
+| `error` | string |
+| `next` | null |
 
 #### Related
 
@@ -942,6 +904,7 @@ code-forge autopilot revert row-missing --run <run> --json
 Exit 1. Output:
 
 ```text
+{"ok":false,"error":"autopilot revert: digest-row-not-open: run <run> has no open digest row row-missing (autopilot digest --run <run> lists them); nothing was recorded","next":null}
 autopilot revert: digest-row-not-open: run <run> has no open digest row row-missing (autopilot digest --run <run> lists them); nothing was recorded
 ```
 
@@ -955,7 +918,13 @@ autopilot revert: digest-row-not-open: run <run> has no open digest row row-miss
 
 #### JSON output
 
-Takes `--json`; the examples above refuse, so no shape is recorded.
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `ok` | boolean |
+| `error` | string |
+| `next` | null |
 
 #### Related
 
@@ -1325,7 +1294,7 @@ code-forge block ready B1 --run <run> --json
 Exit 1. Output:
 
 ```text
-{"block":"B1","ready":false,"blockers":[{"code":"worker.down","file":null,"detail":"pinned worker pid <pid> is not running","fix":"code-forge run start --reattach --run <run>","clears_by":"orchestrator"},{"code":"no_green_gates","file":null,"detail":"no green gates run; run: code-forge gates run --r…
+{"block":"B1","ready":false,"blockers":[{"code":"worker.down","file":null,"detail":"pinned worker pid <pid> is not running; last worker exit: signal (stopped by signal terminated) at 2026-01-01T00:00:00Z","fix":"code-forge run start --add-worker --run <run>","clears_by":"orchestrator"},{"code":"no_g…
 ```
 
 #### Exit codes
@@ -1455,7 +1424,7 @@ code-forge block close B1 --run <run> --dry-run --json
 Exit 1. Output:
 
 ```text
-{"block":"B1","dry_run":true,"verb":"close","ready":false,"blockers":[{"code":"worker.down","file":null,"detail":"pinned worker pid <pid> is not running","fix":"code-forge run start --reattach --run <run>","clears_by":"orchestrator"},{"code":"unreviewed","file":"src/a.txt","detail":"no review.approv…
+{"block":"B1","dry_run":true,"verb":"close","ready":false,"blockers":[{"code":"worker.down","file":null,"detail":"pinned worker pid <pid> is not running; last worker exit: signal (stopped by signal terminated) at 2026-01-01T00:00:00Z","fix":"code-forge run start --add-worker --run <run>","clears_by"…
 ```
 
 #### Exit codes
@@ -1656,6 +1625,7 @@ code-forge block waive B1 F1 --run <run> --file src/a.txt --reason test --json
 Exit 2. Output:
 
 ```text
+{"ok":false,"error":"block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)","next":null}
 block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)
 ```
 
@@ -1669,7 +1639,13 @@ block waive needs the human at a terminal to confirm; nothing was recorded (--ye
 
 #### JSON output
 
-Takes `--json`; the examples above refuse, so no shape is recorded.
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `ok` | boolean |
+| `error` | string |
+| `next` | null |
 
 #### Related
 
@@ -1712,6 +1688,7 @@ code-forge block reopen B1 --run <run> --file src/a.txt --reason again --yes --j
 Exit 1. Output:
 
 ```text
+{"ok":false,"error":"block reopen: reopen-not-stopped: src/a.txt has no review state; only a stopped or lost file is reopened; nothing was recorded","next":null}
 block reopen: reopen-not-stopped: src/a.txt has no review state; only a stopped or lost file is reopened; nothing was recorded
 ```
 
@@ -1725,7 +1702,13 @@ block reopen: reopen-not-stopped: src/a.txt has no review state; only a stopped 
 
 #### JSON output
 
-Takes `--json`; the examples above refuse, so no shape is recorded.
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `ok` | boolean |
+| `error` | string |
+| `next` | null |
 
 #### Related
 
@@ -1768,6 +1751,7 @@ code-forge block accept-hit B1 --run <run> --line 1 --transcript plans/tr.txt --
 Exit 2. Output:
 
 ```text
+{"ok":false,"error":"block accept-hit needs the human at a terminal to confirm; nothing was recorded (there is no --yes)","next":null}
 block accept-hit needs the human at a terminal to confirm; nothing was recorded (there is no --yes)
 ```
 
@@ -1781,7 +1765,13 @@ block accept-hit needs the human at a terminal to confirm; nothing was recorded 
 
 #### JSON output
 
-Takes `--json`; the examples above refuse, so no shape is recorded.
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `ok` | boolean |
+| `error` | string |
+| `next` | null |
 
 #### Related
 
@@ -1822,6 +1812,7 @@ code-forge block unwaive B1 F1 --run <run> --file src/a.txt --reason undo --json
 Exit 1. Output:
 
 ```text
+{"ok":false,"error":"block unwaive: unwaive-no-agent-waiver: no verified agent waiver for this block, file and finding; nothing was recorded","next":null}
 block unwaive: unwaive-no-agent-waiver: no verified agent waiver for this block, file and finding; nothing was recorded
 ```
 
@@ -1835,7 +1826,13 @@ block unwaive: unwaive-no-agent-waiver: no verified agent waiver for this block,
 
 #### JSON output
 
-Takes `--json`; the examples above refuse, so no shape is recorded.
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `ok` | boolean |
+| `error` | string |
+| `next` | null |
 
 #### Related
 
@@ -1874,6 +1871,7 @@ code-forge block ack-waivers B1 --run <run> --json
 Exit 1. Output:
 
 ```text
+{"ok":false,"error":"block ack-waivers: ack-waivers-none: the block has no counted agent waivers; nothing was recorded","next":null}
 block ack-waivers: ack-waivers-none: the block has no counted agent waivers; nothing was recorded
 ```
 
@@ -1887,7 +1885,13 @@ block ack-waivers: ack-waivers-none: the block has no counted agent waivers; not
 
 #### JSON output
 
-Takes `--json`; the examples above refuse, so no shape is recorded.
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `ok` | boolean |
+| `error` | string |
+| `next` | null |
 
 #### Related
 
@@ -1993,6 +1997,7 @@ code-forge block amend-acceptance B1 --run <run> --acceptance plans/acc.yml --re
 Exit 2. Output:
 
 ```text
+{"ok":false,"error":"block amend-acceptance needs the human at a terminal to confirm; nothing was recorded (there is no --yes)","next":null}
 block amend-acceptance needs the human at a terminal to confirm; nothing was recorded (there is no --yes)
 ```
 
@@ -2006,7 +2011,13 @@ block amend-acceptance needs the human at a terminal to confirm; nothing was rec
 
 #### JSON output
 
-Takes `--json`; the examples above refuse, so no shape is recorded.
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `ok` | boolean |
+| `error` | string |
+| `next` | null |
 
 #### Related
 
@@ -2366,7 +2377,7 @@ code-forge context pack --run <run> --block B1 --json
 Exit 0. Output:
 
 ```text
-{"path":"<tmp>/cf-tmp/<run>/context/B1.md","tokens":1355,"lines":60,"cut":0,"sha256":"<sha256>"}
+{"path":"<tmp>/cf-tmp/<run>/context/B1.md","tokens":1500,"lines":65,"cut":0,"sha256":"<sha256>"}
 ```
 
 #### Exit codes
@@ -2620,6 +2631,7 @@ code-forge docs path --json
 Exit 1. Output:
 
 ```text
+{"ok":false,"error":"docs: none; run code-forge docs sync","next":"code-forge docs sync"}
 docs: none; run code-forge docs sync
 ```
 
@@ -2633,7 +2645,13 @@ docs: none; run code-forge docs sync
 
 #### JSON output
 
-Takes `--json`; the examples above refuse, so no shape is recorded.
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `ok` | boolean |
+| `error` | string |
+| `next` | string |
 
 #### Related
 
@@ -2728,7 +2746,9 @@ Exit 1. Output:
 
 ```text
 level=L0 provider=anthropic model=claude-haiku-4-5-20251001 effort=none fallback_step=0
+facts: the provider CLI printed nothing on stderr
 facts: failed (exit 1)
+next: code-forge doctor (checks each provider CLI and its login; code-forge logs --last 5 shows the error log)
 ```
 
 #### Exit codes
@@ -3261,7 +3281,9 @@ code-forge heal show h-missing --json
 Exit 1. Output:
 
 ```text
+{"ok":false,"error":"heal: no item h-missing\nnext: code-forge heal list","next":"code-forge heal list"}
 heal: no item h-missing
+next: code-forge heal list
 ```
 
 #### Exit codes
@@ -3274,7 +3296,13 @@ heal: no item h-missing
 
 #### JSON output
 
-Takes `--json`; the examples above refuse, so no shape is recorded.
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `ok` | boolean |
+| `error` | string |
+| `next` | string |
 
 #### Related
 
@@ -3757,6 +3785,7 @@ Exit 1. Output:
 ```text
 WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store
 jev: not found
+next: code-forge keys set jev
 ```
 
 #### Exit codes
@@ -5609,22 +5638,7 @@ code-forge report --slug demo --json
 Exit 0. Output:
 
 ```text
-{
-  "cost_per_block": [
-    {
-      "run": "<run>",
-      "block": "R-<id>",
-      "level": "L2",
-      "lane": null,
-      "completed": false,
-      "reviewUsd": 0.0134,
-      "coderUsd": 0,
-      "s1s2Usd": 0,
-      "factsUsd": 0,
-      "otherUsd": 0,
-      "proofTimeMs": 0,
-      "wallMs": 0,
-…
+{"cost_per_block":[{"run":"<run>","block":"R-<id>","level":"L2","lane":null,"completed":false,"reviewUsd":0.0134,"coderUsd":0,"s1s2Usd":0,"factsUsd":0,"otherUsd":0,"proofTimeMs":0,"wallMs":0,"humanWaitMs":null,"totalUsd":0.0134,"unknownUsdSessions":0,"reviewTimeMs":0,"stopped":true},{"run":"<run>","…
 ```
 
 #### Exit codes
@@ -5637,7 +5651,7 @@ Exit 0. Output:
 
 #### JSON output
 
-Prints JSON over several lines (pretty-printed): an object with these keys.
+Prints one JSON line: an object with these keys.
 
 | Key | Type |
 |---|---|
@@ -5743,6 +5757,8 @@ Exit 1. Output:
 {"ok":false,"base":"<sha>","base_from":"HEAD","run":"<run>","block":"R-<id>","files":[{"file":"plans/outcome.json","result":"unavailable","reason":"exit","findings":[]}],"skipped":[],"totals":{"files":1,"approved":0,"unchanged":0,"with_findings":0,"findings":0,"stopped":0,"unavailable":1}}
 review: base 45585b9cf037 (HEAD) · 1 file · run <run>
 review: plans/outcome.json  unavailable: exit
+review: plans/outcome.json  session failed (exit 1); the provider CLI printed nothing on stderr
+next: code-forge doctor (checks each provider CLI and its login; code-forge logs --last 5 shows the error log)
 review: run end exited 1: run end: kill EPERM
 ```
 
@@ -5868,7 +5884,7 @@ Available commands:
   run human-checks  List the open human checks of a run, or clear one (owner)
   run reload        Load the changed settings into a run
   run start         Start a run, or add or reattach a worker
-  run status        Show the state of a run
+  run status        Show the state of a run and whether its worker is alive
 
 Options:
   -h, --help  Show this help
@@ -5971,17 +5987,8 @@ code-forge run status --run <run>
 Exit 0. Output:
 
 ```text
-{
-  "run_id": "<run>",
-  "status": "active",
-  "engine": "auto",
-  "worker_pinned": true,
-  "blocks": {},
-  "orphans": [],
-  "spent_usd": 0.5,
-  "budget_usd": null,
-  "unknown_usd_sessions": 0
-}
+{"run_id":"<run>","status":"active","engine":"auto","worker_pinned":true,"worker_live":false,"workers":[{"pid": <pid>,"alive":false,"started_at":"Thu Nov 19 15:57:44 2026"}],"blocks":{},"orphans":[],"spent_usd":0.5,"budget_usd":null,"unknown_usd_sessions":0}
+run <run>: no live worker; fix: code-forge run start --add-worker --run <run>
 ```
 
 #### Exit codes
@@ -6183,7 +6190,9 @@ Exit 1. Output:
 
 ```text
 level=L3 provider=anthropic model=claude-fable-5-2 effort=none fallback_step=0
+s2: the provider CLI printed nothing on stderr
 s2: failed (exit 1)
+next: code-forge doctor (checks each provider CLI and its login; code-forge logs --last 5 shows the error log)
 ```
 
 #### Exit codes
@@ -6329,6 +6338,8 @@ Exit 0. Output:
 
 ```text
 {"runs":[{"run_id":"<run>","status":"active","mode":"plan","spent_usd":0.5,"unknown_usd_sessions":0,"budget_usd":null,"blocks":[],"more":0,"closed":0,"stopped":0},{"run_id":"<run>","status":"active","mode":"plan","spent_usd":0.0134,"unknown_usd_sessions":0,"budget_usd":null,"blocks":[],"more":0,"clo…
+run <run>: no live worker; fix: code-forge run start --add-worker --run <run>
+run <run>: no live worker; fix: code-forge run start --add-worker --run <run>
 ```
 
 #### Exit codes
