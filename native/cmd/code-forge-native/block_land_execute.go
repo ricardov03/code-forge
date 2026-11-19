@@ -148,9 +148,12 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		return fallback(hLandMainRepo)
 	}
 	cfg, ok := blockSnapshot(record)
-	if !ok || !daemonclient.Enabled(cfg) {
+	if !ok {
 		return fallback(hLandConfigDaemon)
 	}
+	// B789: the daemon only carries the review join; with native.daemon:
+	// false the join runs in this process (landJoinStep).
+	daemonOn := daemonclient.Enabled(cfg)
 	mergeGate := merge && !skip && blockMap(cfg["gates"])["merge_gate"] != false
 	// B765: land.require_ci refuses before any write when the block tip's CI
 	// is not green; it runs ahead of every Node hand-over below.
@@ -188,7 +191,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	}
 	if !retry {
 		dry := &landStep{preflight: true}
-		if reviewWaitBlockStep([]string{"--wait-block", id, "--run", run, "--max", "0ms", "--cwd", tree.Workspace}, dry) == landHandover {
+		if landJoinStep(daemonOn, id, run, tree.Workspace, "0ms", 0, dry) == landHandover {
 			return fallback(hLandStepHandoverJoin)
 		}
 		gateArgs := []string{"run", "--run", run, "--block", id, "--changed", "--cwd", tree.Workspace}
@@ -298,7 +301,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 					duration = fmt.Sprintf("%ds", remaining/1000)
 				}
 				joined = landCapture(func(s *landStep) int {
-					return reviewWaitBlockStep([]string{"--wait-block", id, "--run", run, "--max", duration, "--cwd", tree.Workspace}, s)
+					return landJoinStep(daemonOn, id, run, tree.Workspace, duration, time.Duration(remaining)*time.Millisecond, s)
 				}, nil)
 				for _, line := range strings.Split(joined.error, "\n") {
 					if strings.HasPrefix(line, "auto-requeue ") {
