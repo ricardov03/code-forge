@@ -72,6 +72,9 @@ func computeFileSet(cwd, base string) (all []string, ok bool, err error) {
 	}
 	seen := map[string]bool{}
 	add := func(f string) {
+		if gitx.IsStatePath(f) { // B829: code-forge's own state is no block change
+			return
+		}
 		if !seen[f] {
 			seen[f] = true
 			all = append(all, f)
