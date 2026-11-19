@@ -31,6 +31,7 @@ This page lists every CLI command: its purpose, when to use it, its usage and fl
 - [plan](#plan)
 - [proof](#proof)
 - [queue](#queue)
+- [release](#release)
 - [remove](#remove)
 - [report](#report)
 - [resolve](#resolve)
@@ -132,7 +133,7 @@ code-forge audit commands --json
 Exit 0. Output:
 
 ```text
-{"version":"dev","commit":"<sha>","date":"2026-01-01T00:00:00Z","commands":125,"checks":250,"problems":{"high":0,"low":0,"medium":9},"out":"","rows":[{"command":"audit","check":"help","result":"ok","severity":"","detail":"","block":""},{"command":"audit","check":"bad-flag","result":"ok","severity":"…
+{"version":"dev","commit":"<sha>","date":"2026-01-01T00:00:00Z","commands":127,"checks":254,"problems":{"high":0,"low":0,"medium":0},"out":"","rows":[{"command":"audit","check":"help","result":"ok","severity":"","detail":"","block":""},{"command":"audit","check":"bad-flag","result":"ok","severity":"…
 ```
 
 ```sh
@@ -209,7 +210,7 @@ code-forge author --job plan --brief plans/brief.md --timeout 5
 Exit 2. Output:
 
 ```text
-author: facts sheet required: run forge facts first
+author: facts sheet required: run code-forge facts --brief plans/brief.md first, then pass the sheet with --facts <file>
 ```
 
 #### Exit codes
@@ -2605,10 +2606,20 @@ None of its own; see its sub-commands.
 code-forge decisions --help
 ```
 
-Exit 2. Output:
+Exit 0. Output:
 
 ```text
-usage: code-forge decisions list [--run <r>] [--json]
+Description:
+  Show the decisions the autopilot signed
+
+Usage:
+  usage: code-forge decisions list [--run <r>] [--json]
+
+Available commands:
+  decisions list  List the close decisions the autopilot signed
+
+Options:
+  -h, --help  Show this help
 ```
 
 #### Exit codes
@@ -2698,10 +2709,21 @@ None of its own; see its sub-commands.
 code-forge docs --help
 ```
 
-Exit 2. Output:
+Exit 0. Output:
 
 ```text
-usage: code-forge docs sync|path [--json]
+Description:
+  Get the docs of the installed version
+
+Usage:
+  usage: code-forge docs sync|path [--json]
+
+Available commands:
+  docs path  Print the path of the best local docs copy
+  docs sync  Fetch the docs for the installed version
+
+Options:
+  -h, --help  Show this help
 ```
 
 #### Exit codes
@@ -2726,7 +2748,7 @@ Takes `--json`; the examples above refuse, so no shape is recorded.
 Fetch the docs for the installed version
 
 ```text
-usage: code-forge docs sync|path [--json]
+usage: code-forge docs sync [--json]
 ```
 
 #### When to use
@@ -2777,7 +2799,7 @@ Prints one JSON line: an object with these keys.
 Print the path of the best local docs copy
 
 ```text
-usage: code-forge docs sync|path [--json]
+usage: code-forge docs path [--json]
 ```
 
 #### When to use
@@ -2917,7 +2939,9 @@ Exit 1. Output:
 
 ```text
 level=L0 provider=anthropic model=claude-haiku-4-5-20251001 effort=none fallback_step=0
+facts: the provider CLI printed nothing on stderr
 facts: failed (exit 1)
+next: code-forge doctor (checks each provider CLI and its login; code-forge logs --last 5 shows the error log)
 ```
 
 #### Exit codes
@@ -2975,11 +2999,11 @@ Usage:
     gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.
     gates run --run --block --changed: the Go test selection (the block's tests, tests that import a changed file); never the full suite; an empty selection skips the test gate.
     gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.
+    gates run --run --block: a full suite in the shared checkout while other blocks of the run are open there prints 'full suite in a shared tree (N other open blocks)' and records shared_tree: N on gate.done; use --changed for the block's tests, or proof.isolation: worktree.
     gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.
 
 Available commands:
   gates acceptance       Check each acceptance clause has a passing test
-  gates detect           Find the test, lint, type and format commands
 …
 ```
 
@@ -3374,7 +3398,7 @@ Takes `--json`; the examples above refuse, so no shape is recorded.
 List the heal queue
 
 ```text
-usage: code-forge heal list [--run R] [--json] | show <id> [--run R] [--json] | run --run R [--once|--watch] [--max-tries N] [--json]
+usage: code-forge heal list [--run R] [--json]
 ```
 
 #### When to use
@@ -3387,9 +3411,6 @@ See the items waiting for a retry.
 |---|---|---|---|
 | `--run R` | string | not set | Run id (r-...). |
 | `--json` | bool | off | Print JSON instead of text. |
-| `--once` | bool | off | Run one pass and exit. |
-| `--watch` | bool | off | Keep running and retry as items arrive. |
-| `--max-tries N` | number | not set | Most retries per item. |
 
 #### Examples
 
@@ -3425,7 +3446,7 @@ Prints JSON: an array (empty in the example).
 Show one heal item
 
 ```text
-usage: code-forge heal list [--run R] [--json] | show <id> [--run R] [--json] | run --run R [--once|--watch] [--max-tries N] [--json]
+usage: code-forge heal show <id> [--run R] [--json]
 ```
 
 #### When to use
@@ -3438,9 +3459,6 @@ Read one heal item and its tries.
 |---|---|---|---|
 | `--run R` | string | not set | Run id (r-...). |
 | `--json` | bool | off | Print JSON instead of text. |
-| `--once` | bool | off | Run one pass and exit. |
-| `--watch` | bool | off | Keep running and retry as items arrive. |
-| `--max-tries N` | number | not set | Most retries per item. |
 
 #### Examples
 
@@ -3452,6 +3470,7 @@ Exit 1. Output:
 
 ```text
 heal: no item h-missing
+next: code-forge heal list
 ```
 
 #### Exit codes
@@ -3476,7 +3495,7 @@ Takes `--json`; the examples above refuse, so no shape is recorded.
 Retry the heal items of a run
 
 ```text
-usage: code-forge heal list [--run R] [--json] | show <id> [--run R] [--json] | run --run R [--once|--watch] [--max-tries N] [--json]
+usage: code-forge heal run --run R [--once|--watch] [--max-tries N] [--json]
 ```
 
 #### When to use
@@ -3488,10 +3507,10 @@ Retry the heal items of a run now, once or while watching.
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
 | `--run R` | string | not set | Run id (r-...). |
-| `--json` | bool | off | Print JSON instead of text. |
 | `--once` | bool | off | Run one pass and exit. |
 | `--watch` | bool | off | Keep running and retry as items arrive. |
 | `--max-tries N` | number | not set | Most retries per item. |
+| `--json` | bool | off | Print JSON instead of text. |
 
 #### Examples
 
@@ -3947,6 +3966,7 @@ Exit 1. Output:
 ```text
 WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store
 jev: not found
+next: code-forge keys set jev
 ```
 
 #### Exit codes
@@ -5720,6 +5740,148 @@ Exit 1. Output:
 - [`queue status`](#queue-status)
 - [`gates run`](#gates-run)
 
+## release
+
+Check a project is ready to release
+
+```text
+usage: code-forge release check [--cwd <dir>] [--json]
+```
+
+#### When to use
+
+Before you cut a release: ask whether this project is ready, in one read-only command.
+
+#### Flags
+
+None of its own; see its sub-commands.
+
+#### Examples
+
+```sh
+code-forge release --help
+```
+
+Exit 0. Output:
+
+```text
+Description:
+  Check a project is ready to release
+
+Usage:
+  usage: code-forge release check [--cwd <dir>] [--json]
+
+Available commands:
+  release check  Check tree, push, CI, CHANGELOG and npm ls; print the bump and steps
+
+Options:
+  -h, --help  Show this help
+```
+
+#### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | Refused or failed; the message says why. |
+| 2 | Usage error: a missing, unknown or bad argument (the usage is printed). |
+
+#### JSON output
+
+Takes `--json`; the examples above refuse, so no shape is recorded.
+
+#### Related
+
+- [`release check`](#release-check)
+- [`status`](#status)
+- [`doctor`](#doctor)
+
+### release check
+
+Check tree, push, CI, CHANGELOG and npm ls; print the bump and steps
+
+```text
+usage: code-forge release check [--cwd <dir>] [--json]
+```
+
+#### When to use
+
+Before `npm run release`: check the tree is clean, HEAD is pushed, GitHub CI is green for the HEAD sha, CHANGELOG [Unreleased] has one heading per kind and `npm ls` is clean; it suggests the bump and prints the release steps in order. It only reads; it never releases.
+
+#### Flags
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--cwd <dir>` | path | not set | Project folder to check (default: the current folder); the check runs at its git top level. |
+| `--json` | bool | off | Print JSON instead of text. |
+
+#### Examples
+
+```sh
+code-forge release check --json
+```
+
+Exit 1. Output:
+
+```text
+{"ready":false,"root":"<repo>","branch":"main","head":"<sha>","package":"","current":"","bump":"patch","bump_reason":"no CHANGELOG.md","next":"","checks":[{"name":"tree","status":"fail","detail":"the working tree is not clean (1 changed):  M plans/outcome.json","fix":"commit or remove the changes, t…
+```
+
+```sh
+code-forge release check
+```
+
+Exit 1. Output:
+
+```text
+release check: <repo> (branch HEAD, HEAD HEAD)
+ok    tree      working tree is clean
+FAIL  pushed    HEAD is detached
+                fix: check out the release branch (git switch main)
+FAIL  ci        gh run list failed (exit 1): no output
+                fix: check gh auth status and that origin is a GitHub repository
+skip  changelog no CHANGELOG.md: the bump is patch by default
+skip  npm-ls    no package.json
+bump: patch; no CHANGELOG.md
+steps, in order, once every check passes:
+  1. git tag -a v<x.y.z> -m "Release v<x.y.z>"
+  2. git push origin HEAD --follow-tags
+NOT READY: 2 check(s) failed: pushed, ci
+```
+
+#### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | Not ready: at least one check failed; each failing check names what to do (for example push HEAD, wait for CI, npm prune). |
+| 2 | Usage error: no check sub-command, an unknown or repeated option, or --cwd is not a folder. |
+
+#### JSON output
+
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `ready` | boolean |
+| `root` | string |
+| `branch` | string |
+| `head` | string |
+| `package` | string |
+| `current` | string |
+| `bump` | string |
+| `bump_reason` | string |
+| `next` | string |
+| `checks` | array |
+| `failed` | array |
+| `steps` | array |
+
+#### Related
+
+- [`status`](#status)
+- [`doctor`](#doctor)
+- [`audit commands`](#audit-commands)
+
 ## remove
 
 Remove skill installations
@@ -5933,6 +6095,8 @@ Exit 1. Output:
 {"ok":false,"base":"<sha>","base_from":"HEAD","run":"<run>","block":"R-<id>","files":[{"file":"plans/outcome.json","result":"unavailable","reason":"exit","findings":[]}],"skipped":[],"totals":{"files":1,"approved":0,"unchanged":0,"with_findings":0,"findings":0,"stopped":0,"unavailable":1}}
 review: base 45585b9cf037 (HEAD) · 1 file · run <run>
 review: plans/outcome.json  unavailable: exit
+review: plans/outcome.json  session failed (exit 1); the provider CLI printed nothing on stderr
+next: code-forge doctor (checks each provider CLI and its login; code-forge logs --last 5 shows the error log)
 review: run end exited 1: run end: kill EPERM
 ```
 
@@ -6378,7 +6542,9 @@ Exit 1. Output:
 
 ```text
 level=L3 provider=anthropic model=claude-fable-5-2 effort=none fallback_step=0
+s2: the provider CLI printed nothing on stderr
 s2: failed (exit 1)
+next: code-forge doctor (checks each provider CLI and its login; code-forge logs --last 5 shows the error log)
 ```
 
 #### Exit codes

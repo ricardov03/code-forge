@@ -71,7 +71,7 @@
         {
           "command": "code-forge audit commands --json",
           "exit": 0,
-          "output": "{\"version\":\"dev\",\"commit\":\"<sha>\",\"date\":\"2026-01-01T00:00:00Z\",\"commands\":125,\"checks\":250,\"problems\":{\"high\":0,\"low\":0,\"medium\":9},\"out\":\"\",\"rows\":[{\"command\":\"audit\",\"check\":\"help\",\"result\":\"ok\",\"severity\":\"\",\"detail\":\"\",\"block\":\"\"},{\"command\":\"audit\",\"check\":\"bad-flag\",\"result\":\"ok\",\"severity\":\"…"
+          "output": "{\"version\":\"dev\",\"commit\":\"<sha>\",\"date\":\"2026-01-01T00:00:00Z\",\"commands\":127,\"checks\":254,\"problems\":{\"high\":0,\"low\":0,\"medium\":0},\"out\":\"\",\"rows\":[{\"command\":\"audit\",\"check\":\"help\",\"result\":\"ok\",\"severity\":\"\",\"detail\":\"\",\"block\":\"\"},{\"command\":\"audit\",\"check\":\"bad-flag\",\"result\":\"ok\",\"severity\":\"…"
         },
         {
           "command": "code-forge audit commands --out",
@@ -207,7 +207,7 @@
         {
           "command": "code-forge author --job plan --brief plans/brief.md --timeout 5",
           "exit": 2,
-          "output": "author: facts sheet required: run forge facts first"
+          "output": "author: facts sheet required: run code-forge facts --brief plans/brief.md first, then pass the sheet with --facts <file>"
         }
       ],
       "exit_codes": [
@@ -3465,8 +3465,8 @@
       "examples": [
         {
           "command": "code-forge decisions --help",
-          "exit": 2,
-          "output": "usage: code-forge decisions list [--run <r>] [--json]"
+          "exit": 0,
+          "output": "Description:\n  Show the decisions the autopilot signed\n\nUsage:\n  usage: code-forge decisions list [--run <r>] [--json]\n\nAvailable commands:\n  decisions list  List the close decisions the autopilot signed\n\nOptions:\n  -h, --help  Show this help"
         }
       ],
       "exit_codes": [
@@ -3560,8 +3560,8 @@
       "examples": [
         {
           "command": "code-forge docs --help",
-          "exit": 2,
-          "output": "usage: code-forge docs sync|path [--json]"
+          "exit": 0,
+          "output": "Description:\n  Get the docs of the installed version\n\nUsage:\n  usage: code-forge docs sync|path [--json]\n\nAvailable commands:\n  docs path  Print the path of the best local docs copy\n  docs sync  Fetch the docs for the installed version\n\nOptions:\n  -h, --help  Show this help"
         }
       ],
       "exit_codes": [
@@ -3595,7 +3595,7 @@
       "owner_only": false,
       "hidden": false,
       "namespace": false,
-      "usage": "usage: code-forge docs sync|path [--json]",
+      "usage": "usage: code-forge docs sync [--json]",
       "flags": [
         {
           "name": "--json",
@@ -3651,7 +3651,7 @@
       "owner_only": false,
       "hidden": false,
       "namespace": false,
-      "usage": "usage: code-forge docs sync|path [--json]",
+      "usage": "usage: code-forge docs path [--json]",
       "flags": [
         {
           "name": "--json",
@@ -3821,7 +3821,7 @@
         {
           "command": "code-forge facts --brief plans/brief.md --timeout 5",
           "exit": 1,
-          "output": "level=L0 provider=anthropic model=claude-haiku-4-5-20251001 effort=none fallback_step=0\nfacts: failed (exit 1)"
+          "output": "level=L0 provider=anthropic model=claude-haiku-4-5-20251001 effort=none fallback_step=0\nfacts: the provider CLI printed nothing on stderr\nfacts: failed (exit 1)\nnext: code-forge doctor (checks each provider CLI and its login; code-forge logs --last 5 shows the error log)"
         }
       ],
       "exit_codes": [
@@ -3851,13 +3851,13 @@
       "owner_only": false,
       "hidden": false,
       "namespace": true,
-      "usage": "usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]\n  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); without --changed, over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n  gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.\n  gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.\n  gates run --run --block --changed: the Go test selection (the block's tests, tests that import a changed file); never the full suite; an empty selection skips the test gate.\n  gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.\n  gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.",
+      "usage": "usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]\n  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); without --changed, over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n  gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.\n  gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.\n  gates run --run --block --changed: the Go test selection (the block's tests, tests that import a changed file); never the full suite; an empty selection skips the test gate.\n  gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.\n  gates run --run --block: a full suite in the shared checkout while other blocks of the run are open there prints 'full suite in a shared tree (N other open blocks)' and records shared_tree: N on gate.done; use --changed for the block's tests, or proof.isolation: worktree.\n  gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.",
       "flags": [],
       "examples": [
         {
           "command": "code-forge gates --help",
           "exit": 0,
-          "output": "Description:\n  Run the project gates and the safety checks\n\nUsage:\n  usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]\n    gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); without --changed, over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n    gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.\n    gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.\n    gates run --run --block --changed: the Go test selection (the block's tests, tests that import a changed file); never the full suite; an empty selection skips the test gate.\n    gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.\n    gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.\n\nAvailable commands:\n  gates acceptance       Check each acceptance clause has a passing test\n  gates detect           Find the test, lint, type and format commands\n…"
+          "output": "Description:\n  Run the project gates and the safety checks\n\nUsage:\n  usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]\n    gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); without --changed, over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n    gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.\n    gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.\n    gates run --run --block --changed: the Go test selection (the block's tests, tests that import a changed file); never the full suite; an empty selection skips the test gate.\n    gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.\n    gates run --run --block: a full suite in the shared checkout while other blocks of the run are open there prints 'full suite in a shared tree (N other open blocks)' and records shared_tree: N on gate.done; use --changed for the block's tests, or proof.isolation: worktree.\n    gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.\n\nAvailable commands:\n  gates acceptance       Check each acceptance clause has a passing test\n…"
         }
       ],
       "exit_codes": [
@@ -4340,7 +4340,7 @@
       "owner_only": false,
       "hidden": false,
       "namespace": false,
-      "usage": "usage: code-forge heal list [--run R] [--json] | show <id> [--run R] [--json] | run --run R [--once|--watch] [--max-tries N] [--json]",
+      "usage": "usage: code-forge heal list [--run R] [--json]",
       "flags": [
         {
           "name": "--run",
@@ -4355,27 +4355,6 @@
           "type": "bool",
           "default": "off",
           "meaning": "Print JSON instead of text."
-        },
-        {
-          "name": "--once",
-          "value": "",
-          "type": "bool",
-          "default": "off",
-          "meaning": "Run one pass and exit."
-        },
-        {
-          "name": "--watch",
-          "value": "",
-          "type": "bool",
-          "default": "off",
-          "meaning": "Keep running and retry as items arrive."
-        },
-        {
-          "name": "--max-tries",
-          "value": "N",
-          "type": "number",
-          "default": "not set",
-          "meaning": "Most retries per item."
         }
       ],
       "examples": [
@@ -4416,7 +4395,7 @@
       "owner_only": false,
       "hidden": false,
       "namespace": false,
-      "usage": "usage: code-forge heal list [--run R] [--json] | show <id> [--run R] [--json] | run --run R [--once|--watch] [--max-tries N] [--json]",
+      "usage": "usage: code-forge heal show <id> [--run R] [--json]",
       "flags": [
         {
           "name": "--run",
@@ -4431,34 +4410,13 @@
           "type": "bool",
           "default": "off",
           "meaning": "Print JSON instead of text."
-        },
-        {
-          "name": "--once",
-          "value": "",
-          "type": "bool",
-          "default": "off",
-          "meaning": "Run one pass and exit."
-        },
-        {
-          "name": "--watch",
-          "value": "",
-          "type": "bool",
-          "default": "off",
-          "meaning": "Keep running and retry as items arrive."
-        },
-        {
-          "name": "--max-tries",
-          "value": "N",
-          "type": "number",
-          "default": "not set",
-          "meaning": "Most retries per item."
         }
       ],
       "examples": [
         {
           "command": "code-forge heal show h-missing --json",
           "exit": 1,
-          "output": "heal: no item h-missing"
+          "output": "heal: no item h-missing\nnext: code-forge heal list"
         }
       ],
       "exit_codes": [
@@ -4492,7 +4450,7 @@
       "owner_only": false,
       "hidden": false,
       "namespace": false,
-      "usage": "usage: code-forge heal list [--run R] [--json] | show <id> [--run R] [--json] | run --run R [--once|--watch] [--max-tries N] [--json]",
+      "usage": "usage: code-forge heal run --run R [--once|--watch] [--max-tries N] [--json]",
       "flags": [
         {
           "name": "--run",
@@ -4500,13 +4458,6 @@
           "type": "string",
           "default": "not set",
           "meaning": "Run id (r-...)."
-        },
-        {
-          "name": "--json",
-          "value": "",
-          "type": "bool",
-          "default": "off",
-          "meaning": "Print JSON instead of text."
         },
         {
           "name": "--once",
@@ -4528,6 +4479,13 @@
           "type": "number",
           "default": "not set",
           "meaning": "Most retries per item."
+        },
+        {
+          "name": "--json",
+          "value": "",
+          "type": "bool",
+          "default": "off",
+          "meaning": "Print JSON instead of text."
         }
       ],
       "examples": [
@@ -5092,7 +5050,7 @@
         {
           "command": "code-forge keys test jev",
           "exit": 1,
-          "output": "WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store\njev: not found"
+          "output": "WARN keys: no OS keychain available; secrets are stored in 0600 files under ~/.code-forge/store\njev: not found\nnext: code-forge keys set jev"
         }
       ],
       "exit_codes": [
@@ -7089,6 +7047,157 @@
       ]
     },
     {
+      "name": "release",
+      "purpose": "Check a project is ready to release.",
+      "when": "Before you cut a release: ask whether this project is ready, in one read-only command.",
+      "owner_only": false,
+      "hidden": false,
+      "namespace": true,
+      "usage": "usage: code-forge release check [--cwd <dir>] [--json]",
+      "flags": [],
+      "examples": [
+        {
+          "command": "code-forge release --help",
+          "exit": 0,
+          "output": "Description:\n  Check a project is ready to release\n\nUsage:\n  usage: code-forge release check [--cwd <dir>] [--json]\n\nAvailable commands:\n  release check  Check tree, push, CI, CHANGELOG and npm ls; print the bump and steps\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ],
+      "exit_codes": [
+        {
+          "code": 0,
+          "meaning": "Success."
+        },
+        {
+          "code": 1,
+          "meaning": "Refused or failed; the message says why."
+        },
+        {
+          "code": 2,
+          "meaning": "Usage error: a missing, unknown or bad argument (the usage is printed)."
+        }
+      ],
+      "json": {
+        "kind": "none",
+        "lines": "one",
+        "keys": []
+      },
+      "related": [
+        "release check",
+        "status",
+        "doctor"
+      ]
+    },
+    {
+      "name": "release check",
+      "purpose": "Check tree, push, CI, CHANGELOG and npm ls; print the bump and steps.",
+      "when": "Before `npm run release`: check the tree is clean, HEAD is pushed, GitHub CI is green for the HEAD sha, CHANGELOG [Unreleased] has one heading per kind and `npm ls` is clean; it suggests the bump and prints the release steps in order. It only reads; it never releases.",
+      "owner_only": false,
+      "hidden": false,
+      "namespace": false,
+      "usage": "usage: code-forge release check [--cwd <dir>] [--json]",
+      "flags": [
+        {
+          "name": "--cwd",
+          "value": "<dir>",
+          "type": "path",
+          "default": "not set",
+          "meaning": "Project folder to check (default: the current folder); the check runs at its git top level."
+        },
+        {
+          "name": "--json",
+          "value": "",
+          "type": "bool",
+          "default": "off",
+          "meaning": "Print JSON instead of text."
+        }
+      ],
+      "examples": [
+        {
+          "command": "code-forge release check --json",
+          "exit": 1,
+          "output": "{\"ready\":false,\"root\":\"<repo>\",\"branch\":\"main\",\"head\":\"<sha>\",\"package\":\"\",\"current\":\"\",\"bump\":\"patch\",\"bump_reason\":\"no CHANGELOG.md\",\"next\":\"\",\"checks\":[{\"name\":\"tree\",\"status\":\"fail\",\"detail\":\"the working tree is not clean (1 changed):  M plans/outcome.json\",\"fix\":\"commit or remove the changes, t…"
+        },
+        {
+          "command": "code-forge release check",
+          "exit": 1,
+          "output": "release check: <repo> (branch HEAD, HEAD HEAD)\nok    tree      working tree is clean\nFAIL  pushed    HEAD is detached\n                fix: check out the release branch (git switch main)\nFAIL  ci        gh run list failed (exit 1): no output\n                fix: check gh auth status and that origin is a GitHub repository\nskip  changelog no CHANGELOG.md: the bump is patch by default\nskip  npm-ls    no package.json\nbump: patch; no CHANGELOG.md\nsteps, in order, once every check passes:\n  1. git tag -a v<x.y.z> -m \"Release v<x.y.z>\"\n  2. git push origin HEAD --follow-tags\nNOT READY: 2 check(s) failed: pushed, ci"
+        }
+      ],
+      "exit_codes": [
+        {
+          "code": 0,
+          "meaning": "Success."
+        },
+        {
+          "code": 1,
+          "meaning": "Not ready: at least one check failed; each failing check names what to do (for example push HEAD, wait for CI, npm prune)."
+        },
+        {
+          "code": 2,
+          "meaning": "Usage error: no check sub-command, an unknown or repeated option, or --cwd is not a folder."
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "ready",
+            "type": "boolean"
+          },
+          {
+            "key": "root",
+            "type": "string"
+          },
+          {
+            "key": "branch",
+            "type": "string"
+          },
+          {
+            "key": "head",
+            "type": "string"
+          },
+          {
+            "key": "package",
+            "type": "string"
+          },
+          {
+            "key": "current",
+            "type": "string"
+          },
+          {
+            "key": "bump",
+            "type": "string"
+          },
+          {
+            "key": "bump_reason",
+            "type": "string"
+          },
+          {
+            "key": "next",
+            "type": "string"
+          },
+          {
+            "key": "checks",
+            "type": "array"
+          },
+          {
+            "key": "failed",
+            "type": "array"
+          },
+          {
+            "key": "steps",
+            "type": "array"
+          }
+        ]
+      },
+      "related": [
+        "status",
+        "doctor",
+        "audit commands"
+      ]
+    },
+    {
       "name": "remove",
       "purpose": "Remove skill installations.",
       "when": "Uninstall the code-forge skill from a harness.",
@@ -7373,7 +7482,7 @@
         {
           "command": "code-forge review --base HEAD --intent nothing --json --max 5",
           "exit": 1,
-          "output": "{\"ok\":false,\"base\":\"<sha>\",\"base_from\":\"HEAD\",\"run\":\"<run>\",\"block\":\"R-<id>\",\"files\":[{\"file\":\"plans/outcome.json\",\"result\":\"unavailable\",\"reason\":\"exit\",\"findings\":[]}],\"skipped\":[],\"totals\":{\"files\":1,\"approved\":0,\"unchanged\":0,\"with_findings\":0,\"findings\":0,\"stopped\":0,\"unavailable\":1}}\nreview: base 45585b9cf037 (HEAD) · 1 file · run <run>\nreview: plans/outcome.json  unavailable: exit\nreview: run end exited 1: run end: kill EPERM"
+          "output": "{\"ok\":false,\"base\":\"<sha>\",\"base_from\":\"HEAD\",\"run\":\"<run>\",\"block\":\"R-<id>\",\"files\":[{\"file\":\"plans/outcome.json\",\"result\":\"unavailable\",\"reason\":\"exit\",\"findings\":[]}],\"skipped\":[],\"totals\":{\"files\":1,\"approved\":0,\"unchanged\":0,\"with_findings\":0,\"findings\":0,\"stopped\":0,\"unavailable\":1}}\nreview: base 45585b9cf037 (HEAD) · 1 file · run <run>\nreview: plans/outcome.json  unavailable: exit\nreview: plans/outcome.json  session failed (exit 1); the provider CLI printed nothing on stderr\nnext: code-forge doctor (checks each provider CLI and its login; code-forge logs --last 5 shows the error log)\nreview: run end exited 1: run end: kill EPERM"
         }
       ],
       "exit_codes": [
@@ -7957,7 +8066,7 @@
         {
           "command": "code-forge s2 --packet plans/p.json --timeout 5",
           "exit": 1,
-          "output": "level=L3 provider=anthropic model=claude-fable-5-2 effort=none fallback_step=0\ns2: failed (exit 1)"
+          "output": "level=L3 provider=anthropic model=claude-fable-5-2 effort=none fallback_step=0\ns2: the provider CLI printed nothing on stderr\ns2: failed (exit 1)\nnext: code-forge doctor (checks each provider CLI and its login; code-forge logs --last 5 shows the error log)"
         }
       ],
       "exit_codes": [
