@@ -383,6 +383,11 @@ func TestB581OpenAfterOutcomeIsNative(t *testing.T) {
 		}, func(f *closeReviewFixture) string {
 			return "--after-outcome step s1: Cannot read outcome \"" + filepath.Join(f.top, "out/s1.json") + "\" (EISDIR)"
 		}},
+		{"outcome-schema", func(t *testing.T, f *closeReviewFixture) { // B873: named, not handed over
+			outcome(t, f, `{"skill":1,"status":"approved","files":[]}`)
+		}, func(f *closeReviewFixture) string {
+			return "--after-outcome step s1: Outcome \"" + filepath.Join(f.top, "out/s1.json") + "\" does not match the outcome schema: \"skill\" must be a string"
+		}},
 		{"outcome-file-missing", func(t *testing.T, f *closeReviewFixture) {
 			outcome(t, f, `{"skill":"k","status":"approved","files":[{"path":"q","sha256":"x"}]}`)
 		}, func(*closeReviewFixture) string { return "--after-outcome step s1: file \"q\": missing file" }},
@@ -399,9 +404,6 @@ func TestB581OpenAfterOutcomeIsNative(t *testing.T) {
 	}{
 		{"pipeline-schema", "open-pipeline-form", func(t *testing.T, f *closeReviewFixture) { pipeline(t, f, "steps: []\n") }},
 		{"pipeline-yaml-form", "open-pipeline-form", func(t *testing.T, f *closeReviewFixture) { pipeline(t, f, "root: !x .\n") }},
-		{"outcome-schema", "open-outcome-form", func(t *testing.T, f *closeReviewFixture) {
-			outcome(t, f, `{"skill":1,"status":"approved","files":[]}`)
-		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, acceptance := b581Fixture(t)

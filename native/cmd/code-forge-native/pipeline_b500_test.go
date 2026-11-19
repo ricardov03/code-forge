@@ -317,7 +317,8 @@ func TestB500PipelineOutcomeFileProblems(t *testing.T) {
 	}
 }
 
-// Node's YAML and Ajv wording is not ported: those files keep a named handover.
+// Node's YAML and Ajv wording is not ported: those pipeline files keep a
+// named handover; an outcome outside the schema is named since B873.
 func TestB500PipelineKeepsNamedHandovers(t *testing.T) {
 	home, work := b500Env(t)
 	file := filepath.Join(work, "code-forge.pipeline.yml")
@@ -326,8 +327,6 @@ func TestB500PipelineKeepsNamedHandovers(t *testing.T) {
 		{"root: .\nsteps:\n  - {id: A, skill: s, outcome: o/a.json, approval: none}\n", "", "pipeline-unsupported"},
 		{"root: .\nsteps:\n  - {id: a, skill: s, outcome: ../a.json, approval: none}\n", "", "pipeline-unsupported"},
 		{"steps:\n  - {id: a, skill: s, outcome: o/a.json, approval: none}\n", "", "pipeline-unsupported"},
-		{"root: .\nsteps:\n  - {id: a, skill: s, outcome: o/a.json, approval: none}\n", `{"skill":1,"status":"draft","files":[]}`, "pipeline-unsupported"},
-		{"root: .\nsteps:\n  - {id: a, skill: s, outcome: o/a.json, approval: none}\n", `[1]`, "pipeline-unsupported"},
 	} {
 		b500Write(t, file, tc.yaml)
 		if tc.outcome != "" {
@@ -336,6 +335,18 @@ func TestB500PipelineKeepsNamedHandovers(t *testing.T) {
 		code, out, _ := b500Run(t, "pipeline", "status")
 		if code != 1 || out != "" || b500HandedOver(t, home) != tc.reason {
 			t.Errorf("%q %q: got (%d, %q, %q), want a %s handover", tc.yaml, tc.outcome, code, out, b500HandedOver(t, home), tc.reason)
+		}
+	}
+	// B873: an outcome outside the schema is the step's invalid reason, named.
+	b500Write(t, file, "root: .\nsteps:\n  - {id: a, skill: s, outcome: o/a.json, approval: none}\n")
+	for outcome, problem := range map[string]string{
+		`{"skill":1,"status":"draft","files":[]}`: `"skill" must be a string`,
+		`[1]`: `must be a JSON object`,
+	} {
+		b500Write(t, filepath.Join(work, "o", "a.json"), outcome)
+		want := "a  invalid  s  — Outcome " + jsQuote(filepath.Join(work, "o", "a.json")) + " does not match the outcome schema: " + problem + "\n"
+		if code, out, errText := b500Run(t, "pipeline", "status"); code != 0 || out != want || errText != "" {
+			t.Errorf("%s: got (%d, %q, %q), want %q", outcome, code, out, errText, want)
 		}
 	}
 }

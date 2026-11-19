@@ -42,7 +42,7 @@ func runGuarded(args []string) (code int, err error) {
 	if panicSeam != nil {
 		panicSeam(args)
 	}
-	return run(args)
+	return jsonRefusalRun(args, run) // B872: a --json refusal also prints one JSON line
 }
 
 // guardStderr is the standard error the command started with. A command

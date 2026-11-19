@@ -1669,7 +1669,7 @@ func autopilotBinnacle(o *runOut, home, runID, sub string, flags autopilotFlags)
 		} else {
 			data = b.fullLog(rows, scrub)
 		}
-		text, _ := ledger.Stringify(data, true)
+		text, _ := ledger.Stringify(data, false) // B874: one compact line
 		o.out(string(text) + "\n")
 	case flags.bools["markdown"]:
 		binnacle, log, err := bnWriteFiles(home, runID, rows, record, now, owner)

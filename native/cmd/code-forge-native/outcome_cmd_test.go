@@ -90,13 +90,11 @@ func TestB455OutcomeSealMatchesNode(t *testing.T) {
 	}
 }
 
-// AJV wording and an outcome Go cannot rewrite stay with Node; a passing
-// record is signed in Go since B471 (outcome_record_test.go).
+// An outcome Go cannot rewrite is refused in Go; a schema problem is named
+// since B873 (outcome_b873_test.go); a passing record is signed in Go since
+// B471 (outcome_record_test.go).
 func TestB455OutcomeHandsOverSchemaUnwritableAndRecord(t *testing.T) {
 	repo, _ := outcomeFixture(t)
-	writeHomeFile(t, repo, "schema.json", `{"skill":1,"status":"approved","files":[]}`)
-	expectHandover(t, "outcome-unsupported", "outcome", "check", "schema.json")
-	expectHandover(t, "outcome-unsupported", "outcome", "seal", "schema.json")
 	writeHomeFile(t, repo, "locked.json", `{"skill":"s","status":"approved","files":[]}`)
 	if err := os.Chmod(filepath.Join(repo, "locked.json"), 0o444); err != nil {
 		t.Fatal(err)
