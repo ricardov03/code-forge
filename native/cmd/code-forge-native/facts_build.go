@@ -906,6 +906,13 @@ func fcSessionAndSheet(p *fcPlan, root, dir, snapDir string, stderr io.Writer, l
 		if reason, _ := result.Get("reason").(string); reason != "" {
 			line += " (" + reason + ")"
 		}
+		if status == "failed" || status == "timeout" || status == "unavailable" {
+			// B876: the provider's stderr first, then the verdict and the next
+			// step in one write (the error log keeps the verdict)
+			packet := fcPacket(p.claims)
+			fmt.Fprint(stderr, providerExitDetail("facts", result, &packet))
+			line += "\n" + strings.TrimSuffix(refusalNext(providerExitNext), "\n")
+		}
 		fmt.Fprint(stderr, line+"\n")
 		switch status {
 		case "started":
