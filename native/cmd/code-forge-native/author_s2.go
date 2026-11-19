@@ -640,6 +640,13 @@ func b550Exec(o *runOut, p *b550Plan) (int, handoverReason) {
 		if reason, _ := res.Get("reason").(string); reason != "" {
 			line += " (" + reason + ")"
 		}
+		if status == "failed" || status == "timeout" || status == "unavailable" {
+			// B876: the provider's stderr first, then the verdict and the next
+			// step in one write (the error log keeps the verdict)
+			packetText := jsonx.WellFormed(p.packet)
+			o.err(providerExitDetail(p.verb, res, &packetText))
+			line += "\n" + strings.TrimSuffix(refusalNext(providerExitNext), "\n")
+		}
 		o.err(line + "\n")
 		if status == "unavailable" {
 			return 3, 0

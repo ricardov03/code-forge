@@ -2,7 +2,9 @@
 == out
 == err
 level=L3 provider=openai model=gpt-x effort=high fallback_step=0
+s2: provider stderr: boom
 s2: failed (exit 5)
+next: code-forge doctor (checks each provider CLI and its login; code-forge logs --last 5 shows the error log)
 == ledger
 {"event":"session","role":"s2","level":"L3","provider":"openai","model":"gpt-x","effort":"high","fallback_step":0,"run":null,"block":null,"source":"s2","status":"failed","reason":"exit 5","tokens_in":118,"tokens_out":11,"tokens_source":"estimated","usd":0.0032,"cost_source":"estimated","duration_ms":N}
 == files

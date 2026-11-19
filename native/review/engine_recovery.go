@@ -944,6 +944,11 @@ func runOneWith(spec sessionSpec, text string, packet *Packet, in Input, deps De
 		meta.Set("status", "unavailable")
 		meta.Set("reason", verdict.Reason)
 		meta.Set("review", nil)
+		if verdict.Reason == "exit" || verdict.Reason == "timeout" {
+			// B876: why the provider gave no answer, for review's text output
+			meta.Set("detail", verdict.Detail)
+			meta.Set("stderr_tail", failureTail(res, text))
+		}
 		return meta, nil
 	}
 	meta.Set("status", "ok")
