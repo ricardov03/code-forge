@@ -140,15 +140,13 @@ func hasCliOnPath(provider string) bool {
 	return false
 }
 
-// secretShape is SECRET_LOOKING_PATTERNS without the lookbehind: a string
-// with any such candidate goes to Node, which scrubs it.
-var secretShape = regexp.MustCompile(`sk-[A-Za-z0-9_-]{10,}|xai-[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|gh[opsu]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{12,}|AIza[0-9A-Za-z_-]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}`)
-
+// secretCandidate is SECRET_LOOKING_PATTERNS with its lookbehind (B781:
+// config.LooksLikeSecret; "sk-" inside task-runner-ios is not a key).
 func secretCandidate(s string) bool {
 	if strings.HasPrefix(s, "env:") || strings.HasPrefix(s, "op://") || s == "user" {
 		return false
 	}
-	return secretShape.MatchString(s)
+	return config.LooksLikeSecret(s)
 }
 
 func configHoldsSecretShape(node any) bool {

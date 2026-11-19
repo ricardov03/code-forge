@@ -31,7 +31,9 @@ type closeReviewFixture struct {
 	closed chan struct{}
 }
 
-func newCloseReviewFixture(t *testing.T, count int) *closeReviewFixture {
+// projectConfig, when given, is the .code-forge.yml committed in the base
+// commit (B781).
+func newCloseReviewFixture(t *testing.T, count int, projectConfig ...string) *closeReviewFixture {
 	t.Helper()
 	f := &closeReviewFixture{home: t.TempDir(), top: t.TempDir()}
 	t.Setenv("HOME", f.home)
@@ -53,6 +55,9 @@ func newCloseReviewFixture(t *testing.T, count int) *closeReviewFixture {
 		file := fmt.Sprintf("file%d.txt", i)
 		owned = append(owned, file)
 		closeFixtureWrite(t, filepath.Join(f.top, file), []byte("before\n"))
+	}
+	for _, text := range projectConfig {
+		closeFixtureWrite(t, filepath.Join(f.top, ".code-forge.yml"), []byte(text))
 	}
 	git("add", ".")
 	git("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "base")

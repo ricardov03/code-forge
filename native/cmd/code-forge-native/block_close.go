@@ -411,8 +411,11 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	if !supported {
 		return fallback(hCloseTranscriptFormat)
 	}
-	highPaths, ok := closeHighPaths(workspace, base)
-	if !ok {
+	highPaths, err := closeHighPaths(workspace, base)
+	if refusal, isRefusal := closeConfigRefusal(err); isRefusal {
+		// B781: a config close cannot read is a refusal that names the key.
+		return fail(refusal)
+	} else if err != nil {
 		return fallback(hCloseHighPaths)
 	}
 	prefix := gatecheck.Prefix(mainTop, workspace)
@@ -1191,8 +1194,18 @@ func closeTextSafe(text string) bool {
 	return !regexp.MustCompile(`sk-|xai-|xox[baprs]-|gh[opsu]_|github_pat_|AKIA|AIza|eyJ`).MatchString(text)
 }
 
-func closeHighPaths(workspace, base string) ([]any, bool) {
+func closeHighPaths(workspace, base string) ([]any, error) {
 	return gatecheck.HighPaths(workspace, base, version)
+}
+
+// closeConfigRefusal turns HighPaths' config refusal into close's
+// config_invalid refusal (B781); any other error is not one.
+func closeConfigRefusal(err error) (*state.Error, bool) {
+	var refusal *gatecheck.ConfigRefusal
+	if !errors.As(err, &refusal) {
+		return nil, false
+	}
+	return &state.Error{Code: "config_invalid", Message: refusal.Message}, true
 }
 
 func closeExcluded(cfg map[string]any, file string) bool {

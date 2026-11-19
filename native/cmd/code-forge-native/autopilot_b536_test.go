@@ -309,15 +309,14 @@ func TestB536ApproveRefusedInGo(t *testing.T) {
 	}
 }
 
-// B536: what Go does not reproduce hands over before the prompt with a
-// narrow reason and writes nothing: an edited config Node calls invalid
-// (".code-forge.yml would be invalid ([schema] /review/max_rounds_per_file)"
-// names key paths Go's validator does not carry) and a YAML shape yamledit
-// does not write like the yaml package (an anchor).
+// B536 + B781: an edit Go refuses is refused before the prompt, writes
+// nothing and hands nothing over: an edited config that would be invalid
+// gets the config-invalid refusal with the schema key path, and a YAML shape
+// no edit can change safely (an anchor) gets the yaml-shape refusal.
 func TestB536ApproveNarrowHandOvers(t *testing.T) {
 	cases := []struct{ name, yml, key, value, reason string }{
-		{"invalid", "", "review.max_rounds_per_file", `"abc"`, "autopilot-approve-reload-shape"},
-		{"anchor", "# project config\nprovider: anthropic\nreview:\n  max_rounds_per_file: &n 3\n", "review.max_rounds_per_file", "5", "autopilot-approve-yaml-shape"},
+		{"invalid", "", "review.max_rounds_per_file", `"abc"`, "config-invalid"},
+		{"anchor", "# project config\nprovider: anthropic\nreview:\n  max_rounds_per_file: &n 3\n", "review.max_rounds_per_file", "5", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -330,15 +329,21 @@ func TestB536ApproveNarrowHandOvers(t *testing.T) {
 			before := f.state(t)
 			asked := false
 			autopilotConfirm = func(string) (humanask.Result, error) { asked = true; return humanask.Confirmed, nil }
-			code, out, _ := b536Approve(t, tc.key, tc.value, "2026-11-11T11:00:00.000Z")
+			code, out, errText := b536Approve(t, tc.key, tc.value, "2026-11-11T11:00:00.000Z")
 			if code != 1 || out != "" || asked {
 				t.Fatalf("= %d %q asked %v, want the Go refusal before the prompt", code, out, asked)
 			}
 			if f.state(t) != before {
 				t.Fatal("wrote before handing over")
 			}
-			if got := f.handovers(t); len(got) != 1 || got[0] != tc.reason {
-				t.Fatalf("reasons = %v, want %s", got, tc.reason)
+			if tc.reason == "" {
+				if got := f.handovers(t); len(got) != 0 || !strings.Contains(errText, "review.max_rounds_per_file cannot be changed safely in .code-forge.yml (it holds an anchor, alias or tag)") {
+					t.Fatalf("reasons = %v, err %q; want the B781 refusal and no hand-over", got, errText)
+				}
+				return
+			}
+			if got := f.handovers(t); len(got) != 0 || !strings.Contains(errText, "nothing was changed") || !strings.Contains(errText, "max_rounds_per_file") {
+				t.Fatalf("reasons = %v, err %q; want the B781 config-invalid refusal and no hand-over", got, errText)
 			}
 		})
 	}

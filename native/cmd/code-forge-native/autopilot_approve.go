@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 	"time"
@@ -145,8 +146,10 @@ func autopilotApprovePlan(home, runID string, record ledger.Object, flags autopi
 	if !ok || !autopilotPlainPrompt(key, runID, value) {
 		return nil, hAutopilotApproveValue
 	}
-	if _, _, reason := apdApproveDecide(home, runID, record, key, value, now, hAutopilotApproveYAMLShape); reason != 0 {
+	if _, refusal, reason := apdApproveDecide(home, runID, record, key, value, now, hAutopilotApproveYAMLShape); reason != 0 {
 		return nil, reason
+	} else if apdIsShapeRefusal(refusal) {
+		return func(o *runOut) int { return autopilotReport(o, "approve", refusal) }, 0 // B781: before the prompt
 	}
 	if !autopilotPromptable() {
 		return nil, hAutopilotPrompt // stdin is a terminal but stdout is not: clack's output stays with Node
@@ -253,4 +256,10 @@ func autopilotApprove(o *runOut, home, runID string, flags autopilotFlags, key s
 	}
 	o.out("autopilot approve run " + runID + ": " + key + " changed until " + until + " (approval " + approval.Get("approval_id").(string) + "); the old value comes back then\n")
 	return 0
+}
+
+// apdIsShapeRefusal: err is apdShapeRefusal's answer.
+func apdIsShapeRefusal(err error) bool {
+	var e *state.Error
+	return errors.As(err, &e) && (e.Code == "yaml-shape" || e.Code == "config-invalid")
 }
