@@ -420,7 +420,9 @@ func runStatusPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 	var budget any
 	if workspace, isString := record.Get("workspace").(string); isString {
 		if cfg, err := config.Load(workspace); err == nil {
-			if b, isNumber := cfg["budget"].(map[string]any)["usd"].(float64); isNumber && b > 0 && !math.IsInf(b, 0) {
+			// B786: two-value assertions; a config without budget: has no map.
+			budgetCfg, _ := cfg["budget"].(map[string]any)
+			if b, isNumber := budgetCfg["usd"].(float64); isNumber && b > 0 && !math.IsInf(b, 0) {
 				budget = b
 			}
 		}
