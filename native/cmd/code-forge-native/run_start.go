@@ -376,6 +376,27 @@ func runLaunchWorkerJudged(runID, workspace, binary string, env []string, strict
 	return 0, "", &runFail{"the worker did not start (run `code-forge worker --run <id>` by hand to see why)", false}
 }
 
+// runStartWorkerBlocked is the refusal a plain `run start` gives before it
+// writes anything (B871): the workspace is not in a git repository, or the
+// repository already has a live worker of another run (the worker a launch
+// starts would refuse to serve this one). "" when the launch may go ahead; a
+// registry Go cannot judge is left to the launch, as before.
+func runStartWorkerBlocked(workspace, runID string) string {
+	repoRoot, err := gitx.RepoTop(workspace)
+	if err != nil {
+		return "not inside a git repository"
+	}
+	other, judged := runLiveWorker(repoRoot, 0, false)
+	if !judged || other == nil {
+		return ""
+	}
+	run, _ := other.Get("run").(string)
+	if run == runID {
+		return ""
+	}
+	return fmt.Sprintf("the worker did not start: run %s still has a live worker (pid %s); end it with: code-forge run end --run %s; nothing was recorded", run, runNumber(other.Get("pid")), run)
+}
+
 // runPinLocked is reattachWorker under the run lock (add: worker.add, the pin
 // joins the list and history is kept).
 func runPinLocked(home, runID string, pid float64, add bool) (ledger.Object, error) {
@@ -580,6 +601,14 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 				return fail(fmt.Sprintf("worker pid %s is not running", runNumber(workerPid)))
 			}
 			worker = ledger.Object{{Key: "pid", Value: workerPid}, {Key: "started_at", Value: *started}}
+		}
+		if worker == nil {
+			// B871: a worker the launch would start refuses when the repository
+			// already has a live worker of another run; check before the record,
+			// key and signed rows are written, so the refusal leaves no run.
+			if msg := runStartWorkerBlocked(workspace, runID); msg != "" {
+				return fail(msg)
+			}
 		}
 		brief := flags.values["mode"] == "brief"
 		record := runNewRecord(cfg, runID, project, ws, engine, worker, brief, now)
