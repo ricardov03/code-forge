@@ -57,23 +57,31 @@ func run(args []string) (int, error) {
 	return unknownVerb(verb), nil
 }
 
+// unknownVerbUsage is the usage line an unknown verb prints (B878).
+const unknownVerbUsage = "usage: code-forge <command> [options] [arguments]\n"
+
 // B690a: Go never starts Node. A verb that is not in the route table gets
-// Node's unknown-verb text (bin/code-forge.mjs: the verb list is src/cli's
-// file names, which handoverCommands lists), exit 1, and writes nothing.
+// the unknown-verb text and writes nothing. Since B878 it is a usage error
+// like an unknown flag or help topic: exit 2, the usage line, and the list
+// of the visible verbs of the help table (hidden ones such as land and
+// native-status still run but are not listed).
 func unknownVerb(verb string) int {
-	verbs := make([]string, 0, len(handoverCommands))
-	for name := range handoverCommands {
-		verbs = append(verbs, name)
+	verbs := []string{}
+	for _, entry := range helpCommands {
+		if !entry.hidden && !strings.Contains(entry.name, " ") {
+			verbs = append(verbs, entry.name)
+		}
 	}
 	sort.Strings(verbs)
 	var b strings.Builder
-	b.WriteString("code-forge: unknown verb \"" + verb + "\"\nVerbs:\n")
+	b.WriteString("code-forge: unknown verb \"" + verb + "\"\n" + unknownVerbUsage + "Verbs:\n")
 	for _, name := range verbs {
 		b.WriteString("  " + name + "\n")
 	}
-	// Node writes it through redact() (src/util/redact.mjs): registered secrets are masked.
+	b.WriteString("Run code-forge help for what each one does.\n")
+	// Written through redact(), as every stderr path: registered secrets are masked.
 	fmt.Fprint(os.Stderr, autopilotRedact(b.String()))
-	return 1
+	return 2
 }
 
 // refuseUnported is the B690a answer for every case Go does not serve yet

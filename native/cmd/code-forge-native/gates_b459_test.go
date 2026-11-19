@@ -72,7 +72,9 @@ func TestB459GatesHelpAndUsage(t *testing.T) {
 		{[]string{"secret-scan"}, 2, "", "gates secret-scan: at least one --file <path> is required\n"},
 		{[]string{"secret-scan", "--file"}, 2, "", "gates secret-scan: at least one --file <path> is required\n"},
 		{[]string{"safe-edit"}, 2, "", "gates safe-edit: --base <sha> is required\n"},
-		{[]string{"scope", "--base", "--x"}, 2, "", "gates scope: --base <sha> is required\n"},
+		{[]string{"scope", "--base"}, 2, "", "gates scope: --base <sha> is required\n"},
+		// B878: a flag scope does not read is refused with the usage.
+		{[]string{"scope", "--base", "--x"}, 2, "", "gates scope: unknown flag \"--x\"\nusage: code-forge gates scope [--cwd <dir>] --base <sha>\n"},
 		{[]string{"acceptance", "--clauses", "x"}, 2, "", "gates acceptance: --clauses <file.json> and --tap <file> are required\n"},
 		{[]string{"transcript-grep"}, 2, "", "gates transcript-grep: --file <path> is required\n"},
 		{[]string{"transcript-grep", "--file", "x", "--cwd"}, 2, "", "gates transcript-grep: --cwd requires a value\n"},

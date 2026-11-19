@@ -207,11 +207,14 @@ func TestB450GatesRunTimeoutOverflow(t *testing.T) {
 	}
 }
 
+// Since B878 an unknown flag is a usage error (exit 2, the flag and the
+// usage on stderr) and no gate runs; before, it was ignored like Node.
 func TestB450GatesRunUnsupportedFlagIgnored(t *testing.T) {
 	f := b450Setup(t, b450Green(), nil)
 	code, out, errOut := f.call(nil, "gates", "run", "--run", "fixture", "--block", "B1", "--bogus", "extra")
-	if code != 0 || !f.result(out).AllOK {
-		t.Fatalf("unknown flag: exit=%d stdout=%s stderr=%q, want a green run (Node ignores it)", code, out, errOut)
+	want := "gates run: unknown flag \"--bogus\"\n" + gatesSubUsage["run"]
+	if code != 2 || out != "" || errOut != want {
+		t.Fatalf("unknown flag: exit=%d stdout=%s stderr=%q, want exit 2 and %q", code, out, errOut, want)
 	}
 }
 
