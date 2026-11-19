@@ -27,6 +27,14 @@ var decisionsSlug = regexp.MustCompile(`^([a-z0-9][a-z0-9-]*)\.`)
 
 func decisionsMain(args []string, stdout, stderr io.Writer) int {
 	usage := func() int { fmt.Fprintln(stderr, decisionsUsage); return 2 }
+	// B877: --help (or -h) after `decisions` or `decisions list` prints the
+	// usage on stdout and exits 0; the router adds the Description and Options.
+	for _, arg := range args {
+		if metaIsHelp(arg) {
+			fmt.Fprintln(stdout, decisionsUsage)
+			return 0
+		}
+	}
 	if len(args) == 0 || args[0] != "list" {
 		return usage()
 	}

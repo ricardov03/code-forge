@@ -13,9 +13,27 @@ func init() { routes["docs"] = runDocs }
 
 const docsUsage = "usage: code-forge docs sync|path [--json]"
 
+// docsSubUsage is the usage of one docs subcommand (B877: `docs <sub> --help`).
+var docsSubUsage = map[string]string{
+	"sync": "usage: code-forge docs sync [--json]",
+	"path": "usage: code-forge docs path [--json]",
+}
+
 // runDocs serves `docs sync` and `docs path`. Node has no docs verb, so bad
 // input is a usage error here instead of a handover.
 func runDocs(args []string) int {
+	// B877: --help (or -h) prints the usage on stdout and exits 0; the router
+	// adds the Description and Options around it.
+	for _, arg := range args {
+		if metaIsHelp(arg) {
+			usage := docsUsage
+			if len(args) > 0 && docsSubUsage[args[0]] != "" {
+				usage = docsSubUsage[args[0]]
+			}
+			fmt.Fprintln(safeStdout, usage)
+			return 0
+		}
+	}
 	if len(args) == 0 || (args[0] != "sync" && args[0] != "path") {
 		fmt.Fprintln(safeStderr, docsUsage)
 		return 2

@@ -14,6 +14,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - Coder worktrees are guarded: `block open` installs a git `reference-transaction` hook that refuses, from the coder worktree, any move or delete of the base branch (`git branch -f main`, `update-ref`, `fetch ...:main`) and of other block branches, naming the ref and the safe command (`git fetch origin`, then `FETCH_HEAD`); only `block land` and `cf-release release`/`docs-block` pass with the guard token. Every context pack lists the git rules (no moving main, no force push, no `rm -rf`, no `git stash`, no `git reset --hard`) and the one push command. `block land` refuses at step `main-reflog` when main's reflog has entries since the last land that are not a land, release or fast-forward commit, and lists them. `doctor` shows the `ref guard` row (B797)
 
+### Fixed
+
+- `status --help`, `decisions [list] --help` and `docs [sync|path] --help` (also `-h`) print the help page (Description, Usage, Options) and exit 0, like every other command; before they exited 2 with `unknown flag "--help"` or the bare usage line on stderr (B877)
+
 ## [0.25.1] — 2026-11-19
 
 ### Added

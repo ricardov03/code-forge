@@ -458,6 +458,22 @@ Get the docs of the installed version
 usage: code-forge docs sync|path [--json]
 ```
 
+### docs sync
+
+Fetch the docs for the installed version
+
+```text
+usage: code-forge docs sync [--json]
+```
+
+### docs path
+
+Print the path of the best local docs copy
+
+```text
+usage: code-forge docs path [--json]
+```
+
 ## doctor
 
 Check this machine and project are ready
