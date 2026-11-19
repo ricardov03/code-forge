@@ -81,7 +81,12 @@ func b553Binary(t *testing.T) string {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(dir, "code-forge-native")
-	if err := os.Rename(built, bin); err != nil {
+	// a copy: the built binary is shared by every test of this process (B909)
+	data, err := os.ReadFile(built)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, data, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"src", "bin", "package.json"} {
