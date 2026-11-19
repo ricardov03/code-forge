@@ -68,12 +68,21 @@ func readFile(t *testing.T, file string) string {
 	return string(data)
 }
 
+// writeJSON writes file whole: the text goes to file+".tmp" (a name the
+// queue scan ^[0-9a-f]{24}\.json$ ignores) and is renamed into place, so a
+// worker loop running beside the test never reads a half-written ticket and
+// refuses it as bad-ticket (B948: TestB884RunServesAfterUnsupportedTicket
+// flaked in CI with the next ticket "refused").
 func writeJSON(t *testing.T, file, text string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
+	tmp := file + ".tmp"
+	if err := os.WriteFile(tmp, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, file); err != nil {
 		t.Fatal(err)
 	}
 }
