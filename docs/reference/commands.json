@@ -7448,7 +7448,7 @@
     },
     {
       "name": "run status",
-      "purpose": "Show the state of a run.",
+      "purpose": "Show the state of a run and whether its worker is alive.",
       "when": "Read the full record of one run.",
       "owner_only": false,
       "hidden": false,
