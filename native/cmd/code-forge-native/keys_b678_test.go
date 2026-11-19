@@ -45,6 +45,7 @@ func b678Prompt(t *testing.T, project string, keys []string, args ...string) (in
 	if err != nil {
 		t.Fatal(err)
 	}
+	b880StdinTTY(t, true)
 	saved := keysPromptOpen
 	keysPromptOpen = func() (keysTTY, bool) {
 		return keysTTY{initWizEnv{in: &b528Keys{keys: keys}, out: file, cols: 80, rows: 24}, true}, true
@@ -152,6 +153,7 @@ func TestB678KeysSetPromptWriteFails(t *testing.T) {
 // Cases Go does not draw like Node still go to Node, before anything runs.
 func TestB678KeysSetPromptHandsOver(t *testing.T) {
 	_, project, _ := b678PromptHome(t)
+	b880StdinTTY(t, true)
 	saved := keysPromptOpen
 	t.Cleanup(func() { keysPromptOpen = saved })
 	keysPromptOpen = func() (keysTTY, bool) { return keysTTY{}, false }
