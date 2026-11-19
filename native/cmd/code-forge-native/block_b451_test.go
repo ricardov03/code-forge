@@ -181,7 +181,9 @@ func TestB451ErrorsAreLoggedNatively(t *testing.T) {
 		{[]string{"open", "B1", "--run", "r-missing", "--level", "L0", "--owned", "a.go", "--acceptance", "missing-acceptance.json"}, "open", 1, "block open: "},
 	} {
 		res := b451Run(t, "", tc.args...)
-		if res.code != tc.code || !strings.HasPrefix(res.stderr, tc.wantPrefix) || strings.Count(res.stderr, "\n") != 1 {
+		// B875: a missing run record also names the next command
+		refusal := strings.TrimSuffix(res.stderr, "next: code-forge status\n")
+		if res.code != tc.code || !strings.HasPrefix(refusal, tc.wantPrefix) || strings.Count(refusal, "\n") != 1 {
 			t.Errorf("%v: exit=%d stderr=%q; want exit %d and one %q line", tc.args, res.code, res.stderr, tc.code, tc.wantPrefix)
 			continue
 		}
