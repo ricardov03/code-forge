@@ -128,7 +128,7 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 	scrub, counts := gatesScrubber(slug)
 	clean := func(s string) string { return scrub(errorLogRedact(s)) }
 	if text, ok := message.(string); ok {
-		text = clean(errorLogTrim(text))
+		text = clean(errorLogTrim(refusalStripNext(errorLogTrim(text)))) // B875: log the refusal, not its next line
 		if len(text) > 2048 {
 			end := 2048
 			for !utf8.RuneStart(text[end]) {

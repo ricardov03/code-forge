@@ -414,7 +414,7 @@ func TestRunReloadRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		name, run, config, errs string
 	}{
-		{"no record", "r-none", "", "run reload: no run record for r-none\n"},
+		{"no record", "r-none", "", "run reload: no run record for r-none\nnext: code-forge status\n"},
 		{"ended", "r-done", "", "run reload: run r-done has ended\n"},
 		{"no config", "r-test", "", "run reload: no .code-forge.yml in the workspace — nothing changed\n"},
 		{"not a mapping", "r-test", "- a\n- b\n", "run reload: the config could not be parsed (.code-forge.yml) — nothing changed\n"},

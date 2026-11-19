@@ -77,12 +77,12 @@ func TestB456ReportUsageAndSlugErrors(t *testing.T) {
 func TestB456ReportMissingLedgerListsKnownSlugs(t *testing.T) {
 	b456ReportHome(t, nil)
 	code, _, errText := b456Report(t, "--slug", "nope")
-	if code != 1 || errText != "report: no ledger for slug \"nope\"; known slugs: none\n" {
+	if code != 1 || errText != "report: no ledger for slug \"nope\"; known slugs: none\nnext: code-forge run start\n" {
 		t.Fatalf("no ledgers: code %d err %q", code, errText)
 	}
 	b456ReportHome(t, map[string]string{"bb.jsonl": "", "aa.3.jsonl": "", "aa.jsonl": "", "notes.txt": ""})
 	code, _, errText = b456Report(t, "--slug", "nope")
-	if code != 1 || errText != "report: no ledger for slug \"nope\"; known slugs: aa, bb\n" {
+	if code != 1 || errText != "report: no ledger for slug \"nope\"; known slugs: aa, bb\nnext: code-forge report --slug aa\n" {
 		t.Fatalf("known slugs: code %d err %q", code, errText)
 	}
 }
