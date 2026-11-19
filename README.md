@@ -64,7 +64,9 @@ code-forge version
 
 `resolve` prints the provider, model, effort, fallback, and CLI for a level. `doctor --quick`
 checks config, links, and key resolution; `keys list` prints sources and expiry, never values,
-and warns with less than one hour left.
+and warns with less than one hour left. `keys set <name>` asks for the value with the input
+hidden, so it needs a terminal; from a script, store a 1Password reference with
+`keys set <name> --op <item-id|link|op://ref>`.
 
 Write a brief describing the change and how you will know it works. In your agent, invoke
 `/code-forge full path/to/brief.md`: it plans, hardens, asks you to approve the plan, then codes.
