@@ -17,6 +17,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Fixed
 
 - CHANGELOG.md: the 0.25.0 section had 61 entries before its first `###` heading and four `### Changed` headings, and 0.24.0 had two `### Fixed` headings, so the site's changelog page showed a nameless group and repeated groups; each entry now sits under one `### Added`, `Changed`, `Fixed` or `Removed` heading (entry text unchanged). `npm run release` now refuses a new section with an entry before its first `###` heading or a `###` kind that appears twice, naming the line (B785)
+- `code-forge run status --run <id>` panicked (a `go-panic` refusal, exit 1) for every run whose `.code-forge.yml` has no `budget:` block; it now prints the status and exits 0, with `"budget_usd": null` when no `budget.usd` is set (B786)
 
 ## [0.25.0] — 2026-11-18
 
