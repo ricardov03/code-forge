@@ -55,6 +55,13 @@ git would see the folder, `run start`, `proof export` and `proof red-green` refu
 `doctor` shows a FAIL row `.code-forge/ ignored by git`. When git already tracks files there, `init`,
 `upgrade` and `doctor` print the fix, `git rm -r --cached .code-forge && git commit`, and never run it.
 
+**Free disk.** `block land`, `gates run` and `run start` check the free disk first (B961). Under
+twice `land.min_free_gb` (default 15 GB) they remove Go build cache files unused for 24 h and print
+`disk guard: ... removed <n> Go cache files`; under `land.min_free_gb` they refuse (exit 1) with
+`disk guard: only <x> GB free ...` and the next step (`go clean -cache`, old worktrees, or a lower
+`land.min_free_gb`), before anything runs. `doctor` shows a `free disk` row: FAIL under the
+minimum, WARN under twice it. `land.min_free_gb: 0` turns the check off.
+
 **Where the skill goes.** By default `init` links the skill with a symlink, at **project** scope
 inside a git repository (for Claude Code: `.claude/skills/code-forge` in the repo) and at
 **global** scope (under your home folder) outside one. With a global install, pass `-g` inside a

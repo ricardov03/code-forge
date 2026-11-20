@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ricardov03/code-forge/native/diskguard"
 )
 
 // B801: every command in the help table has a reference (when to use it,
@@ -153,6 +155,8 @@ func helpRefNewSandbox(t *testing.T) *helpRefSandbox {
 		"XDG_CONFIG_HOME=" + filepath.Join(s.home, ".config"), "XDG_CACHE_HOME=" + filepath.Join(s.home, ".cache"),
 		"CODE_FORGE_KEY_BACKEND=file", "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-b801-node",
 		"CODE_FORGE_HANDOVER_LOG=0", "CODE_FORGE_TMP_ROOT=" + filepath.Join(tmp, "cf-tmp"),
+		// B961: the disk guard sees a fixed free disk, not the machine's.
+		diskguard.TestFreeEnv + "=1000",
 		"HTTP_PROXY=http://127.0.0.1:9", "HTTPS_PROXY=http://127.0.0.1:9", "http_proxy=http://127.0.0.1:9", "https_proxy=http://127.0.0.1:9",
 	}
 	for _, dir := range []string{filepath.Join(tmp, "t"), filepath.Join(tmp, "cf-tmp"), s.outside} {

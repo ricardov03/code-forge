@@ -189,6 +189,10 @@ reset (one `ci watch: GitHub API rate limit; retry at HH:MM UTC` line per wait) 
 is past `--timeout`, exits 4 with `rate limit, gave up` and no heal item. One watch per repo and
 commit: a second start says another ci watch is already watching and exits 0.
 
+**Disk guard (B961).** `block land`, `gates run` and `run start` refuse under
+`land.min_free_gb` (default 15 GB) free disk, and trim Go cache files unused for 24 h under twice
+that. On the refusal free space (`go clean -cache`, old worktrees); do not lower the key to pass.
+
 **land.after (B960).** Commands in `land.after` run in the main checkout after the merge and
 before the push (build, docs stamp); their tracked changes become one commit on main. A failing
 command stops the land at step `after`, merge kept, nothing pushed. Each landed block gets one

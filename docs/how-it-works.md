@@ -718,6 +718,12 @@ starts `code-forge ci watch --sha <sha> --run <run>` as a detached child, loggin
 `~/.code-forge/heal/ci-<sha>.log`, prints `ci watch: started for <sha>; log <path>` and returns at
 once; land never waits for CI.
 
+**Free disk (B961).** Before a land, a gates run or a run start, code-forge measures the free
+disk where the project lives. Under twice `land.min_free_gb` (default 15) it removes Go build cache
+files unused for 24 h (Go touches a cache file each time it uses it, so running builds keep
+theirs); under `land.min_free_gb` it refuses with the next step and runs nothing. `doctor` has a
+`free disk` row. `land.min_free_gb: 0` turns it off.
+
 **After the merge: land.after (B960).** `land.after` (default `[]`) lists shell commands that
 `block land` (single or batch) runs with `/bin/sh -c` in the main checkout, in order, after the
 merge on main and before the push, for example `node scripts/build-native.mjs --host` and

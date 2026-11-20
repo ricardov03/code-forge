@@ -289,6 +289,12 @@ func runGates(args []string) int {
 			gatesFinish(args, 2)
 			return 2
 		}
+		// B961: no gate run on a full disk.
+		if refusal := diskGuard(loaded, cwd, safeStderr); refusal != "" {
+			gatesErrf("gates run: %s; no gate was run\n", refusal)
+			gatesFinish(args, 1)
+			return 1
+		}
 	}
 	// B450: every gates run form runs in Go; none hands over to Node.
 	// Node's os.homedir() reads the user database when HOME is unset.

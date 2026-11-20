@@ -28,6 +28,7 @@ OK   worker: pid N started, announced itself and stopped on SIGTERM
 INFO signer: same-user boundary only
 INFO native binary: not found
 OK   .code-forge/ ignored by git: yes
+OK   free disk: 1000.0 GB (land.min_free_gb 15 GB)
 INFO native daemon: fallback
 --- stderr
-doctor: 11 ok, 7 warn, 3 fail
+doctor: 12 ok, 7 warn, 3 fail
