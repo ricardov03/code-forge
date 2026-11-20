@@ -131,6 +131,14 @@ func Table(base, ours, theirs string) (string, bool) {
 			} else {
 				result = append(result[:at], result[at+1:]...)
 			}
+		case inB && inO && inT:
+			// B890: both sides changed one row; a row each side only
+			// inserted sentences into keeps both sets of sentences.
+			merged, ok := rowUnion(bv, ov, tv)
+			if !ok {
+				return "", false
+			}
+			result[index(key)].line = merged + "\n"
 		default:
 			return "", false
 		}
@@ -172,4 +180,67 @@ func Table(base, ours, theirs string) (string, bool) {
 		merged = strings.TrimSuffix(merged, "\n")
 	}
 	return merged, true
+}
+
+// rowTokens splits a row into sentences and cells: a token ends after a
+// space that follows a full stop or a cell bar, so the tokens join back into
+// the row.
+func rowTokens(row string) []string {
+	out, start := []string{}, 0
+	for i := 1; i < len(row); i++ {
+		if row[i] == ' ' && (row[i-1] == '.' || row[i-1] == '|') {
+			out, start = append(out, row[start:i+1]), i+1
+		}
+	}
+	if start < len(row) {
+		out = append(out, row[start:])
+	}
+	return out
+}
+
+// rowInserts maps a side's tokens onto base: inserts[k] holds the tokens the
+// side put before base token k (k == len(base) is the end). ok is false when
+// the side removed or changed a base token.
+func rowInserts(base, side []string) (inserts [][]string, ok bool) {
+	inserts = make([][]string, len(base)+1)
+	j := 0
+	for _, token := range side {
+		if j < len(base) && token == base[j] {
+			j++
+			continue
+		}
+		inserts[j] = append(inserts[j], token)
+	}
+	return inserts, j == len(base)
+}
+
+// rowUnion merges one table row both sides changed (B890): when each side
+// only inserted sentences or cells, the result keeps base's text with ours'
+// insertions first and then theirs' at each place (a sentence both inserted
+// at one place is kept once). ok is false when a side removed or changed
+// text of the base row.
+func rowUnion(base, ours, theirs string) (string, bool) {
+	b := rowTokens(base)
+	oIns, ok1 := rowInserts(b, rowTokens(ours))
+	tIns, ok2 := rowInserts(b, rowTokens(theirs))
+	if !ok1 || !ok2 {
+		return "", false
+	}
+	var out strings.Builder
+	for k := 0; k <= len(b); k++ {
+		seen := map[string]bool{}
+		for _, token := range oIns[k] {
+			seen[token] = true
+			out.WriteString(token)
+		}
+		for _, token := range tIns[k] {
+			if !seen[token] {
+				out.WriteString(token)
+			}
+		}
+		if k < len(b) {
+			out.WriteString(b[k])
+		}
+	}
+	return out.String(), true
 }

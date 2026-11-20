@@ -11,6 +11,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/landmerge"
+	"github.com/ricardov03/code-forge/native/releasecheck"
 )
 
 // B431: a replay that stops is a real conflict unless every unmerged file is a
@@ -167,4 +168,83 @@ func ContinueWith(tree string, env []string, settings landmerge.Settings) error 
 func Conflicts(tree string) []string {
 	files, _ := unmerged(tree, gitx.ChildEnv())
 	return files
+}
+
+// ChangelogShape is the CHANGELOG.md shape check a replay runs before its
+// result can be pushed (B890): HEAD's ## [Unreleased] must not repeat a ###
+// kind that base's does not repeat. A tree with no CHANGELOG.md passes.
+func ChangelogShape(tree, base string) error {
+	head, err := gitWithEnv(tree, gitEnv(), "show", "HEAD:CHANGELOG.md")
+	if err != nil {
+		return nil
+	}
+	old := map[string]bool{}
+	if body, err := gitWithEnv(tree, gitEnv(), "show", base+":CHANGELOG.md"); err == nil {
+		for _, kind := range releasecheck.ChangelogRepeats(body) {
+			old[kind] = true
+		}
+	}
+	repeated := []string{}
+	for _, kind := range releasecheck.ChangelogRepeats(head) {
+		if !old[kind] {
+			repeated = append(repeated, kind)
+		}
+	}
+	if len(repeated) == 0 {
+		return nil
+	}
+	return fmt.Errorf("CHANGELOG.md repeats ### %s in ## [Unreleased] after the replay; merge them into one heading per kind", strings.Join(repeated, ", ### "))
+}
+
+// ChangelogFix folds the `### Kind` headings a replay repeated in a
+// CHANGELOG.md it changed (B813: a clean replay can add a second `### Added`)
+// into the replay's last commit, kept under its committer, then runs
+// ChangelogShape. A replay with nothing to fold is left as it is.
+func ChangelogFix(tree, base string) error {
+	changed, err := gitWithEnv(tree, gitEnv(), "diff", "--name-only", "-z", base, "HEAD", "--")
+	if err != nil {
+		return err
+	}
+	folded := []string{}
+	for _, file := range strings.Split(changed, "\x00") {
+		if file == "" || filepath.Base(file) != "CHANGELOG.md" {
+			continue
+		}
+		head, err := gitWithEnv(tree, gitEnv(), "show", "HEAD:"+file)
+		if err != nil {
+			continue
+		}
+		ref, _ := gitWithEnv(tree, gitEnv(), "show", base+":"+file)
+		body := landmerge.FoldChangelog(head, ref)
+		if body == head {
+			continue
+		}
+		full := filepath.Join(tree, file)
+		info, err := os.Lstat(full)
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		if err := os.WriteFile(full, []byte(body), info.Mode().Perm()); err != nil {
+			return err
+		}
+		if _, err := gitWithEnv(tree, gitEnv(), "add", "--", file); err != nil {
+			return err
+		}
+		folded = append(folded, file)
+	}
+	if len(folded) > 0 {
+		identity, err := gitWithEnv(tree, gitEnv(), "show", "-s", "--format=%cn%x00%ce", "HEAD")
+		if err != nil {
+			return err
+		}
+		id := strings.Split(strings.TrimSuffix(identity, "\n"), "\x00")
+		if len(id) != 2 {
+			return fmt.Errorf("invalid committer")
+		}
+		env := append(gitEnv(), "GIT_COMMITTER_NAME="+id[0], "GIT_COMMITTER_EMAIL="+id[1])
+		if _, err := gitWithEnv(tree, env, "-c", "commit.gpgsign=false", "commit", "--amend", "--no-edit", "--no-verify", "--allow-empty"); err != nil {
+			return err
+		}
+	}
+	return ChangelogShape(tree, base)
 }

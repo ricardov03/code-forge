@@ -256,6 +256,25 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		if err := landAutoClaim(home, run, id, top, record, files, print, false); err != nil {
 			return stop(err.Error())
 		}
+		// B814: a merge conflict land cannot resolve stops here, before join,
+		// gates and close, so the block stays open.
+		if merge {
+			if base := blockString(entry.Get("base_branch")); base != "" {
+				branch := blockString(blockObject(entry.Get("worktree")).Get("branch"))
+				conflicts, err := lcfPrecheck(main, base, top, landmerge.FromConfig(cfg))
+				if err != nil {
+					return stop(err.Error())
+				}
+				if len(conflicts) > 0 {
+					step = "merge"
+					next = closeCommand([]string{"code-forge", "block", "rebase", id, "--run", run})
+					if err := landConflictRow(home, run, id, conflicts, next); err != nil {
+						fmt.Fprintln(stderr, "block land:", err)
+					}
+					return stop(lcfPrecloseReason(branch, base, conflicts))
+				}
+			}
+		}
 		stamp := func() (string, error) {
 			head, err := gitx.Run(top, "rev-parse", "--verify", "HEAD")
 			if err != nil {

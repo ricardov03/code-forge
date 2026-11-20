@@ -264,6 +264,15 @@ func replay(tree, oldBase, newBase, oldHead string) error {
 	if len(id) != 2 {
 		return fmt.Errorf("invalid committer")
 	}
+	// B938: commits newBase already has by patch are not replayed.
+	carried, err := Carried(tree, gitEnv(), newBase, oldBase, oldHead)
+	if err != nil {
+		return err
+	}
+	skip := map[string]bool{}
+	for _, sha := range carried {
+		skip[sha] = true
+	}
 	todo := ""
 	for _, line := range strings.Split(strings.TrimSuffix(commits, "\n"), "\n") {
 		if line == "" {
@@ -272,6 +281,9 @@ func replay(tree, oldBase, newBase, oldHead string) error {
 		parts := strings.Split(line, "\x00")
 		if len(parts) != 3 || strings.ContainsAny(parts[1]+parts[2], "\r\n") {
 			return fmt.Errorf("invalid committer")
+		}
+		if skip[parts[0]] {
+			continue
 		}
 		todo += "exec env GIT_COMMITTER_NAME=" + quote(parts[1]) + " GIT_COMMITTER_EMAIL=" + quote(parts[2]) + " git -c commit.gpgsign=false cherry-pick --allow-empty " + parts[0] + "\n"
 	}
@@ -522,6 +534,11 @@ func run(home, runID, blockID string, plain bool) (result Result, err error) {
 			_, _ = git(tree, "cherry-pick", "--abort")
 			_, _ = git(tree, "rebase", "--abort")
 			return refusal("rebase-conflict", ConflictMessage(blockID, conflict))
+		}
+		// B890/B813: the replayed CHANGELOG.md keeps one ### heading per
+		// kind: repeats are folded, then the shape is checked.
+		if err := ChangelogFix(tree, newBase); err != nil {
+			return refusal("rebase-changelog-shape", "block "+blockID+": "+err.Error()+"; nothing changed: fix CHANGELOG.md in the block worktree, then run block rebase again")
 		}
 		changed, err := git(tree, "diff", "--no-renames", "--name-only", "-z", oldHead, "HEAD", "--")
 		if err != nil {

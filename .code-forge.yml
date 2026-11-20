@@ -49,3 +49,14 @@ proof:
     link_dirs:
       - node_modules
     copy_untracked: []
+land:
+  # B815: land re-generates the reference docs when they conflict (B795), instead of merging
+  # them row by row; docs/native-engine.md keeps the default row-by-row table merge.
+  auto_resolve:
+    generated:
+      - path: docs/reference/commands.md
+        argv: [sh, scripts/gen-commands-doc.sh]
+      - path: docs/reference/commands.json
+        argv: [sh, scripts/gen-commands-doc.sh]
+      - path: docs/reference/config.md
+        argv: [sh, scripts/cf-release.sh, config-doc]

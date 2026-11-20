@@ -649,12 +649,20 @@ unscoped. A passing run prints
 still refuses with `test gate unavailable: configure gates.test before merging`.
 A red suite or conflict stops at `merge-gate`. It names the first ten failing TAP tests
 (or gate diagnostics) or the conflict files, and prints a `next:` action.
+Before join, gates and close, `block land --merge` merges the block's head into the base branch in
+memory; a conflict land cannot resolve stops there with `merge conflict with <base> found before
+close; the block stays open and main is unchanged: <file> (<kind>), ...`, a signed `land.conflict`
+row and `next: code-forge block rebase <id> --run <run>` (B814), so no close row is written.
 A merge conflict whose files are all append-only is resolved by land itself (B795,
 `land.auto_resolve`, default on), in the trial merge and again in the merge into main, which must
 give the tree the merge gate checked: `CHANGELOG.md` keeps main's lines, then the block's new ones,
 one `### Kind` heading per kind and no repeated entry; a file in `land.auto_resolve.tables`
-(default `docs/native-engine.md`) merges row by row; a `land.auto_resolve.generated` file keeps
-main's copy and its argv runs again. Land prints `merge: resolved append-only conflicts: <files>`
+(default `docs/native-engine.md`) merges row by row, and a row both sides only added sentences to
+keeps both sets, main's first (B890); a `land.auto_resolve.generated` file keeps
+main's copy and its argv runs again (code-forge's own `.code-forge.yml` lists
+`docs/reference/commands.md`, `commands.json` and `config.md` with their generators, B815). A merge git finishes without a conflict that
+would repeat a `### Kind` heading in `CHANGELOG.md`'s `[Unreleased]` is folded into one heading per
+kind, every line kept, before the merge commit (B813). The two cases that dropped blocks from the 2026-11-19 batch (B800's `### Added` onto a train that already had one, and B877 and B870 each appending a sentence to the `gates run` row) are kept as fixtures: both sides land, one heading per kind (B936). A batch rebase and `block rebase` replay only the block's own commits: one main already has by patch-id (an earlier block's commit the branch carried) is dropped, and the merge-tree precheck checks the same replay; a `land.auto_resolve.generated` file both blocks added or changed is run again in the rebase instead of parking the block (B938). Land prints `merge: resolved append-only conflicts: <files>`
 and writes a signed `land.resolved` row. Any other conflict aborts the merge, so main is unchanged,
 and stops with `merge conflict land cannot resolve by itself; main is unchanged: <file> (<kind>), ...`
 and `next: git -C <main> merge --no-ff --no-edit -- <branch>`; a signed `land.conflict` row lists
