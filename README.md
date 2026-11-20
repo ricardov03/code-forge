@@ -137,7 +137,7 @@ default. See [the workflow](docs/how-it-works.md) and [concepts](docs/concepts.m
 | `code-forge doctor --quick` | Check config, links, and keys |
 | `code-forge review` | Review existing changes without a coding run |
 | `code-forge run start\|status\|reload\|end` | Manage a run and inspect its spend |
-| `code-forge block open\|close\|stop` | Track owned work and enforce its acceptance gates; `close --landed <sha>` reconciles an already landed block commit |
+| `code-forge block open\|close\|stop` | Track owned work and enforce its acceptance gates; `close --landed <sha>` reconciles a block commit (including a merge) already integrated into `main` or a separate combine worktree |
 | `code-forge review-file` | Enqueue a file review or wait for its ticket |
 | `code-forge proof tier\|red-green` | Choose proof strength and prove a test fails before the fix |
 | `code-forge gates detect\|run` | Discover and run project checks; CLI flag changes also select B801 help-reference checks in this repository |

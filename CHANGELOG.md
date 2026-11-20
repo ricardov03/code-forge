@@ -28,6 +28,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - `regen-docs` records examples and other pins before building references, so one write pass reaches a checked fixed point (B1022).
 
 - The CHANGELOG union driver keeps new lane entries in `[Unreleased]` when the lane predates a release, preserving shipped entries and multiline details (B1021).
+- Landed close no longer trusts a lane’s recorded `base_branch` as integration evidence, and supports merge commits against their first parent while preserving ownership and signed evidence gates (B1025).
 
 - Merge and release checks flag near-duplicate `[Unreleased]` entries with the same leading or trailing block ID; the installed driver preserves the refusal instead of falling back to plain union (B1018).
 
