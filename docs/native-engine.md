@@ -721,7 +721,10 @@ extracts `<sha>`'s copy of the Go module into a temp folder with `git archive` (
 and its worktrees are not touched), puts the current test files in and runs only the new tests:
 each must fail by assertion there (a build error or a panic is `RED_INVALID`), then pass in the
 working tree. Verdicts: `PROVEN` and `NO_NEW_TESTS` exit 0; `NOT_RED`, `RED_INVALID` and
-`NOT_GREEN` exit 1. `--out` writes the result as JSON, next to the block's review json.
+`NOT_GREEN` exit 1. Every test file you name goes into the base copy, so a changed helper file the
+new tests call is there too. `--out <file>` writes the result as JSON to the file you name (keep it
+next to the block's review json); its `tip` is `HEAD`, and `dirty: true` says the working tree the
+tip run used had changes `HEAD` lacks. No land or lane check reads the result yet.
 
 ## Flaky test limit per run (B958)
 

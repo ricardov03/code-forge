@@ -153,3 +153,50 @@ func TestB957TipParseErrorRefused(t *testing.T) {
 		t.Fatalf("exit=%d, want 2 and a parse error: %s", code, output)
 	}
 }
+
+func TestB957ChangedHelperFileGoesToBase(t *testing.T) {
+	// A changed test helper file with no new tests is copied into the base too, so the new
+	// test that calls its new helper builds there and fails by assertion (PROVEN, not RED_INVALID).
+	dir, base := redgreenRepo(t, redgreenBuggy)
+	redgreenWrite(t, filepath.Join(dir, "sub/helper_test.go"), "package m\n\nfunc sum5() int { return Add(2, 3) }\n")
+	redgreenWrite(t, filepath.Join(dir, "sub/m_test.go"), redgreenNewTest("\tif sum5() != 5 {\n\t\tt.Fatal(\"sum5\")\n\t}"))
+	code, output := redgreenRun(t, "--base", base, "sub/m_test.go", "sub/helper_test.go")
+	if code != 0 || !strings.Contains(output, "cf-redgreen: PROVEN") {
+		t.Fatalf("exit=%d, want 0 and PROVEN: %s", code, output)
+	}
+}
+
+func TestB957DirtyTipMarked(t *testing.T) {
+	// The tip run uses the working tree: uncommitted changes mark the result dirty; once they
+	// are committed the result names HEAD and is clean.
+	dir, base := redgreenRepo(t, redgreenBuggy)
+	redgreenWrite(t, filepath.Join(dir, "sub/m_test.go"), redgreenNewTest(redgreenAssert))
+	read := func() redgreenResult {
+		t.Helper()
+		out := filepath.Join(t.TempDir(), "redgreen.json")
+		if code, output := redgreenRun(t, "--base", base, "--out", out, "sub/m_test.go"); code != 0 {
+			t.Fatalf("exit=%d: %s", code, output)
+		}
+		data, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result redgreenResult
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	if got := read(); !got.Dirty || got.Tip != base {
+		t.Fatalf("uncommitted tip: dirty=%v tip=%s, want dirty at HEAD %s", got.Dirty, got.Tip, base)
+	}
+	cmd := exec.Command("git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qam", "tip")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("commit: %v: %s", err, out)
+	}
+	head, _ := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if got := read(); got.Dirty || got.Tip != strings.TrimSpace(string(head)) {
+		t.Fatalf("committed tip: dirty=%v tip=%s, want clean at %s", got.Dirty, got.Tip, head)
+	}
+}

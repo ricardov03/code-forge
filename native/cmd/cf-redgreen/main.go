@@ -10,7 +10,8 @@
 // the current test files in, and runs only the new tests there: each must fail by assertion (a
 // build error or a panic proves nothing). Then it runs them in the working tree, where each must
 // pass. The verdict is PROVEN (exit 0), NO_NEW_TESTS (exit 0, nothing to prove), or NOT_RED,
-// RED_INVALID, NOT_GREEN (exit 1). --out writes the result as JSON next to the review json.
+// RED_INVALID, NOT_GREEN (exit 1). --out writes the result as JSON to the named file. Its tip is HEAD; dirty: true
+// says the working tree the tip run used had changes HEAD lacks.
 package main
 
 import (
@@ -48,6 +49,7 @@ type redgreenResult struct {
 	Verdict string         `json:"verdict"`
 	Base    string         `json:"base"`
 	Tip     string         `json:"tip"`
+	Dirty   bool           `json:"dirty,omitempty"`
 	Files   []string       `json:"files"`
 	Tests   []redgreenTest `json:"tests"`
 	Detail  string         `json:"detail,omitempty"`
@@ -141,8 +143,12 @@ func redgreenProve(base string, files []string) (*redgreenResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	tip, _ := redgreenGit(top, "rev-parse", "HEAD")
+	tip, err := redgreenGit(top, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return nil, err
+	}
 	result := &redgreenResult{Base: strings.TrimSpace(sha), Tip: strings.TrimSpace(tip)}
+	fileModule := map[string]string{} // every given test file -> its module (all go into the base copy)
 	// module root (repository path) -> package dir (module path) -> tests
 	type pkgTests struct{ module, pkg string }
 	groups := map[pkgTests][]int{}
@@ -169,6 +175,7 @@ func redgreenProve(base string, files []string) (*redgreenResult, error) {
 		if err != nil {
 			return nil, err
 		}
+		fileModule[rel] = module
 		pkg, _ := filepath.Rel(filepath.Join(top, module), filepath.Join(top, filepath.Dir(rel)))
 		key := pkgTests{module, "./" + filepath.ToSlash(pkg)}
 		nowNames, err := redgreenTestNames(string(now))
@@ -204,21 +211,34 @@ func redgreenProve(base string, files []string) (*redgreenResult, error) {
 				return nil, err
 			}
 			extracted[k.module] = true
+			// Every given test file of the module goes in, not only those with new tests: a
+			// changed helper file the new tests call must be there too.
+			for _, rel := range result.Files {
+				if fileModule[rel] != k.module {
+					continue
+				}
+				data, err := os.ReadFile(filepath.Join(top, rel))
+				if err != nil {
+					return nil, err
+				}
+				if err := os.MkdirAll(filepath.Dir(filepath.Join(tmp, rel)), 0o755); err != nil {
+					return nil, err
+				}
+				if err := os.WriteFile(filepath.Join(tmp, rel), data, 0o644); err != nil {
+					return nil, err
+				}
+			}
+			// The tip run uses the working tree: a change there that HEAD lacks marks the result
+			// dirty, so the stored tip sha is never read as the tested code.
+			if status, err := redgreenGit(top, "status", "--porcelain", "--", k.module); err != nil {
+				return nil, err
+			} else if strings.TrimSpace(status) != "" {
+				result.Dirty = true
+			}
 		}
 		names := []string{}
 		for _, i := range groups[k] {
-			t := result.Tests[i]
-			names = append(names, t.Name)
-			data, err := os.ReadFile(filepath.Join(top, t.File))
-			if err != nil {
-				return nil, err
-			}
-			if err := os.MkdirAll(filepath.Dir(filepath.Join(tmp, t.File)), 0o755); err != nil {
-				return nil, err
-			}
-			if err := os.WriteFile(filepath.Join(tmp, t.File), data, 0o644); err != nil {
-				return nil, err
-			}
+			names = append(names, result.Tests[i].Name)
 		}
 		onBase := redgreenGoTest(baseModule, k.pkg, names)
 		onTip := redgreenGoTest(filepath.Join(top, k.module), k.pkg, names)
