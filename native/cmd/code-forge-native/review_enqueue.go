@@ -269,7 +269,8 @@ func reviewEnqueueWith(args []string, step *landStep, pre *reviewFileScope) int 
 			cwd = filepath.Clean(dir)
 		}
 		var ok bool
-		if root, ok = reviewWaitRoot(context.Background(), cwd); !ok {
+		var refusal ledger.Object
+		if root, refusal, ok = reviewRunRoot(context.Background(), cwd, flags["run"]); !ok || refusal != nil {
 			return landHandover
 		}
 	}

@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- `review` and `review-file` in a linked git worktree review that worktree: a run started there (`run start --cwd .`, or the run `review` starts itself) keeps its worker and review queue in the worktree's `.code-forge/`, and `review --run <id>`, `review-file --run <id>`, `--wait` and `--wait-block` now look for the worker there, at the top of the run's workspace, instead of the main tree. Before, every file came back `unavailable: worker_down` although the worker was alive (B969)
+
 ## [0.26.0] — 2026-11-19
 
 ### Changed

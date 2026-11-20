@@ -68,6 +68,16 @@ each skip is named on stderr:
 
 No file left means `nothing to review` and exit 0. Nothing is started.
 
+### In a git worktree
+
+Run `review` in a linked git worktree (`git worktree add`) and it reviews that worktree's files
+against `--base`. The run, its worker, the review queue and the results all live in the
+worktree's own `.code-forge/`. The same holds for a run you start yourself with
+`code-forge run start --cwd .` in the worktree: `review --run <id>` and `review-file --run <id>`
+find that run's worker there. The rule is one root: the review queue of a run is at the top of the
+run's workspace (the directory `run start` was given). A run started in the main tree, including
+one whose blocks code-forge gave their own worktrees, keeps its queue in the main tree.
+
 ## Examples
 
 Review your branch against `main` (run it on the branch):
