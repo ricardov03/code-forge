@@ -31,7 +31,7 @@ var (
 )
 
 const (
-	rebaseForm = "<id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>] [--accept-landed]"
+	rebaseForm = "<id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>] [--accept-landed] [--accept-identical <file> --source <path-or-ref:path>]"
 )
 
 var (
@@ -44,7 +44,7 @@ var (
 // flags plus multi --accept-changed and boolean --accept-landed.
 func rebaseFlags(args []string) (map[string]any, []string, string) {
 	flags, positionals := map[string]any{}, []string{}
-	values := strings.Fields(" run level acceptance brief attempt base lines head worker-pid reason file transcript kind report rule line note proof max ")
+	values := strings.Fields(" run level acceptance brief attempt base lines head worker-pid reason file transcript kind report rule line note proof max accept-identical source ")
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if !strings.HasPrefix(arg, "--") {
@@ -210,6 +210,31 @@ func rebaseStepBody(args []string, stdout io.Writer, stderr *rebaseHeldStderr, h
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return handOver(hRebaseHome)
+	}
+	if _, identical := flags["accept-identical"]; identical || flags["source"] != nil {
+		if len(pos) != 1 || blockString(flags["accept-identical"]) == "" || blockString(flags["source"]) == "" {
+			return usage("--accept-identical needs one block id, --run and --source")
+		}
+		for name := range flags {
+			if name != "run" && name != "json" && name != "accept-identical" && name != "source" {
+				return usage("--accept-identical takes only --run, --source and optional --json")
+			}
+		}
+		request := &rebaseIdenticalRequest{file: blockString(flags["accept-identical"]), source: blockString(flags["source"])}
+		if message := blockstate.File(request.file, true); message != "" {
+			return usage(message)
+		}
+		oldBase, newBase, err := rebaseWorktreeBlock(home, run, id, nil, "", request)
+		if err != nil {
+			return fail(err)
+		}
+		if asJSON {
+			data, _ := ledger.Stringify(ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "rebased"}, {Key: "old_base", Value: oldBase}, {Key: "new_base", Value: newBase}}, false)
+			fmt.Fprintln(stdout, string(data))
+		} else {
+			fmt.Fprintf(stdout, "block %s rebased %s → %s\n", id, short12(oldBase), short12(newBase))
+		}
+		return 0
 	}
 	if flags["accept-landed"] == true {
 		for name := range flags {

@@ -493,7 +493,7 @@ var autopilotFixedDeny = ledger.Object{
 	{Key: "budget:raise", Value: "raise a budget"},
 }
 
-var autopilotAllowable = []string{"waive:warning", "waive:nit", "round:extra", "model:choose", "close:routine", "review:substitute", "human-pass:deferred"}
+var autopilotAllowable = []string{"waive:warning", "waive:nit", "round:extra", "model:choose", "close:routine", "review:substitute", "human-pass:deferred", autopilot.AcceptIdenticalScope}
 
 func autopilotFixedDenyScopes() []any {
 	out := []any{}
@@ -1042,6 +1042,11 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 	if record.Get("status") != "active" {
 		return autopilotReport(o, "start", &runFail{"run " + runID + " has ended", false})
 	}
+	if slices.Contains(in.scopes, any(autopilot.AcceptIdenticalScope)) {
+		if _, err := rebaseIdenticalSources(record); err != nil {
+			return autopilotReport(o, "start", err)
+		}
+	}
 	before, err := autopilotCheckExpiry(home, runID, now)
 	if err != nil {
 		return autopilotReport(o, "start", err)
@@ -1098,6 +1103,11 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 		if previous, ok := record.Get("autopilot").(ledger.Object); ok {
 			if s, err := autopilot.GrantState(previous, now); err == nil && s == "active" {
 				return &runFail{autopilot.ActiveGrantMessage(runID, autopilotGrantEnd(previous)), false}
+			}
+		}
+		if slices.Contains(in.scopes, any(autopilot.AcceptIdenticalScope)) {
+			if _, err := rebaseIdenticalSources(*record); err != nil {
+				return err
 			}
 		}
 		// the row first: a grant stored without its signed row would act unrecorded

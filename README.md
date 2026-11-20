@@ -11,6 +11,9 @@ Long tasks lose context, parallel edits collide, and a green test can miss the i
 code-forge splits work into owned blocks, gives each change a fresh review, and records proof.
 You approve the plan and keep control of budgets, permissions, and landing the result.
 
+Projects may opt in to automatic clearance of identical rebased binaries with a frozen approved
+source list and the `rebase:accept-identical` grant. See [approved binary sources](docs/autopilot.md#scopes-and-the-fixed-deny-list).
+
 ## Install
 
 Requires git, and npm to install (any Node that runs npm; code-forge itself never runs Node). Install the CLI with `npm install -g @codedology/code-forge`.

@@ -75,7 +75,7 @@ func (f *rebaseCmdFixture) rows() []map[string]any {
 
 func TestBlockRebaseHelpRunsInGo(t *testing.T) {
 	f := newRebaseCmdFixture(t, map[string]string{"a.go": "package a\n"})
-	want := "usage: code-forge block rebase <id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>] [--accept-landed] [--json] [--help|-h]\n" +
+	want := "usage: code-forge block rebase <id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>] [--accept-landed] [--accept-identical <file> --source <path-or-ref:path>] [--json] [--help|-h]\n" +
 		"  --help, -h  Print this usage and exit without changing state.\n" +
 		"  --json      Print one JSON line on success instead of text.\n"
 	for _, args := range [][]string{{"--help"}, {"A", "-h"}, {"A", "--bogus", "--help"}} {

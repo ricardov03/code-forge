@@ -49,3 +49,9 @@ Per question id and `source`: reliability buckets × outcome, the count of `≥ 
 ## §6 Durability
 
 Rotated at 10 MB; rows are signed only where the gate relies on them; `report --export` snapshots are what anything downstream reads. The ledger is per project slug, and every verb takes the config and the slug from the **project root** (the nearest regular `.code-forge.yml` up to the git top level, else the git top level; outside git never above HOME, and a `.git` at HOME does not count), so a run from a sub-directory still lands in the same file.
+
+`rebase.accepted {block, file, content_hash, source, source_hash, by: autopilot, grant_id}` (B1014)
+is signed only after an identical binary matches an approved source under the frozen opt-in
+source policy and signed active `rebase:accept-identical` grant. Both hashes use SHA-256 of raw
+bytes (`gitx.ContentHash`); the following `block.rebase` row marks the clearance `via: autopilot`.
+It records binary clearance, not a human pass or a human wait.

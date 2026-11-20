@@ -76,6 +76,28 @@ scopes, the deny list, the spend per category, and where the log is.
 | `close:routine` | close a routine block when `close.require_human` is on: every changed file approved, a green gate row, no waivers, no transcript hits. Never `block close --decide` |
 | `review:substitute` | run one substitute review of a file whose review stays unavailable after the built-in recovery and `review.on_unavailable`: a closed-book reviewer on a provider none of the failed sessions used. Each substitute gets a signed `autopilot.decision` row first, and `block close` counts its approval only under this scope with every gate green |
 | `human-pass:deferred` | close a block whose only open items are `human_check` clauses as `closed_deferred_human` (Go engine, B632): every other close gate must pass as for a normal close. The checks stay open in `run human-checks list` (marked deferred) for you; the block may land. One signed `autopilot.decision` row (scope, block, clauses, `waits_for`) and one binnacle line per block with your `run human-checks clear` command. Clearing its last check makes the block `closed`. Never a human pass. `run end` refuses while any of these checks is open, and the binnacle's `Human checks` row names them (B633) |
+| `rebase:accept-identical` | accept a changed owned binary whose bytes equal an approved source; requires non-empty `rebase.approved_binary_sources` in the run snapshot |
+
+**Identical binaries after rebase (B1014).** Before starting a run, opt in with
+`rebase.approved_binary_sources: [design/approved/**, public/images/**]` in the project config.
+The default is `[]` (disabled). The paths are repository-relative; `*`, `?` and `**` are supported.
+`run reload` and `autopilot approve` refuse to change this setting during a run.
+The owner must grant `rebase:accept-identical`; starting that scope without the snapshot setting refuses.
+
+```
+code-forge block rebase B1 --run <r> --accept-identical assets/logo.png --source design/approved/logo.png
+code-forge block rebase B1 --run <r> --accept-identical assets/logo.png --source main:assets/logo.png
+```
+
+The first source must match the snapshot's source list; the second reads an immutable blob from
+the block's recorded base branch (its fully qualified ref or resolved commit is also accepted).
+The source and target must be regular files, with no symlink escape. The target must be an owned
+binary changed by this replay or its signed pending checkpoint. Missing files, text and any byte
+mismatch refuse. Other changed files still need their current signed review approval; this flag
+clears only its named binary. Success needs no terminal and writes a signed `rebase.accepted`
+row with both SHA-256 content hashes, source, `by: autopilot` and `grant_id`, followed by the
+normal `block.rebase` row. These hashes use `gitx.ContentHash` (raw bytes, not a Git object id).
+The existing owner-only `--accept-changed` path and `design:approve` denial keep their guards.
 
 An extra round is a normal fix round. Fix rounds are one per block: wait for every `review-file` ticket of the block and its tests, then send ONE fix message with every failing test and every open finding; a finding that arrives later waits for the next round (`skill/references/code.md` §4).
 The per-file cap still counts per file: one block round is one round for each file it touched.

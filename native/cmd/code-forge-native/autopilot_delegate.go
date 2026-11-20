@@ -53,11 +53,12 @@ var apdHeader = strings.Join([]string{
 
 // apdAllowableWhat is ALLOWABLE_WHAT (src/autopilot/scopes.mjs).
 var apdAllowableWhat = map[string]string{
-	"waive:warning": "waive a warning finding",
-	"waive:nit":     "waive a nit finding",
-	"round:extra":   "one fix round past the cap for a file",
-	"model:choose":  "choose the coder level for a block",
-	"close:routine": "close a routine block",
+	"rebase:accept-identical": "accept a changed binary identical to an approved source",
+	"waive:warning":           "waive a warning finding",
+	"waive:nit":               "waive a nit finding",
+	"round:extra":             "one fix round past the cap for a file",
+	"model:choose":            "choose the coder level for a block",
+	"close:routine":           "close a routine block",
 	// B630
 	"review:substitute": "run a substitute review on another provider when a file's review stays unavailable",
 	// B632: Go only; Node's ALLOWABLE_WHAT has no entry.

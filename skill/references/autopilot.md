@@ -59,3 +59,14 @@ Here, a critical waiver means the delegate's `autopilot waive` action; the evide
 - merges and destructive actions.
 
 When one of these comes up during the window: stop that line of work, add it to Actions only you can take, and wait. The delegate never relaxes a rule or a limit to keep work moving (`rules-core.md` R17).
+
+## Identical binary clearance (B1014)
+
+The owner may opt in before run start with `rebase.approved_binary_sources: [design/approved/**]`
+and grant `rebase:accept-identical`. An empty or absent list disables it; reload and temporary
+approval cannot change it. `forge block rebase <id> --run <r> --accept-identical <file> --source <path-or-ref:path>`
+compares a changed owned binary against a regular configured source or recorded base-branch blob.
+Paths are repository-relative and source patterns support `*`, `?`, `**`. Text needs re-review.
+A mismatch refuses; success needs no terminal and signs `rebase.accepted` with `by: autopilot`,
+`grant_id`, `source`, `content_hash` and `source_hash`. Both hashes are SHA-256 of the checked bytes.
+Other changed files must already have their current review approvals. Design approvals stay owner-only.

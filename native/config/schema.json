@@ -63,6 +63,17 @@
         "max_lines": { "type": "integer", "minimum": 1, "default": 300, "description": "Maximum added plus removed lines in a light block at close." }
       }
     },
+    "rebase": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "approved_binary_sources": {
+          "type": "array", "default": [],
+          "description": "Opt in to rebase:accept-identical with approved repository-relative binary source paths or globs (*, ?, **). Empty disables it. Read only from the run snapshot; cannot change mid-run. Base-branch blobs are also approved when opted in. Text still requires re-review.",
+          "items": {"type": "string", "minLength": 1, "pattern": "^[^/\\\\:\\x00-\\x1f]+(/[^/\\\\:\\x00-\\x1f]+)*$", "not": {"pattern": "(^|/)\\.{1,2}(/|$)|^[.](?:[gG][iI][tT]|[cC][oO][dD][eE]-[fF][oO][rR][gG][eE])(/|$)"}}
+        }
+      }
+    },
     "close": {
       "type": "object",
       "additionalProperties": false,

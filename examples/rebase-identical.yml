@@ -1,0 +1,8 @@
+# Merge into a project config before run start. An empty list disables clearance.
+rebase:
+  approved_binary_sources:
+    - design/approved/**
+    - public/images/**
+# Owner grant: --allow rebase:accept-identical
+# Agent: block rebase B1 --run <r> --accept-identical assets/logo.png --source design/approved/logo.png
+# Base blob: --source main:assets/logo.png (the recorded base branch)
