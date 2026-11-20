@@ -685,6 +685,20 @@ prints `gates: N flaky tests in run <run> (<package.Test>, ...), more than 3: th
 writes a `test.flaky_limit` row `{tests, max}` and adds `flaky_limit` to its JSON. In `block land`
 the block's gate fails with the same text. A later gate with no flaky test is not affected.
 
+## Land fast checks (B964)
+
+`block land` (batch and the single-block `--merge` path) runs four quick checks on each block before
+any CI read, rebase or gate, and stops at step `fast-checks` naming each problem. Each looks only at
+what the block adds against its base branch (`base...head`):
+
+- a conflict marker (`<<<<<<<`, `=======`, `>>>>>>>`) added in any file;
+- a `testdata/` or `fixtures/` path git ignores, so it was never committed (`git add -f` it);
+- a Markdown table row whose first cell repeats another row's (or is it plus more commands), new in the block;
+- a `CHANGELOG.md` change that gives `## [Unreleased]` a shape fault the base did not have (an entry
+  before the first `###` heading, or a repeated `###` heading).
+
+A duplicate row or changelog fault already on the base is not the block's and is not refused.
+
 ## How we keep Go and Node the same
 
 Until B690b contributors used parity tests that ran each command through the

@@ -203,6 +203,9 @@ when every failing test matches a `<block> <regexp>` line of `land.ci_red_list` 
 `CODE_FORGE_CI_RED_BLOCKS`; a block never covers its own red. `land.require_main_ci: true` (B962) also refuses while the
 newest completed push run of the base branch is red, unless each of its failing tests matches a
 known-red line of a named block (the landing fix block may cover it).
+Before any of that, `block land` runs the fast checks (B964) on what each block adds: a conflict
+marker, an ignored `testdata/`/`fixtures/` file, a new duplicate docs table row, or a new
+`[Unreleased]` shape fault in CHANGELOG.md stops the land at `fast-checks` with each problem named.
 
 **Heal queue (B429).** `gates run --run --block`, `block rebase` and `block land` still fail on a
 held lock or a transient git error, but also queue the problem and print `heal: queued <id>` as the

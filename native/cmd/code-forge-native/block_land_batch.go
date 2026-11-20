@@ -149,6 +149,13 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if err != nil {
 				return err
 			}
+			// B964: the land fast checks, before any CI push, rebase or gate.
+			// B964: fast checks before CI, rebase and gate (the single-block path
+			// runs them in landExecuteWithReason, block_land_execute.go).
+			if problems := landFastChecks(tree.Path, base, strings.TrimSpace(head)); len(problems) > 0 {
+				step = "fast-checks"
+				return fmt.Errorf("block %s fails the land fast checks:\n  %s", id, strings.Join(problems, "\n  "))
+			}
 			// B765: land.require_ci checks each block's own tip before any
 			// rebase, gate or write.
 			cfg, _ := blockSnapshot(record)
