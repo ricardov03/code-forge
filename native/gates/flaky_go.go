@@ -189,15 +189,27 @@ var goEchoedTest = regexp.MustCompile(`(?:^|[\s:])(?:\S*/)?go test\s+(.*)$`)
 // wrapper's rerun keeps the go test build flags of the first line where the
 // wrapper names its go test (its -timeout 75m, say), since the wrapper's own
 // argv does not hold them.
+//
+// B988: a gate whose program is not go (make test, a shell script) but that
+// prints the go test it runs is rerun with go from PATH: go test, that line's
+// kept build flags, -p 2 unless set, -count=3 -run and the failed packages
+// (import paths, so the gate's directory resolves them). One that prints no
+// go test line is never rerun by name.
 func goRerunCommand(original []string, output string, names, pkgs []string) []string {
+	echoed, named := goEchoedFlags(output)
+	if len(original) > 0 && strings.TrimSuffix(filepath.Base(original[0]), ".exe") != "go" {
+		if !named {
+			return nil
+		}
+		argv := goRerunBuild(append([]string{"go", "test"}, echoed...), nil, names, pkgs)
+		if !goHasFlag(argv, "p") {
+			argv = goRerunBuild(append([]string{"go", "test"}, echoed...), []string{"-p", strconv.Itoa(GoRerunP)}, names, pkgs)
+		}
+		return argv
+	}
 	var extra []string
 	if goRerunWrapper(original) {
-		for _, line := range strings.Split(strings.ReplaceAll(ansi.ReplaceAllString(output, ""), "\r\n", "\n"), "\n") {
-			if m := goEchoedTest.FindStringSubmatch(line); m != nil {
-				extra = goKeptFlags(strings.Fields(m[1]))
-				break
-			}
-		}
+		extra = echoed
 	}
 	// B973: the cf-gotest rules. A wrapper's rerun builds with -trimpath
 	// (cf-gotest's build, so the rerun reuses its build cache); a direct go
@@ -210,6 +222,17 @@ func goRerunCommand(original []string, output string, names, pkgs []string) []st
 		argv = goRerunBuild(original, append(extra, "-p", strconv.Itoa(GoRerunP)), names, pkgs)
 	}
 	return argv
+}
+
+// goEchoedFlags is the kept go test build flags of the first output line
+// that names a go test, and whether there is such a line.
+func goEchoedFlags(output string) ([]string, bool) {
+	for _, line := range strings.Split(strings.ReplaceAll(ansi.ReplaceAllString(output, ""), "\r\n", "\n"), "\n") {
+		if m := goEchoedTest.FindStringSubmatch(line); m != nil {
+			return goKeptFlags(strings.Fields(m[1])), true
+		}
+	}
+	return nil, false
 }
 
 // goHasFlag is true when args hold the go flag name (-name, --name or
