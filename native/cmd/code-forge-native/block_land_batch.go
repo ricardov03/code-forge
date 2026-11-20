@@ -31,6 +31,7 @@ type landBatchBlock struct {
 	rebased                bool
 	node                   bool   // owns or changes a Node product file
 	ci                     string // B910: the tip sha green CI proved (land.require_ci)
+	merged                 string // the precheck's merge commit, reusable by lane combine
 }
 
 // Batch landing consumes closed blocks. Keep the open/join/close single-block
@@ -749,6 +750,7 @@ func landBatchPrecheck(main, head string, batch []*landBatchBlock, auto landmerg
 			return nil, nil, err
 		}
 		running = strings.TrimSpace(commit)
+		block.merged = running
 		kept = append(kept, block)
 	}
 	if len(kept) == 0 {

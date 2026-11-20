@@ -127,6 +127,8 @@ var helpCommands = []helpEntry{
 	{name: "lane", summary: "Start a fast lane on a combine tip", namespace: true},
 	{name: "lane start", summary: "Pin a clean lane checkout for at most two local blocks",
 		options: []helpOption{{"--base <combine-tip>", "The pinned starting commit for the lane checkout"}, {"--cwd <dir>", "The existing lane checkout on its own branch"}, helpRunOption, {"--engine <e>", "The run engine"}, {"--worker-pid <pid>", "Pin an existing worker"}}},
+	{name: "lane ready", summary: "Verify a lane's committed review evidence, ownership and size", options: []helpOption{helpRunOption, helpJSONOption}},
+	{name: "lane combine", summary: "Merge ready lane runs locally with named tests and one regeneration", options: []helpOption{helpRunOption}},
 	{name: "ledger", summary: "Read the ledger or record outcomes and spend", namespace: true},
 	{name: "ledger calibration", summary: "Show how reliable the recorded answers were"},
 	{name: "ledger outcome", summary: "Record the CI result of a pull request"},

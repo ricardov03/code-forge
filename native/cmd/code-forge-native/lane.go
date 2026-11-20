@@ -17,9 +17,14 @@ import (
 func init() { routes["lane"] = runLane }
 
 const laneStartUsage = "usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]\n"
-const laneUsage = laneStartUsage
+const laneReadyUsage = "usage: code-forge lane ready --run <lane-run> [--json]\n"
+const laneCombineUsage = "usage: code-forge lane combine --run <combine-run> <lane-run>...\n"
+const laneUsage = laneStartUsage + laneReadyUsage + laneCombineUsage
 
 func runLane(args []string) int {
+	if len(args) > 0 && (args[0] == "ready" || args[0] == "combine") {
+		return runLaneIntegration(args)
+	}
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h" || len(args) > 1 && args[0] == "start" && (args[1] == "--help" || args[1] == "-h")) {
 		fmt.Fprint(safeStdout, laneUsage)
 		return 0
