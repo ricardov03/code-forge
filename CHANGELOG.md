@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `land.require_main_ci: true` (with `land.require_ci: github`) makes `block land` refuse while the newest completed push run of the base branch is red, unless every failing test of that run matches a `land.ci_red_list` line of a block named in `CODE_FORGE_CI_RED_BLOCKS` (the landing fix block may cover it); a green or missing push run lands (B962)
+
 ## [0.26.0] — 2026-11-19
 
 ### Changed

@@ -200,7 +200,9 @@ refuses with the same land command to resume; red refuses with the failed jobs. 
 fails on auth is retried once over HTTPS with the gh credential helper. After the land the block's
 CI PRs are closed. Do not write poll scripts or open replacement PRs by hand. A red run lands only
 when every failing test matches a `<block> <regexp>` line of `land.ci_red_list` for a block named in
-`CODE_FORGE_CI_RED_BLOCKS`; a block never covers its own red.
+`CODE_FORGE_CI_RED_BLOCKS`; a block never covers its own red. `land.require_main_ci: true` (B962) also refuses while the
+newest completed push run of the base branch is red, unless each of its failing tests matches a
+known-red line of a named block (the landing fix block may cover it).
 
 **Heal queue (B429).** `gates run --run --block`, `block rebase` and `block land` still fail on a
 held lock or a transient git error, but also queue the problem and print `heal: queued <id>` as the

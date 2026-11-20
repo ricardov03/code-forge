@@ -213,6 +213,16 @@ func landCIGate(cfg map[string]any, main, id, sha, base, resume string, out io.W
 	if base == "" {
 		base = "main"
 	}
+	// B962: the base branch's newest push run first (land.require_main_ci).
+	mainNotes, mainRefusal, mainNext := landCIMainGate(land, main, base)
+	if mainRefusal != "" {
+		return nil, mainRefusal, mainNext
+	}
+	defer func() {
+		if refusal == "" {
+			notes = append(mainNotes, notes...)
+		}
+	}()
 	started := landCINow()
 	deadline, line, interval, pushed := started.Add(settings.wait), started, landCIPollStart, false
 	var runs []ciRun
