@@ -168,3 +168,17 @@ Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
 non-empty list of proof roots; v1 refuses `require_proof: false`.
 Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
 Design approvals remain owner-only. See [the opt-in example](../../examples/autopass.yml).
+
+Evidence auto-pass proof is a whole `.json` object or the JSON in an `.html`
+`<script type="application/json" id="code-forge-proof">`. Required fields are
+`block`, `run`, `prover`, ISO `created_at`, `all_green: true`, and
+`checks: [{clause: "C2", result: "pass", evidence: ["shots/phone.png"]}]`.
+Every target clause must have passing evidence. Paths are relative descendants
+of the proof directory; files must exist and be non-empty regular files. The
+resolved proof must remain in the snapshot's `proof_dirs` and outside worktrees
+and `.code-forge/export/`. Symlink escapes refuse. The proof and each evidence
+file are hashed again under the run lock and the hashes are signed in the clear
+rows. `prover` must differ from all recorded coder session ids unless the owner
+set `require_separate_prover: false` before run start. No recorded coder ids means
+an explicit `coder_sessions: []`. See the header example in
+[the guide](../../docs/autopilot.md#auto-pass-on-green-evidence).

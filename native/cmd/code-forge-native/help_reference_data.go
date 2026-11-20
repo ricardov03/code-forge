@@ -381,6 +381,12 @@ var helpRefs = map[string]helpRef{
 		related:  []string{"block waive", "block unwaive"},
 		examples: []helpRefExample{helpRefEx("block", "block ack-waivers B1 --run {run} --json")},
 	},
+	"block auto-pass": {
+		when:     "After code close, pass non-design human checks under human-pass:evidence and the frozen human_check.autopilot opt-in.",
+		related:  []string{"block human-pass", "autopilot start", "run human-checks"},
+		flags:    map[string]string{"--proof": "Non-empty HTML or JSON proof inside proof_dirs, outside worktrees and exports; includes a separate prover and passing evidence for each target.", "--clause": "Open C<n> human-check clause; may repeat. Without selectors pass all open device checks, leaving design checks."},
+		examples: []helpRefExample{helpRefEx("block", "block auto-pass B1 --run {run} --proof plans/proof.json --note checked --dry-run --json")},
+	},
 	"block human-pass": {
 		when:     "The owner records that the human checks of a block passed.",
 		related:  []string{"run human-checks", "block close"},

@@ -68,3 +68,12 @@ Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
 non-empty list of proof roots; v1 refuses `require_proof: false`.
 Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
 Design approvals remain owner-only. See [the opt-in example](../../examples/autopass.yml).
+
+`human-pass:evidence` allows `block auto-pass` after code close only when the owner
+set `human_check.autopilot.enabled` before run start. A new run is required after
+policy changes. The command accepts `.html` JSON-script headers or whole `.json`
+objects, verifies proof paths and hashes, signed machine checks and a separate
+prover session, then records `by: autopilot` and `to_owner: true`. Preview with
+`--dry-run [--json]`; repeated `--clause C<n>` selectors limit the pass. Without
+selectors device checks pass and design checks remain. `design:approve` stays
+fixed-denied. See [the full guide](../../docs/autopilot.md#auto-pass-on-green-evidence).

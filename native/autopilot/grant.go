@@ -479,6 +479,9 @@ const SubstituteScope = "review:substitute"
 // items are human_check clauses as closed_deferred_human.
 const DeferHumanScope = "human-pass:deferred"
 
+// EvidenceHumanScope permits verified non-design checks under an owner opt-in.
+const EvidenceHumanScope = "human-pass:evidence"
+
 // ScopeRefusal is RoutineRefusal for any scope: "" when result's grant is
 // active and allows scope; else no-grant, the grant's state, denied or
 // not-allowed.

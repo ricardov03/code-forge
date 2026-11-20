@@ -805,3 +805,8 @@ Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
 non-empty list of proof roots; v1 refuses `require_proof: false`.
 Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
 Design approvals remain owner-only. See [the opt-in example](../examples/autopass.yml).
+
+`block auto-pass` runs entirely in Go: snapshot opt-in, signed scoped grant,
+proof/header/evidence hashes, design exclusions, review/gate/transcript checks,
+authoritative run-lock rechecks, signed per-clause clears and final done/hook.
+`autopilot start` validates `human-pass:evidence` against the frozen snapshot.

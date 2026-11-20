@@ -58,3 +58,13 @@ Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
 non-empty list of proof roots; v1 refuses `require_proof: false`.
 Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
 Design approvals remain owner-only. See [the opt-in example](../../examples/autopass.yml).
+
+Evidence passes first write `autopilot.decision` with `scope: human-pass:evidence`,
+`subject: {block}`, `clauses`, `decision: pass`, `acted: true`, `to_owner: true`,
+`proof_sha256`, `prover` and `coder_sessions`. Per-clause signed
+`human_check.cleared` rows carry `by: autopilot`, `passed_by: autopilot`,
+`grant_id`, `decision_id`, `proof`, `proof_sha256`, `evidence: [{path, sha256}]`,
+`prover`, `coder_sessions` and `ts`. On the last check, `block.human_pass`
+(awaiting) or `block.human_checks_cleared` (deferred) closes it as autopilot.
+Never interpret these as a human pass. Separate audit/report display and
+`humanWaitMs: null`, `autoPassed: true` reporting belong to B1013.

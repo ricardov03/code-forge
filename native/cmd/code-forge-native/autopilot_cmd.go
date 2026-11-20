@@ -493,7 +493,7 @@ var autopilotFixedDeny = ledger.Object{
 	{Key: "budget:raise", Value: "raise a budget"},
 }
 
-var autopilotAllowable = []string{"waive:warning", "waive:nit", "round:extra", "model:choose", "close:routine", "review:substitute", "human-pass:deferred"}
+var autopilotAllowable = []string{"waive:warning", "waive:nit", "round:extra", "model:choose", "close:routine", "review:substitute", "human-pass:deferred", autopilot.EvidenceHumanScope}
 
 func autopilotFixedDenyScopes() []any {
 	out := []any{}
@@ -1042,6 +1042,9 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 	if record.Get("status") != "active" {
 		return autopilotReport(o, "start", &runFail{"run " + runID + " has ended", false})
 	}
+	if slices.Contains(in.scopes, any(autopilot.EvidenceHumanScope)) && !autoPassEnabled(record) {
+		return autopilotReport(o, "start", &runFail{autoPassOff, false})
+	}
 	before, err := autopilotCheckExpiry(home, runID, now)
 	if err != nil {
 		return autopilotReport(o, "start", err)
@@ -1099,6 +1102,9 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 			if s, err := autopilot.GrantState(previous, now); err == nil && s == "active" {
 				return &runFail{autopilot.ActiveGrantMessage(runID, autopilotGrantEnd(previous)), false}
 			}
+		}
+		if slices.Contains(in.scopes, any(autopilot.EvidenceHumanScope)) && !autoPassEnabled(*record) {
+			return &runFail{autoPassOff, false}
 		}
 		// the row first: a grant stored without its signed row would act unrecorded
 		row := ledger.Object{

@@ -210,3 +210,8 @@ Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
 non-empty list of proof roots; v1 refuses `require_proof: false`.
 Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
 Design approvals remain owner-only. See [the opt-in example](examples/autopass.yml).
+
+Owners may opt in before `run start` to evidence-based autopilot passes for device
+checks. With `human-pass:evidence`, use `block auto-pass <id> --run <r> --proof
+<file> --note <text>`; design approvals stay owner-only. See
+[Auto-pass on green evidence](docs/autopilot.md#auto-pass-on-green-evidence).

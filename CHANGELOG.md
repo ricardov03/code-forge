@@ -49,6 +49,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Added
 
+- `human-pass:evidence` and Go-only `block auto-pass` clear non-design checks under a frozen owner opt-in and active signed grant, after proof/evidence hashes, separate prover and green machine checks are verified again under the run lock; partial passes preserve owner checks and all records identify autopilot (B1012).
+
 - Add the off-by-default, snapshot-frozen `human_check.autopilot` configuration and explicit `approval: design|device` human-check markers; init, schemas and config fix preserve the owner's policy (B1011).
 
 - `code-forge init` writes the new keys with their defaults after `autonomy`: `land.require_main_ci: false`, `autopilot.step_budgets` (`margin: 0.5`, `min_samples: 5`) and `release.max_blocks: 8`; a re-run keeps values already set, and `config fix` leaves them as they are.

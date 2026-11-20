@@ -81,6 +81,7 @@ var helpCommands = []helpEntry{
 	{name: "block accept-hit", summary: "Accept one transcript rule hit as safe", owner: true},
 	{name: "block unwaive", summary: "Undo an agent waiver of a finding", owner: true},
 	{name: "block ack-waivers", summary: "Acknowledge the agent waivers of a block", owner: true},
+	{name: "block auto-pass", summary: "Pass device checks with scoped autopilot evidence", options: []helpOption{helpRunOption, {"--proof <file>", "HTML or JSON proof outside the worktree"}, {"--note <text>", "What the prover checked"}, {"--clause C<n>", "Select an open check; may repeat"}, {"--dry-run", "List checks and write nothing"}, helpJSONOption}},
 	{name: "block human-pass", summary: "Record the owner's device check and close", owner: true},
 	{name: "block amend-acceptance", summary: "Change the acceptance clauses of a block", owner: true},
 	{name: "ci", summary: "Watch the CI runs of one commit", namespace: true},

@@ -76,6 +76,7 @@ scopes, the deny list, the spend per category, and where the log is.
 | `close:routine` | close a routine block when `close.require_human` is on: every changed file approved, a green gate row, no waivers, no transcript hits. Never `block close --decide` |
 | `review:substitute` | run one substitute review of a file whose review stays unavailable after the built-in recovery and `review.on_unavailable`: a closed-book reviewer on a provider none of the failed sessions used. Each substitute gets a signed `autopilot.decision` row first, and `block close` counts its approval only under this scope with every gate green |
 | `human-pass:deferred` | close a block whose only open items are `human_check` clauses as `closed_deferred_human` (Go engine, B632): every other close gate must pass as for a normal close. The checks stay open in `run human-checks list` (marked deferred) for you; the block may land. One signed `autopilot.decision` row (scope, block, clauses, `waits_for`) and one binnacle line per block with your `run human-checks clear` command. Clearing its last check makes the block `closed`. Never a human pass. `run end` refuses while any of these checks is open, and the binnacle's `Human checks` row names them (B633) |
+| `human-pass:evidence` | pass non-design checks with verified green proof under the frozen `human_check.autopilot.enabled` opt-in. Requires a signed grant, approved files, green gates, no current-grant waivers or transcript hits, and a separate prover by default. |
 
 An extra round is a normal fix round. Fix rounds are one per block: wait for every `review-file` ticket of the block and its tests, then send ONE fix message with every failing test and every open finding; a finding that arrives later waits for the next round (`skill/references/code.md` §4).
 The per-file cap still counts per file: one block round is one round for each file it touched.
@@ -381,3 +382,49 @@ Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
 non-empty list of proof roots; v1 refuses `require_proof: false`.
 Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
 Design approvals remain owner-only. See [the opt-in example](../examples/autopass.yml).
+
+## Auto-pass on green evidence
+
+The owner opts in before starting a new run with the section in
+[`examples/autopass.yml`](../examples/autopass.yml). Then grant
+`--allow human-pass:evidence,close:routine` (add `human-pass:deferred` to defer
+checks at close). `autopilot start --allow human-pass:evidence` refuses
+`human-pass-evidence-off` without the snapshot opt-in.
+
+A separate QA session writes a `.json` proof object, or an `.html` file with
+`<script type="application/json" id="code-forge-proof">` containing that object:
+
+```json
+{"block":"B1","run":"example-run","prover":"qa-session","created_at":"2026-11-20T00:00:00Z","all_green":true,"checks":[{"clause":"C2","result":"pass","evidence":["shots/phone.png"]}]}
+```
+
+```sh
+code-forge block auto-pass B1 --run example-run --proof /proof/index.html --note "Phone flows passed" --dry-run
+code-forge block auto-pass B1 --run example-run --proof /proof/index.html --note "Phone flows passed"
+```
+
+Proof and evidence must be non-empty regular files. Resolved proof must stay in
+`proof_dirs`, outside the project worktree and every `.code-forge/export/` folder.
+Evidence names are relative descendants of the proof directory; symlink escapes
+are refused. Every target clause needs a passing result and evidence. The header
+must match the run/block and name a prover; by default it must differ from all
+coder session ids recorded for the block. When no coder session id was recorded,
+the signed rows explicitly store `coder_sessions: []`.
+
+`--clause C2 --clause C4` selects open checks. Without selectors the command passes
+all open device checks, leaving design checks for the owner. An explicitly selected
+design check refuses `auto-pass-design` and writes nothing. `approval: design`,
+excluded `waits_for` values, and unmarked design-looking checks are owner-only.
+The heuristic covers block ids starting with D and clause text containing design,
+diseño, board, tablero or mock; `approval: device` explicitly overrides only the
+heuristic. `design:approve` remains on the fixed deny list.
+
+All checks run before and inside the run lock. Refusals and `--dry-run` write
+nothing; dry-run lists each check, with `--json` for machine-readable results.
+An `awaiting_human_check` or `closed_deferred_human` block becomes `closed` only
+when its last open check clears, then emits the done file and runs the end hook.
+Rows say `by: autopilot`, carry the grant and decision ids, and sign SHA256 hashes
+of the proof and its evidence. The `autopilot.decision` row comes first and sets
+`to_owner: true`. `block human-pass` and `run human-checks clear` keep their terminal
+and active-grant guards. Owner audit/reopen and report presentation are separate
+follow-up work in this wave (B1013).
