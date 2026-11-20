@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-11-20
+
 ### Changed
 
 - code-forge's own test gate (`cf-gotest`) runs `go test` with `-trimpath` added to `GOFLAGS`, so a new worktree reuses the Go build cache of the others instead of compiling every package again (measured: second worktree `go test -c ./cmd/code-forge-native` 1.1 s and 0 compiles with it, 13.5 s and 48 compiles without); CI runs the Go tests the same way, and the B728 golden tests find their fixtures under `-trimpath` (B952)
