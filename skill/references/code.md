@@ -189,6 +189,10 @@ reset (one `ci watch: GitHub API rate limit; retry at HH:MM UTC` line per wait) 
 is past `--timeout`, exits 4 with `rate limit, gave up` and no heal item. One watch per repo and
 commit: a second start says another ci watch is already watching and exits 0.
 
+**Red combined tip (B963).** A red batch merge gate queues ONE found fix block (source `land`)
+whose brief lists every failing test with its suspect blocks. Fix them all in that block, in one
+round; never hand-commit on the combined branch.
+
 **Disk guard (B961).** `block land`, `gates run` and `run start` refuse under
 `land.min_free_gb` (default 15 GB) free disk, and trim Go cache files unused for 24 h under twice
 that. On the refusal free space (`go clean -cache`, old worktrees); do not lower the key to pass.

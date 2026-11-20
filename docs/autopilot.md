@@ -279,6 +279,9 @@ A queued block joins the run's planned blocks at once, so an until-done grant do
 is open. The binnacle shows a **Found work** table (found, source, title, block, state), and every
 finding that waits for you is listed under **Actions only you can take**.
 
+A red batch merge gate records its finding by itself (B963, source `land`): one block for the
+whole red combined tip, with every failing test and its suspect blocks in the brief.
+
 ## Stop it
 
 ```bash

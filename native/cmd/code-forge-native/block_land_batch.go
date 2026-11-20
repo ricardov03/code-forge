@@ -45,6 +45,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 	var landedCfg map[string]any
 	landedMain := ""
 	landedNow := []string{} // B960: the blocks this call merged
+	var red *landRedTip     // B963: the red combined tip, for one fix block
 	stop := func(reason string) int {
 		fmt.Fprintf(safeStderr, "block %s land stopped at %s: %s\n", stoppedID, step, strings.TrimSpace(reason))
 		if json {
@@ -350,6 +351,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 				mergeReason = "node_product"
 			}
 		}
+		var tipSuite landResult // B963: the combined tip's suite output
 		testPrefix := func(n int) string {
 			if reason, ok := tested[n]; ok {
 				return reason
@@ -407,6 +409,9 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 					return code
 				}, ctx)
 				reason = landMergeFailure(home, run, batch[n-1].id, suite, selected)
+				if n == len(batch) {
+					tipSuite = suite
+				}
 			}
 			if ctx.Err() != nil {
 				reason = ctx.Err().Error()
@@ -442,6 +447,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 				}
 			}
 			green, culprit = low, high-1
+			red = landRedTipOf(main, ids, prefixes, tipSuite, tested[len(batch)], ids[culprit])
 		}
 		if err := timedOut(); err != nil {
 			return err
@@ -517,6 +523,10 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 	})
 	if err != nil {
 		return stop(err.Error())
+	}
+	// B963: a red combined tip becomes ONE found fix block (outside the locks).
+	if red != nil {
+		landRedRecord(home, run, red, json, emit, safeStderr)
 	}
 	// B960: land.after in main and one block.landed row per merged block, before the push.
 	if len(landedNow) > 0 {

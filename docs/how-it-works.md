@@ -718,6 +718,17 @@ starts `code-forge ci watch --sha <sha> --run <run>` as a detached child, loggin
 `~/.code-forge/heal/ci-<sha>.log`, prints `ci watch: started for <sha>; log <path>` and returns at
 once; land never waits for CI.
 
+**One fix block for a red combined tip (B963).** When the batch merge gate is red on the
+combined tip, `block land` reads every failing test of that suite (Go `--- FAIL` lines and
+subtests, packages that failed to build, TAP `not ok` lines, the node spec summary), maps each
+test to its suspect blocks (a block id in the test name, a changed file or Go package of a block,
+else the bisect culprit, else every block of the batch) and records ONE found block of the run
+(`autopilot found`, source `land`). Its brief lists every failing test with its suspects and
+each block's changed files, so one coder fixes all of them in one reviewed, gated block; nobody
+hand-commits on the combined branch. The land prints `land: fix block <id> queued for the red
+combined tip …` (JSON: a `fix_block` event). The same red seen again counts as that finding seen
+again and queues no second block.
+
 **Free disk (B961).** Before a land, a gates run or a run start, code-forge measures the free
 disk where the project lives. Under twice `land.min_free_gb` (default 15) it removes Go build cache
 files unused for 24 h (Go touches a cache file each time it uses it, so running builds keep
