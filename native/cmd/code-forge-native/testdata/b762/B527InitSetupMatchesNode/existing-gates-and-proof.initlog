@@ -9,6 +9,6 @@ init-<TS>.log:Project settings (detected)
   copy untracked: blank — none for this stack
 Set the blanks later: edit .code-forge.yml (gates.types, gates.format, proof.export.copy_untracked), then run `code-forge validate`.
 keys: jev from none
-.code-forge.yml: changes gates.types, gates.format, proof.export, project, provider, levels, caps, review, engine, harnesses, system1, autonomy
+.code-forge.yml: changes gates.types, gates.format, gates.ram_tmp, proof.export, project, provider, levels, caps, review, engine, harnesses, system1, autonomy
 .code-forge.yml: written
 engine: auto

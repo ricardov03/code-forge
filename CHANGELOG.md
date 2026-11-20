@@ -9,6 +9,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Added
 
 - On macOS the gates run with `TMPDIR` on a RAM disk with no file-event log: `gates.ram_tmp: auto` (the default) makes `/Volumes/cf-tmp` once without sudo (`hdiutil attach -nomount` + `diskutil erasevolume APFS`), writes `.fseventsd/no_log` and `.metadata_never_index`, and gives every gate and test command a fresh `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`; any error prints one warn line and the gates use the normal `TMPDIR`. `gates.ram_tmp: off` or `CODE_FORGE_RAM_TMP=off` turns it off; `doctor` shows the `ram_tmp` row (B924)
+- `code-forge init` writes `gates.ram_tmp` (the default mode) into a new `.code-forge.yml`, after `gates.format`; a re-run keeps the value already set (B939).
 
 ## [0.26.0] — 2026-11-19
 

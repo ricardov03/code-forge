@@ -15,6 +15,7 @@ gates:
       A: "2"
   types: null
   format: null
+  ram_tmp: auto
 proof:
   isolation: lock
   tiers:

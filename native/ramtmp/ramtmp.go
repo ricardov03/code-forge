@@ -31,6 +31,10 @@ const Volume = "cf-tmp"
 // its pages as they are written, up to this size.
 const DefaultSizeMB = 2048
 
+// DefaultMode is gates.ram_tmp when the config does not set it; code-forge
+// init writes it into a new config (B939).
+const DefaultMode = "auto"
+
 // Runner runs one command and returns its stdout. A non-nil error means the
 // command failed or could not start.
 type Runner func(name string, args ...string) (string, error)
@@ -139,8 +143,11 @@ func Mode(configured any) any {
 // Enabled reads gates.ram_tmp: absent or "auto" is on for darwin and off
 // elsewhere; "off" is off. The string says why it is off.
 func Enabled(mode any, goos string) (bool, string) {
+	if mode == nil {
+		mode = DefaultMode
+	}
 	switch mode {
-	case nil, "auto":
+	case "auto":
 		if goos != "darwin" {
 			return false, "not macOS"
 		}

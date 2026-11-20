@@ -583,6 +583,8 @@ command `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`, a fresh directory per
   never makes a disk.
 - The volume stays mounted until you eject it (`hdiutil detach
   /Volumes/cf-tmp`) or restart the Mac (B924).
+- `code-forge init` writes `gates.ram_tmp` into a new `.code-forge.yml` with
+  the default value, and a re-run keeps the value already there (B939).
 
 ## Rebase runs in Go (B431)
 

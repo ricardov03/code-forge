@@ -39,6 +39,7 @@ gates:
   lint: null
   types: null
   format: null
+  ram_tmp: auto
 autonomy:
   coder_may_push: false
   coder_may_open_draft_pr: false

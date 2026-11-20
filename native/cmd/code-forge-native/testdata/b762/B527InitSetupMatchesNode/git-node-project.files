@@ -35,6 +35,7 @@ gates:
     - tsc
     - --noEmit
   format: null
+  ram_tmp: auto
 proof:
   tiers:
     high:
