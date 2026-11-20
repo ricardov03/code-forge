@@ -83,6 +83,24 @@ find that run's worker there. The rule is one root: the review queue of a run is
 run's workspace (the directory `run start` was given). A run started in the main tree, including
 one whose blocks code-forge gave their own worktrees, keeps its queue in the main tree.
 
+### One file at a time: `review-file`
+
+Inside a run you started yourself (`run start`, `block open`), queue one file and wait for it:
+
+| Command | What it does |
+|---|---|
+| `code-forge review-file <path> --block <id> --run <r>` | queues a review of the file; a cached result of the same content comes back at once |
+| `code-forge review-file <path> --block <id> --run <r> --fresh` | queues a new review even when a cached result exists (a `split_required` retry, or a reverted substitute approval) |
+| `code-forge review-file --wait <ticket> [--max 90s]` | waits for one ticket |
+| `code-forge review-file --wait-block <id> --run <r> [--max 90s]` | waits for every owned file of the block |
+
+`--wait-block` needs a block of the run. An unknown block id is refused, exit 1, with
+`unknown-block`: `block <id> is not a block of run <r>`, and the fix: open it with
+`code-forge block open <id> --run <r> …` (or let `code-forge review` open one), and list the run's
+blocks with `code-forge run status --run <r>`. A run with no record in this repository is
+refused with `unknown-run` and the `run start` command to start it here. How many files the
+worker reviews at once is `review.parallel_tickets` (see [Speed](#speed)).
+
 ## Examples
 
 Review your branch against `main` (run it on the branch):

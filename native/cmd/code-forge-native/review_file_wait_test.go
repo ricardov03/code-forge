@@ -283,7 +283,10 @@ func TestReviewFileArgsDecodeLikeNode(t *testing.T) {
 
 func TestReviewFileBlockScopeUnreadableIsNative(t *testing.T) {
 	const want = `{"status":"refused","reason":"block-scope-unreadable","message":"the block scope cannot be read"}` + "\n"
-	for _, record := range []string{"", `{"run_id":"r-other","blocks":{"B1":{"owned_files":["a.go"]}}}`, `{"run_id":"r-test","blocks":{}}`} {
+	// B971: a missing run record and a block the run lacks have their own
+	// refusals (TestB971UnknownBlockNamesTheFix); a mismatched record and a
+	// block with no owned files stay unreadable.
+	for _, record := range []string{`{"run_id":"r-other","blocks":{"B1":{"owned_files":["a.go"]}}}`, `{"run_id":"r-test","blocks":{"B1":{"owned_files":[]}}}`} {
 		t.Run(record, func(t *testing.T) {
 			home := t.TempDir()
 			repo := reviewFileRepo(t, home)
