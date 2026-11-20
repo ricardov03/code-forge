@@ -565,9 +565,12 @@ command `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`, a fresh directory per
 `gates run` (and per `block land` batch gate), removed after it.
 
 - `/Volumes/cf-tmp` is reused when it is mounted. Otherwise the engine makes
-  it once, with no sudo: `hdiutil attach -nomount ram://4194304` (2 GB; pages
+  it once, with no sudo: `hdiutil attach -nomount ram://<MB*2048>` (pages
   are only taken as they are written) and `diskutil erasevolume APFS cf-tmp
-  <device>`.
+  <device>`. `gates.ram_tmp_mb` sets the size in MB (default 2048, so
+  `ram://4194304`; 64 to 65536). A volume already mounted keeps its size, so
+  a new size takes effect after `hdiutil detach /Volumes/cf-tmp` or a restart
+  (B941).
 - The engine writes `.fseventsd/no_log` (no file-event log for the volume)
   and `.metadata_never_index` (Spotlight skips it) at the volume root.
 - Any error prints one line, `warn: gates.ram_tmp: <reason>; the gates use
@@ -585,6 +588,7 @@ command `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`, a fresh directory per
   /Volumes/cf-tmp`) or restart the Mac (B924).
 - `code-forge init` writes `gates.ram_tmp` into a new `.code-forge.yml` with
   the default value, and a re-run keeps the value already there (B939).
+  It writes `gates.ram_tmp_mb: 2048` after it the same way (B941).
 
 ## Rebase runs in Go (B431)
 

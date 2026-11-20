@@ -36,7 +36,7 @@ func gatesRamTmpEnv(configured map[string]any, run, block string, warn io.Writer
 		})
 		return nil, func() {}
 	}
-	volume, err := o.Ensure(ramtmp.DefaultSizeMB)
+	volume, err := o.Ensure(gatesRamTmpSizeMB(configured))
 	if err != nil {
 		return fallback(err)
 	}
@@ -49,6 +49,22 @@ func gatesRamTmpEnv(configured map[string]any, run, block string, warn io.Writer
 		return fallback(err)
 	}
 	return map[string]string{"TMPDIR": dir}, func() { _ = os.RemoveAll(dir) }
+}
+
+// gatesRamTmpSizeMB is gates.ram_tmp_mb (B941), else ramtmp.DefaultSizeMB.
+// The schema keeps it a whole number in 64..65536.
+func gatesRamTmpSizeMB(configured map[string]any) int {
+	switch v := configured["ram_tmp_mb"].(type) {
+	case float64:
+		if v >= 1 && v == float64(int(v)) {
+			return int(v)
+		}
+	case int:
+		if v >= 1 {
+			return v
+		}
+	}
+	return ramtmp.DefaultSizeMB
 }
 
 // dfRamTmpRow is the doctor row: ram_tmp on, off or the fallback reason.

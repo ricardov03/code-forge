@@ -25,7 +25,7 @@ func TestB939InitWritesRamTmp(t *testing.T) {
 		t.Fatalf("init exit %d: %s", side.code, side.stderr)
 	}
 	cfg := b939Config(t, side)
-	if !strings.Contains(cfg, "\n  format: null\n  ram_tmp: "+ramtmp.DefaultMode+"\nproof:\n") {
+	if !strings.Contains(cfg, "\n  format: null\n  ram_tmp: "+ramtmp.DefaultMode+"\n") {
 		t.Fatalf("gates.ram_tmp: %s is not in the new config:\n%s", ramtmp.DefaultMode, cfg)
 	}
 }

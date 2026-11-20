@@ -73,6 +73,7 @@ gates:
   format: null
   full_suite_threshold_files: 10
   ram_tmp: auto
+  ram_tmp_mb: 2048
 proof:
   isolation: worktree
   worktree:

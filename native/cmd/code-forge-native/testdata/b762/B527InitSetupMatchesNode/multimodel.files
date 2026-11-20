@@ -40,6 +40,7 @@ gates:
   types: null
   format: null
   ram_tmp: auto
+  ram_tmp_mb: 2048
 proof:
   tiers:
     high:

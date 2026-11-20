@@ -425,6 +425,13 @@
           "default": "auto",
           "description": "B924: auto (the default) puts the TMPDIR of every gate and test command code-forge runs (gates run, block land and close) on a macOS RAM disk named cf-tmp: /Volumes/cf-tmp is reused when mounted, else made with hdiutil attach -nomount ram://<sectors> and diskutil erasevolume APFS cf-tmp (2048 MB, no sudo), with .fseventsd/no_log and .metadata_never_index at its root, so fseventsd does not log the test temp files. Each gate run gets a fresh TMPDIR=/Volumes/cf-tmp/<run>-<block>-* that is removed after it. A gate's own env TMPDIR wins. Any error prints one warn line and the gates keep the normal TMPDIR; it never fails a gate. off, any OS other than macOS, or CODE_FORGE_RAM_TMP=off keeps the normal TMPDIR. code-forge doctor prints a ram_tmp row."
         },
+        "ram_tmp_mb": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 65536,
+          "default": 2048,
+          "description": "B941: the size in MB of the RAM disk gates.ram_tmp makes (default 2048; macOS takes the pages only as they are written). It is used when code-forge makes /Volumes/cf-tmp; a volume that is already mounted is reused at its size, so a new size takes effect after hdiutil detach /Volumes/cf-tmp or a restart."
+        },
         "test_class_map": {
           "type": "array",
           "maxItems": 50,
