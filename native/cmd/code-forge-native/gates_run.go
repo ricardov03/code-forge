@@ -996,13 +996,21 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	}
 	// B798: each Go test that passed only on its reruns: WARN, test.flaky
 	// row, and a finding in the run's list.
+	var flakyLimit []string
 	if !cancelled {
 		write := appendRow
 		if slug == "" {
 			write = func(ledger.Object) error { return nil }
 		}
 		if e := gatesFlakyGo(home, owner, results, write); e != nil {
-			return failure(e)
+			var limit *gatesFlakyLimit
+			if !errors.As(e, &limit) {
+				return failure(e)
+			}
+			// B958: too many flaky tests in the run turn the gate red.
+			gatesErrf("%s\n", limit.Error())
+			all = false
+			flakyLimit = limit.tests
 		}
 	}
 	out := ledger.Object{{Key: "stack", Value: p.Stack}}
@@ -1026,6 +1034,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	}
 	if flaky != nil {
 		out.Set("flaky", flaky)
+	}
+	if flakyLimit != nil {
+		out.Set("flaky_limit", flakyLimit)
 	}
 	gatesSay(out, secrets)
 	if all {

@@ -237,6 +237,8 @@ With `gates.repeat_new_tests: N` (integer 2..10; absent means off), a passing `g
 
 A red `go test` gate (with `gates.rerun_failed` on, the default) reruns only its failed top-level test names, 3 times in one `go test -count=3 -run` call. All pass: the gate passes with a `gates: WARN flaky test ...` line, a `test.flaky` ledger row and a `flaky-test` finding in `~/.code-forge/runs/<run>/findings.jsonl`; make that finding a fix block (the test must not depend on wall time or load). Any rerun failure, more than 3 failed names, a panic or a build failure is a real failure (B798).
 
+A run may list at most 3 flaky tests: the gate whose flaky test makes it 4 or more is red, prints `gates: N flaky tests in run <run> (...), more than 3: the gate is red`, writes a `test.flaky_limit` row and shows `flaky_limit` in its JSON; fix the flaky tests first. A later gate with no flaky test stays green (B958).
+
 With `gates.test` configured, `block close` refuses (exit 1) without a green `gate.done` row for this run and block: `no green gates run; run: code-forge gates run --run <r> --block <id>`. When timestamps allow comparison, the green row must be newer than the last commit touching owned paths after the block base; otherwise any green row suffices. The history lookup must succeed; only a successful empty log means no later commit. Waiving reviews does not lift the test gate; the human confirmation and other bypass diagnostics still apply.
 
 `block accept-hit <id> --run <r> --line <n> --transcript <path> --reason <text>` asks the human once for every rule hit on that line and its paired Codex `item.completed` line (same item id), then signs one acceptance per rule and line. Add `--rule <rule-id>` to keep the single-hit behavior.

@@ -10,6 +10,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - `land.require_main_ci: true` (with `land.require_ci: github`) makes `block land` refuse while the newest completed push run of the base branch is red, unless every failing test of that run matches a `land.ci_red_list` line of a block named in `CODE_FORGE_CI_RED_BLOCKS` (the landing fix block may cover it); a green or missing push run lands (B962)
 - Maintainer tool `native/cmd/cf-redgreen --base <sha> [--out <file>] <test files>` proves a block's new Go tests red→green: it runs them on the base sha's module (from `git archive`, nothing touched) and requires an assertion failure, then a pass on the working tree; verdict PROVEN, NO_NEW_TESTS, NOT_RED, RED_INVALID or NOT_GREEN, optionally written as JSON (B957)
+- A run may list at most 3 flaky Go tests: the gate whose flaky test makes it 4 or more is red, names the tests, writes a `test.flaky_limit` row and shows `flaky_limit` in its JSON; a later clean gate stays green (B958)
 
 ## [0.26.0] — 2026-11-19
 
