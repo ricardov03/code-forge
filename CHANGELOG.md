@@ -14,6 +14,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- The autopilot secrets regression requires binnacle reads to redact the run key when audit verification loads it, including later reads after expiry, preserving secret redaction and signed evidence verification (B1013).
 - Go block gates with an affected package that has no selected test names run the declared gate with its ordinary changed scope, preserving failing tests and flaky rerun evidence instead of passing a compile-only `-run '^$'` command (B1009).
 
 - Audit all 55 v0.27.0 entries against the code; fill in maintainer test and generated-doc guidance, correct CI gate reuse and autopilot backlog instructions, and link each entry to its documentation (B1015).

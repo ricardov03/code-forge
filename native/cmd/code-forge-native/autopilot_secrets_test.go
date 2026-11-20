@@ -43,31 +43,30 @@ func secretFiles(t *testing.T, f runFixture, run string) string {
 	return text
 }
 
-// B478: Node masks the run key in every stdout/stderr write and every
-// binnacle field once loadKey has read it (a signed write, or the decision
-// check of round and level), and not before. Go does the same; the
-// expectations are Node's output on the same fixture.
+// B478/B1013: loading the run key registers it for redaction. The binnacle
+// now loads it to verify autopilot evidence passes, even without a signed
+// write. Every read must therefore mask the key, including later processes.
 func TestAutopilotSecretsRedactedInGo(t *testing.T) {
 	f, secret := secretFixture(t)
 
-	// no signed write: the key was never loaded, Node prints the text as is
-	_, out, _ := autopilotCall(t, "binnacle", "--run", "ra")
-	if !strings.Contains(out, "keys "+secret+" end") || strings.Contains(out, "[REDACTED]") {
-		t.Fatalf("binnacle without a key load masked the text:\n%s", out)
+	// No signed write: verification still loads and masks the key.
+	code, out, errText := autopilotCall(t, "binnacle", "--run", "ra")
+	if code != 0 || errText != "" || strings.Contains(out, secret) || !strings.Contains(out, "keys [REDACTED] end") || !strings.Contains(out, "src/[REDACTED].go") {
+		t.Fatalf("binnacle without a signed write = %d %q:\n%s", code, errText, out)
 	}
 
 	// the expire row loads the key: the binnacle masks it
-	code, out, _ := autopilotCall(t, "binnacle", "--run", "rx")
+	code, out, errText = autopilotCall(t, "binnacle", "--run", "rx")
 	if code != 0 || strings.Contains(out, secret) || !strings.Contains(out, "keys [REDACTED] end") || !strings.Contains(out, "src/[REDACTED].go") {
 		t.Fatalf("binnacle after the expire row = %d:\n%s", code, out)
 	}
-	_, out, _ = autopilotCall(t, "binnacle", "--run", "rx")
-	if !strings.Contains(out, "keys "+secret+" end") {
-		t.Fatalf("a later process registers nothing until it loads the key:\n%s", out)
+	code, out, errText = autopilotCall(t, "binnacle", "--run", "rx")
+	if code != 0 || errText != "" || strings.Contains(out, secret) || !strings.Contains(out, "keys [REDACTED] end") || !strings.Contains(out, "src/[REDACTED].go") {
+		t.Fatalf("a later process must also mask the verified key = %d %q:\n%s", code, errText, out)
 	}
 
 	// stop signs a row: stdout and the binnacle files mask the key
-	code, out, errText := autopilotCall(t, "stop", "--run", "ra")
+	code, out, errText = autopilotCall(t, "stop", "--run", "ra")
 	if code != 0 || errText != "" || strings.Contains(out, secret) {
 		t.Fatalf("stop = %d %q %q", code, out, errText)
 	}
