@@ -206,6 +206,7 @@ without it) and checks the generated config and command references. Record chang
 `native/cmd/code-forge-native/data/known-fixes.json`. `npm run release -- <bump> [--dry-run]`
 bumps versions, releases the CHANGELOG, updates the optional Latest line, checks, commits, and
 tags. Publish with `npm publish`, then push the tag; CI creates the GitHub release.
+The merge driver and release checks flag repeated block IDs in `[Unreleased]`; combine near-duplicate entries into one before releasing.
 See [releasing](docs/releasing.md).
 
 <!-- B1011 -->

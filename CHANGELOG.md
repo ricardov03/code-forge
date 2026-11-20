@@ -14,6 +14,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- Merge and release checks flag near-duplicate `[Unreleased]` entries with the same leading or trailing block ID; the installed driver preserves the refusal instead of falling back to plain union (B1018).
+
 - `block close --landed <sha>` reconciles an already landed block commit against its original signed evidence, records `landed_sha`, and preserves human checks despite later combine edits (B1017).
 
 - Audit all 55 v0.27.0 entries against the code; fill in maintainer test and generated-doc guidance, correct CI gate reuse and autopilot backlog instructions, and link each entry to its documentation (B1015).

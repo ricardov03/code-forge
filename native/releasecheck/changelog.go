@@ -78,7 +78,7 @@ func ChangelogFaults(text string) []string {
 	if entries == 0 {
 		out = append(out, `"## [Unreleased]" has no entries: there is nothing to release`)
 	}
-	return out
+	return append(out, ChangelogBlockDuplicates(text)...)
 }
 
 // Bump is the version bump [Unreleased] asks for: minor when ### Added has an entry, else patch.
@@ -190,3 +190,44 @@ func ChangelogRepeats(text string) []string {
 	}
 	return out
 }
+
+// ChangelogBlockDuplicates flags repeated entry identifiers in [Unreleased],
+// across all ### kinds. Released history and references inside prose are ignored.
+// Entry IDs may lead the bullet (plain, bold or code) or be its trailing tag.
+func ChangelogBlockDuplicates(text string) []string {
+	lines := strings.Split(text, "\n")
+	start, end := unreleased(lines)
+	if start < 0 {
+		return nil
+	}
+	seen := map[string]int{}
+	var out []string
+	for i := start + 1; i < end; i++ {
+		if !clBulletRe.MatchString(lines[i]) {
+			continue
+		}
+		id := ""
+		if m := clBlockPrefixRe.FindStringSubmatch(lines[i]); m != nil {
+			id = m[1]
+		} else if m := clBlockSuffixRe.FindStringSubmatch(lines[i]); m != nil {
+			id = m[1]
+			if id == "" {
+				id = m[2]
+			}
+		}
+		if id == "" {
+			continue
+		}
+		if first, ok := seen[id]; ok {
+			out = append(out, "CHANGELOG.md line "+strconv.Itoa(i+1)+": duplicate block "+id+" in [Unreleased] (first at line "+strconv.Itoa(first+1)+"): combine the entries into one")
+		} else {
+			seen[id] = i
+		}
+	}
+	return out
+}
+
+var (
+	clBlockPrefixRe = regexp.MustCompile("^[-*]\\s+(?:\\*\\*|`)?(B[0-9]+[a-z]?)\\b")
+	clBlockSuffixRe = regexp.MustCompile("(?:\\((B[0-9]+[a-z]?)\\)|\\b(B[0-9]+[a-z]?))\\.?\\s*$")
+)

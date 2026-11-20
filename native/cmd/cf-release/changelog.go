@@ -4,6 +4,7 @@ package main
 // parser the release tool shares. Port of scripts/changelog.mjs (B570).
 
 import (
+	"github.com/ricardov03/code-forge/native/releasecheck"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -337,6 +338,11 @@ func sectionShapeError(lines []string, sec *clSection) string {
 				"\" (first at line " + strconv.Itoa(first+1) + "): merge them into one ### " + s.typ + " heading"
 		}
 		seen[kind] = s.heading
+	}
+	if unreleased := findUnreleased(lines); unreleased != nil && sec.start == unreleased.start {
+		if faults := releasecheck.ChangelogBlockDuplicates(strings.Join(lines, "\n")); len(faults) > 0 {
+			return faults[0]
+		}
 	}
 	return ""
 }
