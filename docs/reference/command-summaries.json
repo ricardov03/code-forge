@@ -72,6 +72,8 @@
   {"name":"keys remove","summary":"Remove a stored credential reference","owner":false,"group":"keys"},
   {"name":"keys set","summary":"Store a credential reference","owner":false,"group":"keys"},
   {"name":"keys test","summary":"Check a credential reference works","owner":false,"group":"keys"},
+  {"name":"lane","summary":"Start a fast lane on a combine tip","owner":false,"group":"lane"},
+  {"name":"lane start","summary":"Pin a clean lane checkout for at most two local blocks","owner":false,"group":"lane"},
   {"name":"ledger","summary":"Read the ledger or record outcomes and spend","owner":false,"group":"ledger"},
   {"name":"ledger add","summary":"Add coder spend that code-forge did not see","owner":false,"group":"ledger"},
   {"name":"ledger calibration","summary":"Show how reliable the recorded answers were","owner":false,"group":"ledger"},

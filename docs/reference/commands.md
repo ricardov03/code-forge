@@ -21,6 +21,7 @@ This page lists every CLI command: its purpose, when to use it, its usage and fl
 - [jev](#jev)
 - [keys](#keys)
 - [land](#land)
+- [lane](#lane)
 - [ledger](#ledger)
 - [list](#list)
 - [logs](#logs)
@@ -1651,20 +1652,21 @@ Prints one JSON line: an object with these keys.
 Run the final checks and close the block
 
 ```text
-usage: code-forge block close <id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide] [--dry-run] [--json] [--help|-h]
+usage: code-forge block close <id> --run <r> [--landed <sha>] [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide] [--dry-run] [--json] [--help|-h]
   --help, -h  Print this usage and exit without changing state.
   --json      Print one JSON line on success instead of text.
 ```
 
 #### When to use
 
-Finish a block: re-check gates, reviews and acceptance, then record the close.
+Finish a block: re-check gates, reviews and acceptance, then record the close. With --landed <sha>, measure that single block commit after it reached the base branch or the caller’s combine HEAD (with a merge introducing the commit through a non-first parent) in another worktree of the same repository; retain human checks and record landed_sha.
 
 #### Flags
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
 | `--run <r>` | string | not set | Run id (r-...). |
+| `--landed <sha>` | string | not set |  |
 | `--worker-pid <pid>` | number | not set | Pid of the worker that serves the run. |
 | `--transcript <file>` | path | not set | Coder transcript file. |
 | `--report <file>` | path | not set | Coder report file (JSON). |
@@ -4227,6 +4229,77 @@ Options:
 
 #### Related
 
+- [`block land`](#block-land)
+
+## lane
+
+Start a fast lane on a combine tip
+
+```text
+usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]
+```
+
+#### When to use
+
+Start a short local lane, then give its closed blocks to the wave integrator.
+
+#### Flags
+
+None of its own; see its sub-commands.
+
+#### Examples
+
+#### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | Refused or failed; the message says why. |
+| 2 | Usage error: a missing, unknown or bad argument (the usage is printed). |
+
+#### Related
+
+- [`lane start`](#lane-start)
+- [`block close`](#block-close)
+- [`run status`](#run-status)
+
+### lane start
+
+Pin a clean lane checkout for at most two local blocks
+
+```text
+usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]
+```
+
+#### When to use
+
+In a clean lane branch at the newest combine tip: pin the base and start a brief run with at most two blocks, named Go gates and no lane landing.
+
+#### Flags
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--base <combine-tip>` | string | not set | The newest combine tip (main when no combine is open); HEAD must equal this commit. |
+| `--cwd <dir>` | path | not set | The existing clean lane checkout; blocks use proof.isolation: export. |
+| `--run <id>` | string | not set | Run id (r-...). |
+| `--engine <e>` | string | not set | Engine that runs the coders. |
+| `--worker-pid <pid>` | number | not set | Pid of the worker that serves the run. |
+
+#### Examples
+
+#### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | Refused or failed; the message says why. |
+| 2 | Usage error: a missing, unknown or bad argument (the usage is printed). |
+
+#### Related
+
+- [`run status`](#run-status)
+- [`block open`](#block-open)
+- [`block close`](#block-close)
 - [`block land`](#block-land)
 
 ## ledger

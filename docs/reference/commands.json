@@ -2356,11 +2356,11 @@
     {
       "name": "block close",
       "purpose": "Run the final checks and close the block.",
-      "when": "Finish a block: re-check gates, reviews and acceptance, then record the close.",
+      "when": "Finish a block: re-check gates, reviews and acceptance, then record the close. With --landed <sha>, measure that single block commit after it reached the base branch or the caller’s combine HEAD (with a merge introducing the commit through a non-first parent) in another worktree of the same repository; retain human checks and record landed_sha.",
       "owner_only": false,
       "hidden": false,
       "namespace": false,
-      "usage": "usage: code-forge block close <id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide] [--dry-run] [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.",
+      "usage": "usage: code-forge block close <id> --run <r> [--landed <sha>] [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide] [--dry-run] [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.",
       "flags": [
         {
           "name": "--run",
@@ -2368,6 +2368,13 @@
           "type": "string",
           "default": "not set",
           "meaning": "Run id (r-...)."
+        },
+        {
+          "name": "--landed",
+          "value": "<sha>",
+          "type": "string",
+          "default": "not set",
+          "meaning": ""
         },
         {
           "name": "--worker-pid",
@@ -5527,6 +5534,105 @@
       ],
       "json": null,
       "related": [
+        "block land"
+      ]
+    },
+    {
+      "name": "lane",
+      "purpose": "Start a fast lane on a combine tip.",
+      "when": "Start a short local lane, then give its closed blocks to the wave integrator.",
+      "owner_only": false,
+      "hidden": false,
+      "namespace": true,
+      "usage": "usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]",
+      "flags": [],
+      "examples": [],
+      "exit_codes": [
+        {
+          "code": 0,
+          "meaning": "Success."
+        },
+        {
+          "code": 1,
+          "meaning": "Refused or failed; the message says why."
+        },
+        {
+          "code": 2,
+          "meaning": "Usage error: a missing, unknown or bad argument (the usage is printed)."
+        }
+      ],
+      "json": null,
+      "related": [
+        "lane start",
+        "block close",
+        "run status"
+      ]
+    },
+    {
+      "name": "lane start",
+      "purpose": "Pin a clean lane checkout for at most two local blocks.",
+      "when": "In a clean lane branch at the newest combine tip: pin the base and start a brief run with at most two blocks, named Go gates and no lane landing.",
+      "owner_only": false,
+      "hidden": false,
+      "namespace": false,
+      "usage": "usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]",
+      "flags": [
+        {
+          "name": "--base",
+          "value": "<combine-tip>",
+          "type": "string",
+          "default": "not set",
+          "meaning": "The newest combine tip (main when no combine is open); HEAD must equal this commit."
+        },
+        {
+          "name": "--cwd",
+          "value": "<dir>",
+          "type": "path",
+          "default": "not set",
+          "meaning": "The existing clean lane checkout; blocks use proof.isolation: export."
+        },
+        {
+          "name": "--run",
+          "value": "<id>",
+          "type": "string",
+          "default": "not set",
+          "meaning": "Run id (r-...)."
+        },
+        {
+          "name": "--engine",
+          "value": "<e>",
+          "type": "string",
+          "default": "not set",
+          "meaning": "Engine that runs the coders."
+        },
+        {
+          "name": "--worker-pid",
+          "value": "<pid>",
+          "type": "number",
+          "default": "not set",
+          "meaning": "Pid of the worker that serves the run."
+        }
+      ],
+      "examples": [],
+      "exit_codes": [
+        {
+          "code": 0,
+          "meaning": "Success."
+        },
+        {
+          "code": 1,
+          "meaning": "Refused or failed; the message says why."
+        },
+        {
+          "code": 2,
+          "meaning": "Usage error: a missing, unknown or bad argument (the usage is printed)."
+        }
+      ],
+      "json": null,
+      "related": [
+        "run status",
+        "block open",
+        "block close",
         "block land"
       ]
     },
