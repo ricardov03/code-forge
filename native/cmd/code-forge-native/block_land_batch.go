@@ -29,6 +29,7 @@ type landBatchBlock struct {
 	saved                  ledger.Object // the entry as last read or committed (B426)
 	gatesMs                int64
 	rebased                bool
+	ciPending              bool   // the round stopped for CI on this rebased tip
 	node                   bool   // owns or changes a Node product file
 	ci                     string // B910: the tip sha green CI proved (land.require_ci)
 }
@@ -339,6 +340,7 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 				return err
 			}
 			if landBatchCITip(json, batch, i) {
+				block.ciPending = true
 				ciStop = i
 				break
 			}
@@ -657,13 +659,15 @@ func landBatchCommit(home, run string, list []*landBatchBlock, rows ...ledger.Ob
 	return nil
 }
 
-// landBatchRestore returns every block after index keep to the head and base
-// it had before the batch. A branch the user moved since is left untouched.
+// landBatchRestore returns unlanded blocks to their original head and base.
+// The CI-stopped block at keep retains its rebase onto the landed prefix, so
+// the next round can prove that tip. Other rebases, including the first
+// unlanded block after a failed gate, are restored. User changes are left alone.
 func landBatchRestore(home, run string, batch []*landBatchBlock, keep int) error {
 	restored, rows := []*landBatchBlock{}, []ledger.Object{}
 	var failed error
 	for i, block := range batch {
-		if i <= keep || !block.rebased {
+		if i < keep || i == keep && block.ciPending || !block.rebased {
 			continue
 		}
 		head, err := gitx.Run(block.tree.Path, "rev-parse", "HEAD")

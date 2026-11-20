@@ -809,13 +809,17 @@ Both batch land and single-block `block land --merge` skip the block's local tes
 when its tip is the sha CI proved green (B910, B979). Lint, types and format still run.
 A batch waits for CI without holding block locks (B803). After a rebase makes a new sha,
 the blocks before it can land first; the changed block waits for CI in the next round.
+The CI-stopped block keeps its rebased tip and base when the preceding prefix lands,
+including after a CI refusal, so a retry proves that same tip. Other unlanded
+rebases are restored to their original tips and bases (B1007).
 A tip that moves during the wait is refused at `ci`. A final check requires the proved
 sha before main moves, and a batch's landed marker records it as `ci_sha` (B804).
 
 Short network failures in CI reads retry three times in all, with backoff (B806).
 PR creation and closure first check whether a failed request took effect before retrying,
 so they do not create a second PR or close one twice (B981). Land finds old CI PRs past
-the newest 200 with a `head:` search; a full search page falls back to each exact
+the newest 200 with a `head:` search whenever that page is full, even if it has matches.
+Results are combined by PR number so recent and older matches are kept. A full search page falls back to each exact
 branch name with `gh pr list --head` (B805, B981).
 
 **Newest base, rebase before CI (B942).** A new block with a worktree and no `--base` or `proof.worktree.base` starts from the newest base branch: `block open` fetches `origin <branch>` and takes the local tip when it contains origin's, or origin's tip (by sha; the local branch never moves) when it contains the local one. A repository without an origin, a detached HEAD or a fetch that fails keeps the local HEAD. Local and origin tips that diverged refuse with `base-diverged` and the `git log --left-right` next step; nothing is recorded. The context pack's git rules and a coder spawned with `--block` say: rebase on the newest base branch just before the CI push. `block ready` lists `stale_base` (fix `code-forge block rebase <id> --run <r> --accept-landed`) while the base branch moved past the block's base.

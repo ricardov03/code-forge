@@ -116,21 +116,39 @@ func landCIBlockPRs(main, id, prefix string) ([]landCIPR, error) {
 		return prs, len(all), nil
 	}
 	prs, rows, err := list()
-	if err != nil || len(prs) > 0 || rows < 200 {
+	if err != nil || rows < 200 {
 		return prs, err
 	}
 	// B805: gh pr list returns at most 200 rows here (newest first), so a
-	// full page with none of the block's PRs may hide older ones: search by
+	// full page may hide older PRs even when some match already: search by
 	// head branch (a word prefix; the shape above keeps the exact ones).
+	known := prs
+	merge := func(found []landCIPR) {
+		for _, pr := range found {
+			seen := false
+			for _, previous := range known {
+				if previous.Number == pr.Number {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				known = append(known, pr)
+			}
+		}
+	}
 	prs, rows, err = list("--search", "head:"+strings.ToLower(prefix+id))
-	if err != nil || rows < 200 {
-		return prs, err
+	if err != nil {
+		return nil, err
+	}
+	merge(prs)
+	if rows < 200 {
+		return known, nil
 	}
 	// B981: a full search page (other branches share the word prefix, and
 	// GitHub search stops at 1000 results) may still hide older PRs: list
 	// each exact CI branch name, stopping after 5 names in a row with none
 	// (the push loop skips at most 5 names).
-	prs = []landCIPR{}
 	for n, miss := 1, 0; miss < 5; n++ {
 		found, _, err := list("--head", landCIBranchName(prefix, id, n))
 		if err != nil {
@@ -141,9 +159,9 @@ func landCIBlockPRs(main, id, prefix string) ([]landCIPR, error) {
 			continue
 		}
 		miss = 0
-		prs = append(prs, found...)
+		merge(found)
 	}
-	return prs, nil
+	return known, nil
 }
 
 // landCIOpenPROn finds the open CI pull request on branch, as gh pr create

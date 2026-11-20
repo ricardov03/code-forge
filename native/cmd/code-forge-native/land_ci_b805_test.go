@@ -50,10 +50,10 @@ func TestB805BlockPRsFoundPast200(t *testing.T) {
 	}
 }
 
-// A first page shorter than the limit is the whole list, and a page that
-// holds the block's PR is enough: one call each, no search.
+// A first page shorter than the limit is the whole list: no search, with
+// or without a matching block PR.
 func TestB805NoSearchWhenNotNeeded(t *testing.T) {
-	for name, rows := range map[string]string{"short list": landB805PRs(t, 1, 30, 99), "found in page": landB805PRs(t, 1, 200, 7)} {
+	for name, rows := range map[string]string{"short list": landB805PRs(t, 1, 30, 99), "found in short page": landB805PRs(t, 1, 30, 7)} {
 		gh := landCIFakeGhSeq(t, map[string]string{"prs.json": rows})
 		if _, err := landCIBlockPRs(t.TempDir(), "B1", "ci-"); err != nil {
 			t.Fatal(err)

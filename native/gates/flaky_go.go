@@ -183,7 +183,8 @@ func goRerunArgv(original, names, pkgs []string) []string {
 
 // goEchoedTest is a line where a wrapper names the go test it runs
 // ("cf-gotest: go test -count=1 -timeout 75m ./a", "+ go test ./...").
-var goEchoedTest = regexp.MustCompile(`(?:^|[\s:])(?:\S*/)?go test\s+(.*)$`)
+// Anchor at the start so prose and test failure messages are not commands.
+var goEchoedTest = regexp.MustCompile(`^\s*(?:(?:[^\s:]+:|\+)\s+)?(?:\S*/)?go test\s+(.*)$`)
 
 // goRerunCommand is goRerunArgv for the gate output given (B894): a go run
 // wrapper's rerun keeps the go test build flags of the first line where the

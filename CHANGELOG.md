@@ -8,6 +8,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- Clarify the one Go flaky-test retry: a single `go test -count=3` command executes each failed top-level test three times, and all three must pass ([B958 docs](docs/native-engine.md#flaky-test-limit-per-run-b958); B1003).
 - `run start` and `block land` set `merge.union.driver` to code-forge's `land merge-driver` in the clone's shared git config when `CHANGELOG.md` is `merge=union`, so a plain `git merge` of lane branches folds repeated CHANGELOG headings with no manual step; the line falls back to git's union merge when the binary is gone or older, and a driver of your own is kept (B990b).
 - Go block gates run changed-file, block-id and acceptance tests by name per package with `-count=1 -trimpath`, scope vet/build to those packages, and record `changed tests only (N tests)`; `--changed --packages` restores package runs. Named gates pass big runs through separate bounded FIFO slots; land never reuses their evidence and CI keeps the full gate (B1009)
 - Regression tests cover finish-timing reset on an unavailable answers retry and the one automatic retry (`.retried`): both clear `finished_at` and `duration_ms`, preserve `started_at`, and the worker serves the automatic retry again without recovering an interrupted finish (B944).
@@ -19,6 +20,11 @@ waits on a second real consumer (plan §10.4, Q17).
 - Merge and release checks flag near-duplicate `[Unreleased]` entries with the same leading or trailing block ID; the installed driver preserves the refusal instead of falling back to plain union (B1018).
 
 - `block close --landed <sha>` reconciles an already landed block commit against its original signed evidence, records `landed_sha`, and preserves human checks despite later combine edits (B1017).
+- Echoed `go test` commands must start the output line, allowing a wrapper label or shell trace prefix; prose and test failure text cannot trigger flaky reruns. Regression coverage also rejects unreadable load overrides (B1008).
+
+- Batch land explicitly preserves the rebased tip stopped for CI on a landed prefix, while restoring every other unlanded rebase and its recorded bases after a gate failure (B1007).
+
+- Land searches for older CI PRs whenever the newest 200-row page is full, even with matching PRs there, retaining and deduplicating matches across search and exact-branch results (B1006).
 
 - Audit all 55 v0.27.0 entries against the code; fill in maintainer test and generated-doc guidance, correct CI gate reuse and autopilot backlog instructions, and link each entry to its documentation (B1015).
 - A queued review ticket of a closed (or landed) block for a deleted file (`content_hash: "deleted"`) is no longer served: the worker drops it before any review session as `stale` with reason `block-closed` (signed result, done marker and one `review.result` row, which the gate counts as never reviewed). A rebase-check ticket and a ticket for a file that exists are still served. B919

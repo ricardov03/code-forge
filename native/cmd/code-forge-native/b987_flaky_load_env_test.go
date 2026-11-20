@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"os"
 	"reflect"
 	"runtime"
@@ -33,6 +34,7 @@ exit 1
 // over the core count gives the flaky rerun GOMAXPROCS=cores/2, a load of 0
 // gives none, and the result records the load used.
 func TestB987FlakyLoadEnvCapsRerun(t *testing.T) {
+	t.Setenv("CODE_FORGE_RUN_ID", "")
 	// The cap is never set when the gate's process already sets GOMAXPROCS.
 	if old, had := os.LookupEnv("GOMAXPROCS"); had {
 		os.Unsetenv("GOMAXPROCS")
@@ -45,23 +47,42 @@ func TestB987FlakyLoadEnvCapsRerun(t *testing.T) {
 	}{
 		{"100000", want, 100000},
 		{"0", "-", 0},
+		{"unreadable", "", -1},
 	} {
 		t.Run("load "+tc.load, func(t *testing.T) {
 			f := newB893Fix(t, b987FakeGo, func(fake string) []string { return []string{fake, "test", "./...", "-count=1"} })
 			t.Setenv("CODE_FORGE_FLAKY_LOAD", tc.load)
-			code, out, errText := f.gates(t)
+			// Exercise the original failed gate before its retry. --changed would
+			// select no tests from this synthetic module (B1009).
+			code, out, errText := b988Gates(t, f)
 			if code != 0 || out["allOk"] != true {
 				t.Fatalf("gates = %d %v; stderr %s", code, out, errText)
 			}
-			if got := f.reruns(t); !reflect.DeepEqual(got, []string{"GOMAXPROCS=" + tc.procs}) {
-				t.Fatalf("rerun env %q, want GOMAXPROCS=%s", got, tc.procs)
-			}
-			if !strings.Contains(errText, "(load "+tc.load) {
-				t.Errorf("WARN line must name the load %s: %q", tc.load, errText)
-			}
 			rows := b798Rows(t, f.home, "test.flaky")
-			if len(rows) != 1 || rows[0]["load"] != tc.recorded {
-				t.Errorf("test.flaky rows %v, want one with load %v", rows, tc.recorded)
+			if len(rows) != 1 {
+				t.Fatalf("test.flaky rows %v, want one", rows)
+			}
+			load, ok := rows[0]["load"].(float64)
+			if !ok || load < 0 || math.IsNaN(load) || math.IsInf(load, 0) {
+				t.Fatalf("recorded load %v, want a finite nonnegative number", rows[0]["load"])
+			}
+			procs := tc.procs
+			if tc.recorded < 0 {
+				// The unreadable override falls back to the live probe. Judge
+				// the cap against that same recorded sample, without a load race.
+				procs = "-"
+				if load > float64(runtime.NumCPU()) {
+					procs = want
+				}
+			} else if load != tc.recorded {
+				t.Errorf("recorded load %v, want %v", load, tc.recorded)
+			}
+			if got := f.reruns(t); !reflect.DeepEqual(got, []string{"GOMAXPROCS=" + procs}) {
+				t.Fatalf("rerun env %q, want GOMAXPROCS=%s", got, procs)
+			}
+			loadText := strconv.FormatFloat(load, 'f', -1, 64)
+			if !strings.Contains(errText, "(load "+loadText+")") {
+				t.Errorf("WARN line must name the recorded load %s: %q", loadText, errText)
 			}
 		})
 	}
