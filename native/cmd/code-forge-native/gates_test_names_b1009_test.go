@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -107,7 +108,7 @@ func TestB1009NamesFromChangedFilesBlockIDAndAcceptance(t *testing.T) {
 	}
 }
 
-func TestB1009NoNamesBuildsOnly(t *testing.T) {
+func TestB1009NoNamesRunsDeclaredPackageGate(t *testing.T) {
 	base := map[string]string{"go.mod": b1009Base["go.mod"], "a/a.go": "package a\n", "a/a_test.go": "package a\nimport \"testing\"\nfunc TestUnrelated(t *testing.T) {}\n"}
 	f := newB667GateFixtureOn(t, base, nil, map[string]*string{"a/a.go": b667Body("package a\nvar X = 1\n")})
 	code, out := b1009Gate(t, f)
@@ -115,11 +116,85 @@ func TestB1009NoNamesBuildsOnly(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, out)
 	}
 	calls := strings.Join(b667Calls(t, f.log), "\n")
-	if !strings.Contains(calls, "-run ^$") || !strings.Contains(calls, "./a") || strings.Contains(calls, "./...") {
-		t.Fatalf("want compile only: %s", calls)
+	if strings.Contains(calls, "-run") || !strings.Contains(calls, "block|test ./a -count=1") || strings.Contains(calls, "block|test ./...") {
+		t.Fatalf("want declared package test command: %s", calls)
 	}
-	if f.done(t)["tests_only"] != "changed tests only (0 tests)" {
+	if f.done(t)["tests_only"] != nil {
 		t.Fatal(f.done(t))
+	}
+}
+
+func TestB1009MissingNamesFallsBackForMixedPackagesAndWrappers(t *testing.T) {
+	for _, wrapper := range []bool{false, true} {
+		t.Run(fmt.Sprint(wrapper), func(t *testing.T) {
+			base := map[string]string{}
+			for file, body := range b1009Base {
+				base[file] = strings.ReplaceAll(body, "TestB1Other", "TestOther")
+			}
+			f := newB667GateFixtureOn(t, base, nil, map[string]*string{"a/a.go": b667Body("package a\nvar X = 1\n"), "b/b.go": b667Body("package b\nvar X = 1\n")})
+			if wrapper {
+				script := filepath.Join(t.TempDir(), "go")
+				b667WriteFile(t, script, "#!/bin/sh\nprintf 'fallback|%s|%s\\n' \"$CODE_FORGE_TEST_RUN\" \"$*\" >> \"$B667_GO_LOG\"\nexit 7\n")
+				if err := os.Chmod(script, 0755); err != nil {
+					t.Fatal(err)
+				}
+				cfg := map[string]any{"gates": map[string]any{"test": []string{script, "run", "./wrapper", "--flag", "kept", "{test_files}"}, "lint": nil, "types": nil, "format": nil, "rerun_failed": 0}}
+				data, _ := json.Marshal(cfg)
+				b667WriteFile(t, filepath.Join(f.repo, ".code-forge.yml"), string(data))
+			}
+			t.Setenv("CODE_FORGE_TEST_RUN", "^(Inherited)$")
+			code, out := b1009Gate(t, f)
+			calls := strings.Join(b667Calls(t, f.log), "\n")
+			if strings.Contains(calls, "-run") || strings.Contains(calls, "Inherited") || f.done(t)["tests_only"] != nil {
+				t.Fatalf("incomplete names used: exit %d %s; calls %s", code, out, calls)
+			}
+			if wrapper {
+				if code != 1 || !strings.Contains(calls, "fallback||run ./wrapper --flag kept") {
+					t.Fatalf("declared wrapper failure lost: exit %d %s; calls %s", code, out, calls)
+				}
+			} else if code != 0 || !strings.Contains(calls, "block|test ./a ./b -count=1") {
+				t.Fatalf("declared package command lost: exit %d %s; calls %s", code, out, calls)
+			}
+		})
+	}
+}
+
+func TestB1009NoNamesRunsFailingDeclaredTest(t *testing.T) {
+	base := map[string]string{"go.mod": b1009Base["go.mod"], "a/a.go": "package a\n", "a/a_test.go": "package a\nimport \"testing\"\nfunc TestUnrelated(t *testing.T) { t.Fatal(\"declared test ran\") }\n"}
+	f := newB667GateFixtureOn(t, base, nil, map[string]*string{"a/a.go": b667Body("package a\nvar X = 1\n")})
+	data, err := os.ReadFile(filepath.Join(f.repo, ".code-forge.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	bin := cfg["gates"].(map[string]any)["test"].([]any)[0].(string)
+	body := strings.TrimSuffix(b667FakeGo, "exit 0\n") + "if [ \"$1\" = test ]; then exec \"$B667_REAL_GO\" \"$@\"; fi\nexit 0\n"
+	if err := os.WriteFile(bin, []byte(body), 0755); err != nil {
+		t.Fatal(err)
+	}
+	code, out := b1009Gate(t, f)
+	if code != 1 || !strings.Contains(out, "declared test ran") {
+		t.Fatalf("empty names hid a failing declared test: exit %d %s", code, out)
+	}
+}
+
+func TestB1009NoNamesWithoutWrapperFilesFailsLoudly(t *testing.T) {
+	base := map[string]string{"go.mod": b1009Base["go.mod"], "a/a.go": "package a\n"}
+	f := newB667GateFixtureOn(t, base, nil, map[string]*string{"a/a.go": b667Body("package a\nvar X = 1\n")})
+	script := filepath.Join(t.TempDir(), "go")
+	b667WriteFile(t, script, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(script, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := map[string]any{"gates": map[string]any{"test": []string{script, "run", "./wrapper", "{test_files}"}, "lint": nil, "types": nil, "format": nil}}
+	data, _ := json.Marshal(cfg)
+	b667WriteFile(t, filepath.Join(f.repo, ".code-forge.yml"), string(data))
+	code, out := b1009Gate(t, f)
+	if code != 1 || !strings.Contains(out, "no Go test names or test files selected") {
+		t.Fatalf("empty wrapper selection silently passed: exit %d %s", code, out)
 	}
 }
 

@@ -161,6 +161,11 @@ func gatesNamesSelect(cwd, module, id string, block ledger.Object, listed, chang
 			all[name] = true
 		}
 		sort.Strings(p.Names)
+		// A missing selection is not evidence that this package's tests pass.
+		// Let the caller use its declared gate and ordinary changed scope.
+		if len(p.Names) == 0 {
+			return nil, nil
+		}
 		out.Packages = append(out.Packages, p)
 	}
 	sort.Slice(out.Packages, func(i, j int) bool { return out.Packages[i].Package < out.Packages[j].Package })

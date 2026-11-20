@@ -829,8 +829,11 @@ conflict (B510, B513).
 
 `gates run --run <r> --block <id> --changed` runs tests declared in the block’s changed
 `_test.go` files, `TestB<id>...` tests and acceptance/`--tests` names or files. Each selected
-package gets its own anchored `-run` filter, `-count=1 -trimpath`; an empty name set uses
-`-run '^$'` to compile without executing tests. Direct Go vet/build commands use those packages.
+package gets its own anchored `-run` filter, `-count=1 -trimpath`. If any affected package
+has no selected names, the declared gate runs with the ordinary changed-package or wrapper
+scope and no inherited name filter; it never substitutes a compile-only pass for tests.
+A wrapper with no selectable test files fails with a request to declare tests.
+Direct Go vet/build commands use the selected packages in named mode.
 Go wrappers receive `CODE_FORGE_TEST_RUN`; `cf-gotest` consumes it and uses a plain named run
 even when configured with `--shards`. The result and `gate.done` carry `tests_only`
 (`changed tests only (N tests)`), `test_names` and `packages`. `--changed --packages` restores

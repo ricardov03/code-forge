@@ -717,6 +717,8 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 					return err
 				}
 				p.ReuseTest = false
+			}
+			if namedSelection != nil {
 				scope = gates.Scope{Kind: "changed", Report: "changed", Reason: gatesNamesReason, Files: []string{}, Changed: changed, Dependents: []string{}}
 				for _, pkg := range namedSelection.Packages {
 					scope.Files = append(scope.Files, pkg.File)
@@ -731,6 +733,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 			} else {
 				scope = gatesChangedSelect(cwd, b, listed, changed, goOnly)
 				scope.Files = gatesRunnerFiles(p.Commands["test"].Argv, scope.Files)
+				if namedMode && len(scope.Files) == 0 {
+					return fmt.Errorf("no Go test names or test files selected for block %s; declare its test files or acceptance tests; no gate was run", o.block)
+				}
 			}
 			changedScope = &scope
 		}

@@ -14,6 +14,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- Go block gates with an affected package that has no selected test names run the declared gate with its ordinary changed scope, preserving failing tests and flaky rerun evidence instead of passing a compile-only `-run '^$'` command (B1009).
+
 - Audit all 55 v0.27.0 entries against the code; fill in maintainer test and generated-doc guidance, correct CI gate reuse and autopilot backlog instructions, and link each entry to its documentation (B1015).
 - A queued review ticket of a closed (or landed) block for a deleted file (`content_hash: "deleted"`) is no longer served: the worker drops it before any review session as `stale` with reason `block-closed` (signed result, done marker and one `review.result` row, which the gate counts as never reviewed). A rebase-check ticket and a ticket for a file that exists are still served. B919
 - The coder ref guard no longer turns itself off when a project has its own `reference-transaction` hook or a husky `core.hooksPath`: the guard runs first, then that hook with the same arguments and stdin, and the move fails when either fails; the work tree is not written (B809).

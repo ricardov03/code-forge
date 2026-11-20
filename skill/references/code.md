@@ -150,7 +150,10 @@ selection appended. An empty selection skips the test gate. The reason is `go_on
 `import_graph`. `forge gates run --run <r> --block <id> --full` is the only local full suite.
 In a Go project, a block's `gates run --changed` runs tests declared in its changed `_test.go`
 files, `TestB<id>...` tests and acceptance/`--tests` names or files. Each selected package gets
-its own anchored `-run` filter, `-count=1 -trimpath`; no names means `-run '^$'` (compile only).
+its own anchored `-run` filter, `-count=1 -trimpath`. If any affected package has no selected
+names, use the declared gate with its ordinary changed-package or wrapper scope and no
+inherited name filter; a compile-only pass is not test evidence. A wrapper with no selectable
+test files fails and asks for explicit tests.
 Direct Go vet/build gates also use the selected packages. Wrappers receive the filter as
 `CODE_FORGE_TEST_RUN` (`cf-gotest` honors it). The test result and `gate.done` say
 `changed tests only (N tests)` in `tests_only`, with `test_names` and `packages` (B1009).

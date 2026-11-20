@@ -162,9 +162,11 @@ starts. The result and `gate.done` carry `scope: related`, `test_count` and, on 
 
 A Go block’s `gates run --changed` selects tests declared in changed `_test.go` files,
 `TestB<id>...` tests and the names or Go test files in acceptance/`--tests` (B1009). It runs each
-selected package separately with an anchored `-run` filter, `-count=1 -trimpath`. With no names,
-`-run '^$'` compiles the package and runs no test. Direct Go vet/build commands also narrow to
-these packages. A wrapper receives the filter as `CODE_FORGE_TEST_RUN`; `cf-gotest` honors it
+selected package separately with an anchored `-run` filter, `-count=1 -trimpath`. If any affected
+package has no selected names, the declared gate runs with its ordinary changed-package or
+wrapper scope and no inherited name filter; a wrapper with no selectable test files fails
+with a request to declare tests. Direct Go vet/build commands also narrow to
+the selected packages in named mode. A wrapper receives the filter as `CODE_FORGE_TEST_RUN`; `cf-gotest` honors it
 and uses a plain named run even with `--shards`. Results and `gate.done` carry `tests_only`
 (`changed tests only (N tests)`), `test_names`, `test_count` and `packages`. Named block evidence
 never substitutes for a land merge gate. CI and the final batch gate still run the full suite.
