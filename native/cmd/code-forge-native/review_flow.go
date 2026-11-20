@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -855,7 +856,7 @@ func (f *rvfFlow) flow(code *int) error {
 		f.mu.Lock()
 		f.started = true
 		f.mu.Unlock()
-		res, err := f.cf([]string{"run", "start", "--cwd", in.root, "--run", in.runID}, rvfStepTimeout)
+		res, err := f.startRun()
 		if err != nil {
 			return err
 		}
@@ -974,6 +975,41 @@ func (f *rvfFlow) flow(code *int) error {
 		}
 	}
 	return nil
+}
+
+// B997: a repository has one live worker, serving one run, so a second
+// `review` started while another one runs had its `run start` refused
+// ("run <r> still has a live worker ... nothing was recorded") and failed.
+// startRun queues instead: while the live worker belongs to another
+// review-made run (r-<date>-<time>-<hex>, which ends with its review), it
+// waits and starts again, up to the --max deadline. A worker of any other
+// run (a lane's run that stays up) refuses at once, as before.
+var (
+	rvfBusyRe     = regexp.MustCompile(`still has a live worker \(pid ([0-9]+)\)`)
+	rvfBusyRunRe  = regexp.MustCompile(`run (r-[0-9]{8}-[0-9]{6}-[0-9a-f]+) still has a live worker`)
+	rvfQueuePoll  = 500 * time.Millisecond
+	rvfQueueSleep = time.Sleep
+)
+
+func (f *rvfFlow) startRun() (rvfResult, error) {
+	deadline := rvfNow().UnixMilli() + int64(f.in.maxS*1000)
+	noted := false
+	for {
+		res, err := f.cf([]string{"run", "start", "--cwd", f.in.root, "--run", f.in.runID}, rvfStepTimeout)
+		if err != nil || res.code == nil || *res.code == 0 || !strings.Contains(res.stderr, "nothing was recorded") {
+			return res, err
+		}
+		busy := rvfBusyRunRe.FindStringSubmatch(res.stderr)
+		pid := rvfBusyRe.FindStringSubmatch(res.stderr)
+		if busy == nil || pid == nil || busy[1] == f.in.runID || rvfNow().UnixMilli() >= deadline || f.aborted() {
+			return res, err
+		}
+		if !noted {
+			noted = true
+			f.note("waiting for review run " + busy[1] + " to end: its worker (pid " + pid[1] + ") is this repository's one live worker")
+		}
+		rvfQueueSleep(rvfQueuePoll)
+	}
 }
 
 // cleanup is runReview's finally: block stop, run end and the worker reap,
