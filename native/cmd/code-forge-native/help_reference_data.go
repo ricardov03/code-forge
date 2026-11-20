@@ -140,6 +140,7 @@ var helpRefFlagMeanings = map[string]string{
 	"--security":                "The file touches security.",
 	"--severity":                "Severity of the finding.",
 	"--sha":                     "Commit sha to watch.",
+	"--shared":                  "Owned files another open block may also own (append-only).",
 	"--skip-doctor":             "Do not run doctor at the end.",
 	"--slug":                    "Project slug (from .code-forge.yml).",
 	"--solo-project":            "Solo project number.",

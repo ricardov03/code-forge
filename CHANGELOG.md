@@ -53,6 +53,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Added
 
+- `block open --shared <files…>`: two open blocks of one run may both own an append-only file (CHANGELOG.md, a docs table) when both name it with `--shared` (an exact path also in `--owned`); the run record keeps `shared_files`. A file only one block shares, and every other owned file, still overlaps, and each block's reviews and close checks stay its own (B994).
 - `code-forge init` writes the new keys with their defaults after `autonomy`: `land.require_main_ci: false`, `autopilot.step_budgets` (`margin: 0.5`, `min_samples: 5`) and `release.max_blocks: 8`; a re-run keeps values already set, and `config fix` leaves them as they are.
 - `sh scripts/cf-release.sh regen-docs` regenerates every generated doc and recorded pin once, in order: `docs/reference/commands.md`/`commands.json`, `docs/reference/config.md`, then one `go test` run recording the command summaries, the B801 doc example pins and the init goldens; it stops at the first failing step. `regen-docs --check` runs each step in check mode, lists every stale one and exits 1 (B959)
 - `code-forge land merge-driver %O %A %B %P`, set as `git config merge.union.driver`, makes a plain `git merge` (a wave combine's `--no-ff` merge of lane branches) fold repeated `### Kind` headings in `CHANGELOG.md`'s `[Unreleased]` like `block land` does; other `merge=union` files get git's union result (B990)

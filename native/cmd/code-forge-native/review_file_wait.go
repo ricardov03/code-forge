@@ -368,6 +368,17 @@ func reviewWaitRoot(ctx context.Context, cwd string) (string, bool) {
 	return root, ok && refusal == nil
 }
 
+// reviewRunRootOK is reviewRunRoot with no refusal (B1005), as reviewWaitRoot
+// is reviewMainRoot's. Its callers are the ones that only need a root and
+// treat a refusal as "no root": land's review join (block_land_join.go),
+// close's requeue (block_close.go) and the block wait (review_wait_block.go).
+// The other B1005 callers call reviewRunRoot itself (context pack, spawn
+// --run --block, the hand-over worker guard) or reviewLinkedTop (doctor).
+func reviewRunRootOK(ctx context.Context, cwd, run string) (string, bool) {
+	root, refusal, ok := reviewRunRoot(ctx, cwd, run)
+	return root, ok && refusal == nil
+}
+
 // reviewRunRoot is the one root rule of review-file (B969): the review queue
 // of a run lives where its worker serves it, the top of the run's workspace
 // (`run start --cwd <dir>`; the worker uses gitx.RepoTop of it). For a run

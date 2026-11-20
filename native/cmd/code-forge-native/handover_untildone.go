@@ -55,7 +55,8 @@ func hudRunIDs(args []string) []string {
 	return ids
 }
 
-// hudRegisteredWorkerRuns reads the worker entries of the main tree's queue
+// hudRegisteredWorkerRuns reads the worker entries of the queue at cwd's run
+// root (the main tree, or a linked worktree with its own queue, B1005)
 // (the registry and the legacy worker.json) without probing liveness: a
 // stale entry can only make the guard stricter, never let Node read a grant.
 func hudRegisteredWorkerRuns() []string {
@@ -63,7 +64,8 @@ func hudRegisteredWorkerRuns() []string {
 	if err != nil {
 		return nil
 	}
-	root, _, ok := reviewMainRoot(context.Background(), cwd)
+	// B1005: a linked worktree with its own queue holds its own workers
+	root, _, ok := reviewRunRoot(context.Background(), cwd, "")
 	if !ok || root == "" {
 		return nil
 	}

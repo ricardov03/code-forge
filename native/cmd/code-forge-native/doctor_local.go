@@ -242,6 +242,13 @@ func dfLocksRows(procCwd string) ([]doctorRow, handoverReason) {
 	reviewWaitStarted = nil
 	if ok && refusal == nil && root != "" {
 		repoRoot = root
+		// B1005: a linked worktree with its own queue holds its own
+		// registry; git is asked only when a .git file says it is one
+		if dfInLinkedWorktree(procCwd) {
+			if top := reviewLinkedTop(dfContext(), procCwd, "", root); top != "" {
+				repoRoot = top
+			}
+		}
 	}
 	// liveness does not matter for these rows; no process is probed
 	entries, err := worker.Registry(repoRoot, false, worker.Probes{Alive: func(int) bool { return false }})
@@ -257,6 +264,19 @@ func dfLocksRows(procCwd string) ([]doctorRow, handoverReason) {
 		}
 	}
 	return rows, 0
+}
+
+// dfInLinkedWorktree: the nearest .git above dir is a file, the gitdir
+// pointer of a linked git worktree (B1005). No git child runs.
+func dfInLinkedWorktree(dir string) bool {
+	for d := dir; ; d = filepath.Dir(d) {
+		if info, err := os.Lstat(filepath.Join(d, ".git")); err == nil {
+			return info.Mode().IsRegular()
+		}
+		if filepath.Dir(d) == d {
+			return false
+		}
+	}
 }
 
 // dfTmpBase is tmpBase(undefined) as Node sees it after the router's

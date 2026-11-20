@@ -186,7 +186,8 @@ func contextPack(args []string, stderr io.Writer) int {
 	}
 	// repoRootOf(undefined) runs git in the process folder.
 	workspace, _ := record.Get("workspace").(string)
-	root, refusal, ok := reviewMainRoot(context.Background(), workspace)
+	// B1005: the run's root (a lane run reads its brief and config in the lane)
+	root, refusal, ok := reviewRunRoot(context.Background(), workspace, run)
 	if !ok {
 		return refuse("the repository's top level cannot be resolved")
 	}

@@ -133,7 +133,8 @@ func spawnCoderPrompt(cfg map[string]any, brief []byte, block string, run *strin
 					return nil, &session.Error{Code: "base-not-green", Message: message}, 0
 				}
 			}
-			root, refusal, ok := reviewMainRoot(context.Background(), workspace)
+			// B1005: the brief is read at the run's root (the lane of a lane run)
+			root, refusal, ok := reviewRunRoot(context.Background(), workspace, *run)
 			if !ok || refusal != nil {
 				return nil, nil, hSpawnCoderRun
 			}

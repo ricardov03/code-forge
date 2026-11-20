@@ -25,7 +25,8 @@ func landJoinStep(daemonOn bool, id, run, cwd, duration string, maxWait time.Dur
 	if err != nil {
 		return landHandover
 	}
-	root, ok := reviewWaitRoot(ctx, real)
+	// B1005: the run's root, where its worker serves the queue
+	root, ok := reviewRunRootOK(ctx, real, run)
 	if !ok {
 		return landHandover
 	}
