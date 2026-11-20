@@ -215,7 +215,13 @@ func runLaneIntegration(args []string) int {
 	if sub == "combine" {
 		usage = laneCombineUsage
 	}
-	fail := func(err error, code int) int { fmt.Fprintf(safeStderr, "lane %s: %v\n", sub, err); return code }
+	fail := func(err error, code int) int {
+		fmt.Fprintf(safeStderr, "lane %s: %v\n", sub, err)
+		if code == 2 {
+			fmt.Fprint(safeStderr, usage)
+		}
+		return code
+	}
 	run, json, ids := "", false, []string{}
 	for i := 1; i < len(args); i++ {
 		switch args[i] {
@@ -224,13 +230,13 @@ func runLaneIntegration(args []string) int {
 			return 0
 		case "--run":
 			if run != "" || i+1 == len(args) {
-				return fail(fmt.Errorf("%s", strings.TrimSpace(usage)), 2)
+				return fail(fmt.Errorf("--run needs one value and may only be given once"), 2)
 			}
 			i++
 			run = args[i]
 		case "--json":
 			if sub != "ready" || json {
-				return fail(fmt.Errorf("%s", strings.TrimSpace(usage)), 2)
+				return fail(fmt.Errorf("--json is supported once by lane ready only"), 2)
 			}
 			json = true
 		default:
@@ -241,7 +247,7 @@ func runLaneIntegration(args []string) int {
 		}
 	}
 	if run == "" || sub == "combine" && len(ids) == 0 {
-		return fail(fmt.Errorf("%s", strings.TrimSpace(usage)), 2)
+		return fail(fmt.Errorf("needs --run <id> and lane combine also needs lane runs"), 2)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

@@ -17,6 +17,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- Lane ready/combine usage errors print the command usage on stderr with exit 2 (c28b).
+
 - Adaptive reviewer routing skips closed-book-incompatible Codex candidates before ranking, exploration, pinning and retry reuse, immediately uses a compatible configured alternative and signs replacement route choices (B1027).
 
 - File-only `cf-gotest` calls infer test names per package without `CODE_FORGE_TEST_RUN`; a package with no selected test names refuses before any child starts (B1026).
