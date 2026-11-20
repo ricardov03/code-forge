@@ -161,7 +161,7 @@ func TestB798FlakyGoTestPassesWithRow(t *testing.T) {
 	if code != 0 || out["allOk"] != true {
 		t.Fatalf("gates = %d %v; stderr %s", code, out, errText)
 	}
-	if got, want := f.reruns(t), []string{"test -count=3 -run ^(TestFlaky)$ example.invalid/m/a"}; !reflect.DeepEqual(got, want) {
+	if got, want := f.reruns(t), []string{"test -p 2 -count=3 -run ^(TestFlaky)$ example.invalid/m/a"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("reruns %q, want %q", got, want)
 	}
 	r := b798TestGate(t, out)
@@ -195,7 +195,7 @@ func TestB798FlakyGoTestPassesWithRow(t *testing.T) {
 		t.Fatalf("finding %v", fd)
 	}
 	ev, _ := fd["evidence"].(map[string]any)
-	if ev["test"] != "TestFlaky" || !reflect.DeepEqual(ev["rerun"], []any{f.fake, "test", "-count=3", "-run", "^(TestFlaky)$", "example.invalid/m/a"}) {
+	if ev["test"] != "TestFlaky" || !reflect.DeepEqual(ev["rerun"], []any{f.fake, "test", "-p", "2", "-count=3", "-run", "^(TestFlaky)$", "example.invalid/m/a"}) {
 		t.Fatalf("evidence %v", ev)
 	}
 
@@ -269,7 +269,7 @@ func TestB798ThreeFlakyNamesPass(t *testing.T) {
 	if code != 0 || out["allOk"] != true {
 		t.Fatalf("gates = %d %v: %s", code, out, errText)
 	}
-	if got, want := f.reruns(t), []string{"test -count=3 -run ^(TestA|TestB|TestC)$ example.invalid/m/a"}; !reflect.DeepEqual(got, want) {
+	if got, want := f.reruns(t), []string{"test -p 2 -count=3 -run ^(TestA|TestB|TestC)$ example.invalid/m/a"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("reruns %q, want %q", got, want)
 	}
 	if rows := b798Rows(t, f.home, "test.flaky"); len(rows) != 3 {

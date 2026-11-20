@@ -400,7 +400,7 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 				names, pkgs := goFailedTests(output, GoFlakyMax)
 				if a := goRerunCommand(item.argv, output, names, pkgs); names != nil && a != nil {
 					load := FlakyLoad()
-					if execute(ctx, a, c.Env, cwd, run, timeout, c.FailOnStdout).Get("ok") == true && ctx.Err() == nil {
+					if execute(ctx, a, goRerunEnv(c.Env, load), cwd, run, timeout, c.FailOnStdout).Get("ok") == true && ctx.Err() == nil {
 						tests := []any{}
 						for _, name := range names {
 							tests = append(tests, ledger.Object{{Key: "test", Value: name}, {Key: "packages", Value: pkgs}})

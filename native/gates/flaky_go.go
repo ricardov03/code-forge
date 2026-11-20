@@ -2,8 +2,10 @@ package gates
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -24,6 +26,13 @@ const (
 // FlakyLoad is the 1-minute load average when a flaky test failed (a test
 // seam; testslot's probe in production).
 var FlakyLoad = func() float64 { return testslot.SystemResources().Load1 }
+
+// FlakyCores is the machine's core count (a test seam).
+var FlakyCores = runtime.NumCPU
+
+// GoRerunP is the rerun's go test -p when the gate set none (B973, like
+// cf-gotest's default).
+const GoRerunP = 2
 
 var (
 	goFailedName = regexp.MustCompile(`^--- FAIL: ([A-Za-z_][A-Za-z0-9_]*) \(`)
@@ -170,7 +179,48 @@ func goRerunCommand(original []string, output string, names, pkgs []string) []st
 			}
 		}
 	}
-	return goRerunBuild(original, extra, names, pkgs)
+	// B973: the cf-gotest rules. A wrapper's rerun builds with -trimpath
+	// (cf-gotest's build, so the rerun reuses its build cache); a direct go
+	// test keeps its own choice. -p 2 unless the gate set -p.
+	if goRerunWrapper(original) && !goHasFlag(extra, "trimpath") {
+		extra = append(extra, "-trimpath")
+	}
+	argv := goRerunBuild(original, extra, names, pkgs)
+	if argv != nil && !goHasFlag(argv, "p") {
+		argv = goRerunBuild(original, append(extra, "-p", strconv.Itoa(GoRerunP)), names, pkgs)
+	}
+	return argv
+}
+
+// goHasFlag is true when args hold the go flag name (-name, --name or
+// -name=value).
+func goHasFlag(args []string, name string) bool {
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			continue
+		}
+		if n, _, _ := strings.Cut(strings.TrimLeft(a, "-"), "="); n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// goRerunEnv is the rerun's extra environment (B973, cf-gotest's load
+// cap): env plus GOMAXPROCS=cores/2 when the 1-minute load is over the
+// core count and neither env nor this process sets GOMAXPROCS; env itself
+// is not changed.
+func goRerunEnv(env map[string]string, load float64) map[string]string {
+	cores := FlakyCores()
+	if _, set := env["GOMAXPROCS"]; set || os.Getenv("GOMAXPROCS") != "" || load <= float64(cores) {
+		return env
+	}
+	out := map[string]string{}
+	for k, v := range env {
+		out[k] = v
+	}
+	out["GOMAXPROCS"] = strconv.Itoa(max(1, cores/2))
+	return out
 }
 
 // goRerunWrapper is true for a go gate that is not a direct go test (a go

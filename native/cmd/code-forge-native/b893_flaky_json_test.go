@@ -40,7 +40,7 @@ func TestB893FlakyGoTestJSONGateReruns(t *testing.T) {
 	if code != 0 || out["allOk"] != true {
 		t.Fatalf("gates = %d %v; stderr %s", code, out, errText)
 	}
-	if got, want := f.reruns(t), []string{"test -count=3 -run ^(TestFlaky)$ example.invalid/m/a"}; !reflect.DeepEqual(got, want) {
+	if got, want := f.reruns(t), []string{"test -p 2 -count=3 -run ^(TestFlaky)$ example.invalid/m/a"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("reruns %q, want %q", got, want)
 	}
 	if !strings.Contains(errText, "gates: WARN flaky test TestFlaky (example.invalid/m/a): failed, then passed 3/3 reruns (load ") {

@@ -35,7 +35,7 @@ func TestB894WrapperGateRerunKeepsFlags(t *testing.T) {
 	if code != 0 || out["allOk"] != true {
 		t.Fatalf("gates = %d %v; stderr %s", code, out, errText)
 	}
-	if got, want := f.reruns(t), []string{"test -timeout 75m -p 3 -count=3 -run ^(TestFlaky)$ example.invalid/m/a"}; !reflect.DeepEqual(got, want) {
+	if got, want := f.reruns(t), []string{"test -timeout 75m -p 3 -trimpath -count=3 -run ^(TestFlaky)$ example.invalid/m/a"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("reruns %q, want %q", got, want)
 	}
 	if rows := b798Rows(t, f.home, "test.flaky"); len(rows) != 1 || rows[0]["test"] != "TestFlaky" {
