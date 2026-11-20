@@ -193,7 +193,7 @@ func spawnSessionRun(o *runOut, opts session.Opts, preview bool) int {
 	if errors.As(err, &sessionErr) {
 		o.err("spawn: " + sessionErr.Message + "\n")
 		switch sessionErr.Code {
-		case "forbidden", "sandbox-changed", "sandbox-dir-refused":
+		case "forbidden", "sandbox-changed", "sandbox-dir-refused", "base-not-green":
 			return 1
 		}
 		return 2
