@@ -1005,6 +1005,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 			return failure(e)
 		}
 	}
+	if o.run != "" && !cancelled {
+		gatesAfterRun(home, o.run, o.block, results, duration) // B950, B821
+	}
 	out := ledger.Object{{Key: "stack", Value: p.Stack}}
 	if tree != nil {
 		out.Set("worktree", tree.Path)

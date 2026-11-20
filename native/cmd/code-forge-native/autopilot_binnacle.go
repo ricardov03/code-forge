@@ -25,6 +25,7 @@ import (
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/runstatus"
 	"github.com/ricardov03/code-forge/native/state"
+	"github.com/ricardov03/code-forge/native/stepbudget"
 )
 
 // B478: the autopilot binnacle and full log (src/autopilot/binnacle.mjs) in
@@ -41,7 +42,7 @@ const (
 	bnLinkMax      = 2048
 )
 
-var bnExtraEvents = []string{"block.close", "review.session_timeout", "review.schema_fallback", "worker.down", "worker.replaced", "ledger.tamper", "budget.refused", "gate.red", "gate.done"}
+var bnExtraEvents = []string{"block.close", "review.session_timeout", "review.schema_fallback", "worker.down", "worker.replaced", "ledger.tamper", "budget.refused", "gate.red", "gate.done", "step.over_budget"}
 
 // jsUndefined is a missing property: `${x}` gives "undefined", `??` skips it.
 type jsUndefined struct{}
@@ -626,6 +627,8 @@ func bnDescribe(row any) (string, string, any) {
 		return "Ledger check failed", "block " + bnCo(g("block"), "unknown") + " stopped", nil
 	case "budget.refused":
 		return "Budget refused a session", bnCo(g("role"), "session") + " · spent " + bnMoneyOr(g("spent_usd")) + " of " + bnMoneyOr(g("budget_usd")) + " USD", nil
+	case "step.over_budget": // B950
+		return "Step over budget", bnCo(g("step"), "step") + " took " + bnStepMs(g("ms")) + " · budget " + bnStepMs(g("budget_ms")) + " (" + bnCo(g("source"), "unknown") + ")", nil
 	case "gate.red":
 		return "Gate red", bnCo(g("gate"), "gate") + " · exit " + bnCo(g("code"), "unknown"), nil
 	case "gate.done":
@@ -636,6 +639,15 @@ func bnDescribe(row any) (string, string, any) {
 		return "Gates finished", bnCo(g("stack"), "stack") + " · " + green + bnGateScope(row), nil
 	}
 	return bnJSString(g("event")), "", nil
+}
+
+// bnStepMs words a step time row field (milliseconds) for a person (B950).
+func bnStepMs(v any) string {
+	ms, ok := v.(float64)
+	if !ok || ms < 0 {
+		return "unknown"
+	}
+	return stepbudget.Duration(int64(ms))
 }
 
 // bnCoV is `a ?? fallback` as a value.
@@ -1106,6 +1118,8 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 			incidents = append(incidents, bnIncident(x.time, "A ledger check failed for block "+bnCo(g("block"), "unknown"), "The block was stopped.", "Look at the block before reopening it."))
 		case "autopilot.issue_failed":
 			incidents = append(incidents, bnIncident(x.time, "The waiver issue for "+bnU(g("finding"), "unknown finding")+" in "+bnU(g("file"), "unknown file")+" could not be opened", "The waiver stands without an issue.", "Open the tracking issue by hand."))
+		case "step.over_budget": // B950
+			incidents = append(incidents, bnIncident(x.time, "The "+bnCo(g("step"), "unknown")+" step took "+bnStepMs(g("ms"))+", over its budget "+bnStepMs(g("budget_ms")), "The run went slower than usual.", "Look at the found block for this step, or set autopilot.step_budgets."))
 		case "budget.refused":
 			incidents = append(incidents, bnIncident(x.time, "A "+bnCo(g("role"), "session")+" session was refused: budget "+bnMoneyOr(g("spent_usd"))+" of "+bnMoneyOr(g("budget_usd"))+" USD", "The session did not run.", "Raise the budget (only you can) or finish by hand."))
 		case "autopilot.pause":

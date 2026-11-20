@@ -37,7 +37,7 @@ import (
 // writes one signed autopilot.found row. The binnacle lists found → block →
 // state, and the waiting ones under "Actions only you can take".
 
-var apfSources = []string{"gate", "land", "coder", "flaky", "handover", "review"}
+var apfSources = []string{"gate", "land", "coder", "flaky", "handover", "review", "speed"}
 
 const (
 	apfDefaultCap   = 10

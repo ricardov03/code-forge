@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- Every land, gate, coder session and CI wait has a speed budget: its measured median plus a margin, or fixed minutes under the new `autopilot.step_budgets` config key. `block land` and `gates run --run --block` time themselves; `code-forge autopilot step --run <id> --step <coder|ci-wait> --ms <n>` reports the others. A step over its budget prints `WARN step budget: …`, writes a `step.over_budget` row shown in the binnacle, and under an active autopilot grant becomes found work (source `speed`) (B950)
+
 ## [0.26.0] — 2026-11-19
 
 ### Changed

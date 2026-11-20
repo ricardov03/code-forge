@@ -30,6 +30,8 @@ func landExecute(args []string, flags map[string]any, home, run, id string, reco
 
 func landExecuteWithReason(args []string, flags map[string]any, home, run, id string, record, entry ledger.Object, fallback func(handoverReason) int) (code int) {
 	stderr := &landErrorStream{}
+	landStart, landOK := stepNow(), false // B950
+	defer func() { landAfter(stderr, home, run, id, landStart, landOK) }()
 	beforeLog := []any{}
 	begin := func() { beforeLog = gatesBreadcrumbName("block") }
 	finish := func() {
@@ -416,6 +418,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		} else {
 			fmt.Fprintf(safeStdout, "block %s closed; merge: %s\n", id, command)
 		}
+		landOK = true
 		return 0
 	}
 	current, err := gitx.Run(main, "symbolic-ref", "-q", "HEAD")
@@ -522,6 +525,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	} else {
 		fmt.Fprintf(safeStdout, "block %s landed\n", id)
 	}
+	landOK = true
 	return 0
 }
 

@@ -251,7 +251,7 @@ code-forge autopilot found --run <run> --report coder-report.txt --from B4
 code-forge autopilot found --run <run> --list [--json]
 ```
 
-`--source` is one of `gate`, `land`, `coder`, `flaky`, `handover` or `review`. A coder writes its
+`--source` is one of `gate`, `land`, `coder`, `flaky`, `handover`, `review` or `speed`. A coder writes its
 leftovers in its report as `FOUND [<source>] [<label>,…] <title> :: <evidence>` (the source is
 `coder` when it is left out); a FOUND line without ` :: <evidence>` is skipped with a WARN.
 
@@ -275,6 +275,31 @@ For each finding the autopilot:
 A queued block joins the run's planned blocks at once, so an until-done grant does not end while it
 is open. The binnacle shows a **Found work** table (found, source, title, block, state), and every
 finding that waits for you is listed under **Actions only you can take**.
+
+## A speed budget per step
+
+Every land, gate, coder session and CI wait has a speed budget (Go engine, B950). `block land`
+and `gates run --run <run> --block <id>` record their wall time themselves; the coder session and
+the CI wait report theirs:
+
+```bash
+code-forge autopilot step --run <run> --step <land|gate|coder|ci-wait> --ms <n> [--block <id>] [--json]
+```
+
+The budget is the median of the project's earlier samples of that step plus a margin
+(`autopilot.step_budgets.margin`, default `0.5` = 50%), once `min_samples` (default 5) samples
+exist; before that the step has no budget. A number of minutes under
+`autopilot.step_budgets.<land|gate|coder|ci_wait>` fixes that step's budget instead. The samples
+(the newest 50 per step) are kept per project under `~/.code-forge/stepbudget/`.
+
+A step over its budget:
+
+- prints `WARN step budget: <step> took <time>, over its budget <time> (<basis>)` on stderr;
+- writes a signed `step.over_budget` row, shown in the binnacle log and under Incidents;
+- while an autopilot grant is active, records an `autopilot found` finding with source `speed`
+  (one per step: a later slow run of the same step counts as seen again).
+
+A step under its budget prints and writes nothing more.
 
 ## Stop it
 
