@@ -14,6 +14,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- Land searches for older CI PRs whenever the newest 200-row page is full, even with matching PRs there, retaining and deduplicating matches across search and exact-branch results (B1006).
+
 - Audit all 55 v0.27.0 entries against the code; fill in maintainer test and generated-doc guidance, correct CI gate reuse and autopilot backlog instructions, and link each entry to its documentation (B1015).
 - A queued review ticket of a closed (or landed) block for a deleted file (`content_hash: "deleted"`) is no longer served: the worker drops it before any review session as `stale` with reason `block-closed` (signed result, done marker and one `review.result` row, which the gate counts as never reviewed). A rebase-check ticket and a ticket for a file that exists are still served. B919
 - The coder ref guard no longer turns itself off when a project has its own `reference-transaction` hook or a husky `core.hooksPath`: the guard runs first, then that hook with the same arguments and stdin, and the move fails when either fails; the work tree is not written (B809).

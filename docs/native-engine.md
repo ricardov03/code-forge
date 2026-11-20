@@ -854,3 +854,9 @@ authoritative run-lock rechecks, signed per-clause clears and final done/hook.
 `autopilot start` validates `human-pass:evidence` against the frozen snapshot.
 
 `run human-checks audit --run <r> [--json]` and owner-only `run human-checks reopen --run <r> --block <id> [--clause C<n>] --note <text> [--json]` run in Go. Reopen requires a terminal and no active grant, writes signed revocation rows, and reopens the ledger check even after land. Audit verifies the recorded proof and evidence SHA-256. Run status/list, reports, the binnacle and full log distinguish autopilot passes.
+
+## CI PR discovery (B1006)
+
+Land searches older CI pull requests whenever the newest 200-row page is full, even
+when it contains matching PRs. It keeps matches from every page, deduplicated by PR
+number, including when a full search page requires exact branch lookups.

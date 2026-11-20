@@ -253,7 +253,7 @@ A tip that moves while the land waits is refused at `ci`. B804: a batch lands on
 proved; the landed marker records it as `ci_sha`. B979: a single-block `block land --merge` follows
 the same rules (test gate skipped on a CI-proved tip, a moved tip refused at `ci`). B980: a batch
 merge gate on a tree green CI proved skips its test suite. B805: a block's CI PRs are found past the 200
-newest pull requests (a `head:` search when that page is full and holds none of them). B806: a short
+newest pull requests (a `head:` search whenever that page is full, even when some match). B806: a short
 gh network error (timeout, connection reset, EOF, TLS/DNS failure, HTTP 5xx) while land reads CI is
 retried with a backoff, 3 tries in all; then land refuses at `ci` with gh's message, `(after 3
 tries)` and a `next:` line. B981: `pr create`/`pr close` retry too, after first checking whether
