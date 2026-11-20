@@ -811,3 +811,17 @@ the whole-package scope. Named gates use a separate FIFO queue lane capped at `m
 passing big holders and waiters regardless of load, subject to the memory floor beside holders.
 Queue notices show the wait duration. Land merge gates never reuse names-only evidence and
 retain package scope; batch land and CI retain the full gate.
+
+<!-- B1011 -->
+Evidence passes require the owner's opt-in `human_check.autopilot` section before
+`run start`; the entire section is frozen and `run reload` refuses changes.
+Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
+`exclude_waits_for: []`, `require_separate_prover: true`. Enabling requires a
+non-empty list of proof roots; v1 refuses `require_proof: false`.
+Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
+Design approvals remain owner-only. See [the opt-in example](../examples/autopass.yml).
+
+`block auto-pass` runs entirely in Go: snapshot opt-in, signed scoped grant,
+proof/header/evidence hashes, design exclusions, review/gate/transcript checks,
+authoritative run-lock rechecks, signed per-clause clears and final done/hook.
+`autopilot start` validates `human-pass:evidence` against the frozen snapshot.

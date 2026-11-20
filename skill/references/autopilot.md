@@ -59,3 +59,21 @@ Here, a critical waiver means the delegate's `autopilot waive` action; the evide
 - merges and destructive actions.
 
 When one of these comes up during the window: stop that line of work, add it to Actions only you can take, and wait. The delegate never relaxes a rule or a limit to keep work moving (`rules-core.md` R17).
+
+<!-- B1011 -->
+Evidence passes require the owner's opt-in `human_check.autopilot` section before
+`run start`; the entire section is frozen and `run reload` refuses changes.
+Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
+`exclude_waits_for: []`, `require_separate_prover: true`. Enabling requires a
+non-empty list of proof roots; v1 refuses `require_proof: false`.
+Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
+Design approvals remain owner-only. See [the opt-in example](../../examples/autopass.yml).
+
+`human-pass:evidence` allows `block auto-pass` after code close only when the owner
+set `human_check.autopilot.enabled` before run start. A new run is required after
+policy changes. The command accepts `.html` JSON-script headers or whole `.json`
+objects, verifies proof paths and hashes, signed machine checks and a separate
+prover session, then records `by: autopilot` and `to_owner: true`. Preview with
+`--dry-run [--json]`; repeated `--clause C<n>` selectors limit the pass. Without
+selectors device checks pass and design checks remain. `design:approve` stays
+fixed-denied. See [the full guide](../../docs/autopilot.md#auto-pass-on-green-evidence).

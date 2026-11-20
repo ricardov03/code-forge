@@ -1,0 +1,10 @@
+# Merge this opt-in section into a project's .code-forge.yml before run start.
+human_check:
+  autopilot:
+    enabled: true
+    require_proof: true
+    proof_dirs:
+      - ~/.code-forge/helpers
+    exclude_waits_for:
+      - board approval
+    require_separate_prover: true

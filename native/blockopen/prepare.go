@@ -170,6 +170,14 @@ func Acceptance(value any) ([]any, error) {
 	// B631: a human_check clause may say what the human waits for.
 	for _, c := range clauses {
 		o := object(c)
+		if approval, present := clauseValue(o, "approval"); present {
+			if o.Get("kind") != "human_check" {
+				return nil, refusal("bad-acceptance", "acceptance: approval is allowed only on a human_check clause")
+			}
+			if approval != "design" && approval != "device" {
+				return nil, refusal("bad-acceptance", "acceptance: approval must be design or device")
+			}
+		}
 		waits, present := clauseValue(o, "waits_for")
 		if !present {
 			continue

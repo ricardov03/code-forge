@@ -203,3 +203,17 @@ without it) and checks the generated config and command references. Record chang
 bumps versions, releases the CHANGELOG, updates the optional Latest line, checks, commits, and
 tags. Publish with `npm publish`, then push the tag; CI creates the GitHub release.
 See [releasing](docs/releasing.md).
+
+<!-- B1011 -->
+Evidence passes require the owner's opt-in `human_check.autopilot` section before
+`run start`; the entire section is frozen and `run reload` refuses changes.
+Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
+`exclude_waits_for: []`, `require_separate_prover: true`. Enabling requires a
+non-empty list of proof roots; v1 refuses `require_proof: false`.
+Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
+Design approvals remain owner-only. See [the opt-in example](examples/autopass.yml).
+
+Owners may opt in before `run start` to evidence-based autopilot passes for device
+checks. With `human-pass:evidence`, use `block auto-pass <id> --run <r> --proof
+<file> --note <text>`; design approvals stay owner-only. See
+[Auto-pass on green evidence](docs/autopilot.md#auto-pass-on-green-evidence).

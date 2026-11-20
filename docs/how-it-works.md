@@ -310,7 +310,7 @@ run end: run r-1 has 1 open human check(s); it cannot end until each is cleared:
 
 With `--json`, stdout is `{run, ended: false, refused: "human-checks-open", open: [{block, clause, check, waits_for, opened_at, state, clear}]}` and stderr keeps the first line; a run end that succeeds prints `{run, ended: true, ended_at}`. A block still `open` gets the `still has open blocks` refusal, which names the next step (`stop or close each first: code-forge block stop <id> --run <r>`); with `--json` it is one stdout line `{ok: false, error, next}` with that command as `next` (B881), and a stopped block's checks are not open. The autopilot binnacle never reads ready while such a check is open: its status table adds a `Human checks` row (`<n> open, so the run cannot end: <block> <clause>, ...`), and a `closed` block with an open check reads `Closed, but <n> human check(s) open; not ready`, with the clear command as its owner action instead of `Mark block <id> ready and merge it`. With every check cleared, `run end` and the binnacle are as before.
 
-For design first, give the design block an acceptance clause such as `{clause: "Owner approves the design", kind: human_check}`. Open it, finish its work and pass its code gates, then close it. The owner approves in their terminal before code blocks open:
+For design first, give the design block an acceptance clause such as `{clause: "Owner approves the design", kind: human_check, approval: design}`. Open it, finish its work and pass its code gates, then close it. The owner approves in their terminal before code blocks open:
 
 ```sh
 code-forge block open DESIGN --run <r> --level L1 --kind docs --owned docs/design.md --acceptance design.acc.yml
@@ -1894,3 +1894,21 @@ the plan file. See `skill/references/continuity.md`.
   a second OS user or in a container.
 
 Details: `skill/references/security.md`.
+
+<!-- B1011 -->
+Evidence passes require the owner's opt-in `human_check.autopilot` section before
+`run start`; the entire section is frozen and `run reload` refuses changes.
+Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
+`exclude_waits_for: []`, `require_separate_prover: true`. Enabling requires a
+non-empty list of proof roots; v1 refuses `require_proof: false`.
+Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
+Design approvals remain owner-only. See [the opt-in example](../examples/autopass.yml).
+
+With the frozen owner opt-in and an active `human-pass:evidence` grant,
+`block auto-pass <id> --run <r> --proof <file> --note <text>` verifies green gates,
+current file approvals and separate QA evidence, then clears non-design checks
+without a terminal. `--clause C<n>` may be repeated; `--dry-run` lists every check
+without writes. Partial passes preserve remaining owner checks. See
+[Auto-pass on green evidence](autopilot.md#auto-pass-on-green-evidence) for the
+proof header and path restrictions. Every pass is signed as autopilot, with the
+proof and evidence hashes; the human verbs retain their guards.

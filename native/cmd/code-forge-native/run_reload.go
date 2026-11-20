@@ -419,6 +419,13 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 	if !rrJSStrictEqual(oldHuman, oldHas, newHuman, newHas) {
 		return refuse("close.require_human cannot change mid-run (fixed by the owner before the run starts)")
 	}
+	oldAuto, _ := rrChainGet(before, "human_check", "autopilot")
+	newAuto, _ := rrChainGet(in.cfg, "human_check", "autopilot")
+	oldAutoHash, _ := canon.Marshal(oldAuto)
+	newAutoHash, _ := canon.Marshal(newAuto)
+	if string(oldAutoHash) != string(newAutoHash) {
+		return refuse("human_check.autopilot cannot change mid-run (fixed by the owner before the run starts)")
+	}
 	var frozen []string
 	if stateObj != nil {
 		frozen = immutableChangesGo(before, in.cfg)

@@ -17,9 +17,9 @@ The coder then forecasts **cases** (tests) and **lines**. Compute the floor your
 ## §3 Dispatch — what the brief contains
 
 Acceptance (`block open --acceptance`) is a YAML/JSON list. Code clauses need `tests: [<test ids>]`. A device check instead uses `- clause: "Check the layout on a phone"` with `kind: human_check` on the next indented line and no `tests` key (even an empty list is refused). These texts are recorded as the block's `human_checks` and skipped by test-coverage checks; every other clause still needs tests.
-With an active autopilot grant, `block open` and `block amend-acceptance` refuse every `human_check` clause with `autopilot-human-check`; turn each into a clause with tests or ask the owner.
+With an active autopilot grant, `block open` accepts human checks only under `human-pass:deferred`, or `human-pass:evidence` with the frozen owner opt-in. Otherwise it refuses `autopilot-human-check`. Acceptance amendments remain owner-only.
 
-For design first, put `{clause: "Owner approves the design", kind: human_check}` in `design.acc.yml`, then follow this order:
+For design first, put `{clause: "Owner approves the design", kind: human_check, approval: design}` in `design.acc.yml`, then follow this order:
 
 ```sh
 code-forge block open DESIGN --run <r> --level L1 --kind docs --owned docs/design.md --acceptance design.acc.yml --brief <file> --lines <n>
@@ -364,3 +364,23 @@ Both `autonomy` keys default to false. Whatever they say, a block's branch is ha
 6. Forecast vs actual (cases and lines) recorded; misses attributed (architect-added scope vs coder under-forecast) — a finished green block is accepted and recorded either way.
 7. One commit for the block; the draft PR (when the project uses PRs) carries the evidence.
 8. Every artifact that proves something is committed, not left in a scratch dir; no claim shipped that the evidence does not carry.
+
+<!-- B1011 -->
+Evidence passes require the owner's opt-in `human_check.autopilot` section before
+`run start`; the entire section is frozen and `run reload` refuses changes.
+Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
+`exclude_waits_for: []`, `require_separate_prover: true`. Enabling requires a
+non-empty list of proof roots; v1 refuses `require_proof: false`.
+Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
+Design approvals remain owner-only. See [the opt-in example](../../examples/autopass.yml).
+
+For evidence passes after code close, the orchestrator uses
+`forge block auto-pass <id> --run <r> --proof <file> --note <text> [--clause C<n>]…`
+under `human-pass:evidence`. Preview with `--dry-run` first. It checks the frozen
+opt-in, active signed scoped grant, proof/header/evidence, separate prover,
+green gate row, current signed approvals, no findings/current-grant waivers/hits,
+and a nonblank control-free note, again under the run lock. Only the last check
+cleared closes the block and emits its done/hook; partial passes stay awaiting.
+`approval: design` and excluded waits_for are always owner-only. Unmarked D-prefixed
+blocks and design/diseño/board/tablero/mock clauses need explicit `approval: device`
+to pass automatically. The coder never runs `human-pass`.

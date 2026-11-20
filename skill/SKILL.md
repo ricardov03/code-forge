@@ -107,3 +107,20 @@ Red→green means an assertion failure on old code, then a pass on new code; no 
 | keys, the forbidden list, signed rows and their limit | `references/security.md` |
 | the owner is away: an autopilot grant, the delegate, the live log doc | `references/autopilot.md` |
 | spawning coders per engine | `references/adapters/solo.md`, `references/adapters/claude-code.md`, `references/adapters/subprocess.md` |
+
+<!-- B1011 -->
+Evidence passes require the owner's opt-in `human_check.autopilot` section before
+`run start`; the entire section is frozen and `run reload` refuses changes.
+Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
+`exclude_waits_for: []`, `require_separate_prover: true`. Enabling requires a
+non-empty list of proof roots; v1 refuses `require_proof: false`.
+Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
+Design approvals remain owner-only. See [the opt-in example](../examples/autopass.yml).
+
+Under a frozen `human_check.autopilot.enabled` opt-in and an active signed
+`human-pass:evidence` grant, a separate QA session may supply proof for
+`forge block auto-pass <id> --run <r> --proof <file> --note <text>`.
+Preview with `--dry-run`; it checks every guard and writes nothing. The verb
+passes only non-design open checks, writes `by: autopilot` rows and closes only
+when none remain. Never substitute the human verb. See
+[proof format](references/proof.md) and [autopilot](references/autopilot.md).
