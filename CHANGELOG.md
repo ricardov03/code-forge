@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- Two Go tests no longer depend on machine load: the pseudo-terminal test driver types each key once the program's prompt is on screen (a `prompts` list, one text per key) instead of after 400 ms of quiet output, and the B593 strict-launch test waits for the launch and the reap with a 3-minute stop bound instead of failing at 10 s and 2 s; both pass under `-cpu 1` beside a CPU hog (B891)
+
 ## [0.26.0] — 2026-11-19
 
 ### Changed

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"os/exec"
 	"sync"
@@ -23,6 +24,11 @@ type b703PTYRun struct {
 	keys       []string
 	// idle is how long the output must be quiet before the next key
 	idle time.Duration
+	// prompts, when set, has one text per key: key i is typed only once
+	// the output since key i-1 holds prompts[i], whatever the time (B891:
+	// a quiet spell is no proof the program is at its prompt on a loaded
+	// machine; the idle rule stays for recorders that have no prompt text)
+	prompts []string
 	// timeout kills the program's process group
 	timeout time.Duration
 }
@@ -56,8 +62,13 @@ func b703RunPTY(t *testing.T, r b703PTYRun) ([]byte, int) {
 	}
 	_ = slave.Close()
 
+	if r.prompts != nil && len(r.prompts) != len(r.keys) {
+		t.Fatalf("pty run: %d prompts for %d keys", len(r.prompts), len(r.keys))
+	}
 	var mu sync.Mutex
 	var out []byte
+	// sent is the output length when the last key was typed
+	sent := 0
 	last := time.Now()
 	done := make(chan struct{})
 	go func() {
@@ -99,15 +110,19 @@ func b703RunPTY(t *testing.T, r b703PTYRun) ([]byte, int) {
 				continue
 			}
 			mu.Lock()
-			quiet := len(out) > 0 && time.Since(last) >= r.idle
+			ready := len(out) > 0 && time.Since(last) >= r.idle
+			if r.prompts != nil {
+				ready = bytes.Contains(out[sent:], []byte(r.prompts[len(r.prompts)-len(keys)]))
+			}
 			mu.Unlock()
-			if quiet {
+			if ready {
 				if _, err := master.Write([]byte(keys[0])); err != nil {
 					t.Errorf("write key %q: %v", keys[0], err)
 				}
 				keys = keys[1:]
 				mu.Lock()
 				last = time.Now()
+				sent = len(out)
 				mu.Unlock()
 			}
 		}
@@ -147,9 +162,27 @@ func TestB703PTYDriver(t *testing.T) {
 	script := `stty size; [ -t 0 ] && [ -t 1 ] && [ -t 2 ] || exit 9; printf 'ready> '; read line; echo "got:$line" >&2; exit 3`
 	out, code := b703RunPTY(t, b703PTYRun{
 		argv: []string{sh, "-c", script}, env: []string{"PATH=/bin:/usr/bin", "TERM=xterm-256color"},
-		dir: t.TempDir(), cols: 70, rows: 30, keys: []string{"hello\r"}, idle: 200 * time.Millisecond, timeout: 30 * time.Second,
+		dir: t.TempDir(), cols: 70, rows: 30, keys: []string{"hello\r"}, prompts: []string{"ready> "}, timeout: 30 * time.Second,
 	})
 	if want := "30 70\r\nready> hello\r\ngot:hello\r\n"; string(out) != want || code != 3 {
 		t.Fatalf("pty run: code %d out %q; want 3 %q", code, out, want)
+	}
+}
+
+// TestB891PTYKeyWaitsForSlowPrompt: a program that is slow to reach its
+// prompt (a loaded machine) still gets its key after the prompt, not during
+// a quiet spell before it, so the echo lands after the prompt.
+func TestB891PTYKeyWaitsForSlowPrompt(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	script := `printf 'start\n'; sleep 1; printf 'ready> '; read line; echo "got:$line"; exit 4`
+	out, code := b703RunPTY(t, b703PTYRun{
+		argv: []string{sh, "-c", script}, env: []string{"PATH=/bin:/usr/bin", "TERM=xterm-256color"},
+		dir: t.TempDir(), cols: 70, rows: 30, keys: []string{"hello\r"}, prompts: []string{"ready> "}, timeout: 30 * time.Second,
+	})
+	if want := "start\r\nready> hello\r\ngot:hello\r\n"; string(out) != want || code != 4 {
+		t.Fatalf("pty run: code %d out %q; want 4 %q", code, out, want)
 	}
 }
