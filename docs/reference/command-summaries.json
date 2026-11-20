@@ -16,6 +16,7 @@
   {"name":"autopilot round","summary":"Record one extra review round for a file","owner":false,"group":"autopilot"},
   {"name":"autopilot start","summary":"Grant the autopilot a time window, scopes and budget","owner":false,"group":"autopilot"},
   {"name":"autopilot status","summary":"Show the grant, spend per category and pauses","owner":false,"group":"autopilot"},
+  {"name":"autopilot step","summary":"Record a step's wall time and warn when it runs over its speed budget","owner":false,"group":"autopilot"},
   {"name":"autopilot stop","summary":"End the autopilot grant now","owner":false,"group":"autopilot"},
   {"name":"autopilot waive","summary":"Waive a warning or nit finding by a decision","owner":true,"group":"autopilot"},
   {"name":"block","summary":"Open, check, close and land the blocks of a run","owner":false,"group":"block"},
