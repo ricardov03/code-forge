@@ -62,15 +62,20 @@ func TestB797DoctorShowsTheRefGuard(t *testing.T) {
 	if want := "OK   ref guard: on: hook " + hook + "; 1 coder worktree(s) guarded\nINFO native daemon: "; !strings.Contains(out, want) {
 		t.Fatalf("doctor lacks %q:\n%s", want, out)
 	}
-	// Another tool's hook in its place: the guard is off and doctor warns.
+	// Another tool's hook in its place: the guard is off and doctor warns;
+	// the next install keeps that hook and runs it after the guard (B809).
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := refguard.Install(tree, "main", "forge/r1/B1", "forge/{run}/{block}"); err == nil {
-		t.Fatal("install over a foreign hook succeeded")
+	_, out, _ = runCaptured(t, "doctor")
+	if want := "WARN ref guard: off: " + hook + " holds another hook (the next block open keeps it and runs it after the guard)\n"; !strings.Contains(out, want) {
+		t.Fatalf("doctor lacks %q:\n%s", want, out)
+	}
+	if _, err := refguard.Install(tree, "main", "forge/r1/B1", "forge/{run}/{block}"); err != nil {
+		t.Fatalf("install over a foreign hook: %v", err)
 	}
 	_, out, _ = runCaptured(t, "doctor")
-	if want := "WARN ref guard: off: " + hook + " already holds another hook; the guard is off\n"; !strings.Contains(out, want) {
+	if want := "OK   ref guard: on: hook " + hook + "; runs " + hook + ".code-forge-chained after the guard; 1 coder worktree(s) guarded\n"; !strings.Contains(out, want) {
 		t.Fatalf("doctor lacks %q:\n%s", want, out)
 	}
 	e.assertClean(t)

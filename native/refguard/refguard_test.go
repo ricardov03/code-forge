@@ -133,31 +133,6 @@ func TestGuardLetsTheLandTokenAndTheMainCheckoutMoveMain(t *testing.T) {
 	}
 }
 
-func TestInstallKeepsAForeignHook(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	root := t.TempDir()
-	repo := filepath.Join(root, "repo")
-	must(t, root, "init", "-q", "-b", "main", repo)
-	must(t, repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "base")
-	if status, detail := State(repo); status != "" || detail != "" {
-		t.Fatalf("state before any coder worktree = %s %s, want no row", status, detail)
-	}
-	hook := filepath.Join(repo, ".git", "hooks", HookName)
-	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Install(repo, "main", "forge/r/B1", "forge/{run}/{block}")
-	if err == nil || !strings.Contains(err.Error(), "already holds another hook") {
-		t.Fatalf("install over a foreign hook: %v", err)
-	}
-	if data, _ := os.ReadFile(hook); string(data) != "#!/bin/sh\nexit 0\n" {
-		t.Fatalf("foreign hook changed: %q", data)
-	}
-	if status, detail := State(repo); status != "WARN" || !strings.HasPrefix(detail, "off: ") || !strings.HasSuffix(detail, "/hooks/"+HookName+" already holds another hook; the guard is off") {
-		t.Fatalf("state = %s %s", status, detail)
-	}
-}
-
 func TestStateReportsGuardedWorktrees(t *testing.T) {
 	repo, _, _ := fixture(t)
 	status, detail := State(repo)

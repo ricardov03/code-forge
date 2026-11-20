@@ -33,6 +33,7 @@ import (
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/pkgroot"
+	"github.com/ricardov03/code-forge/native/refguard"
 	"github.com/ricardov03/code-forge/native/session"
 	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
@@ -698,7 +699,9 @@ func prepareDoctorNoConfig(cwd, home string, rows []doctorRow, jsonOut bool) (fu
 	if reason != 0 {
 		return handover(reason)
 	}
-	rows = append(rows, native, daemon)
+	rows = append(rows, native)
+	rows = append(rows, dfRefGuardRows(cwd)...) // B808: the guard row on this path too
+	rows = append(rows, daemon)
 	return func(stdout, stderr io.Writer) int {
 		nativeReportedKind = ""
 		defer release()
@@ -726,6 +729,15 @@ func prepareDoctorNoConfig(cwd, home string, rows []doctorRow, jsonOut bool) (fu
 		nativeReportedKind = ""
 		return 0
 	}, 0, true
+}
+
+// dfRefGuardRows is the coder ref guard's doctor row for the repository at
+// cwd (B797): none when no coder worktree was ever opened there.
+func dfRefGuardRows(cwd string) []doctorRow {
+	if status, detail := refguard.State(cwd); status != "" {
+		return []doctorRow{{"ref-guard", status, "ref guard", detail}}
+	}
+	return nil
 }
 
 func dfAccessW(p string) error { return dfAccess(p, 2) }

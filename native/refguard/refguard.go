@@ -36,50 +36,94 @@ const (
 	hookTag    = "# code-forge ref guard (B797)"
 )
 
-// hookScript is POSIX sh so it runs wherever git runs hooks.
-const hookScript = `#!/bin/sh
+// ChainSuffix names the foreign hook the guard keeps and runs after itself
+// (B809): the file that held the hooks folder's reference-transaction hook
+// before the guard, renamed to <hook>.code-forge-chained.
+const ChainSuffix = ".code-forge-chained"
+
+// WorktreeHooks is the per-worktree hooks folder (in the worktree's git
+// dir) the guard uses when core.hooksPath points inside a work tree (husky):
+// the coder worktree's core.hooksPath (worktree config) points here, and its
+// hooks run the work tree's hooks after the guard.
+const WorktreeHooks = "code-forge-hooks"
+
+// origFile in WorktreeHooks holds the hooks folder it replaces.
+const origFile = ".code-forge-orig"
+
+// stubTag marks the forwarding hooks of WorktreeHooks.
+const stubTag = "# code-forge ref guard forward (B809)"
+
+// gitHooks are the hook names git runs; WorktreeHooks forwards each one the
+// replaced folder holds.
+var gitHooks = []string{"applypatch-msg", "pre-applypatch", "post-applypatch", "pre-commit", "pre-merge-commit", "prepare-commit-msg", "commit-msg", "post-commit", "pre-rebase", "post-checkout", "post-merge", "pre-push", "pre-receive", "update", "proc-receive", "post-receive", "post-update", "push-to-checkout", "pre-auto-gc", "post-rewrite", "sendemail-validate", "fsmonitor-watchman", "p4-changelist", "p4-prepare-changelist", "p4-post-changelist", "p4-pre-submit", "post-index-change"}
+
+// shQuote quotes s for a POSIX shell.
+func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// hookScript is POSIX sh so it runs wherever git runs hooks. chain is the
+// foreign reference-transaction hook it runs after the guard with the same
+// arguments and stdin (B809); the hook fails when either fails.
+func hookScript(chain string) string {
+	return `#!/bin/sh
 ` + hookTag + `
 # Refuses, inside a code-forge coder worktree only, any move of the main
 # branch or of another block's branch. code-forge block land and the release
-# carry ` + TokenEnv + `. code-forge rewrites this file; do not edit it.
-[ "$1" = prepared ] || exit 0
-gd=$(git rev-parse --absolute-git-dir 2>/dev/null) || exit 0
-conf="$gd/` + MarkerName + `"
-[ -f "$conf" ] || exit 0
-if [ -n "$` + TokenEnv + `" ]; then
-	common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
-	token=$(cat "$common/` + StateDir + `/token" 2>/dev/null)
-	if [ -n "$token" ] && [ "$token" = "$` + TokenEnv + `" ]; then exit 0; fi
-fi
-protect= own= pattern=
-while IFS=' ' read -r key value; do
-	case $key in
-	protect) protect=$value ;;
-	own) own=$value ;;
-	pattern) pattern=$value ;;
-	esac
-done < "$conf"
-status=0
-while read -r old new ref; do
-	# an unchanged ref is no move; a delete can carry zero ids on both sides
-	case $new in *[!0]*) [ "$old" = "$new" ] && continue ;; esac
-	[ -n "$own" ] && [ "$ref" = "$own" ] && continue
-	what=
-	if [ -n "$protect" ] && [ "$ref" = "$protect" ]; then
-		what="the main branch"
-	elif [ -n "$pattern" ]; then
-		case $ref in $pattern) what="another block's branch" ;; esac
+# carry ` + TokenEnv + `. Then it runs the chained hook (B809), if any, with
+# the same arguments and stdin. code-forge rewrites this file; do not edit it.
+chain=` + shQuote(chain) + `
+input=$(cat; echo .)
+input=${input%.}
+guard() {
+	[ "$1" = prepared ] || return 0
+	gd=$(git rev-parse --absolute-git-dir 2>/dev/null) || return 0
+	conf="$gd/` + MarkerName + `"
+	[ -f "$conf" ] || return 0
+	if [ -n "$` + TokenEnv + `" ]; then
+		common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+		token=$(cat "$common/` + StateDir + `/token" 2>/dev/null)
+		if [ -n "$token" ] && [ "$token" = "$` + TokenEnv + `" ]; then return 0; fi
 	fi
-	if [ -n "$what" ]; then
-		echo "code-forge ref guard: refused to move $ref ($what) from this coder worktree" >&2
-		status=1
-	fi
-done
-if [ $status -ne 0 ]; then
-	echo "safe: git fetch origin, then read FETCH_HEAD (git log FETCH_HEAD, git diff FETCH_HEAD...HEAD); never git branch -f, git update-ref or git fetch into a local branch; only code-forge block land moves ${protect:-the main branch}" >&2
+	protect= own= pattern=
+	while IFS=' ' read -r key value; do
+		case $key in
+		protect) protect=$value ;;
+		own) own=$value ;;
+		pattern) pattern=$value ;;
+		esac
+	done < "$conf"
+	printf '%s' "$input" | {
+		status=0
+		while read -r old new ref; do
+			# an unchanged ref is no move; a delete can carry zero ids on both sides
+			case $new in *[!0]*) [ "$old" = "$new" ] && continue ;; esac
+			[ -n "$own" ] && [ "$ref" = "$own" ] && continue
+			what=
+			if [ -n "$protect" ] && [ "$ref" = "$protect" ]; then
+				what="the main branch"
+			elif [ -n "$pattern" ]; then
+				case $ref in $pattern) what="another block's branch" ;; esac
+			fi
+			if [ -n "$what" ]; then
+				echo "code-forge ref guard: refused to move $ref ($what) from this coder worktree" >&2
+				status=1
+			fi
+		done
+		if [ $status -ne 0 ]; then
+			echo "safe: git fetch origin, then read FETCH_HEAD (git log FETCH_HEAD, git diff FETCH_HEAD...HEAD); never git branch -f, git update-ref or git fetch into a local branch; only code-forge block land moves ${protect:-the main branch}" >&2
+		fi
+		exit $status
+	}
+}
+guard "$@"
+status=$?
+if [ -n "$chain" ] && [ -x "$chain" ]; then
+	printf '%s' "$input" | "$chain" "$@"
+	rc=$?
+	[ $status -eq 0 ] && status=$rc
 fi
 exit $status
 `
+}
 
 // Installed reports whether the file at path is the guard's hook.
 func Installed(path string) bool {
@@ -164,6 +208,12 @@ func ensureState(common string) error {
 // when the block was opened on a detached HEAD), own the block's branch and
 // template the proof.worktree.branch template. It returns the hook path. An
 // error names why the guard is not on; the worktree still works.
+//
+// B809: a foreign reference-transaction hook is kept and chained (renamed to
+// <hook>.code-forge-chained, run after the guard). A core.hooksPath inside a
+// work tree (husky) is never written to: the coder worktree gets its own
+// hooks folder (worktree config core.hooksPath) whose hooks run the work
+// tree's hooks, the reference-transaction one after the guard.
 func Install(tree, protect, own, template string) (string, error) {
 	hooks, err := HooksDir(tree)
 	if err != nil {
@@ -179,31 +229,24 @@ func Install(tree, protect, own, template string) (string, error) {
 	}
 	top, _ := gitx.Run(tree, "rev-parse", "--show-toplevel")
 	mainTop := filepath.Dir(common)
-	hook := filepath.Join(hooks, HookName)
-	var off error
-	if !inside(hooks, common) && (inside(hooks, strings.TrimSpace(top)) || filepath.Base(common) == ".git" && inside(hooks, mainTop)) {
-		off = fmt.Errorf("core.hooksPath %s is inside a work tree; add the code-forge hook there by hand", hooks)
-	} else if _, err := os.Lstat(hook); err == nil && !Installed(hook) {
-		off = fmt.Errorf("%s already holds another hook; the guard is off", hook)
-	}
+	ours := filepath.Join(gitDir, WorktreeHooks)
+	inTree := !inside(hooks, common) && (inside(hooks, strings.TrimSpace(top)) || filepath.Base(common) == ".git" && inside(hooks, mainTop))
 	if err := ensureState(common); err != nil {
-		return hook, fmt.Errorf("cannot write the guard state: %w", err)
+		return filepath.Join(hooks, HookName), fmt.Errorf("cannot write the guard state: %w", err)
+	}
+	var hook string
+	if inTree || samePath(hooks, ours) {
+		hook, err = installWorktreeHooks(tree, hooks, ours)
+	} else {
+		hook, err = installShared(hooks)
 	}
 	offFile := filepath.Join(common, StateDir, "off")
-	if off != nil {
+	if err != nil {
 		// doctor reads why the guard could not go on.
-		_ = writeAtomic(offFile, []byte(off.Error()+"\n"), 0o600)
-		return hook, off
-	}
-	_ = os.Remove(offFile)
-	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		_ = writeAtomic(offFile, []byte(err.Error()+"\n"), 0o600)
 		return hook, err
 	}
-	if data, err := os.ReadFile(hook); err != nil || string(data) != hookScript {
-		if err := writeAtomic(hook, []byte(hookScript), 0o755); err != nil {
-			return hook, err
-		}
-	}
+	_ = os.Remove(offFile)
 	conf := ""
 	if protect != "" {
 		conf += "protect refs/heads/" + protect + "\n"
@@ -211,6 +254,88 @@ func Install(tree, protect, own, template string) (string, error) {
 	conf += "own refs/heads/" + own + "\npattern " + Pattern(template) + "\n"
 	if err := writeAtomic(filepath.Join(gitDir, MarkerName), []byte(conf), 0o644); err != nil {
 		return hook, err
+	}
+	return hook, nil
+}
+
+func samePath(a, b string) bool {
+	if ra, err := filepath.EvalSymlinks(a); err == nil {
+		a = ra
+	}
+	if rb, err := filepath.EvalSymlinks(b); err == nil {
+		b = rb
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+// writeIfChanged writes data to path unless it already holds it.
+func writeIfChanged(path, data string) error {
+	if old, err := os.ReadFile(path); err == nil && string(old) == data {
+		return nil
+	}
+	return writeAtomic(path, []byte(data), 0o755)
+}
+
+// installShared puts the guard in the repository's hooks folder; a foreign
+// reference-transaction hook there moves to <hook>.code-forge-chained and
+// runs after the guard.
+func installShared(hooks string) (string, error) {
+	hook := filepath.Join(hooks, HookName)
+	chained := hook + ChainSuffix
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		return hook, err
+	}
+	if _, err := os.Lstat(hook); err == nil && !Installed(hook) {
+		if _, err := os.Lstat(chained); err == nil {
+			// Never drop the hook kept before: a rename would replace it.
+			return hook, fmt.Errorf("%s holds another hook and %s already holds the one kept before; join them into one hook by hand, then open a block again; the guard is off", hook, chained)
+		}
+		if err := os.Rename(hook, chained); err != nil {
+			return hook, fmt.Errorf("cannot keep the foreign hook %s as %s: %w", hook, chained, err)
+		}
+	}
+	return hook, writeIfChanged(hook, hookScript(chained))
+}
+
+// installWorktreeHooks gives the coder worktree tree its own hooks folder
+// ours (core.hooksPath in the worktree config) when the repository's hooks
+// folder orig is inside a work tree: the guard runs, then orig's
+// reference-transaction; every other hook orig holds is forwarded.
+func installWorktreeHooks(tree, orig, ours string) (string, error) {
+	hook := filepath.Join(ours, HookName)
+	if samePath(orig, ours) {
+		data, err := os.ReadFile(filepath.Join(ours, origFile))
+		if err != nil || strings.TrimSpace(string(data)) == "" {
+			return hook, fmt.Errorf("core.hooksPath %s has no recorded original hooks folder; the guard is off", ours)
+		}
+		orig = strings.TrimSpace(string(data))
+	}
+	if err := os.MkdirAll(ours, 0o755); err != nil {
+		return hook, err
+	}
+	if err := writeAtomic(filepath.Join(ours, origFile), []byte(orig+"\n"), 0o644); err != nil {
+		return hook, err
+	}
+	for _, name := range gitHooks {
+		stub := filepath.Join(ours, name)
+		if _, err := os.Stat(filepath.Join(orig, name)); err == nil {
+			target := filepath.Join(orig, name)
+			body := "#!/bin/sh\n" + stubTag + "\nh=" + shQuote(target) + "\n[ -x \"$h\" ] || exit 0\nexec \"$h\" \"$@\"\n"
+			if err := writeIfChanged(stub, body); err != nil {
+				return hook, err
+			}
+		} else if data, err := os.ReadFile(stub); err == nil && strings.Contains(string(data), stubTag) {
+			_ = os.Remove(stub)
+		}
+	}
+	if err := writeIfChanged(hook, hookScript(filepath.Join(orig, HookName))); err != nil {
+		return hook, err
+	}
+	if _, err := gitx.Run(tree, "config", "extensions.worktreeConfig", "true"); err != nil {
+		return hook, fmt.Errorf("core.hooksPath %s is inside a work tree and the worktree config cannot be turned on: %w", orig, err)
+	}
+	if _, err := gitx.Run(tree, "config", "--worktree", "core.hooksPath", ours); err != nil {
+		return hook, fmt.Errorf("core.hooksPath %s is inside a work tree and the coder worktree's hooks folder cannot be set: %w", orig, err)
 	}
 	return hook, nil
 }
@@ -334,24 +459,37 @@ func State(tree string) (status, detail string) {
 		// No coder worktree was ever opened here: nothing to guard, no row.
 		return "", ""
 	}
+	marked, perTree := 0, 0
+	if entries, err := os.ReadDir(filepath.Join(common, "worktrees")); err == nil {
+		for _, e := range entries {
+			dir := filepath.Join(common, "worktrees", e.Name())
+			if _, err := os.Stat(filepath.Join(dir, MarkerName)); err == nil {
+				marked++
+				if Installed(filepath.Join(dir, WorktreeHooks, HookName)) {
+					perTree++
+				}
+			}
+		}
+	}
+	if !Installed(hook) && perTree > 0 {
+		// B809: core.hooksPath is in a work tree; each coder worktree has
+		// its own hooks folder that runs the work tree's hooks after the guard.
+		return "OK", fmt.Sprintf("on: per-worktree hooks (core.hooksPath %s is in a work tree; its %s runs after the guard); %d coder worktree(s) guarded", hooks, HookName, perTree)
+	}
 	if data, err := os.ReadFile(filepath.Join(common, StateDir, "off")); err == nil && !Installed(hook) {
 		return "WARN", "off: " + strings.TrimSpace(string(data))
 	}
 	if !Installed(hook) {
 		if _, err := os.Lstat(hook); err == nil {
-			return "WARN", "off: " + hook + " holds another hook"
+			return "WARN", "off: " + hook + " holds another hook (the next block open keeps it and runs it after the guard)"
 		}
 		return "WARN", "off: hook " + hook + " is missing (the next block open puts it back)"
 	}
-	guarded := 0
-	if entries, err := os.ReadDir(filepath.Join(common, "worktrees")); err == nil {
-		for _, e := range entries {
-			if _, err := os.Stat(filepath.Join(common, "worktrees", e.Name(), MarkerName)); err == nil {
-				guarded++
-			}
-		}
+	chains := ""
+	if info, err := os.Stat(hook + ChainSuffix); err == nil && !info.IsDir() {
+		chains = "; runs " + hook + ChainSuffix + " after the guard"
 	}
-	return "OK", fmt.Sprintf("on: hook %s; %d coder worktree(s) guarded", hook, guarded)
+	return "OK", fmt.Sprintf("on: hook %s%s; %d coder worktree(s) guarded", hook, chains, marked)
 }
 
 // neverGuarded answers without running git when the nearest .git above tree
