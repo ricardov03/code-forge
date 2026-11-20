@@ -202,6 +202,9 @@ code-forge autopilot log --run <run> --json            # the full log, as data
 code-forge autopilot binnacle --run <run> --markdown   # write both files, print the binnacle path
 ```
 
+The full log has one **Block landed** row per block `block land` merged (signed `block.landed`
+row: `main <sha>`, and `land.after commit <sha>` when `land.after` committed something; B960).
+
 **Settle before you ask.** Before a block close, the orchestrator runs
 `code-forge block settle <id> --run <run>`. Settle re-reads the close blocker list each round and
 runs every fix an orchestrator may run, in a fixed order: `block rebase --accept-landed` for a stale

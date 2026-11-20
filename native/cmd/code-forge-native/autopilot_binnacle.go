@@ -42,7 +42,7 @@ const (
 	bnLinkMax      = 2048
 )
 
-var bnExtraEvents = []string{"block.close", "review.session_timeout", "review.schema_fallback", "worker.down", "worker.replaced", "ledger.tamper", "budget.refused", "gate.red", "gate.done", "step.over_budget"}
+var bnExtraEvents = []string{"block.close", "review.session_timeout", "review.schema_fallback", "worker.down", "worker.replaced", "ledger.tamper", "budget.refused", "gate.red", "gate.done", "step.over_budget", "block.landed"}
 
 // jsUndefined is a missing property: `${x}` gives "undefined", `??` skips it.
 type jsUndefined struct{}
@@ -606,6 +606,12 @@ func bnDescribe(row any) (string, string, any) {
 			detail += " · commit " + sha.(string)
 		}
 		return "Block closed", detail, bnFirst(g("pr_url"), g("pr"))
+	case "block.landed": // B960: one row per landed block
+		detail := "main " + bnU(bnShort(g("main")), "unknown")
+		if sha := bnShort(g("after_commit")); bnStr(sha) {
+			detail += " · land.after commit " + sha.(string)
+		}
+		return "Block landed", detail, nil
 	case "review.session_timeout":
 		retried := "gave up"
 		if g("retried") == true {

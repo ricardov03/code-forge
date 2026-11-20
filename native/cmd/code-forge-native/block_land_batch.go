@@ -45,6 +45,7 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 	requestedIDs := append([]string{}, ids...)
 	var landedCfg map[string]any
 	landedMain := ""
+	landedNow := []string{} // B960: the blocks this call merged
 	stop := func(reason string) int {
 		fmt.Fprintf(safeStderr, "block %s land stopped at %s: %s\n", stoppedID, step, strings.TrimSpace(reason))
 		if json {
@@ -537,6 +538,7 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 			if err := landBatchCommit(home, run, batch[:green]); err != nil {
 				return err
 			}
+			landedNow = append(landedNow, landed...)
 		}
 		keep = green
 		for i, block := range batch {
@@ -580,6 +582,12 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 		}
 		// B803: an earlier CI round landed blocks; they are still pushed.
 		ids, retry = nil, nil
+	} else if len(landedNow) > 0 {
+		// B960: land.after in main and one block.landed row per merged block, before the push.
+		if err := landAfterRun(home, run, landedCfg, landedMain, landedNow, safeStderr); err != nil {
+			stoppedID, step = landedNow[0], "after"
+			return stop(err.Error())
+		}
 	}
 	// B796: close the open CI pull requests of each landed block.
 	if landedMain != "" {
