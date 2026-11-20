@@ -9,6 +9,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Changed
 
 - `block open` never lets a coder build on a red base: it reads the base's CI with `gh run list --commit <base>`; with `land.require_ci: github` a red base, a base with no CI run or one still running is refused before anything is recorded, with the next step (`gh run view <id> --log-failed` or `code-forge ci watch --sha <base>`); with the gate off a red base or one with no run prints a `warning:` line and the open goes on (B920).
+- Every coder context pack has a generated `## test budget (code-forge)` section and every coder spawned with `--block` a `Test budget (code-forge):` line: run only the test names you add or change (`go test <pkg> -run '^(...)$' -count=1 -p N`), no package-wide, full-suite or stress runs unless the owner asks, GitHub CI is the full gate; N is the new `gates.coder_test_parallel` (default 2) (B923).
 
 ## [0.26.0] — 2026-11-19
 

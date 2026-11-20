@@ -490,6 +490,13 @@ context:
 - each rules file, then the lessons file, each headed by its path (an empty or whitespace-only file
   gives its heading alone).
 
+The header also carries generated rule sections: the forbidden list, `## git rules (code-forge)`
+(B797) and `## test budget (code-forge)` (B923): run only the test names you add or change
+(`go test <pkg> -run '^(TestA|TestB)$' -count=1 -p N`), no package-wide, full-suite or stress
+(`-count=N`) runs unless the owner asks; GitHub CI is the full gate. N is
+`gates.coder_test_parallel` (default 2). `code-forge spawn --role coder --block <id>` adds the same
+rule to the coder prompt as one `Test budget (code-forge):` line.
+
 Over `max_lines` the lessons are cut first, then the rules files from the last one backwards; each
 cut section ends in `[cut: N lines dropped]`. The header and the commands are never cut. It prints
 the path and `tokens ~<n>` (bytes / 4, as for review packets), or with `--json` one line

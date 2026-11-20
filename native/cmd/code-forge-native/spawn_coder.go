@@ -86,7 +86,7 @@ var spawnObjectProto = []string{"constructor", "hasOwnProperty", "isPrototypeOf"
 // spawnCoderPrompt is coderPromptFor(opts) for a coder with --block: the
 // prompt text, or its usage refusal (returned after the budget gate, as Node
 // computes it there); a reason = a case Go leaves to Node.
-func spawnCoderPrompt(brief []byte, block string, run *string) (*string, error, handoverReason) {
+func spawnCoderPrompt(cfg map[string]any, brief []byte, block string, run *string) (*string, error, handoverReason) {
 	if !reviewBlockID.MatchString(block) {
 		return nil, &session.Error{Code: "usage", Message: "block id must match /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/"}, 0
 	}
@@ -140,6 +140,8 @@ func spawnCoderPrompt(brief []byte, block string, run *string) (*string, error, 
 	if len(task) > 0 {
 		text += strings.Join(task, "\n") + "\n\n"
 	}
+	// B923: the CPU budget rule, with the configured -p
+	text += contextpack.TestBudgetLine(cfg) + "\n\n"
 	text += "Report the changed files and pass/fail counts. Print TESTS <command> exit=<n> on its own line before the sentinel. On success, print this exact sentinel as your last line:\n===BLOCK " + block + " COMPLETE===\n"
 	return &text, nil, 0
 }
