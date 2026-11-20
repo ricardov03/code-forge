@@ -249,6 +249,8 @@ makes a new sha pushes it to a new CI branch and waits for green CI on it first.
 tip (B980); otherwise it runs its test gate. B803: a batch land waits for CI with no
 block lock held: each tip's CI is read before the locks are taken, and a block whose rebase made a
 new sha ends the round (the blocks before it land), then waits for CI and lands in the next round.
+The CI-stopped block keeps its rebased tip on the landed prefix for the next CI round or a retry;
+other unlanded rebases return to their original tips and recorded bases (B1007).
 A tip that moves while the land waits is refused at `ci`. B804: a batch lands only a commit green CI
 proved; the landed marker records it as `ci_sha`. B979: a single-block `block land --merge` follows
 the same rules (test gate skipped on a CI-proved tip, a moved tip refused at `ci`). B980: a batch

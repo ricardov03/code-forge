@@ -14,6 +14,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- Batch land explicitly preserves the rebased tip stopped for CI on a landed prefix, while restoring every other unlanded rebase and its recorded bases after a gate failure (B1007).
+
 - Land searches for older CI PRs whenever the newest 200-row page is full, even with matching PRs there, retaining and deduplicating matches across search and exact-branch results (B1006).
 
 - Audit all 55 v0.27.0 entries against the code; fill in maintainer test and generated-doc guidance, correct CI gate reuse and autopilot backlog instructions, and link each entry to its documentation (B1015).

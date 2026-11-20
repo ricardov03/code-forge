@@ -807,6 +807,9 @@ Both batch land and single-block `block land --merge` skip the block's local tes
 when its tip is the sha CI proved green (B910, B979). Lint, types and format still run.
 A batch waits for CI without holding block locks (B803). After a rebase makes a new sha,
 the blocks before it can land first; the changed block waits for CI in the next round.
+The CI-stopped block keeps its rebased tip and base when the preceding prefix lands,
+including after a CI refusal, so a retry proves that same tip. Other unlanded
+rebases are restored to their original tips and bases (B1007).
 A tip that moves during the wait is refused at `ci`. A final check requires the proved
 sha before main moves, and a batch's landed marker records it as `ci_sha` (B804).
 
