@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// b891LaunchBound is the B593 test's bound on the launch and the reap: a
+// stop for a broken launch, never the expected wait (B891).
+const b891LaunchBound = 3 * time.Minute
+
 // b593FakeWorker records its pid, then leaves only a registry entry Go
 // cannot judge (a started_at only Date.parse could read: a lone surrogate
 // escape; B727 reads other lone surrogates in Go) and stays up: the strict launch
@@ -33,10 +37,13 @@ func TestB593StrictUndecidedLaunchReapsChild(t *testing.T) {
 	}
 	e := &b525Env{pids: filepath.Join(base, "fake-pids")}
 	t.Setenv("B524_PIDS", e.pids)
-	beforeTimeout := runLaunchTimeout
-	runLaunchTimeout = 10 * time.Second
+	// B891: the launch returns at the event (the undecided registry, then
+	// the child reaped); these bounds only stop a broken launch, so a slow
+	// machine never turns a wait into a failure.
+	beforeTimeout, beforeKillWait := runLaunchTimeout, runLaunchKillWait
+	runLaunchTimeout, runLaunchKillWait = b891LaunchBound, b891LaunchBound
 	t.Cleanup(func() {
-		runLaunchTimeout = beforeTimeout
+		runLaunchTimeout, runLaunchKillWait = beforeTimeout, beforeKillWait
 		for _, pid := range e.launched() {
 			if pid > 1 {
 				_ = syscall.Kill(pid, syscall.SIGKILL) // only the fake worker this test started
