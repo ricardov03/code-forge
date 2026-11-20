@@ -128,7 +128,7 @@ func TestB950LandFakeClock(t *testing.T) {
 	if rows := b950Rows(f, "step.over_budget"); len(rows) != 1 || rows[0]["step"] != "land" {
 		t.Fatalf("rows = %v", rows)
 	}
-	if found := b800Found(t, f); len(found) != 1 || found[0]["source"] != "speed" || found[0]["block"] != nil {
+	if found := b800Found(t, f); len(found) != 1 || found[0]["source"] != "speed" || found[0]["state"] != "backlog" || found[0]["block"] != nil {
 		t.Fatalf("found = %v", found)
 	}
 }
