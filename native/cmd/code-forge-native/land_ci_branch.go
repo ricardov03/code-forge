@@ -121,8 +121,62 @@ func landCIBlockPRs(main, id, prefix string) ([]landCIPR, error) {
 	// B805: gh pr list returns at most 200 rows here (newest first), so a
 	// full page with none of the block's PRs may hide older ones: search by
 	// head branch (a word prefix; the shape above keeps the exact ones).
-	prs, _, err = list("--search", "head:"+strings.ToLower(prefix+id))
-	return prs, err
+	prs, rows, err = list("--search", "head:"+strings.ToLower(prefix+id))
+	if err != nil || rows < 200 {
+		return prs, err
+	}
+	// B981: a full search page (other branches share the word prefix, and
+	// GitHub search stops at 1000 results) may still hide older PRs: list
+	// each exact CI branch name, stopping after 5 names in a row with none
+	// (the push loop skips at most 5 names).
+	prs = []landCIPR{}
+	for n, miss := 1, 0; miss < 5; n++ {
+		found, _, err := list("--head", landCIBranchName(prefix, id, n))
+		if err != nil {
+			return nil, err
+		}
+		if len(found) == 0 {
+			miss++
+			continue
+		}
+		miss = 0
+		prs = append(prs, found...)
+	}
+	return prs, nil
+}
+
+// landCIOpenPROn finds the open CI pull request on branch, as gh pr create
+// prints it (a URL ending /pull/<n>) (B981).
+func landCIOpenPROn(main, id, prefix, branch string) (string, bool) {
+	prs, err := landCIBlockPRs(main, id, prefix)
+	if err != nil {
+		return "", false
+	}
+	for _, pr := range prs {
+		if strings.EqualFold(pr.HeadRefName, branch) && strings.EqualFold(pr.State, "OPEN") {
+			return fmt.Sprintf("pull/%d", pr.Number), true
+		}
+	}
+	return "", false
+}
+
+// landCIPRClose closes pull request n with the B806 retry; before a retry it
+// reads the PR's state, and a PR already closed or merged is not closed
+// again (B981).
+func landCIPRClose(main string, n int, comment string) error {
+	number := strconv.Itoa(n)
+	_, err := landCIGhOnce(main, func() (string, bool) {
+		out, err := landCIGh(main, "pr", "view", number, "--json", "state")
+		if err != nil {
+			return "", false
+		}
+		var pr landCIPR
+		if json.Unmarshal([]byte(out), &pr) != nil {
+			return "", false
+		}
+		return "", strings.EqualFold(pr.State, "CLOSED") || strings.EqualFold(pr.State, "MERGED")
+	}, "pr", "close", number, "--comment", comment)
+	return err
 }
 
 func landCIShort(sha string) string {
@@ -199,19 +253,19 @@ func landCIEnsureBranch(main, id, sha, base string, s landCISettings, out io.Wri
 		body = fmt.Sprintf("Replaces %s (rebased onto %s).\n\nCI for block %s at %s.", strings.Join(refs, ", "), onto, id, sha)
 	}
 	body += "\n\nOpened by code-forge block land (land.require_ci: github); closed when the block lands."
-	created, err := ciGh(main, "pr", "create", "--draft", "--base", base, "--head", branch, "--title", id+": CI for "+short, "--body", body)
+	created, err := landCIGhOnce(main, func() (string, bool) { return landCIOpenPROn(main, id, s.prefix, branch) }, "pr", "create", "--draft", "--base", base, "--head", branch, "--title", id+": CI for "+short, "--body", body)
 	if err != nil {
 		fmt.Fprintf(out, "warning: ci: gh pr create for %s failed: %s; waiting for a CI run on the push\n", branch, strings.SplitN(err.Error(), "\n", 2)[0])
 		return ""
 	}
 	number := 0
-	if m := regexp.MustCompile(`/pull/([0-9]+)\s*$`).FindStringSubmatch(strings.TrimSpace(created)); m != nil {
+	if m := regexp.MustCompile(`pull/([0-9]+)\s*$`).FindStringSubmatch(strings.TrimSpace(created)); m != nil {
 		number, _ = strconv.Atoi(m[1])
 	}
 	fmt.Fprintf(out, "ci: opened draft PR #%d for %s\n", number, branch)
 	for _, pr := range open {
 		comment := fmt.Sprintf("Replaced by #%d: block %s tip %s (rebased onto %s).", number, id, short, onto)
-		if _, err := ciGh(main, "pr", "close", strconv.Itoa(pr.Number), "--comment", comment); err != nil {
+		if err := landCIPRClose(main, pr.Number, comment); err != nil {
 			fmt.Fprintf(out, "warning: ci: cannot close #%d: %s\n", pr.Number, strings.SplitN(err.Error(), "\n", 2)[0])
 			continue
 		}
@@ -244,7 +298,7 @@ func landCICloseLanded(cfg map[string]any, main, id, base string, out io.Writer)
 			continue
 		}
 		comment := fmt.Sprintf("Block %s landed into %s%s; this CI pull request is no longer needed.", id, base, at)
-		if _, err := ciGh(main, "pr", "close", strconv.Itoa(pr.Number), "--comment", comment); err != nil {
+		if err := landCIPRClose(main, pr.Number, comment); err != nil {
 			fmt.Fprintf(out, "warning: ci: cannot close #%d: %s\n", pr.Number, strings.SplitN(err.Error(), "\n", 2)[0])
 			continue
 		}

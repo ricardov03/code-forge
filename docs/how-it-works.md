@@ -749,7 +749,7 @@ and its next command is `gh run view <id> --log-failed`.
 
 **Newest base, rebase before CI (B942).** A new block with a worktree and no `--base` or `proof.worktree.base` starts from the newest base branch: `block open` fetches `origin <branch>` and takes the local tip when it contains origin's, or origin's tip (by sha; the local branch never moves) when it contains the local one. A repository without an origin, a detached HEAD or a fetch that fails keeps the local HEAD. Local and origin tips that diverged refuse with `base-diverged` and the `git log --left-right` next step; nothing is recorded. The context pack's git rules and a coder spawned with `--block` say: rebase on the newest base branch just before the CI push. `block ready` lists `stale_base` (fix `code-forge block rebase <id> --run <r> --accept-landed`) while the base branch moved past the block's base.
 
-**Never build on a red base (B920).** Before anything is recorded, `block open` reads the CI of the base a new block builds on (`gh run list --commit <base>`, `--workflow <land.ci_workflow>` when set). With `land.require_ci: github` a red base refuses the open (exit 1, `base <sha8> CI is red (...)`, next `gh run view <id> --log-failed`), and so does a base with no CI run or with CI still running (next `code-forge ci watch --sha <base>`); fix main first or open on a green commit with `--base <sha>`. With the gate off a red base or a base with no run prints a `warning:` line and the open goes on; no `gh` on `PATH`, or a `gh` that cannot answer (no GitHub remote), says nothing. A re-open keeps its worktree's base and is not checked again.
+**Never build on a red base (B920).** Before anything is recorded, `block open` reads the CI of the base a new block builds on (`gh run list --commit <base>`, `--workflow <land.ci_workflow>` when set). With `land.require_ci: github` a red base refuses the open (exit 1, `base <sha8> CI is red (...)`, next `gh run view <id> --log-failed`), and so does a base with no CI run or with CI still running (next `code-forge ci watch --sha <base>`); fix main first or open on a green commit with `--base <sha>`. With the gate off a red base or a base with no run prints a `warning:` line and the open goes on; no `gh` on `PATH`, or a `gh` that cannot answer (no GitHub remote), says nothing. A re-open keeps its worktree's base and is not checked again. `spawn --role coder --run <id> --block <id>` checks the block's recorded base the same way before the coder starts, since the base may have turned red after the open: with the gate on a red, unchecked or still-running base refuses the spawn (exit 1, `spawn: base ...`), with the gate off it warns (B982).
 
 **No human between a rebase and green CI (B796).** With `land.require_ci: github`:
 
@@ -792,6 +792,17 @@ test timed out`; indented subtests are dropped). It prints each as `<name> -> <b
 NO BLOCK`; one `NO BLOCK`, or a failed log with no test name (a setup or build step red), refuses.
 The landing block is always dropped from `CODE_FORGE_CI_RED_BLOCKS`: a block never covers its own
 red.
+
+`land.require_main_ci: true` (with `land.require_ci: github`, B962) also judges the base branch: before
+the tip check, land reads the newest completed push run of the base (`gh run list --branch <base>
+--event push --status completed --limit 1`, `land.ci_workflow` applies) and refuses at step ci while
+it is red: `main CI is red (CI: failure, push run <id> at <sha8>); failing tests:`, each top-level
+failing test of its failed log as `<name> -> <block>` or `<name> -> NO BLOCK`, then the fix (`fix main
+first, or name the fix blocks of its reds in CODE_FORGE_CI_RED_BLOCKS with lines in
+land.ci_red_list`), next `gh run view <id> --log-failed`. It lands only when blocks are named and no
+test is `NO BLOCK` (`ci: main red only on known reds (B9), landing allowed`). Here the landing block may cover the red: landing the fix is how a red main turns green.
+A green run prints `ci: main push run <id> green (<sha8>)`; a base with no completed push run passes
+with a note.
 
 `code-forge ci watch --sha <sha> [--run <r>] [--timeout 30m] [--cwd <dir>] [--json]` polls
 `gh run list --commit <sha> --json databaseId,status,conclusion,name` every 30 s, with `gh` from

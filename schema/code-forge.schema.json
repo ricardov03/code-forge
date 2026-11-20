@@ -672,7 +672,20 @@
       "additionalProperties": false,
       "properties": {
         "min_confidence": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.7, "description": "B46: the lowest confidence at which the autopilot delegate's answer is acted on; below it the question goes to the owner." },
-        "max_found_blocks": { "type": "integer", "minimum": 0, "maximum": 100, "default": 10, "description": "B800: how many findings of one run `code-forge autopilot found` turns into queued blocks of that run. Past the cap a finding waits for the owner and is listed in the binnacle. 0 queues none. Read from the run's config in force (the run-start snapshot, or the last run reload)." }
+        "max_found_blocks": { "type": "integer", "minimum": 0, "maximum": 100, "default": 10, "description": "B800: how many findings of one run `code-forge autopilot found` turns into queued blocks of that run. Past the cap a finding waits for the owner and is listed in the binnacle. 0 queues none. Read from the run's config in force (the run-start snapshot, or the last run reload)." },
+        "step_budgets": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "B950: a speed budget per step of a run. Land and gate record their wall time; the coder session and the CI wait report theirs with `code-forge autopilot step`. The budget is the median of the project's earlier samples plus margin, once min_samples samples exist; a number of minutes under a step name fixes that step's budget. A step over its budget prints a WARN line, writes a step.over_budget row (shown in the binnacle) and, while an autopilot grant is active, records an `autopilot found` finding (source speed). Read from the run's config in force.",
+          "properties": {
+            "margin": { "type": "number", "minimum": 0, "maximum": 10, "default": 0.5, "description": "B950: the share added to the measured median (0.5 = 50%)." },
+            "min_samples": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5, "description": "B950: how many earlier samples a measured budget needs; with fewer, the step has no budget yet." },
+            "land": { "type": "number", "exclusiveMinimum": 0, "description": "B950: a fixed land budget in minutes (in place of the measured one)." },
+            "gate": { "type": "number", "exclusiveMinimum": 0, "description": "B950: a fixed gate budget in minutes (in place of the measured one)." },
+            "coder": { "type": "number", "exclusiveMinimum": 0, "description": "B950: a fixed coder session budget in minutes (in place of the measured one)." },
+            "ci_wait": { "type": "number", "exclusiveMinimum": 0, "description": "B950: a fixed CI wait budget in minutes (in place of the measured one)." }
+          }
+        }
       }
     },
     "coder": {
@@ -712,6 +725,7 @@
         "require_ci": { "type": "string", "enum": ["off", "github"], "default": "off", "description": "B765: `github` makes `block land --merge` (and a batch land) merge a block only when GitHub CI is green for the block branch's own tip sha, read with the gh CLI on PATH (`gh run list --commit <sha>`). A red run or no gh refuses the land at step ci (exit 1) before anything is merged or written. B796: a tip with no CI run is pushed to a CI branch with a draft PR (land.ci_branch_prefix, land.ci_remote), and a run still going is waited for up to land.ci_wait (default 30m); the timeout refuses with the command that resumes the land. A red run passes only when every failing test matches a land.ci_red_list line of a block named in CODE_FORGE_CI_RED_BLOCKS (never the landing block itself). Authority: read from the run-start config snapshot." },
         "ci_workflow": { "type": "string", "minLength": 1, "description": "B765: with land.require_ci, only runs of this workflow count (passed to `gh run list --workflow`, e.g. ci.yml). Unset: every workflow run for the tip must be green." },
         "ci_red_list": { "type": "string", "minLength": 1, "description": "B765: known-red list for land.require_ci, relative to the main checkout. One `<block> <regexp>` per line (Go regexp, matched against a failing test name); blank lines and # lines are skipped." },
+        "require_main_ci": { "type": "boolean", "default": false, "description": "B962: with land.require_ci: github, `block land` (single or batch) first reads the newest completed push run of the base branch (`gh run list --branch <base> --event push --status completed --limit 1`, land.ci_workflow applies) and refuses at step ci while it is red, before anything is merged or written. A red base lands only when every failing test of that run matches a land.ci_red_list line of a block named in CODE_FORGE_CI_RED_BLOCKS; here the landing block may cover the red (landing the fix is how main turns green). A base with no completed push run passes with a note. Authority: read from the run-start config snapshot." },
         "ci_wait": { "type": "string", "pattern": "^(off|0|([0-9]+(ms|s|m|h))+)$", "default": "30m", "description": "B796: with land.require_ci, how long `block land` waits for CI on the block tip before it refuses with the command that resumes the land. It polls `gh run list --commit <sha>` with backoff (10s doubling to 1m) and prints one progress line a minute. A red run refuses at once with the failed job names. `off` (or 0) reads CI once and refuses when it is not green yet." },
         "ci_branch_prefix": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$", "default": "ci-", "description": "B796: with land.require_ci, a block tip with no CI run and no open CI pull request at that tip is pushed (never forced) to <prefix><block> (lower case), or <prefix><block>-<n> when the old CI branch does not fast-forward (after a rebase), with a draft PR that replaces and closes the old one. After the land the block's open CI pull requests are closed." },
         "ci_remote": { "type": "string", "minLength": 1, "default": "origin", "description": "B796: the git remote the CI branch is pushed to. An SSH push that fails on authentication is retried once over HTTPS with the gh credential helper." },
@@ -723,6 +737,14 @@
           "default": true,
           "description": "B795: land merges append-only conflicts by itself (default on): CHANGELOG.md bullets (main's lines first, then the block's, one `### Kind` heading per kind, no repeated entry), rows of the markdown tables in `tables`, and the `generated` files land re-generates. Any other conflict aborts the merge, leaves main unchanged, prints the files with their kinds and one next step, and writes a land.conflict ledger row. `false` (or an object with `enabled: false`) keeps only the B431 CHANGELOG.md rule of a batch rebase. The object form also takes `tables` (repository-relative markdown files whose rows merge row by row; default `[docs/native-engine.md]`) and `generated` (`[{path, argv}]`: keep main's copy, run argv in the repository root, stage the file again). Authority: read from the run-start config snapshot."
         }
+      }
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "B951: release size. `code-forge release check` (and the autopilot stop report and binnacle) counts the distinct blocks (B<id> commit subjects) since the last v* tag.",
+      "properties": {
+        "max_blocks": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 8, "description": "B951: how many blocks a release holds at most. From max_blocks - 3 blocks release check prints an info line; at max_blocks or more it prints RELEASE NOW." }
       }
     },
     "telemetry": { "type": "string", "const": "off", "default": "off" }

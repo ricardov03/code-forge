@@ -58,6 +58,9 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 	proved, ciStopped, err := landBatchCIPre(flags, home, run, ids, json)
 	if err != nil {
 		stoppedID, step = ciStopped, "ci"
+		if _, fast := err.(landFastError); fast {
+			step = "fast-checks"
+		}
 		return stop(err.Error())
 	}
 	var retry []string
@@ -157,6 +160,13 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 			head, err := gitx.Run(tree.Path, "rev-parse", "HEAD")
 			if err != nil {
 				return err
+			}
+			// B964: the land fast checks, before any CI push, rebase or gate.
+			// B964: fast checks before CI, rebase and gate (the single-block path
+			// runs them in landExecuteWithReason, block_land_execute.go).
+			if problems := landFastChecks(tree.Path, base, strings.TrimSpace(head)); len(problems) > 0 {
+				step = "fast-checks"
+				return fmt.Errorf("block %s fails the land fast checks:\n  %s", id, strings.Join(problems, "\n  "))
 			}
 			// B765: land.require_ci checks each block's own tip before any
 			// rebase, gate or write.
@@ -399,7 +409,10 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 			cwd := filepath.Join(temporary, prefix)
 			tree := gatesCleanTree(temporary)
 			reason := ""
-			if !gatesReusableFull(cwd) {
+			if proved := landBatchCITree(main, tree, batch[:n]); proved != "" {
+				// B980: green CI already ran the full suite on this exact tree.
+				landBatchCITreeNote(json, tree, proved)
+			} else if !gatesReusableFull(cwd) {
 				tests, owned := []string{}, []string{}
 				for _, block := range batch[:n] {
 					tests = append(tests, gates.Strings(block.entry.Get("test_files"))...)

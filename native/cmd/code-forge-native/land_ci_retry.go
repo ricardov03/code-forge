@@ -53,3 +53,28 @@ func landCIGh(cwd string, args ...string) (string, error) {
 		pause *= 2
 	}
 }
+
+// landCIGhOnce is landCIGh for a gh call that changes GitHub (pr create, pr
+// close). A network error does not say whether GitHub did the change, so
+// before each retry done looks: when it finds the change made it returns
+// what the call would have printed and true, and the call is not sent again
+// (B981). Callers in land_ci_branch.go: landCIEnsureBranch (pr create, done =
+// landCIOpenPROn) and landCIPRClose (pr close, done = pr view state); the
+// tests are in land_ci_b981_test.go.
+func landCIGhOnce(cwd string, done func() (string, bool), args ...string) (string, error) {
+	pause := landCIGhBackoff
+	for try := 1; ; try++ {
+		out, err := ciGh(cwd, args...)
+		if !landCIGhNetwork(err) {
+			return out, err
+		}
+		if try >= landCIGhTries {
+			return out, fmt.Errorf("%s (after %d tries)", strings.SplitN(err.Error(), "\n", 2)[0], try)
+		}
+		landCISleep(pause)
+		pause *= 2
+		if made, ok := done(); ok {
+			return made, nil
+		}
+	}
+}

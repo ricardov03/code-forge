@@ -133,7 +133,7 @@ code-forge audit commands --json
 Exit 0. Output:
 
 ```text
-{"version":"dev","commit":"<sha>","date":"2026-01-01T00:00:00Z","commands":127,"checks":254,"problems":{"high":0,"low":0,"medium":0},"out":"","rows":[{"command":"audit","check":"help","result":"ok","severity":"","detail":"","block":""},{"command":"audit","check":"bad-flag","result":"ok","severity":"…
+{"version":"dev","commit":"<sha>","date":"2026-01-01T00:00:00Z","commands":128,"checks":256,"problems":{"high":0,"low":0,"medium":0},"out":"","rows":[{"command":"audit","check":"help","result":"ok","severity":"","detail":"","block":""},{"command":"audit","check":"bad-flag","result":"ok","severity":"…
 ```
 
 ```sh
@@ -232,7 +232,7 @@ author: facts sheet required: run code-forge facts --brief plans/brief.md first,
 Let a delegate decide for the owner within a grant
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--speed] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes] | digest --run <id> [--json] | ratify <row-id> --run <id> [--json] | revert <row-id> --run <id> [--json] | found --run <id> (--source <gate|land|coder|flaky|handover|review> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--severity <normal|customer-breaking>] [--fingerprint <key>] | --report <file> | --list) [--from <block>] [--json]
+usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--speed] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes] | digest --run <id> [--json] | ratify <row-id> --run <id> [--json] | revert <row-id> --run <id> [--json] | found --run <id> (--source <gate|land|coder|flaky|handover|review|speed> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--severity <normal|customer-breaking>] [--fingerprint <key>] | --report <file> | --list) [--from <block>] [--json] | step --run <id> --step <land|gate|coder|ci-wait> --ms <n> [--block <id>] [--json]
 ```
 
 #### When to use
@@ -865,7 +865,7 @@ code-forge autopilot log --run <run> --json
 Exit 0. Output:
 
 ```text
-[{"time":"2026-01-01T00:00:00Z","event":"Question to the owner","block":null,"file":null,"detail":"waive:nit · to owner (session-failed) · ad-<id>","link":null},{"time":"2026-01-01T00:00:00Z","event":"Delegate session","block":null,"file":null,"detail":"L2 · anthropic · status failed","link":null},{…
+[{"time":"2026-01-01T00:00:00Z","event":"Question to the owner","block":"B1","file":"src/a.txt","detail":"review:substitute · to owner (scope review:substitute not-allowed; the owner grants it with code-forge autopilot start --run <run> --until <time> --delegate L2 --allow review:substitute, else th…
 ```
 
 #### Exit codes
@@ -884,8 +884,8 @@ Prints one JSON line: an array of objects with these keys.
 |---|---|
 | `time` | string |
 | `event` | string |
-| `block` | null |
-| `file` | null |
+| `block` | string |
+| `file` | string |
 | `detail` | string |
 | `link` | null |
 
@@ -1066,7 +1066,7 @@ Prints one JSON line: an object with these keys.
 Turn a problem found during the run into a queued block of the same run
 
 ```text
-usage: code-forge autopilot found --run <id> (--source <gate|land|coder|flaky|handover|review> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--severity <normal|customer-breaking>] [--fingerprint <key>]
+usage: code-forge autopilot found --run <id> (--source <gate|land|coder|flaky|handover|review|speed> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--severity <normal|customer-breaking>] [--fingerprint <key>]
 ```
 
 #### When to use
@@ -1078,7 +1078,7 @@ During an autopilot run: record a problem you found (a red gate, a land failure,
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
 | `--run <id>` | string | not set | Run id (r-...). |
-| `--source <gate\|land\|coder\|flaky\|handover\|review>` | enum | not set | Where the problem was found: gate, land, coder, flaky, handover or review. |
+| `--source <gate\|land\|coder\|flaky\|handover\|review\|speed>` | enum | not set | Where the problem was found: gate, land, coder, flaky, handover or review. |
 | `--title <text>` | string | not set | One line that names the problem; it becomes the block title. |
 | `--evidence <text>` | string | not set | What shows the problem (a failing test, an error line); goes into the brief. |
 | `--evidence-file <path>` | path | not set | File with the evidence, instead of --evidence. |
@@ -1122,6 +1122,68 @@ F1 gate → - → backlog (next release) (backlog: not customer-breaking, so it 
 - [`autopilot status`](#autopilot-status)
 - [`autopilot binnacle`](#autopilot-binnacle)
 - [`autopilot start`](#autopilot-start)
+
+### autopilot step
+
+Record a step's wall time and warn when it runs over its speed budget
+
+```text
+usage: code-forge autopilot step --run <id> --step <land|gate|coder|ci-wait> --ms <n> [--block <id>] [--json]
+```
+
+#### When to use
+
+After a coder session or a CI wait of a run: report its wall time so the step's speed budget can warn (land and gate time themselves).
+
+#### Flags
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--run <id>` | string | not set | Run id (r-...). |
+| `--step <land\|gate\|coder\|ci-wait>` | enum | not set | The step: land, gate, coder or ci-wait. |
+| `--ms <n>` | number | not set | The step's wall time in whole milliseconds. |
+| `--block <id>` | string | not set | The block the step belongs to. |
+| `--json` | bool | off | Print JSON instead of text. |
+
+#### Examples
+
+```sh
+code-forge autopilot step --run <run> --step coder --ms 60000 --json
+```
+
+Exit 0. Output:
+
+```text
+{"step":"coder","ms":0,"budget_ms":0,"median_ms":0,"samples":0,"source":"","over":false}
+```
+
+#### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | Refused or failed; the message says why. |
+| 2 | Usage error: a missing, unknown or bad argument (the usage is printed). |
+
+#### JSON output
+
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `step` | string |
+| `ms` | number |
+| `budget_ms` | number |
+| `median_ms` | number |
+| `samples` | number |
+| `source` | string |
+| `over` | boolean |
+
+#### Related
+
+- [`autopilot found`](#autopilot-found)
+- [`autopilot binnacle`](#autopilot-binnacle)
+- [`block land`](#block-land)
 
 ## block
 
@@ -5630,7 +5692,7 @@ code-forge queue --json
 Exit 0. Output:
 
 ```text
-{"holders":[],"waiters":[],"changed_slots":2}
+{"holders":[],"waiters":[],"changed_slots":1}
 ```
 
 #### Exit codes
@@ -5688,7 +5750,7 @@ code-forge queue status --json
 Exit 0. Output:
 
 ```text
-{"holders":[],"waiters":[],"changed_slots":2}
+{"holders":[],"waiters":[],"changed_slots":1}
 ```
 
 #### Exit codes
@@ -5902,6 +5964,7 @@ Prints one JSON line: an object with these keys.
 | `checks` | array |
 | `failed` | array |
 | `steps` | array |
+| `release_size` | object |
 
 #### Related
 

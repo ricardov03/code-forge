@@ -71,7 +71,7 @@
         {
           "command": "code-forge audit commands --json",
           "exit": 0,
-          "output": "{\"version\":\"dev\",\"commit\":\"<sha>\",\"date\":\"2026-01-01T00:00:00Z\",\"commands\":127,\"checks\":254,\"problems\":{\"high\":0,\"low\":0,\"medium\":0},\"out\":\"\",\"rows\":[{\"command\":\"audit\",\"check\":\"help\",\"result\":\"ok\",\"severity\":\"\",\"detail\":\"\",\"block\":\"\"},{\"command\":\"audit\",\"check\":\"bad-flag\",\"result\":\"ok\",\"severity\":\"…"
+          "output": "{\"version\":\"dev\",\"commit\":\"<sha>\",\"date\":\"2026-01-01T00:00:00Z\",\"commands\":128,\"checks\":256,\"problems\":{\"high\":0,\"low\":0,\"medium\":0},\"out\":\"\",\"rows\":[{\"command\":\"audit\",\"check\":\"help\",\"result\":\"ok\",\"severity\":\"\",\"detail\":\"\",\"block\":\"\"},{\"command\":\"audit\",\"check\":\"bad-flag\",\"result\":\"ok\",\"severity\":\"…"
         },
         {
           "command": "code-forge audit commands --out",
@@ -238,7 +238,7 @@
       "owner_only": false,
       "hidden": false,
       "namespace": true,
-      "usage": "usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--speed] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes] | digest --run <id> [--json] | ratify <row-id> --run <id> [--json] | revert <row-id> --run <id> [--json] | found --run <id> (--source <gate|land|coder|flaky|handover|review> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--severity <normal|customer-breaking>] [--fingerprint <key>] | --report <file> | --list) [--from <block>] [--json]",
+      "usage": "usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--speed] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes] | digest --run <id> [--json] | ratify <row-id> --run <id> [--json] | revert <row-id> --run <id> [--json] | found --run <id> (--source <gate|land|coder|flaky|handover|review|speed> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--severity <normal|customer-breaking>] [--fingerprint <key>] | --report <file> | --list) [--from <block>] [--json] | step --run <id> --step <land|gate|coder|ci-wait> --ms <n> [--block <id>] [--json]",
       "flags": [],
       "examples": [
         {
@@ -1217,7 +1217,7 @@
         {
           "command": "code-forge autopilot log --run <run> --json",
           "exit": 0,
-          "output": "[{\"time\":\"2026-01-01T00:00:00Z\",\"event\":\"Question to the owner\",\"block\":null,\"file\":null,\"detail\":\"waive:nit · to owner (session-failed) · ad-<id>\",\"link\":null},{\"time\":\"2026-01-01T00:00:00Z\",\"event\":\"Delegate session\",\"block\":null,\"file\":null,\"detail\":\"L2 · anthropic · status failed\",\"link\":null},{…"
+          "output": "[{\"time\":\"2026-01-01T00:00:00Z\",\"event\":\"Question to the owner\",\"block\":\"B1\",\"file\":\"src/a.txt\",\"detail\":\"review:substitute · to owner (scope review:substitute not-allowed; the owner grants it with code-forge autopilot start --run <run> --until <time> --delegate L2 --allow review:substitute, else th…"
         }
       ],
       "exit_codes": [
@@ -1248,11 +1248,11 @@
           },
           {
             "key": "block",
-            "type": "null"
+            "type": "string"
           },
           {
             "key": "file",
-            "type": "null"
+            "type": "string"
           },
           {
             "key": "detail",
@@ -1476,7 +1476,7 @@
       "owner_only": false,
       "hidden": false,
       "namespace": false,
-      "usage": "usage: code-forge autopilot found --run <id> (--source <gate|land|coder|flaky|handover|review> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--severity <normal|customer-breaking>] [--fingerprint <key>]",
+      "usage": "usage: code-forge autopilot found --run <id> (--source <gate|land|coder|flaky|handover|review|speed> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--severity <normal|customer-breaking>] [--fingerprint <key>]",
       "flags": [
         {
           "name": "--run",
@@ -1487,7 +1487,7 @@
         },
         {
           "name": "--source",
-          "value": "<gate|land|coder|flaky|handover|review>",
+          "value": "<gate|land|coder|flaky|handover|review|speed>",
           "type": "enum",
           "default": "not set",
           "meaning": "Where the problem was found: gate, land, coder, flaky, handover or review."
@@ -1566,6 +1566,112 @@
         "autopilot status",
         "autopilot binnacle",
         "autopilot start"
+      ]
+    },
+    {
+      "name": "autopilot step",
+      "purpose": "Record a step's wall time and warn when it runs over its speed budget.",
+      "when": "After a coder session or a CI wait of a run: report its wall time so the step's speed budget can warn (land and gate time themselves).",
+      "owner_only": false,
+      "hidden": false,
+      "namespace": false,
+      "usage": "usage: code-forge autopilot step --run <id> --step <land|gate|coder|ci-wait> --ms <n> [--block <id>] [--json]",
+      "flags": [
+        {
+          "name": "--run",
+          "value": "<id>",
+          "type": "string",
+          "default": "not set",
+          "meaning": "Run id (r-...)."
+        },
+        {
+          "name": "--step",
+          "value": "<land|gate|coder|ci-wait>",
+          "type": "enum",
+          "default": "not set",
+          "meaning": "The step: land, gate, coder or ci-wait."
+        },
+        {
+          "name": "--ms",
+          "value": "<n>",
+          "type": "number",
+          "default": "not set",
+          "meaning": "The step's wall time in whole milliseconds."
+        },
+        {
+          "name": "--block",
+          "value": "<id>",
+          "type": "string",
+          "default": "not set",
+          "meaning": "The block the step belongs to."
+        },
+        {
+          "name": "--json",
+          "value": "",
+          "type": "bool",
+          "default": "off",
+          "meaning": "Print JSON instead of text."
+        }
+      ],
+      "examples": [
+        {
+          "command": "code-forge autopilot step --run <run> --step coder --ms 60000 --json",
+          "exit": 0,
+          "output": "{\"step\":\"coder\",\"ms\":0,\"budget_ms\":0,\"median_ms\":0,\"samples\":0,\"source\":\"\",\"over\":false}"
+        }
+      ],
+      "exit_codes": [
+        {
+          "code": 0,
+          "meaning": "Success."
+        },
+        {
+          "code": 1,
+          "meaning": "Refused or failed; the message says why."
+        },
+        {
+          "code": 2,
+          "meaning": "Usage error: a missing, unknown or bad argument (the usage is printed)."
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "step",
+            "type": "string"
+          },
+          {
+            "key": "ms",
+            "type": "number"
+          },
+          {
+            "key": "budget_ms",
+            "type": "number"
+          },
+          {
+            "key": "median_ms",
+            "type": "number"
+          },
+          {
+            "key": "samples",
+            "type": "number"
+          },
+          {
+            "key": "source",
+            "type": "string"
+          },
+          {
+            "key": "over",
+            "type": "boolean"
+          }
+        ]
+      },
+      "related": [
+        "autopilot found",
+        "autopilot binnacle",
+        "block land"
       ]
     },
     {
@@ -7013,7 +7119,7 @@
         {
           "command": "code-forge queue --json",
           "exit": 0,
-          "output": "{\"holders\":[],\"waiters\":[],\"changed_slots\":2}"
+          "output": "{\"holders\":[],\"waiters\":[],\"changed_slots\":1}"
         }
       ],
       "exit_codes": [
@@ -7088,7 +7194,7 @@
         {
           "command": "code-forge queue status --json",
           "exit": 0,
-          "output": "{\"holders\":[],\"waiters\":[],\"changed_slots\":2}"
+          "output": "{\"holders\":[],\"waiters\":[],\"changed_slots\":1}"
         }
       ],
       "exit_codes": [
@@ -7332,6 +7438,10 @@
           {
             "key": "steps",
             "type": "array"
+          },
+          {
+            "key": "release_size",
+            "type": "object"
           }
         ]
       },

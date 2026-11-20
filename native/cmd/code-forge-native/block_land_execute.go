@@ -30,6 +30,8 @@ func landExecute(args []string, flags map[string]any, home, run, id string, reco
 
 func landExecuteWithReason(args []string, flags map[string]any, home, run, id string, record, entry ledger.Object, fallback func(handoverReason) int) (code int) {
 	stderr := &landErrorStream{}
+	landStart, landOK := stepNow(), false                                                     // B950
+	defer func() { landAfter(stderr, home, run, id, landStart, landOK, code, stderr.last) }() // B950, B821
 	beforeLog := []any{}
 	begin := func() { beforeLog = gatesBreadcrumbName("block") }
 	finish := func() {
@@ -157,9 +159,20 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	// false the join runs in this process (landJoinStep).
 	daemonOn := daemonclient.Enabled(cfg)
 	mergeGate := merge && !skip && blockMap(cfg["gates"])["merge_gate"] != false
+	// B979: the tip green CI proved (land.require_ci), "" without the gate.
+	ciProved := ""
 	// B765: land.require_ci refuses before any write when the block tip's CI
 	// is not green; it runs ahead of every Node hand-over below.
 	if merge {
+		// B964: the land fast checks, before any CI push, rebase or gate.
+		fastBase := blockString(entry.Get("base_branch"))
+		if fastBase == "" {
+			fastBase = "main"
+		}
+		if problems := landFastChecks(top, fastBase, "HEAD"); len(problems) > 0 {
+			step = "fast-checks"
+			return stop("the land fast checks fail:\n  " + strings.Join(problems, "\n  "))
+		}
 		provider, bad := landCIRequired(cfg)
 		if bad != "" {
 			step = "ci"
@@ -185,6 +198,13 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 			for _, line := range notes {
 				fmt.Fprintln(out, line)
 			}
+			// B979 (B803 for one block): the CI wait above holds no lock, so
+			// the tip CI proved must still be the branch tip.
+			ciProved = strings.TrimSpace(sha)
+			if reason := landCITipMoved(main, id, branch, ciProved); reason != "" {
+				step = "ci"
+				return stop(reason)
+			}
 		}
 	}
 	if retry {
@@ -202,6 +222,10 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		if message != "" {
 			return fallback(hLandGatesParse)
 		}
+		// B979 (B910 for one block): green CI already ran the full suite on
+		// this tip, so the local test gate is skipped; the other gates and
+		// the merge gate still run.
+		gateOptions.noTest = ciProved != ""
 		// B450: only a run record that names another run or has no
 		// workspace path still hands the gates step over to Node.
 		if _, safe := gatesNativeStep(gateArgs, gateOptions, dry); !safe {
@@ -289,6 +313,9 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		before, err := stamp()
 		if err != nil {
 			return stop(err.Error())
+		}
+		if ciProved != "" {
+			fmt.Fprintf(print, "gates: block %s tip %s has green CI; local test gate skipped (B910)\n", id, landCIShort(ciProved))
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -435,6 +462,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		} else {
 			fmt.Fprintf(safeStdout, "block %s closed; merge: %s\n", id, command)
 		}
+		landOK = true
 		return 0
 	}
 	current, err := gitx.Run(main, "symbolic-ref", "-q", "HEAD")
@@ -454,6 +482,13 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	if err != nil || status != "" {
 		next = closeCommand([]string{"git", "-C", top, "status", "--short"})
 		return stop("block worktree is dirty or unreadable; commit and review its changes before merging")
+	}
+	// B979 (B804 for one block): only the commit green CI proved is merged.
+	if ciProved != "" {
+		if reason := landCITipMoved(main, id, branch, ciProved); reason != "" {
+			step = "ci"
+			return stop(reason)
+		}
 	}
 	// B797: main moved only by lands, releases and plain commits since the
 	// last land.
@@ -541,6 +576,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	} else {
 		fmt.Fprintf(safeStdout, "block %s landed\n", id)
 	}
+	landOK = true
 	return 0
 }
 
@@ -854,4 +890,17 @@ func landRetryStateSafe(record ledger.Object, retry bool) bool {
 	without := record.Clone()
 	without.Delete("autopilot_approvals")
 	return blockGrantEndSafe(without)
+}
+
+// landCITipMoved refuses a block branch whose tip is not the sha green CI
+// proved (B979): it moved while the land waited for CI, or after.
+func landCITipMoved(main, id, branch, proved string) string {
+	head, err := gitx.Run(main, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch+"^{commit}")
+	if err != nil {
+		return "cannot resolve the tip of block branch " + branch
+	}
+	if head = strings.TrimSpace(head); head != proved {
+		return fmt.Sprintf("block %s tip moved from %s to %s while the land waited for CI (B803); land again", id, landCIShort(proved), landCIShort(head))
+	}
+	return ""
 }

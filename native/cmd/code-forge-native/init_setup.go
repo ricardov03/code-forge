@@ -19,6 +19,8 @@ import (
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/ramtmp"
+	"github.com/ricardov03/code-forge/native/releasecheck"
+	"github.com/ricardov03/code-forge/native/stepbudget"
 )
 
 // `code-forge init` past the refusals, without prompts (B527): the setup
@@ -444,9 +446,10 @@ type initValues struct {
 	soloProject    any
 	push, draft    bool
 	gates          map[string]any
-	ramTmp         any // B939: gates.ram_tmp, kept from the config or the default
-	ramTmpMB       any // B941: gates.ram_tmp_mb, kept from the config or the default
-	coderTestP     any // B923: gates.coder_test_parallel, kept from the config or the default
+	ramTmp         any           // B939: gates.ram_tmp, kept from the config or the default
+	ramTmpMB       any           // B941: gates.ram_tmp_mb, kept from the config or the default
+	coderTestP     any           // B923: gates.coder_test_parallel, kept from the config or the default
+	newKeys        ledger.Object // w1b: land, autopilot and release keys (initNewKeys)
 	proof          map[string]any
 	doctor         bool
 	gateOrigin     map[string]string
@@ -648,6 +651,8 @@ func initResolve(ctx initCtx, ex, user ledger.Object, existing bool, parsed init
 	if kept, present := initField(exGates, "coder_test_parallel"); initKept(kept, present) {
 		v.coderTestP = initClone(kept)
 	}
+
+	v.newKeys = initNewKeys(ex)
 
 	exProof, hasProof := initField(ex, "proof")
 	if initKept(exProof, hasProof) && !initIsMap(exProof) {
@@ -989,7 +994,58 @@ func initGenerated(v initValues, ctx initCtx, jevRef string) ledger.Object {
 		{Key: "coder_may_push", Value: v.push},
 		{Key: "coder_may_open_draft_pr", Value: v.push && v.draft},
 	}})
-	return cfg
+	return append(cfg, v.newKeys...)
+}
+
+// initNewKeys is the land, autopilot and release part of a new config (owner
+// rule: a new key goes into the default config): land.require_main_ci (B962),
+// autopilot.step_budgets.margin and .min_samples (B950) and release.max_blocks
+// (B951), each with its default. A value already in the config stays; a
+// section the config holds as something other than a map is left alone.
+func initNewKeys(ex ledger.Object) ledger.Object {
+	type key struct {
+		path []string
+		def  any
+	}
+	sections := []struct {
+		name string
+		keys []key
+	}{
+		{"land", []key{{[]string{"require_main_ci"}, false}}},
+		{"autopilot", []key{{[]string{"step_budgets", "margin"}, stepbudget.DefaultMargin}, {[]string{"step_budgets", "min_samples"}, float64(stepbudget.DefaultMinSamples)}}},
+		{"release", []key{{[]string{"max_blocks"}, float64(releasecheck.DefaultMaxBlocks)}}},
+	}
+	out := ledger.Object{}
+	for _, sec := range sections {
+		if v, present := initField(ex, sec.name); initKept(v, present) && !initIsMap(v) {
+			continue
+		}
+		obj := ledger.Object{}
+		for _, k := range sec.keys {
+			value := k.def
+			if kept, present := initField(ex, append([]string{sec.name}, k.path...)...); initKept(kept, present) {
+				value = initClone(kept)
+			}
+			if len(k.path) == 1 {
+				obj = append(obj, ledger.Field{Key: k.path[0], Value: value})
+				continue
+			}
+			parent, present := initField(ex, sec.name, k.path[0])
+			if initKept(parent, present) && !initIsMap(parent) {
+				continue
+			}
+			inner, _ := obj.Get(k.path[0]).(ledger.Object)
+			if inner == nil {
+				obj = append(obj, ledger.Field{Key: k.path[0], Value: ledger.Object{}})
+			}
+			inner = append(inner, ledger.Field{Key: k.path[1], Value: value})
+			obj.Set(k.path[0], inner)
+		}
+		if len(obj) > 0 {
+			out = append(out, ledger.Field{Key: sec.name, Value: obj})
+		}
+	}
+	return out
 }
 
 // initDropKeys removes keys from a map value, nil when nothing is left.

@@ -396,10 +396,11 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 			}
 			// B798: a go test gate reruns its failed test names instead.
 			if r.Get("ok") != true && ctx.Err() == nil {
-				names, pkgs := goFailedTests(fmt.Sprint(r.Get("stdout"))+"\n"+fmt.Sprint(r.Get("stderr")), GoFlakyMax)
-				if a := goRerunArgv(item.argv, names, pkgs); names != nil && a != nil {
+				output := fmt.Sprint(r.Get("stdout")) + "\n" + fmt.Sprint(r.Get("stderr"))
+				names, pkgs := goFailedTests(output, GoFlakyMax)
+				if a := goRerunCommand(item.argv, output, names, pkgs); names != nil && a != nil {
 					load := FlakyLoad()
-					if execute(ctx, a, p.CommandEnv(c.Env), cwd, run, timeout, c.FailOnStdout).Get("ok") == true && ctx.Err() == nil {
+					if execute(ctx, a, goRerunEnv(p.CommandEnv(c.Env), load), cwd, run, timeout, c.FailOnStdout).Get("ok") == true && ctx.Err() == nil {
 						tests := []any{}
 						for _, name := range names {
 							tests = append(tests, ledger.Object{{Key: "test", Value: name}, {Key: "packages", Value: pkgs}})

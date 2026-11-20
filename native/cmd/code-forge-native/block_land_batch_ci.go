@@ -90,6 +90,10 @@ func landBatchCIPre(flags map[string]any, home, run string, ids []string, json b
 			break
 		}
 		sha := strings.TrimSpace(head)
+		// B964 after B803: the fast checks run before this tip's CI is read.
+		if problems := landFastChecks(tree.Path, blockString(entry.Get("base_branch")), sha); len(problems) > 0 {
+			return nil, id, landFastError{fmt.Sprintf("block %s fails the land fast checks:\n  %s", id, strings.Join(problems, "\n  "))}
+		}
 		notes, refusal, next := landCIGate(cfg, main, id, sha, blockString(entry.Get("base_branch")), landCIResume(ids, run, flags), out)
 		if refusal != "" {
 			if next != "" {
@@ -104,6 +108,12 @@ func landBatchCIPre(flags map[string]any, home, run string, ids []string, json b
 	}
 	return proved, "", nil
 }
+
+// landFastError is a land fast-checks refusal (B964), so the batch stops at
+// step fast-checks, not ci.
+type landFastError struct{ text string }
+
+func (e landFastError) Error() string { return e.text }
 
 // landBatchCITip says whether batch[i], just rebased, must wait for CI on its
 // new tip (true: the round stops before it). A tip CI proved skips the local
@@ -159,4 +169,31 @@ func landBatchNoTest(commands map[string]*gates.Command) map[string]*gates.Comma
 		}
 	}
 	return kept
+}
+
+// B980: a merge-gate prefix whose tree is the tree of a block tip green CI
+// proved (land.require_ci) needs no local suite: CI ran the full suite on
+// that same tree. With blocks rebased onto the prefix before them, the whole
+// batch's tree is the last block's proved tip tree. landBatchCITree returns
+// the proved sha whose tree is tree, or "".
+func landBatchCITree(main, tree string, blocks []*landBatchBlock) string {
+	if tree == "" {
+		return ""
+	}
+	for i := len(blocks) - 1; i >= 0; i-- {
+		sha := blocks[i].ci
+		if sha == "" {
+			continue
+		}
+		got, err := gitx.Run(main, "rev-parse", "--verify", "--quiet", sha+"^{tree}")
+		if err == nil && strings.TrimSpace(got) == tree {
+			return sha
+		}
+	}
+	return ""
+}
+
+// landBatchCITreeNote says the merge gate reused CI's green full suite.
+func landBatchCITreeNote(json bool, tree, sha string) {
+	fmt.Fprintf(landBatchCIOut(json), "merge gate: tree %.12s is the tree green CI proved at %s; full suite skipped (B980)\n", tree, landCIShort(sha))
 }

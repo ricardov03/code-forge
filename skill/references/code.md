@@ -198,7 +198,7 @@ commit: a second start says another ci watch is already watching and exits 0.
 
 **Newest base, rebase before CI (B942).** A new block with a worktree and no `--base` or `proof.worktree.base` starts from the newest base branch: `block open` fetches `origin <branch>` and takes the local tip when it contains origin's, or origin's tip (by sha; the local branch never moves) when it contains the local one. A repository without an origin, a detached HEAD or a fetch that fails keeps the local HEAD. Local and origin tips that diverged refuse with `base-diverged` and the `git log --left-right` next step; nothing is recorded. The context pack's git rules and a coder spawned with `--block` say: rebase on the newest base branch just before the CI push. `block ready` lists `stale_base` (fix `code-forge block rebase <id> --run <r> --accept-landed`) while the base branch moved past the block's base.
 
-**Never build on a red base (B920).** Before anything is recorded, `block open` reads the CI of the base a new block builds on (`gh run list --commit <base>`, `--workflow <land.ci_workflow>` when set). With `land.require_ci: github` a red base refuses the open (exit 1, `base <sha8> CI is red (...)`, next `gh run view <id> --log-failed`), and so does a base with no CI run or with CI still running (next `code-forge ci watch --sha <base>`); fix main first or open on a green commit with `--base <sha>`. With the gate off a red base or a base with no run prints a `warning:` line and the open goes on; no `gh` on `PATH`, or a `gh` that cannot answer (no GitHub remote), says nothing. A re-open keeps its worktree's base and is not checked again.
+**Never build on a red base (B920).** Before anything is recorded, `block open` reads the CI of the base a new block builds on (`gh run list --commit <base>`, `--workflow <land.ci_workflow>` when set). With `land.require_ci: github` a red base refuses the open (exit 1, `base <sha8> CI is red (...)`, next `gh run view <id> --log-failed`), and so does a base with no CI run or with CI still running (next `code-forge ci watch --sha <base>`); fix main first or open on a green commit with `--base <sha>`. With the gate off a red base or a base with no run prints a `warning:` line and the open goes on; no `gh` on `PATH`, or a `gh` that cannot answer (no GitHub remote), says nothing. A re-open keeps its worktree's base and is not checked again. `spawn --role coder --run <id> --block <id>` checks the block's recorded base the same way before the coder starts, since the base may have turned red after the open: with the gate on a red, unchecked or still-running base refuses the spawn (exit 1, `spawn: base ...`), with the gate off it warns (B982).
 
 **Require green CI (B765).** `land.require_ci: github` (default `off`) makes `--merge` and a batch
 land merge a block only when GitHub CI is green for the block's own tip (`gh run list --commit
@@ -218,11 +218,21 @@ makes a new sha pushes it to a new CI branch and waits for green CI on it first.
 block lock held: each tip's CI is read before the locks are taken, and a block whose rebase made a
 new sha ends the round (the blocks before it land), then waits for CI and lands in the next round.
 A tip that moves while the land waits is refused at `ci`. B804: a batch lands only a commit green CI
-proved; the landed marker records it as `ci_sha`. B805: a block's CI PRs are found past the 200
+proved; the landed marker records it as `ci_sha`. B979: a single-block `block land --merge` follows
+the same rules (test gate skipped on a CI-proved tip, a moved tip refused at `ci`). B980: a batch
+merge gate on a tree green CI proved skips its test suite. B805: a block's CI PRs are found past the 200
 newest pull requests (a `head:` search when that page is full and holds none of them). B806: a short
 gh network error (timeout, connection reset, EOF, TLS/DNS failure, HTTP 5xx) while land reads CI is
 retried with a backoff, 3 tries in all; then land refuses at `ci` with gh's message, `(after 3
-tries)` and a `next:` line.
+tries)` and a `next:` line. B981: `pr create`/`pr close` retry too, after first checking whether
+the failed call took effect (no second PR, no second close); a full `head:` search page falls back to
+`pr list --head` per exact CI branch name.
+`land.require_main_ci: true` (B962) also refuses while the
+newest completed push run of the base branch is red, unless each of its failing tests matches a
+known-red line of a named block (the landing fix block may cover it).
+Before any of that, `block land` runs the fast checks (B964) on what each block adds: a conflict
+marker, an ignored `testdata/`/`fixtures/` file, a new duplicate docs table row, or a new
+`[Unreleased]` shape fault in CHANGELOG.md stops the land at `fast-checks` with each problem named.
 
 **Heal queue (B429).** `gates run --run --block`, `block rebase` and `block land` still fail on a
 held lock or a transient git error, but also queue the problem and print `heal: queued <id>` as the
@@ -255,9 +265,11 @@ For a block with `human_checks`, a successful close runs all code gates and writ
 
 With `gates.repeat_new_tests: N` (integer 2..10; absent means off), a passing `gates run --run <r> --block <id>` test gate runs N additional times for only the block's added or changed test files against its base, using a whole `{test_files}` argv item; without that item it prints `repeat_new_tests: skipped (gates.test has no {test_files})`, and without changed tests it does no repeats. A failed repeat makes the gate red with `reason: flaky-test`, the file list and failing output; JSON and signed gate rows carry `repeats: {n, files, failed}`, and the report's forecast section shows the count.
 
-A red `go test` gate (with `gates.rerun_failed` on, the default) reruns only its failed top-level test names, 3 times in one `go test -count=3 -run` call. All pass: the gate passes with a `gates: WARN flaky test ...` line, a `test.flaky` ledger row and a `flaky-test` finding in `~/.code-forge/runs/<run>/findings.jsonl`; make that finding a fix block (the test must not depend on wall time or load). Any rerun failure, more than 3 failed names, a panic or a build failure is a real failure (B798).
+A red `go test` gate (with `gates.rerun_failed` on, the default) reruns only its failed top-level test names, 3 times in one `go test -count=3 -run` call. All pass: the gate passes with a `gates: WARN flaky test ...` line, a `test.flaky` ledger row and a `flaky-test` finding in `~/.code-forge/runs/<run>/findings.jsonl`; make that finding a fix block (the test must not depend on wall time or load). Any rerun failure, more than 3 failed names, a panic or a build failure is a real failure (B798). A `go test -json` gate is read the same way from its events (B893). A `go run` wrapper gate's rerun keeps the build flags (`-timeout 75m`, `-p`) of the `go test` line the wrapper prints (B894). The rerun runs with `-p 2` (unless the gate set `-p`), `-trimpath` for a wrapper, and `GOMAXPROCS=cores/2` when the load is over the core count (B973).
 
 With `gates.ram_tmp: auto` (opt-in; the default is `off` since B940 measured the RAM disk 1.2% slower, 141.08 s vs 139.36 s) the macOS gates run with `TMPDIR` on a RAM disk, `/Volumes/cf-tmp/<run>-<block>-*`, so temp git directories skip the SSD and the file-event log. The engine makes the disk once without sudo and reuses it. A RAM disk error prints one `warn: gates.ram_tmp: ...` line and the gates use the normal `TMPDIR`; it never fails a gate. `gates.ram_tmp: off` (the default) or `CODE_FORGE_RAM_TMP=off` keeps it off; `code-forge doctor` shows the `ram_tmp` row (B924). `code-forge init` writes `gates.ram_tmp` into a new config and keeps a value already set (B939). `gates.ram_tmp_mb` sets the RAM disk size in MB (default 2048, 64 to 65536); `init` writes it too, and a mounted volume keeps its size until `hdiutil detach /Volumes/cf-tmp` (B941).
+
+A run may list at most 3 flaky tests: the gate whose flaky test makes it 4 or more is red, prints `gates: N flaky tests in run <run> (...), more than 3: the gate is red`, writes a `test.flaky_limit` row and shows `flaky_limit` in its JSON; fix the flaky tests first. A later gate with no flaky test stays green (B958).
 
 With `gates.test` configured, `block close` refuses (exit 1) without a green `gate.done` row for this run and block: `no green gates run; run: code-forge gates run --run <r> --block <id>`. When timestamps allow comparison, the green row must be newer than the last commit touching owned paths after the block base; otherwise any green row suffices. The history lookup must succeed; only a successful empty log means no later commit. Waiving reviews does not lift the test gate; the human confirmation and other bypass diagnostics still apply.
 

@@ -15,7 +15,7 @@
         {
           "args": "audit commands --json",
           "exit": 0,
-          "out": "{\"version\":\"dev\",\"commit\":\"<sha>\",\"date\":\"2026-01-01T00:00:00Z\",\"commands\":127,\"checks\":254,\"problems\":{\"high\":0,\"low\":0,\"medium\":0},\"out\":\"\",\"rows\":[{\"command\":\"audit\",\"check\":\"help\",\"result\":\"ok\",\"severity\":\"\",\"detail\":\"\",\"block\":\"\"},{\"command\":\"audit\",\"check\":\"bad-flag\",\"result\":\"ok\",\"severity\":\"…"
+          "out": "{\"version\":\"dev\",\"commit\":\"<sha>\",\"date\":\"2026-01-01T00:00:00Z\",\"commands\":128,\"checks\":256,\"problems\":{\"high\":0,\"low\":0,\"medium\":0},\"out\":\"\",\"rows\":[{\"command\":\"audit\",\"check\":\"help\",\"result\":\"ok\",\"severity\":\"\",\"detail\":\"\",\"block\":\"\"},{\"command\":\"audit\",\"check\":\"bad-flag\",\"result\":\"ok\",\"severity\":\"…"
         },
         {
           "args": "audit commands --out",
@@ -329,7 +329,7 @@
         {
           "args": "autopilot log --run {run} --json",
           "exit": 0,
-          "out": "[{\"time\":\"2026-01-01T00:00:00Z\",\"event\":\"Question to the owner\",\"block\":null,\"file\":null,\"detail\":\"waive:nit · to owner (session-failed) · ad-<id>\",\"link\":null},{\"time\":\"2026-01-01T00:00:00Z\",\"event\":\"Delegate session\",\"block\":null,\"file\":null,\"detail\":\"L2 · anthropic · status failed\",\"link\":null},{…"
+          "out": "[{\"time\":\"2026-01-01T00:00:00Z\",\"event\":\"Question to the owner\",\"block\":\"B1\",\"file\":\"src/a.txt\",\"detail\":\"review:substitute · to owner (scope review:substitute not-allowed; the owner grants it with code-forge autopilot start --run <run> --until <time> --delegate L2 --allow review:substitute, else th…"
         }
       ],
       "json": {
@@ -346,11 +346,11 @@
           },
           {
             "key": "block",
-            "type": "null"
+            "type": "string"
           },
           {
             "key": "file",
-            "type": "null"
+            "type": "string"
           },
           {
             "key": "detail",
@@ -518,6 +518,49 @@
           {
             "key": "expired_at",
             "type": "null"
+          }
+        ]
+      }
+    },
+    "autopilot step": {
+      "examples": [
+        {
+          "args": "autopilot step --run {run} --step coder --ms 60000 --json",
+          "exit": 0,
+          "out": "{\"step\":\"coder\",\"ms\":0,\"budget_ms\":0,\"median_ms\":0,\"samples\":0,\"source\":\"\",\"over\":false}"
+        }
+      ],
+      "json": {
+        "kind": "object",
+        "lines": "one",
+        "keys": [
+          {
+            "key": "step",
+            "type": "string"
+          },
+          {
+            "key": "ms",
+            "type": "number"
+          },
+          {
+            "key": "budget_ms",
+            "type": "number"
+          },
+          {
+            "key": "median_ms",
+            "type": "number"
+          },
+          {
+            "key": "samples",
+            "type": "number"
+          },
+          {
+            "key": "source",
+            "type": "string"
+          },
+          {
+            "key": "over",
+            "type": "boolean"
           }
         ]
       }
@@ -1913,7 +1956,7 @@
         {
           "args": "queue --json",
           "exit": 0,
-          "out": "{\"holders\":[],\"waiters\":[],\"changed_slots\":2}"
+          "out": "{\"holders\":[],\"waiters\":[],\"changed_slots\":1}"
         }
       ],
       "json": {
@@ -1954,7 +1997,7 @@
         {
           "args": "queue status --json",
           "exit": 0,
-          "out": "{\"holders\":[],\"waiters\":[],\"changed_slots\":2}"
+          "out": "{\"holders\":[],\"waiters\":[],\"changed_slots\":1}"
         }
       ],
       "json": {
@@ -2049,6 +2092,10 @@
           {
             "key": "steps",
             "type": "array"
+          },
+          {
+            "key": "release_size",
+            "type": "object"
           }
         ]
       }
