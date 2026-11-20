@@ -425,6 +425,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	if e := gates.ResolveCustomErr(&p, configured); e != nil {
 		return gatesError(e)
 	}
+	if o.noTest {
+		p.Commands = landBatchNoTest(p.Commands)
+	}
 	// B335: {test_classes} in a fixed gate's argv takes the block's own test
 	// classes from gates.test_class_map; an empty filter drops the item.
 	classRules, classErr := gates.ParseClassMap(configured["test_class_map"])

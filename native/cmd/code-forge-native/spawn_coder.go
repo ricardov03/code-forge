@@ -121,6 +121,18 @@ func spawnCoderPrompt(cfg map[string]any, brief []byte, block string, run *strin
 			if !isString {
 				return nil, nil, hSpawnCoderRun
 			}
+			// B982: the base may have turned red since block open checked it
+			// (B920): check it again before a coder builds on it.
+			if base, _ := entry.Get("base_sha").(string); base != "" {
+				if err := openBaseCICheck(cfg, workspace, safeStderr)(base); err != nil {
+					message := err.Error()
+					var stateErr *state.Error
+					if errors.As(err, &stateErr) {
+						message = stateErr.Message
+					}
+					return nil, &session.Error{Code: "base-not-green", Message: message}, 0
+				}
+			}
 			root, refusal, ok := reviewMainRoot(context.Background(), workspace)
 			if !ok || refusal != nil {
 				return nil, nil, hSpawnCoderRun

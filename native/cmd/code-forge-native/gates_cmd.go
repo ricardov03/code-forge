@@ -66,6 +66,9 @@ type gatesOptions struct {
 	// goScope is the package scope the land merge gate already planned
 	// from goChanged (B723b: go list runs once).
 	goScope *gates.Scope
+	// noTest drops the test gate: set only by a single-block land whose tip
+	// green CI proved under land.require_ci (B979, as the batch's B910).
+	noTest bool
 }
 
 func gatesParse(args []string) (gatesOptions, string) {

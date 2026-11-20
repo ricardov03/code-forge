@@ -406,7 +406,10 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 			cwd := filepath.Join(temporary, prefix)
 			tree := gatesCleanTree(temporary)
 			reason := ""
-			if !gatesReusableFull(cwd) {
+			if proved := landBatchCITree(main, tree, batch[:n]); proved != "" {
+				// B980: green CI already ran the full suite on this exact tree.
+				landBatchCITreeNote(json, tree, proved)
+			} else if !gatesReusableFull(cwd) {
 				tests, owned := []string{}, []string{}
 				for _, block := range batch[:n] {
 					tests = append(tests, gates.Strings(block.entry.Get("test_files"))...)

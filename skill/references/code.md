@@ -198,7 +198,7 @@ commit: a second start says another ci watch is already watching and exits 0.
 
 **Newest base, rebase before CI (B942).** A new block with a worktree and no `--base` or `proof.worktree.base` starts from the newest base branch: `block open` fetches `origin <branch>` and takes the local tip when it contains origin's, or origin's tip (by sha; the local branch never moves) when it contains the local one. A repository without an origin, a detached HEAD or a fetch that fails keeps the local HEAD. Local and origin tips that diverged refuse with `base-diverged` and the `git log --left-right` next step; nothing is recorded. The context pack's git rules and a coder spawned with `--block` say: rebase on the newest base branch just before the CI push. `block ready` lists `stale_base` (fix `code-forge block rebase <id> --run <r> --accept-landed`) while the base branch moved past the block's base.
 
-**Never build on a red base (B920).** Before anything is recorded, `block open` reads the CI of the base a new block builds on (`gh run list --commit <base>`, `--workflow <land.ci_workflow>` when set). With `land.require_ci: github` a red base refuses the open (exit 1, `base <sha8> CI is red (...)`, next `gh run view <id> --log-failed`), and so does a base with no CI run or with CI still running (next `code-forge ci watch --sha <base>`); fix main first or open on a green commit with `--base <sha>`. With the gate off a red base or a base with no run prints a `warning:` line and the open goes on; no `gh` on `PATH`, or a `gh` that cannot answer (no GitHub remote), says nothing. A re-open keeps its worktree's base and is not checked again.
+**Never build on a red base (B920).** Before anything is recorded, `block open` reads the CI of the base a new block builds on (`gh run list --commit <base>`, `--workflow <land.ci_workflow>` when set). With `land.require_ci: github` a red base refuses the open (exit 1, `base <sha8> CI is red (...)`, next `gh run view <id> --log-failed`), and so does a base with no CI run or with CI still running (next `code-forge ci watch --sha <base>`); fix main first or open on a green commit with `--base <sha>`. With the gate off a red base or a base with no run prints a `warning:` line and the open goes on; no `gh` on `PATH`, or a `gh` that cannot answer (no GitHub remote), says nothing. A re-open keeps its worktree's base and is not checked again. `spawn --role coder --run <id> --block <id>` checks the block's recorded base the same way before the coder starts, since the base may have turned red after the open: with the gate on a red, unchecked or still-running base refuses the spawn (exit 1, `spawn: base ...`), with the gate off it warns (B982).
 
 **Require green CI (B765).** `land.require_ci: github` (default `off`) makes `--merge` and a batch
 land merge a block only when GitHub CI is green for the block's own tip (`gh run list --commit
@@ -218,11 +218,15 @@ makes a new sha pushes it to a new CI branch and waits for green CI on it first.
 block lock held: each tip's CI is read before the locks are taken, and a block whose rebase made a
 new sha ends the round (the blocks before it land), then waits for CI and lands in the next round.
 A tip that moves while the land waits is refused at `ci`. B804: a batch lands only a commit green CI
-proved; the landed marker records it as `ci_sha`. B805: a block's CI PRs are found past the 200
+proved; the landed marker records it as `ci_sha`. B979: a single-block `block land --merge` follows
+the same rules (test gate skipped on a CI-proved tip, a moved tip refused at `ci`). B980: a batch
+merge gate on a tree green CI proved skips its test suite. B805: a block's CI PRs are found past the 200
 newest pull requests (a `head:` search when that page is full and holds none of them). B806: a short
 gh network error (timeout, connection reset, EOF, TLS/DNS failure, HTTP 5xx) while land reads CI is
 retried with a backoff, 3 tries in all; then land refuses at `ci` with gh's message, `(after 3
-tries)` and a `next:` line.
+tries)` and a `next:` line. B981: `pr create`/`pr close` retry too, after first checking whether
+the failed call took effect (no second PR, no second close); a full `head:` search page falls back to
+`pr list --head` per exact CI branch name.
 `land.require_main_ci: true` (B962) also refuses while the
 newest completed push run of the base branch is red, unless each of its failing tests matches a
 known-red line of a named block (the landing fix block may cover it).

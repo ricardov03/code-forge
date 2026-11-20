@@ -160,3 +160,30 @@ func landBatchNoTest(commands map[string]*gates.Command) map[string]*gates.Comma
 	}
 	return kept
 }
+
+// B980: a merge-gate prefix whose tree is the tree of a block tip green CI
+// proved (land.require_ci) needs no local suite: CI ran the full suite on
+// that same tree. With blocks rebased onto the prefix before them, the whole
+// batch's tree is the last block's proved tip tree. landBatchCITree returns
+// the proved sha whose tree is tree, or "".
+func landBatchCITree(main, tree string, blocks []*landBatchBlock) string {
+	if tree == "" {
+		return ""
+	}
+	for i := len(blocks) - 1; i >= 0; i-- {
+		sha := blocks[i].ci
+		if sha == "" {
+			continue
+		}
+		got, err := gitx.Run(main, "rev-parse", "--verify", "--quiet", sha+"^{tree}")
+		if err == nil && strings.TrimSpace(got) == tree {
+			return sha
+		}
+	}
+	return ""
+}
+
+// landBatchCITreeNote says the merge gate reused CI's green full suite.
+func landBatchCITreeNote(json bool, tree, sha string) {
+	fmt.Fprintf(landBatchCIOut(json), "merge gate: tree %.12s is the tree green CI proved at %s; full suite skipped (B980)\n", tree, landCIShort(sha))
+}
