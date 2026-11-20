@@ -21,6 +21,9 @@ type landBatchFixture struct {
 	t          *testing.T
 	home, repo string
 	base       string
+	// rounds: a land.require_ci land may land in CI rounds (B803), so a
+	// later round's suite sees main at an earlier round's landed merge.
+	rounds bool
 }
 
 func newLandBatchFixture(t *testing.T, bad int) *landBatchFixture {
@@ -184,8 +187,14 @@ func (f *landBatchFixture) checkMain(ids []string) {
 		}
 		parent = commit
 	}
+	allowed := map[string]bool{f.base: true}
+	if f.rounds {
+		for _, commit := range commits {
+			allowed[commit] = true
+		}
+	}
 	for _, seen := range f.lines("observed-main") {
-		if seen != f.base {
+		if !allowed[seen] {
 			f.t.Errorf("main held %s during the suite, want original %s", seen, f.base)
 		}
 	}

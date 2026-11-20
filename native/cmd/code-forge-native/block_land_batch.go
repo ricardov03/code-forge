@@ -35,7 +35,7 @@ type landBatchBlock struct {
 
 // Batch landing consumes closed blocks. Keep the open/join/close single-block
 // path separate so its output and hand-over boundary remain unchanged.
-func landBatch(flags map[string]any, home, run string, ids []string) int {
+func landBatchRounds(flags map[string]any, home, run string, ids []string, round int, earlier []string) int {
 	json := flags["json"] == true
 	emit := func(row ledger.Object) {
 		data, _ := ledger.Stringify(row, false)
@@ -53,13 +53,21 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		return 1
 	}
 	code := 0
+	// B803: with land.require_ci, each block's CI is read (and waited for)
+	// here, before any lock is taken.
+	proved, ciStopped, err := landBatchCIPre(flags, home, run, ids, json)
+	if err != nil {
+		stoppedID, step = ciStopped, "ci"
+		return stop(err.Error())
+	}
+	var retry []string
 	// Closed-block checks cannot use proof.WithSlot (it requires open blocks).
 	// B426: the batch holds only its own blocks' locks through the rebases,
 	// gates and merge gate, working on a snapshot of the run record. Each
 	// record change (a new base, landed, a restore) is one short commit of
 	// these blocks alone, refused with block-changed if another verb changed
 	// one of them meanwhile. Verbs on other blocks of the run never wait.
-	err := state.WithBlockLocks(home, run, ids, func() (failed error) {
+	err = state.WithBlockLocks(home, run, ids, func() (failed error) {
 		record, err := state.ReadRun(home, run)
 		if err != nil {
 			return err
@@ -157,7 +165,16 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if json {
 				ciOut = safeStderr
 			}
-			notes, refusal, ciNext := landCIGate(cfg, main, id, strings.TrimSpace(head), base, landCIResume(requestedIDs, run, flags), ciOut)
+			var notes []string
+			refusal, ciNext := "", ""
+			if sha, ok := proved[id]; ok {
+				// B803: CI proved this tip before the lock; it must not have moved.
+				if sha != strings.TrimSpace(head) {
+					refusal = fmt.Sprintf("block %s tip moved from %s to %s while the land waited for CI (B803); land again", id, landCIShort(sha), landCIShort(head))
+				}
+			} else {
+				notes, refusal, ciNext = landCIGate(cfg, main, id, strings.TrimSpace(head), base, landCIResume(requestedIDs, run, flags), ciOut)
+			}
 			if refusal != "" {
 				step = "ci"
 				if ciNext != "" {
@@ -221,8 +238,9 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		// may remain as a base: every later block returns to its original head
 		// and base, so a not-landed branch never carries another block's commits.
 		keep := 0
+		all := batch
 		defer func() {
-			if err := landBatchRestore(home, run, batch, keep); err != nil {
+			if err := landBatchRestore(home, run, all, keep); err != nil {
 				fmt.Fprintln(safeStderr, "cannot restore not-landed block:", err)
 				if failed == nil {
 					failed = err
@@ -262,7 +280,8 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			return fmt.Errorf("batch timed out after %dms during the %s step; no block landed", maxMs, step)
 		}
 		prefixes := []string{strings.TrimSpace(mainHead)}
-		for _, block := range batch {
+		ciStop := -1
+		for i, block := range batch {
 			stoppedID, step = block.id, "rebase"
 			tip := prefixes[len(prefixes)-1]
 			if ctx.Err() != nil {
@@ -295,9 +314,9 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if err := landBatchCommit(home, run, []*landBatchBlock{block}, ledger.Object{{Key: "event", Value: "block.rebase"}, {Key: "block", Value: block.id}, {Key: "old_base", Value: block.base}, {Key: "new_base", Value: tip}, {Key: "worktree", Value: true}}); err != nil {
 				return err
 			}
-			if err := landBatchCITip(flags, run, requestedIDs, main, baseBranch, json, record, block); err != nil {
-				step = "ci"
-				return err
+			if landBatchCITip(json, batch, i) {
+				ciStop = i
+				break
 			}
 			step = "gates"
 			args := []string{"run", "--run", run, "--block", block.id, "--changed", "--cwd", block.tree.Workspace}
@@ -322,6 +341,14 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 				return err
 			}
 			prefixes = append(prefixes, strings.TrimSpace(head))
+		}
+		if ciStop >= 0 {
+			// B803: the blocks before ciStop land now; the rest wait for CI
+			// on their new tips with no lock held, then land in the next round.
+			retry, batch = ids[ciStop:], batch[:ciStop]
+			if ciStop == 0 {
+				return nil
+			}
 		}
 		step = "merge-gate"
 		// B589 (issue #36): the batch merge gate gets gates.merge_gate_links,
@@ -505,6 +532,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			return err
 		}
 		if culprit >= 0 {
+			retry = nil
 			stoppedID = ids[culprit]
 			code = stop(failure)
 			for _, id := range ids[culprit+1:] {
@@ -518,12 +546,12 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		return nil
 	})
 	if err != nil {
-		return stop(err.Error())
-	}
-	// B430: push once after the block locks and the run lock are released.
-	if pushed, err := landBatchPush(flags, home, run, ids); err != nil {
-		stoppedID, step = pushed, "push"
-		return stop(err.Error())
+		code = stop(err.Error())
+		if len(earlier) == 0 {
+			return code
+		}
+		// B803: an earlier CI round landed blocks; they are still pushed.
+		ids, retry = nil, nil
 	}
 	// B796: close the open CI pull requests of each landed block.
 	if landedMain != "" {
@@ -535,6 +563,16 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 				}
 			}
 		}
+	}
+	landedIDs := append(append([]string{}, earlier...), ids...)
+	if len(retry) > 0 && code == 0 {
+		return landBatchNextRound(flags, home, run, retry, round, landedIDs)
+	}
+	// B430: push once after the block locks and the run lock are released
+	// (B803: once after the last CI round).
+	if pushed, err := landBatchPush(flags, home, run, landedIDs); err != nil {
+		stoppedID, step = pushed, "push"
+		return stop(err.Error())
 	}
 	return code
 }

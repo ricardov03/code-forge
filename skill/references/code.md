@@ -203,7 +203,10 @@ when every failing test matches a `<block> <regexp>` line of `land.ci_red_list` 
 `CODE_FORGE_CI_RED_BLOCKS`; a block never covers its own red. B910: with the gate on, a batch land
 skips a block's local `test` gate when the sha it lands is the sha green CI proved; a rebase that
 makes a new sha pushes it to a new CI branch and waits for green CI on it first. The other gates
-(lint, types, format) and the batch merge gate still run.
+(lint, types, format) and the batch merge gate still run. B803: a batch land waits for CI with no
+block lock held: each tip's CI is read before the locks are taken, and a block whose rebase made a
+new sha ends the round (the blocks before it land), then waits for CI and lands in the next round.
+A tip that moves while the land waits is refused at `ci`.
 
 **Heal queue (B429).** `gates run --run --block`, `block rebase` and `block land` still fail on a
 held lock or a transient git error, but also queue the problem and print `heal: queued <id>` as the

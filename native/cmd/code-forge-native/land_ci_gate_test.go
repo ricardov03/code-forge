@@ -91,6 +91,7 @@ func landCISnapshot(t *testing.T, home, run string, cfg map[string]any, land map
 func landCIBatch(t *testing.T, land map[string]any, redList, redBlocks string) *landBatchFixture {
 	t.Helper()
 	f := newLandBatchFixture(t, 0)
+	f.rounds = true
 	if redList != "" {
 		// An absolute list path: a file in the repo would add a commit on main.
 		dir := t.TempDir()
