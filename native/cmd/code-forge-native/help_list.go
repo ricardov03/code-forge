@@ -57,6 +57,7 @@ var helpCommands = []helpEntry{
 	{name: "autopilot ratify", summary: "Accept one autopilot decision from the digest", owner: true},
 	{name: "autopilot revert", summary: "Undo one autopilot decision from the digest", owner: true},
 	{name: "autopilot found", summary: "Turn a problem found during the run into a queued block of the same run"},
+	{name: "autopilot step", summary: "Record a step's wall time and warn when it runs over its speed budget"},
 	{name: "audit", summary: "Audit every command before a major release", namespace: true},
 	{name: "audit commands", summary: "Run every command in a throwaway HOME and write the audit report",
 		options: []helpOption{helpJSONOption, {"--out <file>", "Write the Markdown report (docs/audits/audit-<version>.md)"}}},

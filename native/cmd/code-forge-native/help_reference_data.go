@@ -288,6 +288,18 @@ var helpRefs = map[string]helpRef{
 			helpRefEx("autopilot", "autopilot found --run {run} --list"),
 		},
 	},
+	"autopilot step": {
+		when:    "After a coder session or a CI wait of a run: report its wall time so the step's speed budget can warn (land and gate time themselves).",
+		related: []string{"autopilot found", "autopilot binnacle", "block land"},
+		flags: map[string]string{
+			"--step":  "The step: land, gate, coder or ci-wait.",
+			"--ms":    "The step's wall time in whole milliseconds.",
+			"--block": "The block the step belongs to.",
+		},
+		examples: []helpRefExample{
+			helpRefEx("autopilot", "autopilot step --run {run} --step coder --ms 60000 --json"),
+		},
+	},
 	"autopilot revert": {
 		when:     "The owner undoes a delegate decision from the digest.",
 		related:  []string{"autopilot digest", "autopilot ratify"},

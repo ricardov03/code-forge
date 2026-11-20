@@ -940,6 +940,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	ended := result.Status == "closed" || result.Status == "stopped" || result.Status == humancheck.DeferredStatus
 	if ended {
 		doneFile = closeWriteDone(home, run, id, record, result, lines, rows, key, stderr)
+		apfFoundReport(stderr, home, run, id, reportText) // B821: the coder's FOUND lines
 		if len(endHook) > 0 {
 			// The flags caller flushes its buffered output before invoking this.
 			*endHook[0] = func() { blockRunEndHook(home, run, id, result.Status, doneFile, record, safeStderr) }

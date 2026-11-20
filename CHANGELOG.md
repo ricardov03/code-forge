@@ -44,6 +44,12 @@ waits on a second real consumer (plan §10.4, Q17).
 - A red `go test -json` gate now gets the flaky rerun by name too: the failed top-level tests are read from its test2json events (per package, the same rules as plain output: a panic, a build failure, a failed package with no named test or more than 3 names is a real failure), rerun 3 times without `-json`, and a pass gives the `gates: WARN flaky test` line and the `test.flaky` row (B893)
 - The flaky rerun of a `go run` wrapper gate (such as code-forge's own `cf-gotest`) keeps the wrapper's go test flags: `-timeout`, `-p`, `-tags`, `-race` and the other build flags are taken from the first output line where the wrapper names its `go test` (`cf-gotest: go test -count=1 -timeout 75m ./a`); before, the rerun called plain `go test` and dropped them (B894)
 - The flaky rerun of a `go test` gate no longer runs plain `go test` on a loaded machine: it uses `-p 2` unless the gate set `-p`, builds a `go run` wrapper's rerun with `-trimpath` (cf-gotest's build, so the build cache is reused; a direct `go test` keeps its own flags), and gets `GOMAXPROCS=cores/2` when the 1-minute load is over the core count and no `GOMAXPROCS` is set (B973)
+### Added
+
+- Every land, gate, coder session and CI wait has a speed budget: its measured median plus a margin, or fixed minutes under the new `autopilot.step_budgets` config key. `block land` and `gates run --run --block` time themselves; `code-forge autopilot step --run <id> --step <coder|ci-wait> --ms <n>` reports the others. A step over its budget prints `WARN step budget: …`, writes a `step.over_budget` row shown in the binnacle, and under an active autopilot grant becomes found work (source `speed`) (B950)
+- `code-forge release check` counts the blocks since the last `v*` tag and prints `RELEASE NOW: N blocks since vX` at the new `release.max_blocks` config key (default 8), an info line from 3 below it; the autopilot stop report and binnacle (`Release size`) show the same line (B951)
+- While an autopilot grant is active, a red gate, a land that stops, a hand-over that names the run and the coder report's `FOUND` lines (on `block close` and `block land`) record an `autopilot found` finding by themselves, deduped by fingerprint (B821)
+- A queued `autopilot found` block's acceptance file lists the red test its evidence names (`--- FAIL: TestX` or a findings.jsonl `"test"`); with none it carries a `needs-test` marker in place of the old placeholder (B822)
 
 ## [0.26.0] — 2026-11-19
 

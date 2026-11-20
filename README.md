@@ -109,9 +109,12 @@ reviewer sessions outside the coder's sandbox. A file the worker cannot review f
 leaves a signed `worker.exit` row and `.code-forge/logs/worker-<pid>.log`. `run status` says whether a
 pinned worker is alive (`worker_live`), the same way `block ready` checks it. Fix rounds are bounded;
 unresolved work stops.
-Under autopilot, a problem found during the work (a red gate, a coder's leftover, a flaky test)
-becomes a queued block of the same run with `code-forge autopilot found`; findings about scope,
-security, deletes or publishing wait for you ([autopilot](docs/autopilot.md)).
+Under autopilot, a problem found during the work (a red gate, a failed land, a hand-over, a coder's
+leftover, a flaky test) becomes a queued block of the same run with `code-forge autopilot found`, recorded
+by itself for the first four; findings about scope,
+security, deletes or publishing wait for you ([autopilot](docs/autopilot.md)). Each land, gate,
+coder session and CI wait has a speed budget (its measured median plus a margin, or
+`autopilot.step_budgets`); a step over it prints a WARN and becomes found work too.
 Tests and red→green proof establish that a change meets its acceptance clauses before closing.
 You control the final merge and publish permissions; coders cannot push or open draft PRs by
 default. See [the workflow](docs/how-it-works.md) and [concepts](docs/concepts.md).
@@ -134,7 +137,7 @@ default. See [the workflow](docs/how-it-works.md) and [concepts](docs/concepts.m
 | `code-forge pipeline status\|next` | See specialist step states and the next ready step |
 | `code-forge logs` | Inspect local errors; `logs report` previews a public issue |
 | `code-forge upgrade` | Refresh installed skill copies after upgrading the package, then fix the project config |
-| `code-forge release check [--json]` | Check the project is ready to release (clean tree, HEAD pushed, green CI, CHANGELOG shape, `npm ls`), suggest the bump and print the release steps |
+| `code-forge release check [--json]` | Check the project is ready to release (clean tree, HEAD pushed, green CI, CHANGELOG shape, `npm ls`), suggest the bump and print the release steps; says `RELEASE NOW` at `release.max_blocks` blocks (default 8) since the last tag |
 | `code-forge config fix [--dry-run]` | Rewrite `.code-forge.yml` shapes an older release accepted and this one refuses |
 | `code-forge audit commands [--out <file>]` | Maintainers: run every command in a sandbox and write the audit a major release needs |
 | `code-forge --help` | List every verb; each verb prints its own usage on bad arguments |

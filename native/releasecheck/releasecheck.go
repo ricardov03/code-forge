@@ -105,6 +105,8 @@ type Report struct {
 	Checks     []Check  `json:"checks"`
 	Failed     []string `json:"failed"`
 	Steps      []string `json:"steps"`
+	// Size is the release size (B951): the blocks since the last v* tag.
+	Size Size `json:"release_size"`
 }
 
 func firstLine(s string) string {
@@ -228,7 +230,7 @@ func Run(root string, run Runner) Report {
 	if run == nil {
 		run = DefaultRunner
 	}
-	r := Report{Root: root, Checks: []Check{}, Failed: []string{}, Steps: []string{}}
+	r := Report{Root: root, Checks: []Check{}, Failed: []string{}, Steps: []string{}, Size: Size{IDs: []string{}, Level: SizeNone}}
 	add := func(c Check) {
 		r.Checks = append(r.Checks, c)
 		if c.Status == Fail {
@@ -329,6 +331,11 @@ func Run(root string, run Runner) Report {
 	}
 	r.Next = NextVersion(r.Current, r.Bump)
 	r.Steps = steps(pkg, r.Bump, r.Next, or(r.Branch, "main"))
+	if isRepo {
+		r.Size = SizeOf(root, run)
+	} else {
+		r.Size.Max = MaxBlocks(root)
+	}
 	r.Ready = len(r.Failed) == 0
 	return r
 }
@@ -478,6 +485,9 @@ func (r Report) Text() string {
 		}
 	}
 	fmt.Fprintf(&b, "bump: %s%s; %s\n", r.Bump, next, r.BumpReason)
+	if line := r.Size.Line(); line != "" {
+		b.WriteString(line + "\n")
+	}
 	if r.Ready {
 		b.WriteString("steps, in order:\n")
 	} else {
