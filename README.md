@@ -166,6 +166,8 @@ Oversized Markdown reviews split at headings, paragraphs and diff lines so a lon
 be approved in bounded parts; every part must pass.
 [Portable deadlines](docs/portable-deadlines.md) use the built-in gate, review and wait flags
 on macOS and Linux.
+Adaptive routing skips models that cannot serve closed-book reviews and immediately
+selects a compatible configured alternative, including on retries (B1027).
 See the [routing and fallback examples](docs/how-it-works.md) for a long-context reviewer above
 400 lines and fallback lists of `{provider, model}` objects (optional `effort`, never strings).
 `block open --kind code|docs|contract` overrides the kind inferred from filenames.

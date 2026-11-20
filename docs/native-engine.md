@@ -601,6 +601,14 @@ It adds `-trimpath` to `GOFLAGS` so worktrees can reuse the Go build cache (B952
 It passes `-p 2` to `go test` by default; `--p N` sets a positive whole number instead.
 A bad flag exits 2 (B953).
 
+File-only selections infer top-level `Test...` names from the selected `_test.go`
+files and run each package separately with an anchored `-run` filter (B1026).
+No `CODE_FORGE_TEST_RUN` setting is needed. A missing, malformed or helper-only
+selection that leaves a package without test names exits 2 before starting any
+child. Select its test files or supply `CODE_FORGE_TEST_RUN` explicitly; an explicit
+filter remains authoritative. Source files alone never start an unfiltered package.
+For example: `go -C native run ./cmd/cf-gotest native/cmd/cf-gotest/main_b1026_test.go`.
+
 When the 1-minute load average exceeds the core count, and `GOMAXPROCS` is unset,
 the Go child gets half the cores, with a minimum of one. The runner prints the cap.
 It reads `/proc/loadavg` on Linux and `sysctl vm.loadavg` on macOS.
@@ -910,3 +918,23 @@ A batch keeps the rebase of a block stopped for CI when its preceding prefix has
 landed. A CI refusal leaves that tip and recorded base ready for retry. Unlanded
 blocks stopped by other failures return to their original tips and bases, including
 the first unlanded block; a branch changed by the user is left alone.
+## Maintainer lane ledger check
+
+The local `plans/tools/forge/p4/lane-ledger-check.py` tool accepts a findings
+review resolved through answers as well as an ordinary approved result (B1024).
+Every open finding needs a `review.answered` row for the same run, block, file
+and content hash. Its separate `by_file` must still match `by_hash` at the block's
+last commit. Missing, incomplete or stale answers fail the check. Capped reviews
+still require an ordinary approval; cap supersession is left to the native gate.
+The checker reads local ledger evidence; `block close` verifies its signatures.
+This maintainer script is local tooling outside the tracked release artifacts.
+
+## Adaptive reviewer eligibility
+
+Adaptive L2 routing filters candidates through the closed-book capability rule before
+ranking, exploration, pinning or retry reuse (B1027). A configured Codex coder no longer
+becomes an unsupported reviewer: the compatible configured route or fallback runs at
+once. `review.allow_open_book_codex: true` retains its explicit opt-in behavior. An
+incompatible pinned route also gives way to a compatible alternative; no eligible
+candidate returns `unavailable: route-invalid`. Replacement choices get a fresh signed
+`review.route` row; retries reuse the latest compatible choice without duplicate rows.
