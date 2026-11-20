@@ -508,6 +508,14 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 			fmt.Fprintln(stderr, "block land:", err)
 		}
 	}
+	// B960: land.after in main and the block.landed row, before the push.
+	step = "after"
+	if err := landAfter(home, run, cfg, main, []string{id}, print); err != nil {
+		if after, ok := err.(*landAfterError); ok {
+			next = after.next
+		}
+		return stop(err.Error())
+	}
 	// B430: main first; push after the merge (flag --push or land.push).
 	if landPushWanted(flags, cfg) {
 		step = "push"

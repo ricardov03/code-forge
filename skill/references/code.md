@@ -189,6 +189,11 @@ reset (one `ci watch: GitHub API rate limit; retry at HH:MM UTC` line per wait) 
 is past `--timeout`, exits 4 with `rate limit, gave up` and no heal item. One watch per repo and
 commit: a second start says another ci watch is already watching and exits 0.
 
+**land.after (B960).** Commands in `land.after` run in the main checkout after the merge and
+before the push (build, docs stamp); their tracked changes become one commit on main. A failing
+command stops the land at step `after`, merge kept, nothing pushed. Each landed block gets one
+`block.landed` row (binnacle **Block landed**). Do not run the post-land tail by hand.
+
 **No big files (B986).** A land (step `size`, before the merge) or a push (main, CI branch) of
 commits that add a file over `land.max_file_mb` (default 5; `0` off) is refused and names each
 file with its size; remove it from the commits or raise the key. Never commit a built binary.

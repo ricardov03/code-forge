@@ -44,6 +44,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 	requestedIDs := append([]string{}, ids...)
 	var landedCfg map[string]any
 	landedMain := ""
+	landedNow := []string{} // B960: the blocks this call merged
 	stop := func(reason string) int {
 		fmt.Fprintf(safeStderr, "block %s land stopped at %s: %s\n", stoppedID, step, strings.TrimSpace(reason))
 		if json {
@@ -478,6 +479,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if err := landBatchCommit(home, run, batch[:green]); err != nil {
 				return err
 			}
+			landedNow = append(landedNow, landed...)
 		}
 		keep = green
 		for i, block := range batch {
@@ -515,6 +517,13 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 	})
 	if err != nil {
 		return stop(err.Error())
+	}
+	// B960: land.after in main and one block.landed row per merged block, before the push.
+	if len(landedNow) > 0 {
+		if err := landAfter(home, run, landedCfg, landedMain, landedNow, safeStderr); err != nil {
+			stoppedID, step = landedNow[0], "after"
+			return stop(err.Error())
+		}
 	}
 	// B430: push once after the block locks and the run lock are released.
 	if pushed, err := landBatchPush(flags, home, run, ids); err != nil {

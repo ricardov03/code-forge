@@ -718,6 +718,17 @@ starts `code-forge ci watch --sha <sha> --run <run>` as a detached child, loggin
 `~/.code-forge/heal/ci-<sha>.log`, prints `ci watch: started for <sha>; log <path>` and returns at
 once; land never waits for CI.
 
+**After the merge: land.after (B960).** `land.after` (default `[]`) lists shell commands that
+`block land` (single or batch) runs with `/bin/sh -c` in the main checkout, in order, after the
+merge on main and before the push, for example `node scripts/build-native.mjs --host` and
+`npm run -s docs-block -- stamp`. Their changes to tracked files are committed on main in one
+commit, `land.after for <ids>: <commands>` (untracked files stay untracked), and the line
+`land.after: ran <command>` / `land.after: committed <sha>` is printed. A command that fails stops
+the land at step `after` (exit 1) with the command and its last output lines: main keeps the
+merge, the later commands do not run and nothing is pushed. Every block a land merges gets one
+signed `block.landed` row (`block`, `main`, `after`, `after_commit`), shown as **Block landed** in
+the autopilot full log, with or without `land.after`.
+
 **No big files (B986).** Land refuses commits that add a file over `land.max_file_mb` (default 5,
 the B606 size limit of the main npm package; `0` turns it off). `block land` (single or batch)
 stops at step `size` before the merge, main unchanged; a push (main with `--push`/`land.push`, and
