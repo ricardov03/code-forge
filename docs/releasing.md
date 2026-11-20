@@ -253,7 +253,11 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
    into parallel jobs (`go lint`, `build-native`, `go native` shards of `cmd/code-forge-native` from
    `scripts/ci-shards.sh`, `go other packages`; `-race` on Go stable, plain on the 1.22.x floor);
    the run's conclusion is `success` only when every job passed, so the run must be `completed` with
-   conclusion `success` for that exact HEAD. A missing, running or failed run, or a `gh` error,
+   conclusion `success` for that exact HEAD. The Go test steps run with `GOFLAGS=-trimpath`, as
+   code-forge's own test gate `cf-gotest` does (B952). The same shard split runs on a laptop with
+   `go -C native run ./cmd/cf-gotest --shards 6 --p 3`: one `go test -c` build, the
+   `scripts/ci-shards.sh pick` split, at most `--p` shards at once, red when any shard is red (B807).
+   A missing, running or failed run, or a `gh` error,
    refuses with exit 1 and one line that names HEAD and the run state, for example
    `CI for HEAD <sha> is not green: run status in_progress; push HEAD and wait for a green CI run`.
    Nothing is written or tagged. After the version edits it builds the four native targets with

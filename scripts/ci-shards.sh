@@ -16,6 +16,8 @@
 #   sh ../scripts/ci-shards.sh regex I N         anchored -run regex for shard I of N
 #   sh ../scripts/ci-shards.sh check N           proves: each shard's regex selects exactly its names,
 #                                                no name is in two shards, union == full list
+#   sh ../scripts/ci-shards.sh pick I N < names  shard I of N of the names on stdin (no go call); the
+#                                                split rule for local shards too (cf-gotest --shards, B807)
 set -eu
 pkg=./cmd/code-forge-native
 
@@ -24,13 +26,17 @@ case ${RACE:-} in "" | -race) ;; *) die "RACE must be empty or -race, got: $RACE
 
 list() {
 	out=$(go test ${RACE:-} -list '.*' "$pkg") || { printf '%s\n' "$out" >&2; die "go test -list failed"; }
-	printf '%s\n' "$out" | grep -E '^(Test|Example|Fuzz)[A-Za-z0-9_]*$' | LC_ALL=C sort
+	printf '%s\n' "$out" | tests_only
 }
 
 num() { case $1 in '' | *[!0-9]*) die "not a number: $1" ;; esac; }
 
 pick() { # stdin: sorted names; $1 index, $2 count
 	awk -v i="$1" -v n="$2" '(NR - 1) % n == i'
+}
+
+tests_only() { # stdin: any lines -> sorted test names
+	grep -E '^(Test|Example|Fuzz)[A-Za-z0-9_]*$' | LC_ALL=C sort
 }
 
 to_regex() { # stdin: names -> ^(A|B)$
@@ -53,6 +59,10 @@ list)
 names)
 	shard_args "$@"
 	list | pick "$1" "$2"
+	;;
+pick)
+	shard_args "$@"
+	{ tests_only || true; } | pick "$1" "$2"
 	;;
 regex)
 	shard_args "$@"
@@ -93,6 +103,6 @@ check)
 	echo "ci-shards: $n shards, $total tests, union == full list, no test in two shards"
 	;;
 *)
-	die "usage: list | names I N | regex I N | check N"
+	die "usage: list | names I N | regex I N | check N | pick I N"
 	;;
 esac

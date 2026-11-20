@@ -236,3 +236,139 @@ func TestB953ReadsLoadLines(t *testing.T) {
 		t.Fatal("this machine has no readable load average")
 	}
 }
+
+// shardFixture is a fake go whose `go test -c -o <bin> ... <pkg>` writes a fake test binary. The
+// binary lists names (one per line) for -test.list, logs each -test.run regex and its directory to
+// runs.log, and fails when its regex selects TestRed. nativeDir and shardScript point at a temp
+// native/ folder and the real scripts/ci-shards.sh.
+func shardFixture(t *testing.T, names string) (goLog, runsLog string) {
+	t.Helper()
+	dir := t.TempDir()
+	goLog, runsLog = filepath.Join(dir, "go.log"), filepath.Join(dir, "runs.log")
+	bin := "#!/bin/sh\n" +
+		"if [ \"$1\" = -test.list ]; then printf '" + names + "'; exit 0; fi\n" +
+		"echo \"$2 $(pwd -P)\" >> '" + runsLog + "'\n" +
+		"case \"$2\" in *TestRed*) echo '--- FAIL: TestRed'; echo FAIL; exit 1;; esac\n" +
+		"echo PASS\n"
+	if err := os.WriteFile(filepath.Join(dir, "bin.sh"), []byte(bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gosh := "#!/bin/sh\necho \"$*\" >> '" + goLog + "'\n" +
+		"while [ $# -gt 0 ]; do if [ \"$1\" = -o ]; then cp '" + filepath.Join(dir, "bin.sh") + "' \"$2\"; fi; shift; done\n"
+	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(gosh), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":/usr/bin:/bin")
+	quietMachine(t)
+	native := filepath.Join(dir, "native")
+	if err := os.MkdirAll(filepath.Join(native, "cmd", "code-forge-native"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script, err := filepath.Abs(filepath.Join("..", "..", "..", "scripts", "ci-shards.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ns, ss := nativeDir, shardScript
+	nativeDir, shardScript = native, script
+	t.Cleanup(func() { nativeDir, shardScript = ns, ss })
+	return goLog, runsLog
+}
+
+// shardRuns reads runs.log: the names each shard's -test.run regex selects, and the directories.
+func shardRuns(t *testing.T, runsLog string) (sets [][]string, dirs []string) {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(readLog(t, runsLog)), "\n") {
+		re, dir, _ := strings.Cut(line, " ")
+		if !strings.HasPrefix(re, "^(") || !strings.HasSuffix(re, ")$") {
+			t.Fatalf("regex %q is not anchored", re)
+		}
+		sets = append(sets, strings.Split(strings.TrimSuffix(strings.TrimPrefix(re, "^("), ")$"), "|"))
+		dirs = append(dirs, dir)
+	}
+	return sets, dirs
+}
+
+// TestB807ShardsRunDisjointSetsCoveringAllTests: --shards 4 builds the package once, then runs 4
+// processes of that binary whose -test.run sets are disjoint and cover every listed test, each in
+// the package directory, with the CI round-robin split.
+func TestB807ShardsRunDisjointSetsCoveringAllTests(t *testing.T) {
+	names := []string{"ExampleZ", "FuzzY", "TestA", "TestB", "TestC", "TestD", "TestE", "TestF", "TestG"}
+	goLog, runsLog := shardFixture(t, strings.Join(names, `\n`)+`\nok  \tnoise\n`)
+	var out, errb bytes.Buffer
+	if code := run([]string{"--shards", "4", "--p", "4"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errb.String())
+	}
+	if got := strings.Split(strings.TrimSpace(readLog(t, goLog)), "\n"); len(got) != 1 || !strings.HasPrefix(got[0], "test -c -o ") || !strings.HasSuffix(got[0], " -p 4 ./cmd/code-forge-native") {
+		t.Fatalf("go ran %q, want one test -c build", got)
+	}
+	sets, dirs := shardRuns(t, runsLog)
+	if len(sets) != 4 {
+		t.Fatalf("%d shard processes, want 4", len(sets))
+	}
+	seen := map[string]int{}
+	for _, set := range sets {
+		for _, n := range set {
+			seen[n]++
+		}
+	}
+	for _, n := range names {
+		if seen[n] != 1 {
+			t.Fatalf("%s is in %d shards (%v)", n, seen[n], sets)
+		}
+	}
+	if len(seen) != len(names) {
+		t.Fatalf("shards ran %v, want only %v", seen, names)
+	}
+	// the CI split: k-th sorted name goes to shard k mod 4
+	want := map[string]bool{"ExampleZ|TestC|TestG": true, "FuzzY|TestD": true, "TestA|TestE": true, "TestB|TestF": true}
+	for _, set := range sets {
+		if !want[strings.Join(set, "|")] {
+			t.Fatalf("shard %v is not a CI round-robin shard", set)
+		}
+	}
+	pkgDir, _ := filepath.EvalSymlinks(filepath.Join(nativeDir, "cmd", "code-forge-native"))
+	for _, d := range dirs {
+		if d != pkgDir {
+			t.Fatalf("shard ran in %s, want %s", d, pkgDir)
+		}
+	}
+	if !strings.Contains(out.String(), "cf-gotest: all 4 shards ok") {
+		t.Fatalf("stdout %s", out.String())
+	}
+}
+
+// TestB807OneRedShardMakesTheRunRed: a failing test in one shard fails the whole run, and that
+// shard's output is printed under its header.
+func TestB807OneRedShardMakesTheRunRed(t *testing.T) {
+	_, runsLog := shardFixture(t, `TestA\nTestB\nTestRed\nTestZ\n`)
+	var out, errb bytes.Buffer
+	if code := run([]string{"--shards", "4"}, &out, &errb); code != 1 {
+		t.Fatalf("exit %d, want 1\n%s", code, out.String())
+	}
+	if sets, _ := shardRuns(t, runsLog); len(sets) != 4 {
+		t.Fatalf("%d shards ran, want all 4 (a red shard does not stop the others)", len(sets))
+	}
+	o := out.String()
+	if !strings.Contains(o, "--- FAIL: TestRed") || !strings.Contains(o, "FAIL\t./cmd/code-forge-native [shard 3/4]") || !strings.Contains(o, "cf-gotest: 1 of 4 shards FAIL") {
+		t.Fatalf("stdout %s", o)
+	}
+}
+
+// TestB807ShardsNeedOnePackageWithTests: a selection of two packages is a usage error, and a
+// package with no tests is red, never an empty green run.
+func TestB807ShardsNeedOnePackageWithTests(t *testing.T) {
+	goLog, _ := shardFixture(t, `TestA\n`)
+	var out, errb bytes.Buffer
+	if code := run([]string{"--shards", "2", "native/gates/a_test.go", "native/state/b_test.go"}, &out, &errb); code != 2 || !strings.Contains(errb.String(), "--shards runs one package") {
+		t.Fatalf("exit %d stderr %q", code, errb.String())
+	}
+	if got := readLog(t, goLog); got != "" {
+		t.Fatalf("go ran %q", got)
+	}
+	shardFixture(t, `noise\n`)
+	out.Reset()
+	errb.Reset()
+	if code := run([]string{"--shards", "2"}, &out, &errb); code != 1 || !strings.Contains(errb.String(), "has no tests to shard") {
+		t.Fatalf("exit %d stderr %q", code, errb.String())
+	}
+}
