@@ -134,7 +134,7 @@ code-forge audit commands --json
 Exit 0. Output:
 
 ```text
-{"version":"dev","commit":"<sha>","date":"2026-01-01T00:00:00Z","commands":131,"checks":262,"problems":{"high":0,"low":0,"medium":0},"out":"","rows":[{"command":"audit","check":"help","result":"ok","severity":"","detail":"","block":""},{"command":"audit","check":"bad-flag","result":"ok","severity":"…
+{"version":"dev","commit":"<sha>","date":"2026-01-01T00:00:00Z","commands":133,"checks":266,"problems":{"high":0,"low":0,"medium":0},"out":"","rows":[{"command":"audit","check":"help","result":"ok","severity":"","detail":"","block":""},{"command":"audit","check":"bad-flag","result":"ok","severity":"…
 ```
 
 ```sh
@@ -1659,14 +1659,14 @@ usage: code-forge block close <id> --run <r> [--landed <sha>] [--worker-pid <pid
 
 #### When to use
 
-Finish a block: re-check gates, reviews and acceptance, then record the close. With --landed <sha>, measure that single block commit after it reached the base branch or the caller’s combine HEAD (with a merge introducing the commit through a non-first parent) in another worktree of the same repository; retain human checks and record landed_sha.
+Finish a block: re-check gates, reviews and acceptance, then record the close. With --landed <sha>, measure the block commit (including a merge) against its first parent after it reached refs/heads/main or the root-selected caller’s combine HEAD (with a merge introducing it through a non-first parent) in a separate worktree of the same repository. The run workspace, block worktree and recorded base_branch cannot establish combine landing; retain human checks and record landed_sha.
 
 #### Flags
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
 | `--run <r>` | string | not set | Run id (r-...). |
-| `--landed <sha>` | string | not set |  |
+| `--landed <sha>` | string | not set | Reconcile this already landed block commit against its original signed evidence; record landed_sha and retain human checks (B1017). |
 | `--worker-pid <pid>` | number | not set | Pid of the worker that serves the run. |
 | `--transcript <file>` | path | not set | Coder transcript file. |
 | `--report <file>` | path | not set | Coder report file (JSON). |
@@ -4237,6 +4237,8 @@ Start a fast lane on a combine tip
 
 ```text
 usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]
+usage: code-forge lane ready --run <lane-run> [--json]
+usage: code-forge lane combine --run <combine-run> <lane-run>...
 ```
 
 #### When to use
@@ -4261,9 +4263,13 @@ Description:
 
 Usage:
   usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]
+  usage: code-forge lane ready --run <lane-run> [--json]
+  usage: code-forge lane combine --run <combine-run> <lane-run>...
 
 Available commands:
-  lane start  Pin a clean lane checkout for at most two local blocks
+  lane combine  Merge ready lane runs locally with named tests and one regeneration
+  lane ready    Verify a lane's committed review evidence, ownership and size
+  lane start    Pin a clean lane checkout for at most two local blocks
 
 Options:
   -h, --help  Show this help
@@ -4277,6 +4283,10 @@ Options:
 | 1 | Refused or failed; the message says why. |
 | 2 | Usage error: a missing, unknown or bad argument (the usage is printed). |
 
+#### JSON output
+
+Takes `--json`; the examples above refuse, so no shape is recorded.
+
 #### Related
 
 - [`lane start`](#lane-start)
@@ -4289,6 +4299,8 @@ Pin a clean lane checkout for at most two local blocks
 
 ```text
 usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]
+usage: code-forge lane ready --run <lane-run> [--json]
+usage: code-forge lane combine --run <combine-run> <lane-run>...
 ```
 
 #### When to use
@@ -4304,6 +4316,7 @@ In a clean lane branch at the newest combine tip: pin the base and start a brief
 | `--run <id>` | string | not set | Run id (r-...). |
 | `--engine <e>` | string | not set | Engine that runs the coders. |
 | `--worker-pid <pid>` | number | not set | Pid of the worker that serves the run. |
+| `--json` | bool | off | Print JSON instead of text. |
 
 #### Examples
 
@@ -4319,6 +4332,8 @@ Description:
 
 Usage:
   usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]
+  usage: code-forge lane ready --run <lane-run> [--json]
+  usage: code-forge lane combine --run <combine-run> <lane-run>...
 
 Options:
   --base <combine-tip>  The pinned starting commit for the lane checkout
@@ -4343,6 +4358,114 @@ Options:
 - [`block open`](#block-open)
 - [`block close`](#block-close)
 - [`block land`](#block-land)
+
+### lane ready
+
+Verify a lane's committed review evidence, ownership and size
+
+```text
+usage: code-forge lane ready --run <lane-run> [--json]
+```
+
+#### When to use
+
+After committing and closing a lane's blocks: verify signed reviews of committed bytes, ownership, timing, clean history and the 5 MB limit.
+
+#### Flags
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--run <lane-run>` | string | not set | Run id (r-...). |
+| `--json` | bool | off | Print JSON instead of text. |
+
+#### Examples
+
+```sh
+code-forge lane ready --help
+```
+
+Exit 0. Output:
+
+```text
+Description:
+  Verify a lane's committed review evidence, ownership and size
+
+Usage:
+  usage: code-forge lane ready --run <lane-run> [--json]
+
+Options:
+  --run <r>   The run id
+  --json      Print one JSON line instead of text
+  -h, --help  Show this help
+```
+
+#### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | Refused or failed; the message says why. |
+| 2 | Usage error: a missing, unknown or bad argument (the usage is printed). |
+
+#### JSON output
+
+Takes `--json`; the examples above refuse, so no shape is recorded.
+
+#### Related
+
+- [`lane combine`](#lane-combine)
+- [`block close`](#block-close)
+
+### lane combine
+
+Merge ready lane runs locally with named tests and one regeneration
+
+```text
+usage: code-forge lane combine --run <combine-run> <lane-run>...
+```
+
+#### When to use
+
+In a separate integration branch and active run: merge local ready lane runs without rebasing, run named tests after each merge and regenerate once. Review, CI and main promotion remain integrator steps.
+
+#### Flags
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--run <combine-run>` | string | not set | The active integration run; positional arguments name lane runs in merge order. |
+
+#### Examples
+
+```sh
+code-forge lane combine --help
+```
+
+Exit 0. Output:
+
+```text
+Description:
+  Merge ready lane runs locally with named tests and one regeneration
+
+Usage:
+  usage: code-forge lane combine --run <combine-run> <lane-run>...
+
+Options:
+  --run <r>   The run id
+  -h, --help  Show this help
+```
+
+#### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | Refused or failed; the message says why. |
+| 2 | Usage error: a missing, unknown or bad argument (the usage is printed). |
+
+#### Related
+
+- [`lane ready`](#lane-ready)
+- [`run start`](#run-start)
 
 ## ledger
 
