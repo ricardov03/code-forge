@@ -362,9 +362,10 @@ func Open(o Options) (result Result, err error) {
 				return nil, err
 			}
 			// B797: the coder worktree cannot move the main branch or other
-			// blocks' branches. A guard that cannot go on (another hook,
-			// core.hooksPath in a work tree) leaves the worktree usable;
-			// doctor shows the guard state.
+			// blocks' branches. Another reference-transaction hook is kept
+			// and runs after the guard; core.hooksPath in a work tree (husky)
+			// gets a per-worktree hooks folder that runs it (B809). A guard
+			// that cannot go on leaves the worktree usable; doctor shows why.
 			protect, _ := baseBranch.(string)
 			_, _ = refguard.Install(text(made.Record.Get("path")), protect, text(made.Record.Get("branch")), o.Settings.Branch)
 		}
