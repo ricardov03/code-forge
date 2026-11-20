@@ -116,8 +116,8 @@ var b690bNodeVerbs = []string{"author", "autopilot", "block", "ci", "cloud-coder
 // and writes nothing at all.
 func TestB690aUnknownVerbMatchesNode(t *testing.T) {
 	// The visible verbs: the Node router's list (B690b), config (B791),
-	// release (B799) and audit (B802), without the hidden land and native-status.
-	verbs := []string{"config", "release", "audit"}
+	// release (B799), audit (B802) and lane (B1010), without hidden verbs.
+	verbs := []string{"config", "release", "audit", "lane"}
 	for _, verb := range b690bNodeVerbs {
 		if verb != "land" && verb != "native-status" {
 			verbs = append(verbs, verb)
