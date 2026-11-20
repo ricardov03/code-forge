@@ -2,10 +2,12 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -94,6 +96,7 @@ func TestB920OpenGreenBaseOpens(t *testing.T) {
 
 func TestB920OpenWarnsWhenGateOff(t *testing.T) {
 	f := landCIBatch(t, map[string]any{"require_ci": "off"}, "", "")
+	b920Origin(t, f)
 	landCIFakeGh(t, landCIRed, nil)
 	code, output := b920Open(t, f)
 	if code != 0 {
@@ -104,5 +107,33 @@ func TestB920OpenWarnsWhenGateOff(t *testing.T) {
 	}
 	if got := b920Status(t, f); got != "open" {
 		t.Errorf("B4 status=%v, want open", got)
+	}
+}
+
+// b920Origin gives the fixture repo an origin remote (an empty bare repo:
+// the newest-base fetch finds no branch there and keeps HEAD).
+func b920Origin(t *testing.T, f *landBatchFixture) {
+	t.Helper()
+	bare := filepath.Join(t.TempDir(), "origin.git")
+	for _, args := range [][]string{{"init", "-q", "--bare", bare}, {"-C", f.repo, "remote", "add", "origin", bare}} {
+		cmd := exec.Command("git", args...)
+		cmd.Env = gitx.ChildEnv()
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s: %v", args, out, err)
+		}
+	}
+}
+
+// With the gate off and no origin remote there is no CI to read: gh is
+// never run (it would write its own state under HOME) and the open goes on.
+func TestB920OpenGateOffNoRemoteSkipsGh(t *testing.T) {
+	f := landCIBatch(t, map[string]any{"require_ci": "off"}, "", "")
+	gh := landCIFakeGh(t, landCIRed, nil)
+	code, output := b920Open(t, f)
+	if code != 0 || strings.Contains(output, "warning") {
+		t.Fatalf("exit=%d output=%q, want a plain open", code, output)
+	}
+	if calls := landCICalls(t, gh); len(calls) != 0 {
+		t.Errorf("gh calls=%q, want none without an origin remote", calls)
 	}
 }

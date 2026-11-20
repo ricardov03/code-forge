@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -89,6 +90,13 @@ func openBaseCICheck(cfg map[string]any, cwd string, warn io.Writer) func(string
 			return &state.Error{Code: "base-not-green", Message: message + "\n" + strings.TrimSuffix(refusalNext(next), "\n")}
 		}
 		watch := closeCommand([]string{"code-forge", "ci", "watch", "--sha", sha, "--cwd", cwd})
+		if !required {
+			// gate off: a repository without an origin remote has no CI to
+			// read, so gh is not run at all (it would only write its state)
+			if url, err := gitx.Run(cwd, "remote", "get-url", "origin"); err != nil || strings.TrimSpace(url) == "" {
+				return nil
+			}
+		}
 		if _, err := exec.LookPath("gh"); err != nil {
 			if required {
 				return refuse("base "+short+": land.require_ci: github reads CI runs with the gh CLI, and gh is not on PATH; install gh and run gh auth login (B920)", "gh auth status")
