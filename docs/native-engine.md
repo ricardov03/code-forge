@@ -703,6 +703,45 @@ HEAD in place of local checks. Since B606
 it also writes one platform package per target to `dist/npm/<target>/` and checks every pack size.
 See [Releasing](releasing.md).
 
+## Red→green proof for Go tests (B957)
+
+`code-forge proof red-green` has no Go runner, so a lane proves its new Go tests with the
+maintainer tool `native/cmd/cf-redgreen` (not shipped):
+
+```
+go -C native run ./cmd/cf-redgreen --base <sha> [--out <file>] <test files...>
+```
+
+The new tests are the `Test` functions a file has now and did not have at `<sha>`. The tool
+extracts `<sha>`'s copy of the Go module into a temp folder with `git archive` (the repository
+and its worktrees are not touched), puts the current test files in and runs only the new tests:
+each must fail by assertion there (a build error or a panic is `RED_INVALID`), then pass in the
+working tree. Verdicts: `PROVEN` and `NO_NEW_TESTS` exit 0; `NOT_RED`, `RED_INVALID` and
+`NOT_GREEN` exit 1. `--out` writes the result as JSON, next to the block's review json.
+
+## Flaky test limit per run (B958)
+
+A `go test` gate reruns a failed test once (one `go test -count=3 -run` call, B798) and lists a
+test that passes only there as a `flaky-test` finding of the run. A run may list at most 3: when a
+gate's flaky test brings the run's list to 4 or more, that gate is red (`allOk: false`, exit 1),
+prints `gates: N flaky tests in run <run> (<package.Test>, ...), more than 3: the gate is red`,
+writes a `test.flaky_limit` row `{tests, max}` and adds `flaky_limit` to its JSON. In `block land`
+the block's gate fails with the same text. A later gate with no flaky test is not affected.
+
+## Land fast checks (B964)
+
+`block land` (batch and the single-block `--merge` path) runs four quick checks on each block before
+any CI read, rebase or gate, and stops at step `fast-checks` naming each problem. Each looks only at
+what the block adds against its base branch (`base...head`):
+
+- a conflict marker (`<<<<<<<`, `=======`, `>>>>>>>`) added in any file;
+- a `testdata/` or `fixtures/` path git ignores, so it was never committed (`git add -f` it);
+- a Markdown table row whose first cell repeats another row's (or is it plus more commands), new in the block;
+- a `CHANGELOG.md` change that gives `## [Unreleased]` a shape fault the base did not have (an entry
+  before the first `###` heading, or a repeated `###` heading).
+
+A duplicate row or changelog fault already on the base is not the block's and is not refused.
+
 ## How we keep Go and Node the same
 
 Until B690b contributors used parity tests that ran each command through the

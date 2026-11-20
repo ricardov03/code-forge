@@ -162,6 +162,15 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	// B765: land.require_ci refuses before any write when the block tip's CI
 	// is not green; it runs ahead of every Node hand-over below.
 	if merge {
+		// B964: the land fast checks, before any CI push, rebase or gate.
+		fastBase := blockString(entry.Get("base_branch"))
+		if fastBase == "" {
+			fastBase = "main"
+		}
+		if problems := landFastChecks(top, fastBase, "HEAD"); len(problems) > 0 {
+			step = "fast-checks"
+			return stop("the land fast checks fail:\n  " + strings.Join(problems, "\n  "))
+		}
 		provider, bad := landCIRequired(cfg)
 		if bad != "" {
 			step = "ci"

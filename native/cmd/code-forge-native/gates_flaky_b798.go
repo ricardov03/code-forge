@@ -23,9 +23,14 @@ var gflNow = time.Now
 // run, block and worktree first) and, inside a run, one finding in the run's
 // findings list, so the flake gets its own fix block in the same session
 // (B800 reads the list). A finding already listed is not added again.
+//
+// B958: when this call lists a flaky test and the run's list then holds more
+// than gatesFlakyRunMax flaky tests, it writes a test.flaky_limit row and
+// returns a *gatesFlakyLimit: the gate is red.
 func gatesFlakyGo(home string, owner ledger.Object, results []any, write func(ledger.Object) error) error {
 	run, _ := owner.Get("run").(string)
 	block, _ := owner.Get("block").(string)
+	flaky := false
 	for _, v := range results {
 		r, _ := v.(ledger.Object)
 		tests, _ := r.Get("flaky_tests").([]any)
@@ -50,6 +55,7 @@ func gatesFlakyGo(home string, owner ledger.Object, results []any, write func(le
 			if run == "" {
 				continue
 			}
+			flaky = true
 			rerun, _ := r.Get("flaky_rerun").([]string)
 			finding := ledger.Object{
 				{Key: "ts", Value: gflNow().UTC().Format("2006-01-02T15:04:05.000Z")},
@@ -66,7 +72,53 @@ func gatesFlakyGo(home string, owner ledger.Object, results []any, write func(le
 			}
 		}
 	}
-	return nil
+	if !flaky {
+		return nil
+	}
+	return gatesFlakyRunLimit(home, run, owner, write)
+}
+
+// gatesFlakyRunMax is the most flaky tests one run may list and stay green (B958).
+const gatesFlakyRunMax = 3
+
+// gatesFlakyLimit is the red of a run with too many flaky tests (B958).
+type gatesFlakyLimit struct {
+	run   string
+	tests []string
+}
+
+func (e *gatesFlakyLimit) Error() string {
+	return fmt.Sprintf("gates: %d flaky tests in run %s (%s), more than %d: the gate is red; fix the flaky tests first (B958)",
+		len(e.tests), e.run, strings.Join(e.tests, ", "), gatesFlakyRunMax)
+}
+
+// gatesFlakyRunLimit counts the flaky tests in the run's findings list and,
+// above gatesFlakyRunMax, writes the test.flaky_limit row and returns the red.
+func gatesFlakyRunLimit(home, run string, owner ledger.Object, write func(ledger.Object) error) error {
+	data, err := os.ReadFile(gatesFindingsFile(home, run))
+	if err != nil {
+		return err
+	}
+	tests := []string{}
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		var row struct {
+			Source, Fingerprint string
+		}
+		if json.Unmarshal(line, &row) == nil && row.Source == "flaky-test" {
+			tests = append(tests, strings.TrimPrefix(row.Fingerprint, "flaky-test:"))
+		}
+	}
+	if len(tests) <= gatesFlakyRunMax {
+		return nil
+	}
+	row := owner.Clone()
+	row.Set("event", "test.flaky_limit")
+	row.Set("tests", tests)
+	row.Set("max", gatesFlakyRunMax)
+	if e := write(row); e != nil {
+		return e
+	}
+	return &gatesFlakyLimit{run: run, tests: tests}
 }
 
 // gatesFindingsFile is the run's findings list: one JSON object per line.

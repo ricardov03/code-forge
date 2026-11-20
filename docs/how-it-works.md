@@ -793,6 +793,17 @@ NO BLOCK`; one `NO BLOCK`, or a failed log with no test name (a setup or build s
 The landing block is always dropped from `CODE_FORGE_CI_RED_BLOCKS`: a block never covers its own
 red.
 
+`land.require_main_ci: true` (with `land.require_ci: github`, B962) also judges the base branch: before
+the tip check, land reads the newest completed push run of the base (`gh run list --branch <base>
+--event push --status completed --limit 1`, `land.ci_workflow` applies) and refuses at step ci while
+it is red: `main CI is red (CI: failure, push run <id> at <sha8>); failing tests:`, each top-level
+failing test of its failed log as `<name> -> <block>` or `<name> -> NO BLOCK`, then the fix (`fix main
+first, or name the fix blocks of its reds in CODE_FORGE_CI_RED_BLOCKS with lines in
+land.ci_red_list`), next `gh run view <id> --log-failed`. It lands only when blocks are named and no
+test is `NO BLOCK` (`ci: main red only on known reds (B9), landing allowed`). Here the landing block may cover the red: landing the fix is how a red main turns green.
+A green run prints `ci: main push run <id> green (<sha8>)`; a base with no completed push run passes
+with a note.
+
 `code-forge ci watch --sha <sha> [--run <r>] [--timeout 30m] [--cwd <dir>] [--json]` polls
 `gh run list --commit <sha> --json databaseId,status,conclusion,name` every 30 s, with `gh` from
 `PATH`. When every run is completed and each concluded `success`, `skipped` or `neutral`, it exits 0.

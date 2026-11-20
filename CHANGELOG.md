@@ -50,6 +50,12 @@ waits on a second real consumer (plan §10.4, Q17).
 - `code-forge release check` counts the blocks since the last `v*` tag and prints `RELEASE NOW: N blocks since vX` at the new `release.max_blocks` config key (default 8), an info line from 3 below it; the autopilot stop report and binnacle (`Release size`) show the same line (B951)
 - While an autopilot grant is active, a red gate, a land that stops, a hand-over that names the run and the coder report's `FOUND` lines (on `block close` and `block land`) record an `autopilot found` finding by themselves, deduped by fingerprint (B821)
 - A queued `autopilot found` block's acceptance file lists the red test its evidence names (`--- FAIL: TestX` or a findings.jsonl `"test"`); with none it carries a `needs-test` marker in place of the old placeholder (B822)
+### Added
+
+- `land.require_main_ci: true` (with `land.require_ci: github`) makes `block land` refuse while the newest completed push run of the base branch is red, unless every failing test of that run matches a `land.ci_red_list` line of a block named in `CODE_FORGE_CI_RED_BLOCKS` (the landing fix block may cover it); a green or missing push run lands (B962)
+- Maintainer tool `native/cmd/cf-redgreen --base <sha> [--out <file>] <test files>` proves a block's new Go tests red→green: it runs them on the base sha's module (from `git archive`, nothing touched) and requires an assertion failure, then a pass on the working tree; verdict PROVEN, NO_NEW_TESTS, NOT_RED, RED_INVALID or NOT_GREEN, optionally written as JSON (B957)
+- A run may list at most 3 flaky Go tests: the gate whose flaky test makes it 4 or more is red, names the tests, writes a `test.flaky_limit` row and shows `flaky_limit` in its JSON; a later clean gate stays green (B958)
+- `block land` runs fast checks before CI, rebase or gate: a block that adds a conflict marker, leaves a testdata/fixtures file ignored by git, adds a duplicate docs table row or a new CHANGELOG [Unreleased] shape fault stops at `fast-checks` with each problem named (B964)
 
 ## [0.26.0] — 2026-11-19
 
