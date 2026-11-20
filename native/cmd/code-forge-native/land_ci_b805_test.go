@@ -63,3 +63,53 @@ func TestB805NoSearchWhenNotNeeded(t *testing.T) {
 		}
 	}
 }
+
+// B998 (B805 review): a land whose first pull request page is 200 unrelated
+// rows finds block B1's stale CI PR #105 (ci-b1 at an old sha) only by the
+// head-branch search, and replaces it: the tip goes to ci-b1-2, the new
+// draft PR names #105, and #105 is closed. B2 lands after it as usual.
+func TestB998StalePRPast200Replaced(t *testing.T) {
+	f := landCIBatch(t, map[string]any{"require_ci": "github"}, "", "")
+	f.bareRemote()
+	heads := f.heads()
+	old := f.git(f.repo, "commit-tree", "-p", f.base, "-m", "B1 before rebase", f.base+"^{tree}")
+	f.git(f.repo, "push", "-q", "origin", old+":refs/heads/ci-b1")
+	gh := landCIFakeGhSeq(t, map[string]string{
+		"prs-1.json":                      landB805PRs(t, 1, 200, 999),
+		"prs-search-head:ci-b1.json":      `[{"number":105,"headRefName":"ci-b1","headRefOid":"` + old + `","state":"OPEN"}]`,
+		"prs.json":                        `[{"number":200,"headRefName":"ci-b1-2","headRefOid":"` + heads["B1"] + `","state":"OPEN"}]`,
+		"runs-" + heads["B1"] + "-1.json": `[]`,
+		"runs-" + heads["B1"] + ".json":   landCIGreen,
+		"runs-" + heads["B2"] + ".json":   landCIGreen,
+		"runs-other.json":                 landCIGreen, // B2 rebased onto B1's merge
+	})
+	landCIFakeClock(t)
+	code, output := f.land("B1", "B2")
+	if code != 0 {
+		t.Fatalf("exit=%d, want 0: %s", code, output)
+	}
+	calls := landCICalls(t, gh)
+	joined := strings.Join(calls, "\n")
+	lists := []string{}
+	for _, call := range calls {
+		if strings.HasPrefix(call, "pr list ") {
+			lists = append(lists, call)
+		}
+	}
+	if len(lists) < 2 || !strings.HasPrefix(lists[0], "pr list --state all --limit 200 ") || !strings.HasPrefix(lists[1], "pr list --state all --search head:ci-b1 --limit 200 ") {
+		t.Fatalf("the PR lists must start with the 200-row page, then the head-branch search:\n%s", joined)
+	}
+	for _, want := range []string{
+		"pr create --draft --base main --head ci-b1-2 --title B1: CI for " + heads["B1"][:8] + " --body Replaces #105 ",
+		"pr close 105 --comment Replaced by #200: block B1 tip " + heads["B1"][:8],
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("gh calls must contain %q:\n%s", want, joined)
+		}
+	}
+	for _, want := range []string{"ci: pushed tip " + heads["B1"][:8] + " to origin/ci-b1-2 ", "ci: closed #105 (replaced by #200)\n", "block B1 landed\n", "block B2 landed\n"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output must contain %q:\n%s", want, output)
+		}
+	}
+}
