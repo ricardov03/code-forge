@@ -85,6 +85,13 @@ func laneCombine(home, run string, ids []string) error {
 		}
 		commands := landRegenerateCommands(cfg)
 		auto := landmerge.FromConfig(cfg)
+		// Use the same sanitized git environment as commit-tree and the
+		// generator commit, before creating any trial checkout or merge objects.
+		for _, identity := range []string{"GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"} {
+			if _, err := gitx.Run(top, "var", identity); err != nil {
+				return fmt.Errorf("configure repository-local git identity before combining: git config user.name 'Your Name' and git config user.email 'you@example.com'")
+			}
+		}
 		temporary, err := os.MkdirTemp("", "code-forge-lane-combine-")
 		if err != nil {
 			return err

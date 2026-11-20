@@ -191,10 +191,11 @@ func b1010bCombine(t *testing.T, f startFixture, base string) string {
 	// A recorded generator proves that regeneration happens once, after named tests.
 	b1010EditRecord(t, f.home, "r-combine", func(r map[string]any) { r["workspace"] = dir })
 	b1010bChdir(t, dir)
-	t.Setenv("GIT_AUTHOR_NAME", "Fixture")
-	t.Setenv("GIT_AUTHOR_EMAIL", "fixture@example.invalid")
-	t.Setenv("GIT_COMMITTER_NAME", "Fixture")
-	t.Setenv("GIT_COMMITTER_EMAIL", "fixture@example.invalid")
+	// Product git children discard inherited GIT_* variables. Pin identity
+	// in the shared repository config so trial worktrees inherit it too.
+	b1010Git(t, dir, "config", "--local", "user.useConfigOnly", "true")
+	b1010Git(t, dir, "config", "--local", "user.name", "Fixture")
+	b1010Git(t, dir, "config", "--local", "user.email", "fixture@example.invalid")
 	return dir
 }
 
@@ -264,5 +265,30 @@ func TestB1010bCombineStopsOnRed(t *testing.T) {
 	}
 	if b1010Git(t, dir, "rev-parse", "HEAD") != base || b1010Git(t, f.repo, "rev-parse", "HEAD") != head {
 		t.Fatal("red combine moved a branch")
+	}
+}
+
+func TestC28cCombineMissingIdentity(t *testing.T) {
+	for _, field := range []string{"name", "email"} {
+		t.Run(field, func(t *testing.T) {
+			f, base, head := b1010bLane(t)
+			dir := b1010bCombine(t, f, base)
+			b1010Git(t, dir, "config", "--local", "--unset-all", "user."+field)
+			before := b1010Git(t, dir, "worktree", "list", "--porcelain")
+			code, out, errs := runCaptured(t, "lane", "combine", "--run", "r-combine", "r-lane")
+			if code != 1 || !strings.Contains(errs, "configure repository-local git identity") ||
+				!strings.Contains(errs, "git config user.name") || !strings.Contains(errs, "git config user.email") {
+				t.Fatalf("missing %s: %d %s %s", field, code, out, errs)
+			}
+			if b1010Git(t, dir, "rev-parse", "HEAD") != base || b1010Git(t, f.repo, "rev-parse", "HEAD") != head {
+				t.Fatal("missing identity moved a branch")
+			}
+			if after := b1010Git(t, dir, "worktree", "list", "--porcelain"); after != before {
+				t.Fatalf("missing identity changed worktrees:\nbefore %s\nafter %s", before, after)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "regenerated.txt")); !os.IsNotExist(err) {
+				t.Fatalf("generator ran without identity: %v", err)
+			}
+		})
 	}
 }

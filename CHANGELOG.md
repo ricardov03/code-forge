@@ -17,6 +17,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- Pin combine-test identity in repository config so trial commits work without machine credentials; lane combine checks author and committer identity up front and gives repo-local configuration steps (c28c).
+
 - Recognize lane start, ready and combine in the handover vocabulary while hiding private argument values (c28c).
 
 - Give the auxiliary Added entry in the B795 batch-land fixture its own block ID, preserving autonomous heading union and the B1018 duplicate-entry guard (c28c).

@@ -15,7 +15,10 @@ review hashes, clean history and the fixed 5 MB blob limit. In a separate clean
 integration branch and ordinary active run, `forge lane combine --run <integration>
 <lane-run>...` merges local ready lanes without rebasing, tests each merged prefix
 by name, and regenerates once using `land.regenerate`. Red tests reuse land's
-single fix finding. The integrator reviews the generated tip, runs one CI for it,
+single fix finding. Configure repo-local `user.name` and `user.email` first;
+combine checks author and committer identity before creating a trial checkout,
+using git children that exclude inherited `GIT_*` overrides and global config.
+The integrator reviews the generated tip, runs one CI for it,
 then fast-forwards main; that final promotion remains outside the local command.
 
 Small changes may use `block open <id> --kind light`. Close allows at most `light.max_files` owned changed files (default 5) and `light.max_lines` added plus removed lines (default 300), including new files. Auto ticket lines are unchanged. `gates run --block` runs the block's tests through `{test_files}`, ignoring the full-suite threshold; supply block tests and a test command containing that item. A close refusal `light-limits <files> files, <lines> lines` means the block outgrew this kind: the orchestrator stops the open attempt, then opens the same id with `block open <id> --kind code --attempt <n+1>` and the original base, ownership and acceptance.

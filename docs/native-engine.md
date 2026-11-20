@@ -38,6 +38,10 @@ Readiness does not write state or run tests. The workspace must be the repo root
 
 Start an ordinary active run on a separate clean integration branch in the same
 repository, then run `code-forge lane combine --run <integration-run> <lane-run>...`.
+Configure a repository-local commit identity with `git config user.name 'Your Name'`
+and `git config user.email 'you@example.com'`. Combine checks author and committer
+identity before creating a trial checkout; inherited `GIT_*` overrides and global
+git configuration are excluded from its git children.
 Lane bases must already be ancestors of the integration tip. It validates every
 lane before merging, rechecks each tip, uses the existing land merge precheck
 and conflict resolution, runs that lane's named Go tests in the combined trial
