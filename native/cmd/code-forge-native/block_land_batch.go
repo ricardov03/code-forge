@@ -892,7 +892,10 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 	if gatesSelectedReason(scope.Reason) {
 		runPlan = gatesWithTestFiles(p)
 	}
+	ramEnv, ramDone := gatesRamTmpEnv(configured, run, block.id, os.Stderr)
+	runPlan.BaseEnv = ramEnv
 	results, all, err := gates.Run(ctx, runPlan, block.tree.Workspace, run, timeout, scope)
+	ramDone()
 	if err != nil {
 		return err
 	}

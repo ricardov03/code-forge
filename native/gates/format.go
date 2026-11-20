@@ -203,10 +203,10 @@ func outputTail(stream string) string {
 // runBatches runs each batch and keeps the first timeout, else the first
 // failure, else the first outcome, with every batch's output joined; with
 // more than one batch each output is its tail.
-func runBatches(ctx context.Context, batches [][]string, c *Command, cwd, run string, timeout float64) ledger.Object {
+func runBatches(ctx context.Context, batches [][]string, c *Command, env map[string]string, cwd, run string, timeout float64) ledger.Object {
 	outcomes := []ledger.Object{}
 	for _, batch := range batches {
-		o := execute(ctx, batch, c.Env, cwd, run, timeout, c.FailOnStdout)
+		o := execute(ctx, batch, env, cwd, run, timeout, c.FailOnStdout)
 		if len(batches) > 1 {
 			o.Set("stdout", outputTail(fmt.Sprint(o.Get("stdout"))))
 			o.Set("stderr", outputTail(fmt.Sprint(o.Get("stderr"))))

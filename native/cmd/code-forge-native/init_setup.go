@@ -17,6 +17,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/ramtmp"
 )
 
 // `code-forge init` past the refusals, without prompts (B527): the setup
@@ -442,6 +443,8 @@ type initValues struct {
 	soloProject    any
 	push, draft    bool
 	gates          map[string]any
+	ramTmp         any // B939: gates.ram_tmp, kept from the config or the default
+	ramTmpMB       any // B941: gates.ram_tmp_mb, kept from the config or the default
 	proof          map[string]any
 	doctor         bool
 	gateOrigin     map[string]string
@@ -627,6 +630,15 @@ func initResolve(ctx initCtx, ex, user ledger.Object, existing bool, parsed init
 	for _, g := range initFlagsFor(parsed, "gates") {
 		gv := g.value.(initGateValue)
 		v.gates[gv.name], v.gateOrigin[gv.name] = gv.argv, "flag"
+	}
+	// B939: init writes gates.ram_tmp; a value already in the config stays.
+	v.ramTmp = ramtmp.DefaultMode
+	if kept, present := initField(exGates, "ram_tmp"); initKept(kept, present) {
+		v.ramTmp = initClone(kept)
+	}
+	v.ramTmpMB = float64(ramtmp.DefaultSizeMB)
+	if kept, present := initField(exGates, "ram_tmp_mb"); initKept(kept, present) {
+		v.ramTmpMB = initClone(kept)
 	}
 
 	exProof, hasProof := initField(ex, "proof")
@@ -957,6 +969,7 @@ func initGenerated(v initValues, ctx initCtx, jevRef string) ledger.Object {
 	cfg = append(cfg, ledger.Field{Key: "gates", Value: ledger.Object{
 		{Key: "test", Value: v.gates["test"]}, {Key: "lint", Value: v.gates["lint"]},
 		{Key: "types", Value: v.gates["types"]}, {Key: "format", Value: v.gates["format"]},
+		{Key: "ram_tmp", Value: v.ramTmp}, {Key: "ram_tmp_mb", Value: v.ramTmpMB},
 	}})
 	cfg = append(cfg, ledger.Field{Key: "proof", Value: ledger.Object{
 		{Key: "tiers", Value: ledger.Object{{Key: "high", Value: ledger.Object{{Key: "paths", Value: initClone(v.proof["high"])}}}}},

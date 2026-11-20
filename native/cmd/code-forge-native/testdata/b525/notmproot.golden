@@ -14,6 +14,7 @@ OK   tmp: 0 stale roots, 0 stale pids
 OK   sweep: 0 stale workers, 0 orphans, 0 zombies
 INFO memory: code-forge N MB, children N MB, orphans N MB
 INFO review concurrency: 6 tickets at once; provider slots anthropic 4 · openai 2 · xai 2
+INFO ram_tmp: off (CODE_FORGE_RAM_TMP=off)
 FAIL probes: no temp root (EACCES: permission denied, mkdir '<BASE>/tmp/doctor-<PID>-<MS>-<HEX>')
 INFO signer: same-user boundary only
 INFO native binary: not found

@@ -207,7 +207,7 @@ Read these rows in the JSON `rows` list:
 |---|---|
 | `native` | `OK` gives the binary path and version. `INFO` with `not found` means the binary is absent or cannot run (B760: no Node fallback, and `CODE_FORGE_NATIVE=0` no longer disables it). |
 | `ref-guard` | Shown once `block open` made a coder worktree in the repository (B797). `OK` with `on: hook <path>; N coder worktree(s) guarded`. `WARN` with `off:` and the reason: another tool's `reference-transaction` hook is in place, `core.hooksPath` points inside a work tree (add the hook there by hand), or the hook file is missing (the next `block open` puts it back). No row when no coder worktree was ever opened. |
-| `state-ignored` | `.code-forge/ ignored by git`, in a git work tree only, full run only (B828). `OK` with `yes`. `FAIL` with `no; git would see the proof export (copies of .env) and the run files; fix: add the line .code-forge/ to <repo>/.gitignore (code-forge upgrade or init adds it)` when a file under `.code-forge/export/` would not be ignored, or with the tracked-files line and `git rm -r --cached .code-forge && git commit` when git already tracks files under `.code-forge/` (doctor never runs it). |
+| `state-ignored` | `.code-forge/ ignored by git`, in a git work tree only, full run only (B828). `OK` with `yes`. `FAIL` with `no; git would see the proof export (copies of .env) and the run files; fix: add the line .code-forge/ to <repo>/.gitignore (code-forge upgrade or init adds it)` when a file under `.code-forge/export/` would not be ignored, or with the tracked-files line and `git rm -r --cached .code-forge && git commit` when git already tracks files under `.code-forge/` (doctor never runs it). The row asks git twice: `check-ignore`, then one `ls-files --full-name` with a `:(top)` pathspec from the doctor's folder, with no separate `rev-parse --show-toplevel` (B898). |
 | `native_daemon` | `live` means the daemon answered for the active worker. `off` means no live worker, no usable config, or `native.daemon: false` in it. `fallback` means it is enabled but no compatible daemon answered. Since B760 `CODE_FORGE_NATIVE=0` no longer turns it off. |
 
 The text form, `code-forge doctor`, labels these rows `native binary` and
@@ -555,6 +555,44 @@ used to pass that ignore on, so a gate killed by SIGHUP or SIGINT could exit
 shell's background job inherits as ignored, and the copy also unblocks every
 signal before the gate starts, so a gate never inherits the engine's
 blocked-signal mask; Node's spawn (libuv) does both in its child (B721).
+
+## Gate temp files on a RAM disk (macOS)
+
+Go tests make thousands of temp git directories under `$TMPDIR`. On macOS
+`fseventsd` logs every one of those changes and can take a whole CPU. With
+`gates.ram_tmp: auto` (opt-in) the Go engine gives every gate and test
+command `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`, a fresh directory per
+`gates run` (and per `block land` batch gate), removed after it.
+
+- `/Volumes/cf-tmp` is reused when it is mounted. Otherwise the engine makes
+  it once, with no sudo: `hdiutil attach -nomount ram://<MB*2048>` (pages
+  are only taken as they are written) and `diskutil erasevolume APFS cf-tmp
+  <device>`. `gates.ram_tmp_mb` sets the size in MB (default 2048, so
+  `ram://4194304`; 64 to 65536). A volume already mounted keeps its size, so
+  a new size takes effect after `hdiutil detach /Volumes/cf-tmp` or a restart
+  (B941).
+- The engine writes `.fseventsd/no_log` (no file-event log for the volume)
+  and `.metadata_never_index` (Spotlight skips it) at the volume root.
+- Any error prints one line, `warn: gates.ram_tmp: <reason>; the gates use
+  the normal TMPDIR`, and the gates run on the normal `TMPDIR`. A RAM disk
+  problem never fails a gate.
+- A gate command's own `env.TMPDIR` wins. The RAM disk `TMPDIR` is not listed
+  in `env_keys` and is not masked.
+- `gates.ram_tmp: off` is the default (B940): measured on this repo's
+  `worker`, `review` and `gates` tests (3 interleaved rounds each), the RAM
+  disk was 1.2% slower in the sum of medians (141.08 s vs 139.36 s on the
+  normal disk), short of the 10% gain a default-on needs. `off` (or
+  `CODE_FORGE_RAM_TMP=off` in the environment) keeps the normal `TMPDIR`. On
+  Linux and Windows `auto` does nothing.
+- `code-forge doctor` shows a `ram_tmp` row: `on: /Volumes/cf-tmp mounted,
+  .fseventsd/no_log present`, `on (auto): ... is made on the first gate`,
+  `off (gates.ram_tmp: off)` or `fallback: hdiutil not found; ...`. The row
+  never makes a disk.
+- The volume stays mounted until you eject it (`hdiutil detach
+  /Volumes/cf-tmp`) or restart the Mac (B924).
+- `code-forge init` writes `gates.ram_tmp` into a new `.code-forge.yml` with
+  the default value (`off`, B940), and a re-run keeps the value already there (B939).
+  It writes `gates.ram_tmp_mb: 2048` after it the same way (B941).
 
 ## Rebase runs in Go (B431)
 
