@@ -597,7 +597,7 @@ var helpRefs = map[string]helpRef{
 	"lane ready": {
 		when:     "After committing and closing a lane's blocks: verify signed reviews of committed bytes, ownership, timing, clean history and the 5 MB limit.",
 		related:  []string{"lane combine", "block close"},
-		examples: []helpRefExample{helpRefEx("none", "lane ready --help")},
+		examples: []helpRefExample{helpRefEx("none", "lane ready --help"), helpRefEx("none", "lane ready --run missing-lane --json")},
 	},
 	"lane combine": {
 		when:     "In a separate integration branch and active run: merge local ready lane runs without rebasing, run named tests after each merge and regenerate once. Review, CI and main promotion remain integrator steps.",
