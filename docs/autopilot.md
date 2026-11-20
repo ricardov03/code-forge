@@ -276,6 +276,14 @@ A queued block joins the run's planned blocks at once, so an until-done grant do
 is open. The binnacle shows a **Found work** table (found, source, title, block, state), and every
 finding that waits for you is listed under **Actions only you can take**.
 
+## Release size
+
+`code-forge release check` counts the blocks landed since the last `v*` tag (B951; distinct
+`B<id>` commit subjects). From `release.max_blocks` − 3 (default 8, so 5 to 7) it prints an info
+line; at `release.max_blocks` or more it prints `RELEASE NOW: N blocks since vX (release.max_blocks M)`.
+The `autopilot stop` final report carries the same line, and the binnacle adds a `Release size`
+status item while it applies.
+
 ## A speed budget per step
 
 Every land, gate, coder session and CI wait has a speed budget (Go engine, B950). `block land`

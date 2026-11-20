@@ -720,6 +720,14 @@
         }
       }
     },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "B951: release size. `code-forge release check` (and the autopilot stop report and binnacle) counts the distinct blocks (B<id> commit subjects) since the last v* tag.",
+      "properties": {
+        "max_blocks": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 8, "description": "B951: how many blocks a release holds at most. From max_blocks - 3 blocks release check prints an info line; at max_blocks or more it prints RELEASE NOW." }
+      }
+    },
     "telemetry": { "type": "string", "const": "off", "default": "off" }
   },
   "$defs": {

@@ -109,19 +109,35 @@ func autopilotReleaseReport(workspace string) string {
 // workspace is a project a release applies to: the top of a git work tree with a CHANGELOG.md or
 // a package.json. Any other workspace prints nothing.
 func autopilotStopReleaseCheck(workspace string) string {
-	if workspace == "" || !filepath.IsAbs(workspace) {
+	if !releaseApplies(workspace) {
 		return ""
+	}
+	return autopilotReleaseReport(workspace)
+}
+
+// releaseApplies: the workspace is the top of a git work tree with a
+// CHANGELOG.md or a package.json, a project a release applies to.
+func releaseApplies(workspace string) bool {
+	if workspace == "" || !filepath.IsAbs(workspace) {
+		return false
 	}
 	_, clErr := os.Stat(filepath.Join(workspace, "CHANGELOG.md"))
 	_, pkgErr := os.Stat(filepath.Join(workspace, "package.json"))
 	if clErr != nil && pkgErr != nil {
-		return ""
+		return false
 	}
 	top := releaseRunner(workspace, 0, "git", "rev-parse", "--show-toplevel")
-	if top.Code != 0 || !releaseSameDir(strings.TrimSpace(top.Stdout), workspace) {
+	return top.Code == 0 && releaseSameDir(strings.TrimSpace(top.Stdout), workspace)
+}
+
+// releaseSizeLine is the release size of the run's workspace (B951): the
+// RELEASE NOW or near line, or "" when it does not apply.
+func releaseSizeLine(workspace any) string {
+	ws, _ := workspace.(string)
+	if !releaseApplies(ws) {
 		return ""
 	}
-	return autopilotReleaseReport(workspace)
+	return releasecheck.SizeOf(ws, releaseRunner).Line()
 }
 
 func releaseSameDir(a, b string) bool {

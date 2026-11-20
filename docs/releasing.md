@@ -206,6 +206,9 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
    checks the tree is clean, HEAD is pushed, GitHub CI is green for the HEAD sha, the
    `[Unreleased]` shape and `npm ls`; it prints the bump (`### Added` entries: minor, else patch)
    and every step below in order, and exits 0 only when every check passes (`--json` for scripts).
+   It also counts the blocks since the last `v*` tag (B951): release every 5–8 blocks. From
+   `release.max_blocks` − 3 (default 8) it prints an info line; at `release.max_blocks` or more it
+   prints `RELEASE NOW: …` (the autopilot stop report and binnacle show the same line).
 2. The known-fixes test above when the release fixes reported errors.
 3. Complete [the docs block](#the-docs-block), commit its stamp last, and land it on `main`.
 4. `npm run release -- <bump> --dry-run`, and read the README and CHANGELOG diffs.

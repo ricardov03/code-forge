@@ -1292,6 +1292,9 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 	} else if approx > 1 {
 		status = append(status, item("Clock note", strconv.Itoa(approx)+" rows carry no valid timestamp and take the time of the rows before them"))
 	}
+	if size := releaseSizeLine(record.Get("workspace")); size != "" { // B951
+		status = append(status, item("Release size", size))
+	}
 	// B800: found work (autopilot found), only for a run that has some
 	foundRows, foundActions := apfBinnacle(b.runID, record)
 	for _, text := range foundActions {
