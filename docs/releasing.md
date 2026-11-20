@@ -26,6 +26,18 @@ The union driver keeps the lines from both sides, so these lands go through on e
 CI. It does not sort lines or remove duplicates, so read the `[Unreleased]` section before you
 release. The file is not in the npm package.
 
+Union can still leave two `### Added` headings in `[Unreleased]` when each side added its own group
+in a different place. code-forge's own merges and replays (`block land`, batch rebase,
+`block rebase`) fold them into one (B813). For merges you make with plain git, such as combining
+lane branches with `git merge --no-ff`, set code-forge as the union driver once per clone (B990):
+
+```sh
+git config merge.union.driver 'code-forge land merge-driver %O %A %B %P'
+```
+
+It merges like git's union driver and then folds a `CHANGELOG.md`'s repeated `###` headings into the
+first one of each kind, every line kept; other `merge=union` files get the plain union result.
+
 Every `[Unreleased]` entry must sit under a `### <Type>` heading, and each type has one heading:
 `npm run release` refuses a section with an entry before its first `###` heading or a `###` type
 that appears twice, and names the line to fix (the site's changelog page would show a nameless or
