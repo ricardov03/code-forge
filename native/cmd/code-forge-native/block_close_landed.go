@@ -12,7 +12,8 @@ import (
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
-// closeLandedTree measures the original single block commit in a private clone.
+// closeLandedTree measures the original block commit in a private clone.
+// A merge is measured against its first parent, including conflict resolutions.
 // Later commits (including edits to shared files) never change the bytes checked
 // by the ordinary close gates. No branch or worktree of the user is modified.
 func closeLandedTree(repo, workspace, id, sha string, entry ledger.Object) (tree, parent string, cleanup func(), err error) {
@@ -28,10 +29,11 @@ func closeLandedTree(repo, workspace, id, sha string, entry ledger.Object) (tree
 		return refuse("commit subject must start with the block id followed by ':' or a space")
 	}
 	parents, e := gitx.Run(repo, "show", "-s", "--format=%P", sha)
-	if e != nil || len(strings.Fields(parents)) != 1 {
-		return refuse("commit must have exactly one parent")
+	ps := strings.Fields(parents)
+	if e != nil || len(ps) == 0 {
+		return refuse("commit must have at least one parent")
 	}
-	parent = strings.TrimSpace(parents)
+	parent = ps[0]
 	base := blockString(entry.Get("base_sha"))
 	if base == "" {
 		return refuse("block has no base SHA")
@@ -39,18 +41,17 @@ func closeLandedTree(repo, workspace, id, sha string, entry ledger.Object) (tree
 	if _, e = gitx.Run(repo, "merge-base", "--is-ancestor", base, parent); e != nil {
 		return refuse("block base is not an ancestor of the commit's parent")
 	}
-	branch := blockString(entry.Get("base_branch"))
-	if branch == "" {
-		branch = "main"
-	}
-	_, e = gitx.Run(repo, "merge-base", "--is-ancestor", sha, "refs/heads/"+branch)
+	// base_branch records where coding started, not an integration authority:
+	// a linked-worktree run commonly records its own lane branch there.
+	_, e = gitx.Run(repo, "merge-base", "--is-ancestor", sha, "refs/heads/main")
 	landed := e == nil
 	// A combine caller may close a lane run in another worktree of this repo.
 	// Its HEAD is accepted only after checking the shared git directory identity.
 	if !landed {
 		cwd, ce := os.Getwd()
 		caller, ce2 := gitx.RepoTop(cwd)
-		if ce == nil && ce2 == nil && statusReal(caller) != statusReal(repo) {
+		blockTree := blockString(blockObject(entry.Get("worktree")).Get("path"))
+		if ce == nil && ce2 == nil && statusReal(caller) != statusReal(repo) && (blockTree == "" || statusReal(caller) != statusReal(blockTree)) {
 			common, a := gitx.Run(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
 			other, b := gitx.Run(caller, "rev-parse", "--path-format=absolute", "--git-common-dir")
 			if a == nil && b == nil && statusReal(strings.TrimSpace(common)) == statusReal(strings.TrimSpace(other)) {
@@ -80,7 +81,7 @@ func closeLandedTree(repo, workspace, id, sha string, entry ledger.Object) (tree
 		}
 	}
 	if !landed {
-		return refuse("commit is not an ancestor of the base branch or this repository's combine HEAD")
+		return refuse("commit is not an ancestor of main or this repository's separate combine HEAD")
 	}
 	changed, e := gitx.Run(repo, "diff", "--name-only", "--no-renames", "-z", parent, sha, "--")
 	if e != nil {

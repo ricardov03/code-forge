@@ -14,6 +14,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- Landed close no longer trusts a lane’s recorded `base_branch` as integration evidence, and supports merge commits against their first parent while preserving ownership and signed evidence gates (B1025).
+
 - Merge and release checks flag near-duplicate `[Unreleased]` entries with the same leading or trailing block ID; the installed driver preserves the refusal instead of falling back to plain union (B1018).
 
 - `block close --landed <sha>` reconciles an already landed block commit against its original signed evidence, records `landed_sha`, and preserves human checks despite later combine edits (B1017).
