@@ -758,8 +758,10 @@ tip run used had changes `HEAD` lacks. No land or lane check reads the result ye
 
 ## Flaky test limit per run (B958)
 
-A `go test` gate reruns a failed test once (one `go test -count=3 -run` call, B798) and lists a
-test that passes only there as a `flaky-test` finding of the run. A run may list at most 3: when a
+A failed `go test` gate gets one retry command: a single
+`go test -count=3 -run '^(A|B)$' <pkgs>` call (B798). That command runs each failed
+top-level test three times; all three executions must pass for the gate to pass.
+A test that passes only on this retry is listed as a `flaky-test` finding of the run. A run may list at most 3: when a
 gate's flaky test brings the run's list to 4 or more, that gate is red (`allOk: false`, exit 1),
 prints `gates: N flaky tests in run <run> (<package.Test>, ...), more than 3: the gate is red`,
 writes a `test.flaky_limit` row `{tests, max}` and adds `flaky_limit` to its JSON. In `block land`

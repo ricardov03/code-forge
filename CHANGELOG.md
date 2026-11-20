@@ -8,6 +8,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- Clarify the one Go flaky-test retry: a single `go test -count=3` command executes each failed top-level test three times, and all three must pass ([B958 docs](docs/native-engine.md#flaky-test-limit-per-run-b958); B1003).
 - `run start` and `block land` set `merge.union.driver` to code-forge's `land merge-driver` in the clone's shared git config when `CHANGELOG.md` is `merge=union`, so a plain `git merge` of lane branches folds repeated CHANGELOG headings with no manual step; the line falls back to git's union merge when the binary is gone or older, and a driver of your own is kept (B990b).
 - Go block gates run changed-file, block-id and acceptance tests by name per package with `-count=1 -trimpath`, scope vet/build to those packages, and record `changed tests only (N tests)`; `--changed --packages` restores package runs. Named gates pass big runs through separate bounded FIFO slots; land never reuses their evidence and CI keeps the full gate (B1009)
 - Regression tests cover finish-timing reset on an unavailable answers retry and the one automatic retry (`.retried`): both clear `finished_at` and `duration_ms`, preserve `started_at`, and the worker serves the automatic retry again without recovering an interrupted finish (B944).
