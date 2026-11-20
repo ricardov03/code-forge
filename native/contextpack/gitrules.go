@@ -46,3 +46,15 @@ func gitRulesSection(root, branch, base string) []string {
 	}
 	return append(out, "- this repository has no origin remote: do not push")
 }
+
+// rebaseRuleLine (B942) closes the git rules: rebase on the newest base
+// branch just before the CI push, so CI tests the block on today's base.
+func rebaseRuleLine(base, id, run string) string {
+	if base == "" {
+		base = "the main branch"
+	}
+	return "- rebase on the newest " + base + " just before the CI push: code-forge block rebase " + id + " --run " + run + " (block ready lists stale_base while " + base + " moved past your base)"
+}
+
+// RebaseRuleLine is the spawned coder's form of the B942 rule.
+const RebaseRuleLine = "Rebase on the newest base branch just before the CI push (code-forge block ready lists stale_base with the rebase command while it moved past your base)."

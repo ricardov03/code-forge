@@ -14,6 +14,7 @@ import (
 	"github.com/ricardov03/code-forge/native/blockend"
 	"github.com/ricardov03/code-forge/native/blockstate"
 	"github.com/ricardov03/code-forge/native/gatecheck"
+	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -157,6 +158,11 @@ func runBlockReady(args []string) int {
 	}
 	if why := blockclose.Tamper(p.run, p.id, rows, key); why != "" {
 		blockers = append(blockers, gatecheck.Blocker{Code: "ledger.tamper", Detail: why})
+	}
+	// B942: plain ready lists a stale base too (the preflight's B363 check),
+	// so a coder rebases on the newest base branch just before the CI push.
+	if s := gates.StaleBase(workspace, entry); s != nil {
+		blockers = append(blockers, gatecheck.Blocker{Code: "stale_base", Detail: fmt.Sprintf("%s moved %s → %s since the block's base; rebase on the newest %s before the CI push (B942)", s.Branch, gatesShort(s.Recorded), s.Tip, s.Branch)})
 	}
 	reportText := ""
 	var reportErr error

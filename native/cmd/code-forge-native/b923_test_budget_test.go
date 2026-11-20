@@ -50,7 +50,7 @@ func TestB923SpawnedCoderPromptCarriesTestBudget(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := "\n\nTest budget (code-forge): " + b923RuleFor(tc.p) + "\n\nReport the changed files"
+			want := "\n\nTest budget (code-forge): " + b923RuleFor(tc.p) + "\n\n"
 			if !strings.Contains(string(prompt), want) {
 				t.Fatalf("prompt lacks %q:\n%s", want, prompt)
 			}

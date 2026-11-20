@@ -142,6 +142,8 @@ func spawnCoderPrompt(cfg map[string]any, brief []byte, block string, run *strin
 	}
 	// B923: the CPU budget rule, with the configured -p
 	text += contextpack.TestBudgetLine(cfg) + "\n\n"
+	// B942: rebase on the newest base just before the CI push
+	text += contextpack.RebaseRuleLine + "\n\n"
 	text += "Report the changed files and pass/fail counts. Print TESTS <command> exit=<n> on its own line before the sentinel. On success, print this exact sentinel as your last line:\n===BLOCK " + block + " COMPLETE===\n"
 	return &text, nil, 0
 }

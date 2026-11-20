@@ -209,6 +209,20 @@ func Open(o Options) (result Result, err error) {
 	if !o.BaseExplicit {
 		ref = "HEAD"
 	}
+	// B942: a new coder worktree with no --base and no proof.worktree.base
+	// starts from the newest base branch: the newer of the local branch and
+	// origin's copy. The outer and the locked resolve share this sha.
+	newest := ""
+	if prior == nil && !o.BaseExplicit && o.Settings != nil && o.Settings.Base == "" && !o.Settings.BaseSet {
+		sha, _, err := worktree.NewestBase(workspace)
+		if err != nil {
+			return result, err
+		}
+		newest = sha
+	}
+	if newest != "" {
+		ref = newest
+	}
 	if prior != nil {
 		ref = text(prior.Get("base_sha"))
 	}
@@ -296,6 +310,9 @@ func Open(o Options) (result Result, err error) {
 		ref := o.Base
 		if !o.BaseExplicit {
 			ref = "HEAD"
+		}
+		if newest != "" {
+			ref = newest
 		}
 		if prior != nil {
 			ref = text(prior.Get("base_sha"))

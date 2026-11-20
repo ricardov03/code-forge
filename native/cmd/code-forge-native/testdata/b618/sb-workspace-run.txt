@@ -47,6 +47,8 @@ Line two.
 
 Test budget (code-forge): run only the test names you add or change: go test <pkg> -run '^(TestA|TestB)$' -count=1 -p 2 (or your stack's single-test form). No package-wide or full-suite runs, and no stress runs (-count=N) unless the owner asks. GitHub CI is the full gate.
 
+Rebase on the newest base branch just before the CI push (code-forge block ready lists stale_base with the rebase command while it moved past your base).
+
 Report the changed files and pass/fail counts. Print TESTS <command> exit=<n> on its own line before the sentinel. On success, print this exact sentinel as your last line:
 ===BLOCK B1 COMPLETE===
 == codex.home
