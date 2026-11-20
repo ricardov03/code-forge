@@ -569,6 +569,8 @@ func (e *reportBlockCost) object() ledger.Object {
 		switch key {
 		case "stopped":
 			o.Set(key, true)
+		case "autoPassed":
+			o.Set(key, true)
 		case "gateTimeMs":
 			o.Set(key, e.gateTimeMs)
 		case "reviewTimeMs":
@@ -639,7 +641,8 @@ func rpCostPerBlock(rows []ledger.Object) []*reportBlockCost {
 		t := timeOf[key]
 		event, _ := rpGet(row, "event").(string)
 		switch event {
-		case "dispatch", "block.close", "block.awaiting_human_check", "block.human_pass":
+		case "dispatch", "block.close", "block.awaiting_human_check", "block.human_pass", "block.human_checks_cleared":
+			e.drop("autoPassed")
 			e.drop("stopped")
 			t.stopped = nil
 		}
@@ -657,8 +660,16 @@ func rpCostPerBlock(rows []ledger.Object) []*reportBlockCost {
 			keep[key] = true
 		case "block.awaiting_human_check":
 			e.completed = false
-		case "block.human_pass":
+		case "block.human_pass", "block.human_checks_cleared":
 			e.completed = true
+			if rpIs(row, "by", "autopilot") {
+				e.add("autoPassed")
+			} else {
+				e.drop("autoPassed")
+			}
+		case "human_check.reopened":
+			e.completed = false
+			e.drop("autoPassed")
 		case "block.stop":
 			e.completed = false
 			e.add("stopped")
@@ -674,9 +685,14 @@ func rpCostPerBlock(rows []ledger.Object) []*reportBlockCost {
 				t.completion, t.humanWait = ts, nil
 			case "block.awaiting_human_check":
 				t.awaiting, t.completion, t.humanWait = ts, nil, nil
-			case "block.human_pass":
+			case "block.human_pass", "block.human_checks_cleared":
 				t.completion = ts
 				t.humanWait = rpElapsed(t.awaiting, ts)
+				if rpIs(row, "by", "autopilot") {
+					t.humanWait = nil
+				}
+			case "human_check.reopened":
+				t.completion, t.humanWait, t.awaiting = nil, nil, ts
 			case "block.stop":
 				t.stopped = ts
 			}
@@ -1498,6 +1514,9 @@ func rpCostLines(costs []*reportBlockCost) string {
 		status := "open"
 		if b.completed {
 			status = "completed"
+			if b.has("autoPassed") {
+				status += "; passed by autopilot"
+			}
 		} else if b.has("stopped") {
 			status = "stopped"
 		}

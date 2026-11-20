@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"math"
 	"os"
 	"os/exec"
@@ -430,6 +431,18 @@ func bnDeepScrub(v any, scrub func(string) string) any {
 	switch x := v.(type) {
 	case string:
 		return scrub(x)
+	case map[string]any:
+		out := map[string]any{}
+		for k, v := range x {
+			out[k] = bnDeepScrub(v, scrub)
+		}
+		return out
+	case []ledger.Object:
+		out := make([]ledger.Object, len(x))
+		for i, o := range x {
+			out[i] = bnDeepScrub(o, scrub).(ledger.Object)
+		}
+		return out
 	case []any:
 		out := make([]any, len(x))
 		for i, item := range x {
@@ -497,7 +510,8 @@ func bnInLog(row any) bool {
 	event, isText := bnGet(row, "event").(string)
 	return isText && (strings.HasPrefix(event, "autopilot.") || slices.Contains(bnExtraEvents, event)) ||
 		event == "review.waived" && bnEq(bnGet(row, "by"), "autopilot") ||
-		event == "session" && bnEq(bnGet(row, "role"), "delegate")
+		event == "session" && bnEq(bnGet(row, "role"), "delegate") ||
+		event == humancheck.ClearedEvent && bnEq(bnGet(row, "by"), "autopilot")
 }
 
 func bnUSD(n float64) string { return statusFixed(n) }
@@ -540,6 +554,12 @@ func bnDescribe(row any) (string, string, any) {
 		scope = g("scope").(string)
 	}
 	switch bnEvent(row) {
+	case humancheck.ClearedEvent:
+		p := ledger.Object{}
+		for _, k := range []string{"block", "clause", "grant_id", "proof", "proof_sha256"} {
+			p.Set(k, bnGet(row, k))
+		}
+		return "Passed by autopilot", rhcPassText(p) + "; revoke: code-forge run human-checks reopen --run " + bnU(g("run"), "unknown") + " --block " + bnU(g("block"), "unknown") + " --clause " + bnU(g("clause"), "unknown") + " --note \"<reason>\"", nil
 	case "autopilot.grant":
 		return "Grant started", "grant " + bnU(g("grant_id"), "unknown") + " · delegate " + bnU(g("delegate"), "unknown") + " · allow " + bnList(g("scopes")) + " · " + bnEndText(row), nil
 	case "autopilot.stop":
@@ -664,6 +684,12 @@ func bnCoV(v, fallback any) any {
 func (b *bnBuild) fullLog(rows []ledger.Row, scrub func(string) string) []any {
 	mine := []bnItem{}
 	for _, x := range b.ordered(rows) {
+		if bnEvent(x.row) == humancheck.ClearedEvent {
+			key, _ := blockclose.ReadKey(b.home, b.runID)
+			if len(humancheck.AutoPasses(b.runID, []any{x.row}, key)) == 0 {
+				continue
+			}
+		}
 		if bnInLog(x.row) {
 			mine = append(mine, x)
 		}
@@ -1317,6 +1343,9 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 		{Key: "open_questions", Value: questions}, {Key: "owner_actions", Value: ownerActions},
 		{Key: "incidents", Value: incidents}, {Key: "timeline", Value: timeline},
 	}
+	if passes, err := rhcPasses(b.home, runID, record); err == nil && len(passes) > 0 {
+		out.Set("auto_passed", passes)
+	}
 	if foundRows != nil {
 		out = append(out, ledger.Field{Key: "found", Value: foundRows})
 	}
@@ -1401,6 +1430,13 @@ func bnRenderBinnacle(b ledger.Object, scrub func(string) string) string {
 		lines = append(lines, "## Found work", "")
 		lines = append(lines, bnTable([]string{"Found", "Source", "Title", "Block", "State"}, bnRows(found, "found", "source", "title", "block", "state"))...)
 	}
+	if passes, ok := b.Get("auto_passed").([]ledger.Object); ok && len(passes) > 0 {
+		lines = append(lines, "## Passed by autopilot — please audit", "")
+		for _, p := range passes {
+			lines = append(lines, "- "+rhcPassText(p)+"; revoke: code-forge run human-checks reopen --run "+strings.TrimPrefix(b.Get("title").(string), "Autopilot run ")+" --block "+fmt.Sprint(p.Get("block"))+" --clause "+fmt.Sprint(p.Get("clause"))+" --note \"<reason>\"")
+		}
+		lines = append(lines, "")
+	}
 	lines = append(lines, "## Open questions", "")
 	questions, _ := b.Get("open_questions").([]any)
 	if len(questions) == 0 {
@@ -1456,6 +1492,18 @@ func bnRenderLog(runID string, entries []any, scrub func(string) string) string 
 		body = append(body, row)
 	}
 	lines := append([]string{"# Autopilot full log " + runID, "", "Newest first.", ""}, bnTable([]string{"Time", "Event", "Block", "File", "Detail", "Link"}, body)...)
+	audit := []string{}
+	for _, e := range entries {
+		o := e.(ledger.Object)
+		if o.Get("event") == "Passed by autopilot" {
+			audit = append(audit, "- "+bnCell(o.Get("detail")))
+		}
+	}
+	if len(audit) > 0 {
+		lines = append(lines, "## Passed by autopilot — please audit", "")
+		lines = append(lines, audit...)
+		lines = append(lines, "")
+	}
 	return bnFinish(lines, scrub)
 }
 

@@ -337,3 +337,5 @@ Both `autonomy` keys default to false. Whatever they say, a block's branch is ha
 6. Forecast vs actual (cases and lines) recorded; misses attributed (architect-added scope vs coder under-forecast) — a finished green block is accepted and recorded either way.
 7. One commit for the block; the draft PR (when the project uses PRs) carries the evidence.
 8. Every artifact that proves something is committed, not left in a scratch dir; no claim shipped that the evidence does not carry.
+
+Owner revocation: `code-forge run human-checks reopen --run <r> --block <id> [--clause C<n>] --note "<reason>" [--json]` revokes signed autopilot clause passes (all passed clauses when omitted). It requires an active run, TTY confirmation and no active grant, with no `--yes`. An unlanded closed block returns to `awaiting_human_check`; landed blocks stay closed but their checks reopen, so stop or fix the block. A later verified clear can resolve the check again. Never run reopen for the owner.

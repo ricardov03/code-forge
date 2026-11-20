@@ -107,3 +107,5 @@ Red→green means an assertion failure on old code, then a pass on new code; no 
 | keys, the forbidden list, signed rows and their limit | `references/security.md` |
 | the owner is away: an autopilot grant, the delegate, the live log doc | `references/autopilot.md` |
 | spawning coders per engine | `references/adapters/solo.md`, `references/adapters/claude-code.md`, `references/adapters/subprocess.md` |
+
+Evidence passes are listed separately as `auto_passed` by `run status` and `run human-checks list`. Use `run human-checks audit --run <r> [--json]` to re-hash proof and evidence. Only the owner may run `run human-checks reopen --run <r> --block <id> [--clause C<n>] --note "<reason>"`: terminal confirmation, active run, no active grant, no `--yes`. Reopened checks hold `run end`, including for landed blocks.

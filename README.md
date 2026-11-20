@@ -201,3 +201,5 @@ without it) and checks the generated config and command references. Record chang
 bumps versions, releases the CHANGELOG, updates the optional Latest line, checks, commits, and
 tags. Publish with `npm publish`, then push the tag; CI creates the GitHub release.
 See [releasing](docs/releasing.md).
+
+Autopilot evidence passes stay visible for owner audit. Use `code-forge run human-checks audit --run <r> [--json]` to verify the recorded proof and evidence hashes, and `run human-checks reopen --run <r> --block <id> [--clause C<n>] --note "<reason>"` at your terminal to revoke a pass after stopping the grant.

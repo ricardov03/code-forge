@@ -12,7 +12,6 @@ package humancheck
 
 import (
 	"fmt"
-	"slices"
 
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/sign"
@@ -20,6 +19,8 @@ import (
 
 // ClearedEvent is the signed row `run human-checks clear` writes.
 const ClearedEvent = "human_check.cleared"
+
+const ReopenedEvent = "human_check.reopened"
 
 // DeferredStatus (B632) is the block status of a block closed under an
 // autopilot grant with scope human-pass:deferred while its human_check
@@ -53,34 +54,38 @@ func object(v any) ledger.Object { o, _ := v.(ledger.Object); return o }
 // means no clear row verifies).
 func Open(run string, record ledger.Object, rows []any, key []byte) []Entry {
 	type pair struct{ block, clause, check string }
-	cleared := map[pair]bool{}
-	passed := map[string][]string{}
-	for _, v := range rows {
+	cleared := map[pair]int{}
+	passed := map[pair]int{}
+	reopened := map[pair]int{}
+	for i, v := range rows {
 		r, ok := v.(map[string]any)
-		if !ok || r["run"] != run {
+		if !ok || r["run"] != run || key == nil {
 			continue
 		}
 		event := r["event"]
-		if event != ClearedEvent && event != "block.human_pass" {
+		if event != ClearedEvent && event != "block.human_pass" && event != ReopenedEvent {
 			continue
 		}
 		block, _ := r["block"].(string)
-		if block == "" || key == nil {
+		if block == "" {
 			continue
 		}
 		if result, err := sign.VerifyRow(r, key); err != nil || !result.OK {
 			continue
 		}
-		if event == ClearedEvent {
-			clause, _ := r["clause"].(string)
-			check, _ := r["check"].(string)
-			cleared[pair{block, clause, check}] = true
-			continue
-		}
-		checks, _ := r["checks"].([]any)
-		for _, c := range checks {
-			if s, ok := c.(string); ok {
-				passed[block] = append(passed[block], s)
+		clause, _ := r["clause"].(string)
+		check, _ := r["check"].(string)
+		switch event {
+		case ReopenedEvent:
+			reopened[pair{block, clause, ""}] = i + 1
+		case ClearedEvent:
+			cleared[pair{block, clause, check}] = i + 1
+		case "block.human_pass":
+			checks, _ := r["checks"].([]any)
+			for _, c := range checks {
+				if text, ok := c.(string); ok {
+					passed[pair{block, "", text}] = i + 1
+				}
 			}
 		}
 	}
@@ -101,7 +106,7 @@ func Open(run string, record ledger.Object, rows []any, key []byte) []Entry {
 				continue
 			}
 			id := ClauseID(i)
-			if cleared[pair{field.Key, id, check}] || slices.Contains(passed[field.Key], check) {
+			if max(cleared[pair{field.Key, id, check}], passed[pair{field.Key, "", check}]) > reopened[pair{field.Key, id, ""}] {
 				continue
 			}
 			var waits any
@@ -122,4 +127,25 @@ func Find(open []Entry, block, clause string) (Entry, bool) {
 		}
 	}
 	return Entry{}, false
+}
+
+// AutoPasses returns the verified per-clause evidence passes in ledger order.
+// Historical passes stay visible for audit even after the owner reopens them.
+func AutoPasses(run string, rows []any, key []byte) []ledger.Object {
+	out := []ledger.Object{}
+	for _, v := range rows {
+		r, ok := v.(map[string]any)
+		if !ok || r["run"] != run || r["event"] != ClearedEvent || r["by"] != "autopilot" || key == nil {
+			continue
+		}
+		if verified, err := sign.VerifyRow(r, key); err != nil || !verified.OK {
+			continue
+		}
+		o := ledger.Object{}
+		for _, k := range []string{"block", "clause", "check", "waits_for", "by", "grant_id", "decision_id", "proof", "proof_sha256", "evidence", "ts"} {
+			o.Set(k, r[k])
+		}
+		out = append(out, o)
+	}
+	return out
 }

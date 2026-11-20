@@ -92,6 +92,10 @@ func runHumanChecks(home string, args []string, stdout, stderr io.Writer) int {
 		err = rhcList(home, args[1:], stdout)
 	case "clear":
 		err = rhcClear(home, args[1:], stdout, stderr)
+	case "reopen":
+		err = rhcReopen(home, args[1:], stdout, stderr)
+	case "audit":
+		err = rhcAudit(home, args[1:], stdout)
 	default:
 		fmt.Fprint(stderr, runSubUsage["human-checks"])
 		return 2
@@ -142,6 +146,15 @@ func rhcList(home string, args []string, stdout io.Writer) *rhcFail {
 	if fail != nil {
 		return fail
 	}
+	passes, err := rhcPasses(home, run, record)
+	if err != nil {
+		return &rhcFail{1, blockIOMessage(err)}
+	}
+	if !asJSON {
+		for _, p := range passes {
+			fmt.Fprintln(stdout, rhcPassText(p))
+		}
+	}
 	// B632: a check of a closed_deferred_human block is marked deferred.
 	deferred := func(e humancheck.Entry) bool {
 		return blockObject(blockObject(record.Get("blocks")).Get(e.Block)).Get("status") == humancheck.DeferredStatus
@@ -155,7 +168,11 @@ func rhcList(home string, args []string, stdout io.Writer) *rhcFail {
 			}
 			list[i] = o
 		}
-		data, _ := ledger.Stringify(ledger.Object{{Key: "run", Value: run}, {Key: "open", Value: list}}, false)
+		out := ledger.Object{{Key: "run", Value: run}, {Key: "open", Value: list}}
+		if len(passes) > 0 {
+			out.Set("auto_passed", passes)
+		}
+		data, _ := ledger.Stringify(out, false)
 		fmt.Fprintln(stdout, string(data))
 		return nil
 	}

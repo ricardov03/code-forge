@@ -372,3 +372,11 @@ by itself; the next autopilot or block command writes one `autopilot.expire` row
 
 See also: [concepts.md](concepts.md) (grant, delegate, binnacle, full log, scope, deny list,
 approval) and [privacy.md](privacy.md).
+
+### Audit evidence passes
+
+`run human-checks list` and `run status` include a separate `auto_passed` list for verified autopilot passes, with grant, decision, proof path and SHA-256. The binnacle and full log show **Passed by autopilot — please audit**, including a per-clause revoke command. Human passes retain their existing attribution.
+
+Run `code-forge run human-checks audit --run <r> [--json]` to check every signed autopilot clause pass. Status is `ok`, `changed`, or `missing`; the audit checks the proof and each recorded evidence file, resolving relative evidence paths next to the proof. It writes nothing and retains historical passes for audit. JSON returns `{run, passes}` with `status` and `evidence_audit` per pass.
+
+After stopping an active grant, the owner can run `code-forge run human-checks reopen --run <r> --block <id> [--clause C<n>] --note "<reason>" [--json]`. It needs an active run and terminal confirmation, has no `--yes`, and refuses under an active grant. Omit `--clause` to reopen all passed autopilot checks of that block. A signed `human_check.reopened` row names the revoked decision. An unlanded closed block becomes `awaiting_human_check`; a landed block stays closed, with an open check and the instruction to stop or fix the block. Either holds `run end` until addressed. Design approvals remain owner-only (`design:approve` stays denied).

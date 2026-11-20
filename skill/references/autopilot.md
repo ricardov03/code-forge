@@ -59,3 +59,5 @@ Here, a critical waiver means the delegate's `autopilot waive` action; the evide
 - merges and destructive actions.
 
 When one of these comes up during the window: stop that line of work, add it to Actions only you can take, and wait. The delegate never relaxes a rule or a limit to keep work moving (`rules-core.md` R17).
+
+Audit signed evidence passes with `code-forge run human-checks audit --run <r> [--json]`: `ok`, `changed`, or `missing` covers the proof plus recorded evidence hashes. Status/list expose `auto_passed`; the binnacle and full log add **Passed by autopilot — please audit** with proof paths, hashes, and owner revoke commands. Stop the grant before the owner uses `run human-checks reopen --run <r> --block <id> [--clause C<n>] --note "<reason>"`. This needs an active run and terminal confirmation, has no `--yes`, and holds run end until the reopened check is resolved.
