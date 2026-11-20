@@ -195,6 +195,7 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 	rows = append(rows, review...)
 	rows = append(rows, rwlDoctorRows(home)...) // B885: the run status probe
 	rows = append(rows, dfReviewConcurrencyRow(cfg, order))
+	rows = append(rows, dfRamTmpRow(cfg))
 	rows = append(rows, dfCoderSandboxRows(cfg)...)
 
 	// The CLI presence probes (read-only: --version and --help). Node runs

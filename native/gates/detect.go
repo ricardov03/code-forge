@@ -32,6 +32,24 @@ type Plan struct {
 	Light       []string
 	ReuseTest   bool
 	ReuseReason string
+	// BaseEnv is set for every gate command under the command's own env
+	// (B924: TMPDIR on the RAM disk). It is not a secret and not in env_keys.
+	BaseEnv map[string]string
+}
+
+// CommandEnv is a command's env over p.BaseEnv: the command's keys win.
+func (p Plan) CommandEnv(env map[string]string) map[string]string {
+	if len(p.BaseEnv) == 0 {
+		return env
+	}
+	out := make(map[string]string, len(p.BaseEnv)+len(env))
+	for k, v := range p.BaseEnv {
+		out[k] = v
+	}
+	for k, v := range env {
+		out[k] = v
+	}
+	return out
 }
 
 type Custom struct {

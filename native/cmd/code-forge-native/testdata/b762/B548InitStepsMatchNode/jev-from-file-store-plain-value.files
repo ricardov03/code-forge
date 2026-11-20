@@ -27,6 +27,8 @@ gates:
   lint: null
   types: null
   format: null
+  ram_tmp: off
+  ram_tmp_mb: 2048
 proof:
   tiers:
     high:

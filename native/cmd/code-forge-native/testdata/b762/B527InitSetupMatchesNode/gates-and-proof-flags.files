@@ -35,6 +35,8 @@ gates:
     - gofmt
     - -l
     - .
+  ram_tmp: off
+  ram_tmp_mb: 2048
 proof:
   tiers:
     high:

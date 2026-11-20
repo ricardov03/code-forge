@@ -18,6 +18,9 @@ import (
 // passes it the TMPDIR it wants; the child inherits b753TmpEnv from the
 // parent and keeps that TMPDIR as given.
 func TestMain(m *testing.M) {
+	// B924: no test (nor a child it starts) makes a real RAM disk; the
+	// ram_tmp tests clear this and use a fake Mac.
+	_ = os.Setenv("CODE_FORGE_RAM_TMP", "off")
 	os.Exit(b753Main(m))
 }
 
