@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/humancheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
@@ -126,11 +126,18 @@ func reviewEnqueueAnswersFlags(flags map[string]string) ([]string, string) {
 	return ids, ""
 }
 
-func reviewEnqueueAnswers(home, root, run, block, tree, file, byFile string, ids []string) (ledger.Object, int, bool) {
+// reviewEnqueueAnswers is the enqueue of `review-file --answers` (B71): the
+// block must own both files, and every id must be open on the source's
+// current content by the close's own rules over the unverified rows
+// (answersPrecheck/namedOnHash, B992). A run record or ledger that cannot be
+// read skips the check it needs, as Node did: the worker checks everything
+// again with the signed rows. hash and byHash are the files' current hashes.
+func reviewEnqueueAnswers(home, root, run, block, tree, file, byFile, hash, byHash string, ids []string) (ledger.Object, int, bool) {
 	record, err := state.ReadRun(home, run)
+	var entry ledger.Object
 	if err == nil {
 		blocks, _ := record.Get("blocks").(ledger.Object)
-		entry, _ := blocks.Get(block).(ledger.Object)
+		entry, _ = blocks.Get(block).(ledger.Object)
 		if entry != nil {
 			paths, _ := entry.Get("owned_files").([]any)
 			kinds, _ := entry.Get("owned_kinds").(ledger.Object)
@@ -139,32 +146,16 @@ func reviewEnqueueAnswers(home, root, run, block, tree, file, byFile string, ids
 			}
 		}
 	}
-	hash, err := gitx.ContentHash(tree, file)
-	if err != nil {
-		return nil, 0, false
-	}
-	byHash, err := gitx.ContentHash(tree, byFile)
-	if err != nil {
-		return nil, 0, false
-	}
 	p := ticket.Parts{Run: run, Block: block, File: file, ContentHash: hash}
 	if tree != root {
 		p.Tree = &tree
 	}
 	id := queue.AnswersID(p, byFile, byHash, ids)
-	if record != nil {
-		blocks, _ := record.Get("blocks").(ledger.Object)
-		if entry, _ := blocks.Get(block).(ledger.Object); entry != nil {
-			slug, _ := record.Get("project").(string)
-			rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), slug)
-			if err == nil {
-				missing, supported := reviewq.MissingAnswers(rows, run, block, file, hash, byFile, byHash, id, ids)
-				if !supported {
-					return nil, 0, false
-				}
-				if len(missing) > 0 {
-					return reviewEnqueueRefusal("answers-not-open", strings.Join(missing, ", ")+" is not an open finding of "+file+" at its current content; nothing was queued"), 1, true
-				}
+	if entry != nil {
+		slug, _ := record.Get("project").(string)
+		if rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), slug); err == nil {
+			if missing, known := reviewAnswersMissing(rows, run, block, file, hash, byFile, byHash, id, ids); known && len(missing) > 0 {
+				return reviewEnqueueRefusal("answers-not-open", strings.Join(missing, ", ")+" is not an open finding of "+file+" at its current content; nothing was queued"), 1, true
 			}
 		}
 	}
@@ -204,6 +195,35 @@ func reviewEnqueueAnswers(home, root, run, block, tree, file, byFile string, ids
 		out.Set("retry", true)
 	}
 	return out, 0, true
+}
+
+// reviewAnswersMissing is answersPrecheck's namedOnHash: the ids not open on
+// (file, hash) by the close's rules over unverified rows, the rows of the
+// asking ticket left out. known is false when a row needs a rule Go cannot
+// read; the pre-check then refuses nothing and the worker decides.
+func reviewAnswersMissing(rows []ledger.Row, run, block, file, hash, byFile, byHash, ticketID string, ids []string) ([]string, bool) {
+	in := gatecheck.Input{Run: run, Block: block, Unverified: true,
+		Files: []gatecheck.File{{File: file, Hash: hash}, {File: byFile, Hash: byHash}}}
+	for _, raw := range rows {
+		if r, ok := raw.(map[string]any); ok {
+			in.Rows = append(in.Rows, r)
+		}
+	}
+	open, _, unknown := gatecheck.AnswerableOpen(in, file, hash, ticketID)
+	if unknown {
+		return nil, false
+	}
+	isOpen := map[string]bool{}
+	for _, id := range open {
+		isOpen[id] = true
+	}
+	missing := []string{}
+	for _, id := range ids {
+		if !isOpen[id] {
+			missing = append(missing, id)
+		}
+	}
+	return missing, true
 }
 
 // Budget-sensitive split results need the reloaded config and remain on Node

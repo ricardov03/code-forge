@@ -1356,8 +1356,10 @@ ticket kind, whose id covers the source, its hash and the ids, so it never colli
 answering file's normal review ticket. Nothing is queued unless the block owns both files (`answers-not-owned`), they are two
 different files (`answers-same-file`), and every id is still open on the source's current content
 (`answers-not-open`: an id already waived or answered there, an id open only on an older version,
-the proof finding or an id of unknown severity is not open). A bad id list is `usage`. The worker
-checks the same again and asks one fresh L2 reviewer, with the findings, the source lines around
+the proof finding or an id of unknown severity is not open). This first check reads the
+block's review rows by the close's own rules, without the run key, so a reviewed, reopened or capped
+file is checked in Go and never handed over (B992). A bad id list is `usage`. The worker
+checks the same again, with the signed rows, and asks one fresh L2 reviewer, with the findings, the source lines around
 each and the answering file's diff against the block base (all of it when the file is new), whether
 each finding is resolved. The worker reads each file once and builds the packet from those bytes,
 so the answer is bound to exactly what the reviewer saw (a file gone by then is

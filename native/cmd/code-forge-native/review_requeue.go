@@ -64,6 +64,23 @@ func reviewRequeueStopped(o reviewRequeue) (map[string]string, error) {
 	return o.pass(false)
 }
 
+// requeueRunRoot: realRepo is a root of the run's workspace (B991). That is
+// the main working tree of the workspace's repository, or, for a run started
+// in a linked git worktree (`run start --cwd .` there, B969), the top of that
+// worktree, which is where the run's worker serves its queue. A root of any
+// other repository or worktree is another workspace.
+func requeueRunRoot(workspace, main, realRepo string) bool {
+	if real, err := filepath.EvalSymlinks(main); err == nil && real == realRepo {
+		return true
+	}
+	top, err := gitx.RepoTop(workspace)
+	if err != nil {
+		return false
+	}
+	real, err := filepath.EvalSymlinks(top)
+	return err == nil && real == realRepo
+}
+
 func (o reviewRequeue) pass(dry bool) (map[string]string, error) {
 	restarted := map[string]string{}
 	if len(o.files) == 0 {
@@ -88,7 +105,7 @@ func (o reviewRequeue) pass(dry bool) (map[string]string, error) {
 	if !ok {
 		return nil, errRequeueUnsupported
 	}
-	if real, err := filepath.EvalSymlinks(main); err != nil || real != realRepo {
+	if !requeueRunRoot(workspace, main, realRepo) {
 		return nil, &state.Error{Code: "other-workspace", Message: "the run belongs to another workspace"}
 	}
 	recorded := o.repoRoot

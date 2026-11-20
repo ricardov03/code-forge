@@ -78,6 +78,9 @@ func b573Lines(t *testing.T, log string) []string {
 // the end of the test (the lazy root released as at exit).
 func b573Install(t *testing.T, args ...string) {
 	t.Helper()
+	// a gate run sets CODE_FORGE_RUN_ID for its tests; the run id rule takes
+	// the environment's first, so the --run of args would never be seen
+	b528Unset(t, "CODE_FORGE_RUN_ID")
 	lrRoot, lrLazyRoots = "", nil
 	childregInstall(args)
 	t.Cleanup(func() {

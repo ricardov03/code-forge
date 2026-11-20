@@ -81,7 +81,10 @@ worktree's own `.code-forge/`. The same holds for a run you start yourself with
 `code-forge run start --cwd .` in the worktree: `review --run <id>` and `review-file --run <id>`
 find that run's worker there. The rule is one root: the review queue of a run is at the top of the
 run's workspace (the directory `run start` was given). A run started in the main tree, including
-one whose blocks code-forge gave their own worktrees, keeps its queue in the main tree.
+one whose blocks code-forge gave their own worktrees, keeps its queue in the main tree. The whole block flow follows the same rule: `block open`, `review-file`,
+`review-file --wait-block` and `block close` (and `block close --dry-run`) of a run started in a
+linked worktree work there; only a run of another repository or worktree is refused as
+`other-workspace`.
 
 ### One file at a time: `review-file`
 
