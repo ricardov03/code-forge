@@ -14,6 +14,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- Echoed `go test` commands must start the output line, allowing a wrapper label or shell trace prefix; prose and test failure text cannot trigger flaky reruns. Regression coverage also rejects unreadable load overrides (B1008).
+
 - Batch land explicitly preserves the rebased tip stopped for CI on a landed prefix, while restoring every other unlanded rebase and its recorded bases after a gate failure (B1007).
 
 - Land searches for older CI PRs whenever the newest 200-row page is full, even with matching PRs there, retaining and deduplicating matches across search and exact-branch results (B1006).
