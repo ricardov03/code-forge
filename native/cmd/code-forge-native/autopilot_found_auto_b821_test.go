@@ -38,7 +38,7 @@ func TestB821RedGateRecordsFound(t *testing.T) {
 	green := ledger.Object{{Key: "gate", Value: "lint"}, {Key: "ok", Value: true}, {Key: "code", Value: 0}, {Key: "stdout", Value: ""}, {Key: "stderr", Value: ""}}
 	gatesAfterRun(f.home, "r-test", "B1", []any{red, green}, 0)
 	found := b821Found(t, f.home, "r-test")
-	if len(found) != 1 || found[0].Get("source") != "gate" || found[0].Get("state") != "backlog" || found[0].Get("from_block") != "B1" ||
+	if len(found) != 1 || found[0].Get("source") != "gate" || found[0].Get("state") != "backlog" || found[0].Get("block") != nil || found[0].Get("from_block") != "B1" ||
 		found[0].Get("title") != "the test gate is red: TestB1Thing" || !strings.Contains(autopilotText(found[0].Get("evidence")), "--- FAIL: TestB1Thing") {
 		t.Fatalf("found = %v", found)
 	}
