@@ -356,6 +356,10 @@ func (w *TicketRunner) reviewOne(id string, t ledger.Object) (ledger.Object, err
 	if t.Get("run") != w.RunID {
 		return base("refused", "other-run"), nil
 	}
+	if w.closedBlockStale(t) {
+		// B919: a deleted file's ticket of a closed block is not reviewed
+		return base("stale", ClosedBlockReason), nil
+	}
 	contentRoot, code, err := w.contentRootFor(block)
 	if err != nil {
 		return nil, err

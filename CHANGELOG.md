@@ -18,6 +18,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- A queued review ticket of a closed (or landed) block for a deleted file (`content_hash: "deleted"`) is no longer served: the worker drops it before any review session as `stale` with reason `block-closed` (signed result, done marker and one `review.result` row, which the gate counts as never reviewed). A rebase-check ticket and a ticket for a file that exists are still served. B919
 - `review-file <file> --answers <ids> --of <source>` queues its answers ticket in Go after an ordinary findings review: the first check of the open ids reads the block's review rows by the close's own rules (unverified, like the old Node check), so a `review.state`, `review.reopened` or `review.cap` row no longer hands the command to the removed Node engine (`enqueue-answers`); an id that is not open is still `answers-not-open` (B992)
 - `block close` and `block close --dry-run` of a run started in a linked git worktree (`run start --cwd .` there) no longer refuse it as `other-workspace`: the close's review requeue check takes the worktree's top as the run's root, like `review-file` (B969); a run of another repository is still refused (B991).
 - Land merges a docs table row to which both sides only added sentences (the `block land` row of `docs/native-engine.md`): both sets are kept, main's first, instead of a conflict; `block rebase` and batch land refuse a replay whose `CHANGELOG.md` would repeat a `### Kind` heading in `[Unreleased]` (B890)
