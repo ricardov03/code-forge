@@ -224,7 +224,9 @@ merge gate on a tree green CI proved skips its test suite. B805: a block's CI PR
 newest pull requests (a `head:` search when that page is full and holds none of them). B806: a short
 gh network error (timeout, connection reset, EOF, TLS/DNS failure, HTTP 5xx) while land reads CI is
 retried with a backoff, 3 tries in all; then land refuses at `ci` with gh's message, `(after 3
-tries)` and a `next:` line.
+tries)` and a `next:` line. B981: `pr create`/`pr close` retry too, after first checking whether
+the failed call took effect (no second PR, no second close); a full `head:` search page falls back to
+`pr list --head` per exact CI branch name.
 
 **Heal queue (B429).** `gates run --run --block`, `block rebase` and `block land` still fail on a
 held lock or a transient git error, but also queue the problem and print `heal: queued <id>` as the
