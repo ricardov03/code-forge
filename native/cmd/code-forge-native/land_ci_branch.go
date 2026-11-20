@@ -38,6 +38,7 @@ var (
 type landCISettings struct {
 	wait           time.Duration
 	prefix, remote string
+	maxFile        int64 // B986: land.max_file_mb in bytes
 }
 
 var landCIWaitShape = regexp.MustCompile(`^([0-9]+(ms|s|m|h))+$`)
@@ -45,7 +46,7 @@ var landCIWaitShape = regexp.MustCompile(`^([0-9]+(ms|s|m|h))+$`)
 // landCIConfig reads land.ci_wait, land.ci_branch_prefix and land.ci_remote.
 func landCIConfig(cfg map[string]any) (landCISettings, string) {
 	land := blockMap(cfg["land"])
-	s := landCISettings{wait: 30 * time.Minute, prefix: "ci-", remote: "origin"}
+	s := landCISettings{wait: 30 * time.Minute, prefix: "ci-", remote: "origin", maxFile: landBigFileLimit(cfg)}
 	switch raw := land["ci_wait"].(type) {
 	case nil:
 	case string:
@@ -215,7 +216,7 @@ func landCIEnsureBranch(main, id, sha, base string, s landCISettings, out io.Wri
 	}
 	// A tip that only adds commits to the newest open CI branch updates its PR.
 	if newest != nil {
-		transport, _, err := landGitPush(main, s.remote, sha+":refs/heads/"+newest.HeadRefName, out)
+		transport, _, err := landGitPush(main, s.remote, sha+":refs/heads/"+newest.HeadRefName, s.maxFile, out)
 		if err == nil {
 			fmt.Fprintf(out, "ci: pushed tip %s to %s/%s (#%d) over %s\n", short, s.remote, newest.HeadRefName, newest.Number, transport)
 			return ""
@@ -227,7 +228,7 @@ func landCIEnsureBranch(main, id, sha, base string, s landCISettings, out io.Wri
 	branch, pushed := "", false
 	for n := last + 1; n <= last+5; n++ {
 		branch = landCIBranchName(s.prefix, id, n)
-		transport, _, err := landGitPush(main, s.remote, sha+":refs/heads/"+branch, out)
+		transport, _, err := landGitPush(main, s.remote, sha+":refs/heads/"+branch, s.maxFile, out)
 		if err == nil {
 			fmt.Fprintf(out, "ci: pushed tip %s to %s/%s over %s\n", short, s.remote, branch, transport)
 			pushed = true
@@ -366,7 +367,13 @@ func landHTTPSURL(url string) string {
 // landGitPush pushes refspec to remote from dir. When the remote is SSH and
 // the push fails on SSH authentication, it retries once over HTTPS with the
 // gh credential helper and says so. It returns the transport that worked.
-func landGitPush(dir, remote, refspec string, out io.Writer) (string, string, error) {
+// B986: commits not yet on remote that add a file over maxFile bytes (0: no
+// check) are refused before anything is pushed (*landBigFileError).
+func landGitPush(dir, remote, refspec string, maxFile int64, out io.Writer) (string, string, error) {
+	src, _, _ := strings.Cut(refspec, ":")
+	if refusal := landBigFileRefusal(dir, maxFile, src, "--remotes="+remote); refusal != "" {
+		return "", "", &landBigFileError{refusal}
+	}
 	url := ""
 	if got, err := gitx.Run(dir, "remote", "get-url", "--push", remote); err == nil {
 		url = strings.TrimSpace(got)

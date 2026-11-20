@@ -497,6 +497,11 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		next = closeCommand([]string{"git", "-C", main, "reflog", "show", base})
 		return stop(refguard.Refusal(base, main, reviewed, bad))
 	}
+	// B986: a block branch that adds a file over land.max_file_mb is not merged.
+	if refusal := landBigFileRefusal(main, landBigFileLimit(cfg), branch, base); refusal != "" {
+		step, next = "size", closeCommand([]string{"git", "-C", top, "log", "--stat", base + ".." + branch})
+		return stop(refusal)
+	}
 	// B795: land.auto_resolve from the run-start config snapshot.
 	auto := landmerge.FromConfig(cfg)
 	gatedTree := ""
@@ -557,11 +562,19 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 			fmt.Fprintln(stderr, "block land:", err)
 		}
 	}
+	// B960: land.after in main and the block.landed row, before the push.
+	step = "after"
+	if err := landAfterRun(home, run, cfg, main, []string{id}, print); err != nil {
+		if after, ok := err.(*landAfterError); ok {
+			next = after.next
+		}
+		return stop(err.Error())
+	}
 	// B430: main first; push after the merge (flag --push or land.push).
 	if landPushWanted(flags, cfg) {
 		step = "push"
 		next = closeCommand([]string{"git", "-C", main, "push", "origin", base})
-		if _, err := landPush(home, run, []string{id}, main, base, flags["watch-ci"] == true, print); err != nil {
+		if _, err := landPush(home, run, []string{id}, main, base, flags["watch-ci"] == true, landBigFileLimit(cfg), print); err != nil {
 			return stop(err.Error())
 		}
 	}

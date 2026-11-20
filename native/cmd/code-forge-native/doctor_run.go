@@ -366,6 +366,10 @@ func prepareDoctorRun(args []string, cwd, home string, rows []doctorRow, cfg map
 		if row, ok := doctorStateIgnoreRow(cwd); ok {
 			tail = append(tail, row)
 		}
+		// B961: the free disk, against land.min_free_gb.
+		if row, ok := doctorDiskRow(cfg, cwd); ok {
+			tail = append(tail, row)
+		}
 		// B797: the coder ref guard (hook and guarded worktrees).
 		if status, detail := refguard.State(cwd); status != "" {
 			tail = append(tail, doctorRow{"ref-guard", status, "ref guard", detail})

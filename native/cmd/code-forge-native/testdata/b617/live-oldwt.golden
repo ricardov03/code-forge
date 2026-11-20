@@ -31,9 +31,10 @@ WARN worktree indexing: <BASE>/repo-worktrees may be indexed by Spotlight.
 proof.worktree.dir: ../repo-worktrees.noindex
 To move the old folder, finish or end the runs, then mv the folder to the .noindex path; or remove it.
 OK   .code-forge/ ignored by git: yes
+OK   free disk: 1000.0 GB (land.min_free_gb 15 GB)
 INFO native daemon: fallback
 --- stderr
-doctor: 15 ok, 6 warn, 0 fail
+doctor: 16 ok, 6 warn, 0 fail
 --- argv
 === claude
 -p

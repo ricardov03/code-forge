@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -66,7 +67,9 @@ type landPushResult struct {
 
 // landPush pushes base from main to origin. A failed push appends a heal item
 // of kind land (argv: the push to retry) and returns an error naming its id.
-func landPush(home, run string, ids []string, main, base string, watch bool, print io.Writer) (landPushResult, error) {
+// B986: maxFile is land.max_file_mb in bytes; a push refused by the size
+// check queues no heal item (a retry would fail the same way).
+func landPush(home, run string, ids []string, main, base string, watch bool, maxFile int64, print io.Writer) (landPushResult, error) {
 	result := landPushResult{}
 	sha, err := gitx.Run(main, "rev-parse", "--verify", "HEAD")
 	if err != nil {
@@ -74,7 +77,11 @@ func landPush(home, run string, ids []string, main, base string, watch bool, pri
 	}
 	result.sha = strings.TrimSpace(sha)
 	// B796: an SSH auth failure is retried once over HTTPS (landGitPush).
-	if _, output, err := landGitPush(main, "origin", base, print); err != nil {
+	if _, output, err := landGitPush(main, "origin", base, maxFile, print); err != nil {
+		var big *landBigFileError
+		if errors.As(err, &big) {
+			return result, fmt.Errorf("merged into local %s but did not push: %s", base, big.reason)
+		}
 		detail := strings.TrimSpace(landFirst(landGitError(err, ""), output, err.Error()))
 		id, herr := healQueue(home, run, strings.Join(ids, ","), healq.KindLand, landRetryArgv(run, ids), main, "push of "+base+" at "+result.sha+" rejected: "+detail)
 		if herr != nil {
@@ -155,7 +162,7 @@ func landBatchPush(flags map[string]any, home, run string, ids []string) (string
 	if err != nil {
 		return landed[0], err
 	}
-	_, err = landPush(home, run, landed, main, base, flags["watch-ci"] == true, safeStderr)
+	_, err = landPush(home, run, landed, main, base, flags["watch-ci"] == true, landBigFileLimit(cfg), safeStderr)
 	return landed[0], err
 }
 

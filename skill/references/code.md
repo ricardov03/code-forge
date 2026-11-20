@@ -200,6 +200,23 @@ commit: a second start says another ci watch is already watching and exits 0.
 
 **Never build on a red base (B920).** Before anything is recorded, `block open` reads the CI of the base a new block builds on (`gh run list --commit <base>`, `--workflow <land.ci_workflow>` when set). With `land.require_ci: github` a red base refuses the open (exit 1, `base <sha8> CI is red (...)`, next `gh run view <id> --log-failed`), and so does a base with no CI run or with CI still running (next `code-forge ci watch --sha <base>`); fix main first or open on a green commit with `--base <sha>`. With the gate off a red base or a base with no run prints a `warning:` line and the open goes on; no `gh` on `PATH`, or a `gh` that cannot answer (no GitHub remote), says nothing. A re-open keeps its worktree's base and is not checked again. `spawn --role coder --run <id> --block <id>` checks the block's recorded base the same way before the coder starts, since the base may have turned red after the open: with the gate on a red, unchecked or still-running base refuses the spawn (exit 1, `spawn: base ...`), with the gate off it warns (B982).
 
+**Red combined tip (B963).** A red batch merge gate queues ONE found fix block (source `land`)
+whose brief lists every failing test with its suspect blocks. Fix them all in that block, in one
+round; never hand-commit on the combined branch.
+
+**Disk guard (B961).** `block land`, `gates run` and `run start` refuse under
+`land.min_free_gb` (default 15 GB) free disk, and trim Go cache files unused for 24 h under twice
+that. On the refusal free space (`go clean -cache`, old worktrees); do not lower the key to pass.
+
+**land.after (B960).** Commands in `land.after` run in the main checkout after the merge and
+before the push (build, docs stamp); their tracked changes become one commit on main. A failing
+command stops the land at step `after`, merge kept, nothing pushed. Each landed block gets one
+`block.landed` row (binnacle **Block landed**). Do not run the post-land tail by hand.
+
+**No big files (B986).** A land (step `size`, before the merge) or a push (main, CI branch) of
+commits that add a file over `land.max_file_mb` (default 5; `0` off) is refused and names each
+file with its size; remove it from the commits or raise the key. Never commit a built binary.
+
 **Require green CI (B765).** `land.require_ci: github` (default `off`) makes `--merge` and a batch
 land merge a block only when GitHub CI is green for the block's own tip (`gh run list --commit
 <sha>`, `gh` from `PATH`; `land.ci_workflow` limits it to one workflow). No run, a running or red

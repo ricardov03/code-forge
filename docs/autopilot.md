@@ -205,6 +205,9 @@ code-forge autopilot log --run <run> --json            # the full log, as data
 code-forge autopilot binnacle --run <run> --markdown   # write both files, print the binnacle path
 ```
 
+The full log has one **Block landed** row per block `block land` merged (signed `block.landed`
+row: `main <sha>`, and `land.after commit <sha>` when `land.after` committed something; B960).
+
 **Settle before you ask.** Before a block close, the orchestrator runs
 `code-forge block settle <id> --run <run>`. Settle re-reads the close blocker list each round and
 runs every fix an orchestrator may run, in a fixed order: `block rebase --accept-landed` for a stale
@@ -312,6 +315,9 @@ For each finding the autopilot:
 A queued block joins the run's planned blocks at once, so an until-done grant does not end while it
 is open. The binnacle shows a **Found work** table (found, source, title, block, state), and every
 finding that waits for you is listed under **Actions only you can take**.
+
+A red batch merge gate records its finding by itself (B963, source `land`): one block for the
+whole red combined tip, with every failing test and its suspect blocks in the brief.
 
 ## Release size
 

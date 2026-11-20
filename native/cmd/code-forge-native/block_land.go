@@ -171,6 +171,13 @@ func runBlockLand(args []string) int {
 	if done, code := landPushOnly(flags, home, run, record, pos); done {
 		return code
 	}
+	// B961: no land on a full disk (a merge gate builds and tests).
+	if workspace := blockString(record.Get("workspace")); workspace != "" {
+		cfg, _ := blockSnapshot(record)
+		if refusal := diskGuard(cfg, workspace, safeStderr); refusal != "" {
+			return fail(refusal, 1)
+		}
+	}
 	if len(pos) > 1 {
 		// A stray trailing argument remains a usage error. Batch operands must
 		// name distinct blocks in this run, preserving the legacy malformed-call

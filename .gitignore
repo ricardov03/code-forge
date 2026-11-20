@@ -16,6 +16,13 @@ reports/
 package-lock.json
 *.tsbuildinfo
 native/bin/
+# B986: binaries a `go build` in native/ (or in a native/cmd/<name> folder) writes
+/native/code-forge-native
+/native/cf-gotest
+/native/cf-release
+/native/cmd/*/code-forge-native
+/native/cmd/*/cf-gotest
+/native/cmd/*/cf-release
 /dist/npm/
 
 # macOS

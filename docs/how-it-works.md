@@ -733,6 +733,44 @@ starts `code-forge ci watch --sha <sha> --run <run>` as a detached child, loggin
 `~/.code-forge/heal/ci-<sha>.log`, prints `ci watch: started for <sha>; log <path>` and returns at
 once; land never waits for CI.
 
+**One fix block for a red combined tip (B963).** When the batch merge gate is red on the
+combined tip, `block land` reads every failing test of that suite (Go `--- FAIL` lines and
+subtests, packages that failed to build, TAP `not ok` lines, the node spec summary), maps each
+test to its suspect blocks (a block id in the test name, a changed file or Go package of a block,
+else the bisect culprit, else every block of the batch) and records ONE found block of the run
+(`autopilot found`, source `land`, severity `customer-breaking`: a red tip stops the run's own
+lands, so the fix joins this run, not the B921 backlog). Its brief lists every failing test with its suspects and
+each block's changed files, so one coder fixes all of them in one reviewed, gated block; nobody
+hand-commits on the combined branch. The land prints `land: fix block <id> queued for the red
+combined tip …` (JSON: a `fix_block` event). The same red seen again counts as that finding seen
+again and queues no second block.
+
+**Free disk (B961).** Before a land, a gates run or a run start, code-forge measures the free
+disk where the project lives. Under twice `land.min_free_gb` (default 15) it removes Go build cache
+files unused for 24 h (Go touches a cache file each time it uses it, so running builds keep
+theirs); under `land.min_free_gb` it refuses with the next step and runs nothing. `doctor` has a
+`free disk` row. `land.min_free_gb: 0` turns it off.
+
+**After the merge: land.after (B960).** `land.after` (default `[]`) lists shell commands that
+`block land` (single or batch) runs with `/bin/sh -c` in the main checkout, in order, after the
+merge on main and before the push, for example `node scripts/build-native.mjs --host` and
+`npm run -s docs-block -- stamp`. Their changes to tracked files are committed on main in one
+commit, `land.after for <ids>: <commands>` (untracked files stay untracked), and the line
+`land.after: ran <command>` / `land.after: committed <sha>` is printed. A command that fails stops
+the land at step `after` (exit 1) with the command and its last output lines: main keeps the
+merge, the later commands do not run and nothing is pushed. Every block a land merges gets one
+signed `block.landed` row (`block`, `main`, `after`, `after_commit`), shown as **Block landed** in
+the autopilot full log, with or without `land.after`.
+
+**No big files (B986).** Land refuses commits that add a file over `land.max_file_mb` (default 5,
+the B606 size limit of the main npm package; `0` turns it off). `block land` (single or batch)
+stops at step `size` before the merge, main unchanged; a push (main with `--push`/`land.push`, and
+the `land.require_ci` CI branch) checks the commits the remote does not have yet
+(`git rev-list --objects <tip> --not --remotes=<remote>`) and refuses before anything is sent,
+naming each file and its size and the fix (`git rm --cached <file>`, `.gitignore`, amend). A
+refused main push keeps the local merge and queues no heal item: a retry would fail the same way.
+The binaries a `go build` in `native/` writes are in `.gitignore`.
+
 **Require green CI (B765).** Opt in with `land.require_ci: github` in the run-start config (default
 `off`: nothing changes). Then `block land --merge` and a batch land merge a block only when GitHub
 CI is green for the block branch's own tip sha. Before anything is merged or written (a batch: for

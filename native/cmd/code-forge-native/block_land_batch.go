@@ -45,6 +45,8 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 	requestedIDs := append([]string{}, ids...)
 	var landedCfg map[string]any
 	landedMain := ""
+	landedNow := []string{} // B960: the blocks this call merged
+	var red *landRedTip     // B963: the red combined tip, for one fix block
 	stop := func(reason string) int {
 		fmt.Fprintf(safeStderr, "block %s land stopped at %s: %s\n", stoppedID, step, strings.TrimSpace(reason))
 		if json {
@@ -171,6 +173,11 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 			// B765: land.require_ci checks each block's own tip before any
 			// rebase, gate or write.
 			cfg, _ := blockSnapshot(record)
+			// B986: a block that adds a file over land.max_file_mb is not merged.
+			if refusal := landBigFileRefusal(main, landBigFileLimit(cfg), strings.TrimSpace(head), base); refusal != "" {
+				step = "size"
+				return fmt.Errorf("%s", refusal)
+			}
 			ciOut := io.Writer(safeStdout)
 			if json {
 				ciOut = safeStderr
@@ -397,6 +404,7 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 				mergeReason = "node_product"
 			}
 		}
+		var tipSuite landResult // B963: the combined tip's suite output
 		testPrefix := func(n int) string {
 			if reason, ok := tested[n]; ok {
 				return reason
@@ -457,6 +465,9 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 					return code
 				}, ctx)
 				reason = landMergeFailure(home, run, batch[n-1].id, suite, selected)
+				if n == len(batch) {
+					tipSuite = suite
+				}
 			}
 			if ctx.Err() != nil {
 				reason = ctx.Err().Error()
@@ -492,6 +503,7 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 				}
 			}
 			green, culprit = low, high-1
+			red = landRedTipOf(main, ids, prefixes, tipSuite, tested[len(batch)], ids[culprit])
 		}
 		if err := timedOut(); err != nil {
 			return err
@@ -532,6 +544,7 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 			if err := landBatchCommit(home, run, batch[:green]); err != nil {
 				return err
 			}
+			landedNow = append(landedNow, landed...)
 		}
 		keep = green
 		for i, block := range batch {
@@ -575,6 +588,18 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 		}
 		// B803: an earlier CI round landed blocks; they are still pushed.
 		ids, retry = nil, nil
+	} else {
+		// B963: a red combined tip becomes ONE found fix block (outside the locks).
+		if red != nil {
+			landRedRecord(home, run, red, json, emit, safeStderr)
+		}
+	}
+	// B960: land.after in main and one block.landed row per merged block, before the push.
+	if err == nil && len(landedNow) > 0 {
+		if err := landAfterRun(home, run, landedCfg, landedMain, landedNow, safeStderr); err != nil {
+			stoppedID, step = landedNow[0], "after"
+			return stop(err.Error())
+		}
 	}
 	// B796: close the open CI pull requests of each landed block.
 	if landedMain != "" {
