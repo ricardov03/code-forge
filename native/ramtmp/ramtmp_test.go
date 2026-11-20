@@ -120,6 +120,7 @@ func TestB924EnsureIsNoOpOffMac(t *testing.T) {
 }
 
 func TestB924EnabledAndStatus(t *testing.T) {
+	t.Setenv(EnvMode, "") // a CODE_FORGE_RAM_TMP set in the shell would change every answer
 	cases := []struct {
 		mode any
 		goos string
