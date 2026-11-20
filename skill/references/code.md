@@ -173,7 +173,9 @@ before it and prints `block <id> not landed (after <culprit>)` for the rest.
 **Append-only conflicts (B795).** Single and batch land resolve a conflict by themselves when every
 file is append-only (`land.auto_resolve`, default on): `CHANGELOG.md` bullets (one `### Kind`
 heading per kind, main's lines first), rows of the tables in `land.auto_resolve.tables` (default
-`docs/native-engine.md`) and the `generated` files land re-generates; the same gates then run.
+`docs/native-engine.md`; a row both sides only added sentences to keeps both, B890) and the
+`generated` files land re-generates; the same gates then run. A rebase whose `CHANGELOG.md`
+would repeat a `### Kind` in `[Unreleased]` is refused (B890).
 Any other conflict aborts with main unchanged, prints the files with their kinds and one `next:`
 step and writes a `land.conflict` ledger row. Two blocks that both add a `### Fixed` bullet land
 in one batch with no human.

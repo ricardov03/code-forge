@@ -11,6 +11,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/landmerge"
+	"github.com/ricardov03/code-forge/native/releasecheck"
 )
 
 // B431: a replay that stops is a real conflict unless every unmerged file is a
@@ -167,4 +168,30 @@ func ContinueWith(tree string, env []string, settings landmerge.Settings) error 
 func Conflicts(tree string) []string {
 	files, _ := unmerged(tree, gitx.ChildEnv())
 	return files
+}
+
+// ChangelogShape is the CHANGELOG.md shape check a replay runs before its
+// result can be pushed (B890): HEAD's ## [Unreleased] must not repeat a ###
+// kind that base's does not repeat. A tree with no CHANGELOG.md passes.
+func ChangelogShape(tree, base string) error {
+	head, err := gitWithEnv(tree, gitEnv(), "show", "HEAD:CHANGELOG.md")
+	if err != nil {
+		return nil
+	}
+	old := map[string]bool{}
+	if body, err := gitWithEnv(tree, gitEnv(), "show", base+":CHANGELOG.md"); err == nil {
+		for _, kind := range releasecheck.ChangelogRepeats(body) {
+			old[kind] = true
+		}
+	}
+	repeated := []string{}
+	for _, kind := range releasecheck.ChangelogRepeats(head) {
+		if !old[kind] {
+			repeated = append(repeated, kind)
+		}
+	}
+	if len(repeated) == 0 {
+		return nil
+	}
+	return fmt.Errorf("CHANGELOG.md repeats ### %s in ## [Unreleased] after the replay; merge them into one heading per kind", strings.Join(repeated, ", ### "))
 }

@@ -523,6 +523,10 @@ func run(home, runID, blockID string, plain bool) (result Result, err error) {
 			_, _ = git(tree, "rebase", "--abort")
 			return refusal("rebase-conflict", ConflictMessage(blockID, conflict))
 		}
+		// B890: the replayed CHANGELOG.md keeps one ### heading per kind.
+		if err := ChangelogShape(tree, newBase); err != nil {
+			return refusal("rebase-changelog-shape", "block "+blockID+": "+err.Error()+"; nothing changed: fix CHANGELOG.md in the block worktree, then run block rebase again")
+		}
 		changed, err := git(tree, "diff", "--no-renames", "--name-only", "-z", oldHead, "HEAD", "--")
 		if err != nil {
 			return err

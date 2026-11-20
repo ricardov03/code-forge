@@ -166,3 +166,27 @@ func changelogOutside(git func(...string) Exec, text string) []string {
 	}
 	return out
 }
+
+// ChangelogRepeats lists the ### kinds (lower case) that appear more than once in
+// ## [Unreleased], each once, in the order of their second heading (B890: the shape check a
+// rebase runs before its result can be pushed).
+func ChangelogRepeats(text string) []string {
+	lines := strings.Split(text, "\n")
+	start, end := unreleased(lines)
+	if start < 0 {
+		return nil
+	}
+	seen, listed := map[string]bool{}, map[string]bool{}
+	var out []string
+	for i := start + 1; i < end; i++ {
+		if h := clHeadingRe.FindStringSubmatch(lines[i]); h != nil {
+			kind := strings.ToLower(h[1])
+			if seen[kind] && !listed[kind] {
+				listed[kind] = true
+				out = append(out, kind)
+			}
+			seen[kind] = true
+		}
+	}
+	return out
+}

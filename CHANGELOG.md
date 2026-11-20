@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- Land merges a docs table row to which both sides only added sentences (the `block land` row of `docs/native-engine.md`): both sets are kept, main's first, instead of a conflict; `block rebase` and batch land refuse a replay whose `CHANGELOG.md` would repeat a `### Kind` heading in `[Unreleased]` (B890)
+
 ## [0.26.0] — 2026-11-19
 
 ### Changed

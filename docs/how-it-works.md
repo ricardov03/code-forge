@@ -653,7 +653,8 @@ A merge conflict whose files are all append-only is resolved by land itself (B79
 `land.auto_resolve`, default on), in the trial merge and again in the merge into main, which must
 give the tree the merge gate checked: `CHANGELOG.md` keeps main's lines, then the block's new ones,
 one `### Kind` heading per kind and no repeated entry; a file in `land.auto_resolve.tables`
-(default `docs/native-engine.md`) merges row by row; a `land.auto_resolve.generated` file keeps
+(default `docs/native-engine.md`) merges row by row, and a row both sides only added sentences to
+keeps both sets, main's first (B890); a `land.auto_resolve.generated` file keeps
 main's copy and its argv runs again. Land prints `merge: resolved append-only conflicts: <files>`
 and writes a signed `land.resolved` row. Any other conflict aborts the merge, so main is unchanged,
 and stops with `merge conflict land cannot resolve by itself; main is unchanged: <file> (<kind>), ...`
