@@ -55,7 +55,7 @@ func reviewWaitBlockStep(args []string, step *landStep) int {
 		return landHandover
 	}
 	ctx := context.Background()
-	root, ok := reviewWaitRoot(ctx, cwd)
+	root, ok := reviewRunRootOK(ctx, cwd, run) // B1005
 	if !ok {
 		return landHandover
 	}
@@ -394,9 +394,12 @@ func reviewBlockTree(ctx context.Context, root string, record, entry ledger.Obje
 	}
 	top, t := reviewBlockGit(ctx, real, "rev-parse", "--show-toplevel")
 	actual, a := reviewBlockGit(ctx, real, "symbolic-ref", "--quiet", "--short", "HEAD")
+	// B1005: root is the run's root, the main tree or the lane the run was
+	// started in; the block worktree and the workspace share its main tree.
 	main, m := reviewWaitRoot(ctx, real)
 	spaceMain, s := reviewWaitRoot(ctx, workspace)
-	if !t || !a || !m || !s || top != real || actual != branch || main != root || spaceMain != root {
+	rootMain, r := reviewWaitRoot(ctx, root)
+	if !t || !a || !m || !s || !r || top != real || actual != branch || main != rootMain || spaceMain != rootMain {
 		return false
 	}
 	spaceTop, s := reviewBlockGit(ctx, workspace, "rev-parse", "--show-toplevel")

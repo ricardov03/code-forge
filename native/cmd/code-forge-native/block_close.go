@@ -2342,7 +2342,7 @@ func closeRequeue(step *landStep, home, run, id, mainTop, top, cwd string, rows 
 		return false, 0, false, err
 	}
 	answer := reviewBlockJoined{handed: true, handover: hCloseRequeue}
-	if root, ok := reviewWaitRoot(context.Background(), cwd); ok {
+	if root, ok := reviewRunRootOK(context.Background(), cwd, run); ok { // B1005
 		answer = reviewWaitBlockJoin(cwd, root, run, id, 90*time.Second, stderr)
 	}
 	if answer.handed {
