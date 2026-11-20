@@ -200,3 +200,17 @@ func TestB957DirtyTipMarked(t *testing.T) {
 		t.Fatalf("committed tip: dirty=%v tip=%s, want clean at %s", got.Dirty, got.Tip, head)
 	}
 }
+
+func TestB957UnbornHeadRefused(t *testing.T) {
+	// HEAD that does not resolve (a new orphan branch) is an error (exit 2), never a result with
+	// an empty tip.
+	dir, base := redgreenRepo(t, redgreenBuggy)
+	redgreenWrite(t, filepath.Join(dir, "sub/m_test.go"), redgreenNewTest(redgreenAssert))
+	if out, err := exec.Command("git", "-C", dir, "checkout", "-q", "--orphan", "unborn").CombinedOutput(); err != nil {
+		t.Fatalf("orphan: %v: %s", err, out)
+	}
+	code, output := redgreenRun(t, "--base", base, "sub/m_test.go")
+	if code != 2 || !strings.Contains(output, "cf-redgreen: git rev-parse --verify HEAD^{commit}") || strings.Contains(output, "PROVEN") {
+		t.Fatalf("exit=%d, want 2 and a HEAD rev-parse error: %s", code, output)
+	}
+}
