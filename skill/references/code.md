@@ -189,6 +189,8 @@ reset (one `ci watch: GitHub API rate limit; retry at HH:MM UTC` line per wait) 
 is past `--timeout`, exits 4 with `rate limit, gave up` and no heal item. One watch per repo and
 commit: a second start says another ci watch is already watching and exits 0.
 
+**Never build on a red base (B920).** Before anything is recorded, `block open` reads the CI of the base a new block builds on (`gh run list --commit <base>`, `--workflow <land.ci_workflow>` when set). With `land.require_ci: github` a red base refuses the open (exit 1, `base <sha8> CI is red (...)`, next `gh run view <id> --log-failed`), and so does a base with no CI run or with CI still running (next `code-forge ci watch --sha <base>`); fix main first or open on a green commit with `--base <sha>`. With the gate off a red base or a base with no run prints a `warning:` line and the open goes on; no `gh` on `PATH`, or a `gh` that cannot answer (no GitHub remote), says nothing. A re-open keeps its worktree's base and is not checked again.
+
 **Require green CI (B765).** `land.require_ci: github` (default `off`) makes `--merge` and a batch
 land merge a block only when GitHub CI is green for the block's own tip (`gh run list --commit
 <sha>`, `gh` from `PATH`; `land.ci_workflow` limits it to one workflow). No run, a running or red

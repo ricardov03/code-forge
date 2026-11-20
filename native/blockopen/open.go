@@ -34,6 +34,10 @@ type Options struct {
 	After                                                                 []string
 	AfterOutcome                                                          []any
 	Decision                                                              ledger.Object
+	// BaseCheck (B920) vets the base a new block builds on before anything
+	// is recorded: an error refuses the open. Nil skips it; a re-open keeps
+	// its worktree's base and is not checked again.
+	BaseCheck func(sha string) error
 }
 type Result struct {
 	Block   ledger.Object
@@ -219,6 +223,11 @@ func Open(o Options) (result Result, err error) {
 		}
 		if explicit != prior.Get("base_sha") {
 			return result, refusal("worktree-base", fmt.Sprintf("block %s: --base %s is not %s, the base of the block's worktree %s; a re-open keeps the worktree and its base — drop --base; nothing was recorded", o.ID, o.Base, stamped[:12], text(prior.Get("path"))))
+		}
+	}
+	if prior == nil && o.BaseCheck != nil {
+		if err := o.BaseCheck(stamped); err != nil {
+			return result, err
 		}
 	}
 	mismatches, notes := CheckAPIFit(workspace, stamped, fit.Uses)

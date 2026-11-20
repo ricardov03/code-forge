@@ -730,6 +730,8 @@ pass and prints `ci: tip <sha8> green (<n> runs)`. A red run, a failing `gh` cal
 merged and no state is written. A red refusal names the failed jobs (`gh run view <id> --json jobs`)
 and its next command is `gh run view <id> --log-failed`.
 
+**Never build on a red base (B920).** Before anything is recorded, `block open` reads the CI of the base a new block builds on (`gh run list --commit <base>`, `--workflow <land.ci_workflow>` when set). With `land.require_ci: github` a red base refuses the open (exit 1, `base <sha8> CI is red (...)`, next `gh run view <id> --log-failed`), and so does a base with no CI run or with CI still running (next `code-forge ci watch --sha <base>`); fix main first or open on a green commit with `--base <sha>`. With the gate off a red base or a base with no run prints a `warning:` line and the open goes on; no `gh` on `PATH`, or a `gh` that cannot answer (no GitHub remote), says nothing. A re-open keeps its worktree's base and is not checked again.
+
 **No human between a rebase and green CI (B796).** With `land.require_ci: github`:
 
 - A tip with no CI run and no open CI pull request at that tip is pushed, never forced, to
