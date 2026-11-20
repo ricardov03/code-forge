@@ -85,10 +85,10 @@ func TestB959RegenRunsEveryStepOnce(t *testing.T) {
 	if len(*calls) != 2 {
 		t.Fatalf("children %v, want the commands doc and one go test", *calls)
 	}
-	if (*calls)[0].argv != "sh scripts/gen-commands-doc.sh" || b959Records((*calls)[0]) != "" {
-		t.Errorf("step 1 %+v", (*calls)[0])
+	if (*calls)[1].argv != "sh scripts/gen-commands-doc.sh" || b959Records((*calls)[1]) != "" {
+		t.Errorf("commands step %+v", (*calls)[1])
 	}
-	g := (*calls)[1]
+	g := (*calls)[0]
 	for _, name := range []string{"TestB613SummariesFile", "TestB801DocExamplesRun", "TestB528InitWizardMatchesNode", "TestB611InitWizardJevAndDoctorMatchNode", "TestB703InitWizardMatchesNode", "TestB726InitWizardMatchesNode", "TestB762.*Golden"} {
 		if !strings.Contains(g.argv, name) {
 			t.Errorf("go test run misses %s: %s", name, g.argv)
@@ -114,8 +114,8 @@ func TestB959RegenStopsAtFailure(t *testing.T) {
 	calls := b959Fake(t, "gen-commands-doc")
 	root := b959Root(t)
 	code, stdout, stderr := b959Run(t, root)
-	if code != 1 || len(*calls) != 1 {
-		t.Fatalf("exit %d after %d children, want 1 after 1", code, len(*calls))
+	if code != 1 || len(*calls) != 2 {
+		t.Fatalf("exit %d after %d children, want 1 after 2", code, len(*calls))
 	}
 	if _, err := os.Stat(filepath.Join(root, "docs", "reference", "config.md")); err == nil || strings.Contains(stdout, "ok: docs/reference/config.md") {
 		t.Errorf("the config doc step ran after the failed first step; stdout %q", stdout)
@@ -137,10 +137,10 @@ func TestB959CheckListsStaleSteps(t *testing.T) {
 	if code != 1 || len(*calls) != 2 {
 		t.Fatalf("exit %d, children %d; stderr %q", code, len(*calls), stderr)
 	}
-	if (*calls)[0].argv != "sh scripts/gen-commands-doc.sh --check" {
-		t.Errorf("check step 1 %q", (*calls)[0].argv)
+	if (*calls)[1].argv != "sh scripts/gen-commands-doc.sh --check" {
+		t.Errorf("commands check %q", (*calls)[1].argv)
 	}
-	if r := b959Records((*calls)[1]); r != "" {
+	if r := b959Records((*calls)[0]); r != "" {
 		t.Errorf("check mode go test has a record switch: %s", r)
 	}
 	if !strings.Contains(stdout, "regen-docs --check: ok: docs/reference/commands.md") ||

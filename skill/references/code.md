@@ -172,6 +172,8 @@ test files fails and asks for explicit tests.
 Direct Go vet/build gates also use the selected packages. Wrappers receive the filter as
 `CODE_FORGE_TEST_RUN` (`cf-gotest` honors it). The test result and `gate.done` say
 `changed tests only (N tests)` in `tests_only`, with `test_names` and `packages` (B1009).
+Changes to code-forge CLI flag literals also select the two B801 reference-contract tests,
+so add each flag's command-specific meaning before closing the block (B1023).
 `--changed --packages` keeps whole-package scope. Land merge gates retain the changed-package
 and importer selection (B667, B723b), never reuse a names-only block gate, and a batch land runs
 one full `go test ./...` at the end. CI keeps the full gate.
@@ -422,3 +424,8 @@ Owner revocation: `code-forge run human-checks reopen --run <r> --block <id> [--
 If the combine already contains a block commit before its lane run closes, run `forge block close <id> --run <r> --landed <full-sha>`. The commit subject must begin with the block id, all changed paths must be owned, and ancestry must prove it reached the recorded base branch or the caller’s combine HEAD (with a merge introducing the commit through a non-first parent) in another worktree of the same repository. Close measures that commit against its parent in a private clone and keeps the ordinary evidence and human-check gates. It records `landed_sha`; later combine edits do not invalidate the original review hashes. Use `--dry-run` to inspect blockers first.
 
 Before combining lane entries, keep one `[Unreleased]` bullet per block ID across all kinds. The merge driver and release checks flag duplicate leading IDs or trailing block tags and name both lines (B1018); reconcile the wording into one entry. Identical bullets folded by the driver remain one. A real driver refusal is preserved instead of falling back to plain union.
+
+The CHANGELOG union driver keeps additions from lanes based before a release in `[Unreleased]`; it matches complete entries, including continuation lines, when identifying shipped entries (B1021).
+
+`regen-docs` records command summaries, examples and init goldens before generating
+the command and config references; one write pass is sufficient before `--check` (B1022).

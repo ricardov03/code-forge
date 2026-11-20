@@ -17,6 +17,12 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- Named block gates include the two B801 help-reference contract tests when CLI flag literals change, catching missing flag meanings before combine (B1023).
+
+- `regen-docs` records examples and other pins before building references, so one write pass reaches a checked fixed point (B1022).
+
+- The CHANGELOG union driver keeps new lane entries in `[Unreleased]` when the lane predates a release, preserving shipped entries and multiline details (B1021).
+
 - Merge and release checks flag near-duplicate `[Unreleased]` entries with the same leading or trailing block ID; the installed driver preserves the refusal instead of falling back to plain union (B1018).
 
 - `block close --landed <sha>` reconciles an already landed block commit against its original signed evidence, records `landed_sha`, and preserves human checks despite later combine edits (B1017).

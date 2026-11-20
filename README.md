@@ -140,7 +140,7 @@ default. See [the workflow](docs/how-it-works.md) and [concepts](docs/concepts.m
 | `code-forge block open\|close\|stop` | Track owned work and enforce its acceptance gates; `close --landed <sha>` reconciles an already landed block commit |
 | `code-forge review-file` | Enqueue a file review or wait for its ticket |
 | `code-forge proof tier\|red-green` | Choose proof strength and prove a test fails before the fix |
-| `code-forge gates detect\|run` | Discover and run project checks |
+| `code-forge gates detect\|run` | Discover and run project checks; CLI flag changes also select B801 help-reference checks in this repository |
 | `code-forge keys list\|set\|test\|remove` | Manage key references without printing secrets |
 | `code-forge report` | Inspect recorded outcomes and costs |
 | `code-forge outcome seal\|check` | Seal a specialist result and check its files before a caller uses it |

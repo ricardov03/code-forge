@@ -168,7 +168,7 @@ wrapper scope and no inherited name filter; a wrapper with no selectable test fi
 with a request to declare tests. Direct Go vet/build commands also narrow to
 the selected packages in named mode. A wrapper receives the filter as `CODE_FORGE_TEST_RUN`; `cf-gotest` honors it
 and uses a plain named run even with `--shards`. Results and `gate.done` carry `tests_only`
-(`changed tests only (N tests)`), `test_names`, `test_count` and `packages`. Named block evidence
+(`changed tests only (N tests)`), `test_names`, `test_count` and `packages`. When code-forge CLI flag literals change, named block gates also run `TestB801EveryCommandHasAReference` and `TestB801CommandsJSONCoversTheTable` to check the help-reference contract (B1023). Named block evidence
 never substitutes for a land merge gate. CI and the final batch gate still run the full suite.
 
 With `--changed --packages`, a Go project tests only its changed packages (B667). This applies when the test command is
@@ -1945,3 +1945,5 @@ proof header and path restrictions. Every pass is signed as autopilot, with the
 proof and evidence hashes; the human verbs retain their guards.
 
 Autopilot evidence passes appear separately in `run status` and `run human-checks list` (`auto_passed`), the binnacle, and the full log. `run human-checks audit --run <r> [--json]` re-hashes each signed pass’s proof and evidence (`ok`, `changed`, `missing`). The owner can revoke one clause, or all passed autopilot clauses of a block, with `run human-checks reopen --run <r> --block <id> [--clause C<n>] --note "<reason>"`. This needs an active run, terminal confirmation and no active grant; there is no `--yes`. Its signed `human_check.reopened` rows make the checks open again. An unlanded closed block returns to `awaiting_human_check`; a landed block stays closed and needs a stop or fix. Open checks hold `run end` in either case. Reports mark autopilot completions `autoPassed: true` with `humanWaitMs: null`.
+
+When a lane predates a release, the CHANGELOG union driver merges by release section: new lane entries stay in `[Unreleased]`, while unchanged shipped entries stay in their released section (B1021).
