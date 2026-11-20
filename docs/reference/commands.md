@@ -4399,6 +4399,17 @@ Options:
   -h, --help  Show this help
 ```
 
+```sh
+code-forge lane ready --run missing-lane --json
+```
+
+Exit 1. Output:
+
+```text
+{"run":"missing-lane","ready":false,"reason":"no run record for missing-lane"}
+lane ready: no run record for missing-lane
+```
+
 #### Exit codes
 
 | Code | Meaning |
@@ -4409,7 +4420,13 @@ Options:
 
 #### JSON output
 
-Takes `--json`; the examples above refuse, so no shape is recorded.
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `run` | string |
+| `ready` | boolean |
+| `reason` | string |
 
 #### Related
 

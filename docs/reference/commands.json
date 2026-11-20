@@ -5688,6 +5688,11 @@
           "command": "code-forge lane ready --help",
           "exit": 0,
           "output": "Description:\n  Verify a lane's committed review evidence, ownership and size\n\nUsage:\n  usage: code-forge lane ready --run <lane-run> [--json]\n\nOptions:\n  --run <r>   The run id\n  --json      Print one JSON line instead of text\n  -h, --help  Show this help"
+        },
+        {
+          "command": "code-forge lane ready --run missing-lane --json",
+          "exit": 1,
+          "output": "{\"run\":\"missing-lane\",\"ready\":false,\"reason\":\"no run record for missing-lane\"}\nlane ready: no run record for missing-lane"
         }
       ],
       "exit_codes": [
@@ -5705,9 +5710,22 @@
         }
       ],
       "json": {
-        "kind": "none",
+        "kind": "object",
         "lines": "one",
-        "keys": []
+        "keys": [
+          {
+            "key": "run",
+            "type": "string"
+          },
+          {
+            "key": "ready",
+            "type": "boolean"
+          },
+          {
+            "key": "reason",
+            "type": "string"
+          }
+        ]
       },
       "related": [
         "lane combine",

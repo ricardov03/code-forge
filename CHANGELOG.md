@@ -17,6 +17,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- Regenerate command references and B801 example pins for the lane ready JSON example (c28b).
+
 - Record the eight former oversized Markdown stops from Go as bounded, approvable review/recheck parts; retain every other golden case unchanged (c28b, B1019).
 
 - Refresh close usage expectations for the supported --landed <sha> option (c28b).
