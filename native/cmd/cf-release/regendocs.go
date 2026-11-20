@@ -21,15 +21,18 @@ var rdRecordEnv = [][2]string{{"CODE_FORGE_WRITE_SUMMARIES", "1"}, {"CODE_FORGE_
 	{"CODE_FORGE_INIT_GOLDEN_RECORD", "1"}}
 
 // rdStep is one generated-doc step: a child command, or (argv nil) the in-process config doc.
+// env is set in the child's environment; drop is removed from it.
 type rdStep struct {
 	name string
 	argv []string
 	env  [][2]string
+	drop []string
 }
 
-// rdSpawn runs a child step from the repository root; tests replace it.
-var rdSpawn = func(root string, argv []string, env [][2]string) result {
-	return spawn(root, argv, 0, envWith(nil, env...))
+// rdSpawn runs a child step from the repository root with env as its whole environment; tests
+// replace it.
+var rdSpawn = func(root string, argv []string, env []string) result {
+	return spawn(root, argv, 0, env)
 }
 
 func rdSteps(check bool) []rdStep {
@@ -41,7 +44,12 @@ func rdSteps(check bool) []rdStep {
 	}
 	goTest := rdStep{name: "test pins (command summaries, B801 doc examples, init goldens)",
 		argv: []string{"go", "-C", "native", "test", "./cmd/code-forge-native", "-run", rdGoTests, "-count=1"}}
-	if !check {
+	if check {
+		// a record switch left in the caller's shell must not turn the check into a rewrite
+		for _, kv := range rdRecordEnv {
+			goTest.drop = append(goTest.drop, kv[0])
+		}
+	} else {
 		goTest.env = rdRecordEnv
 	}
 	return []rdStep{
@@ -74,7 +82,7 @@ func regenDocsMain(a *app, args []string, root string) int {
 			}
 			ok = configDocMain(a, cdArgs, root) == 0
 		} else {
-			r := rdSpawn(root, step.argv, step.env)
+			r := rdSpawn(root, step.argv, envWith(step.drop, step.env...))
 			if r.failed() || r.code != 0 {
 				ok = false
 				a.err(rdTail(r.stdout+r.stderr+r.errMsg, 40))

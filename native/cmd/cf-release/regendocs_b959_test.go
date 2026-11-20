@@ -39,10 +39,12 @@ func b959Fake(t *testing.T, fail ...string) *[]b959Call {
 	calls := &[]b959Call{}
 	saved := rdSpawn
 	t.Cleanup(func() { rdSpawn = saved })
-	rdSpawn = func(root string, argv []string, env [][2]string) result {
+	rdSpawn = func(root string, argv []string, env []string) result {
 		c := b959Call{argv: strings.Join(argv, " "), env: map[string]string{}}
 		for _, kv := range env {
-			c.env[kv[0]] = kv[1]
+			if k, v, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(k, "CODE_FORGE_") {
+				c.env[k] = v
+			}
 		}
 		*calls = append(*calls, c)
 		for _, f := range fail {
@@ -53,6 +55,17 @@ func b959Fake(t *testing.T, fail ...string) *[]b959Call {
 		return result{code: 0}
 	}
 	return calls
+}
+
+// b959Records lists the record switches a child got.
+func b959Records(c b959Call) string {
+	var on []string
+	for _, k := range []string{"CODE_FORGE_WRITE_SUMMARIES", "CODE_FORGE_B801_RECORD", "CODE_FORGE_INIT_GOLDEN_RECORD"} {
+		if v, ok := c.env[k]; ok {
+			on = append(on, k+"="+v)
+		}
+	}
+	return strings.Join(on, " ")
 }
 
 func b959Run(t *testing.T, root string, args ...string) (int, string, string) {
@@ -72,7 +85,7 @@ func TestB959RegenRunsEveryStepOnce(t *testing.T) {
 	if len(*calls) != 2 {
 		t.Fatalf("children %v, want the commands doc and one go test", *calls)
 	}
-	if (*calls)[0].argv != "sh scripts/gen-commands-doc.sh" || len((*calls)[0].env) != 0 {
+	if (*calls)[0].argv != "sh scripts/gen-commands-doc.sh" || b959Records((*calls)[0]) != "" {
 		t.Errorf("step 1 %+v", (*calls)[0])
 	}
 	g := (*calls)[1]
@@ -99,9 +112,13 @@ func TestB959RegenRunsEveryStepOnce(t *testing.T) {
 
 func TestB959RegenStopsAtFailure(t *testing.T) {
 	calls := b959Fake(t, "gen-commands-doc")
-	code, _, stderr := b959Run(t, b959Root(t))
+	root := b959Root(t)
+	code, stdout, stderr := b959Run(t, root)
 	if code != 1 || len(*calls) != 1 {
 		t.Fatalf("exit %d after %d children, want 1 after 1", code, len(*calls))
+	}
+	if _, err := os.Stat(filepath.Join(root, "docs", "reference", "config.md")); err == nil || strings.Contains(stdout, "ok: docs/reference/config.md") {
+		t.Errorf("the config doc step ran after the failed first step; stdout %q", stdout)
 	}
 	if !strings.Contains(stderr, "regen-docs: failed: docs/reference/commands.md and commands.json\n") || !strings.Contains(stderr, "--- FAIL: TestX") {
 		t.Errorf("stderr %q", stderr)
@@ -109,6 +126,10 @@ func TestB959RegenStopsAtFailure(t *testing.T) {
 }
 
 func TestB959CheckListsStaleSteps(t *testing.T) {
+	// record switches left in the shell must not reach a check's go test
+	t.Setenv("CODE_FORGE_B801_RECORD", "1")
+	t.Setenv("CODE_FORGE_INIT_GOLDEN_RECORD", "1")
+	t.Setenv("CODE_FORGE_WRITE_SUMMARIES", "1")
 	root := b959Root(t)
 	calls := b959Fake(t, "go -C native test")
 	// config.md missing: stale too; every step still runs
@@ -119,8 +140,8 @@ func TestB959CheckListsStaleSteps(t *testing.T) {
 	if (*calls)[0].argv != "sh scripts/gen-commands-doc.sh --check" {
 		t.Errorf("check step 1 %q", (*calls)[0].argv)
 	}
-	if len((*calls)[1].env) != 0 {
-		t.Errorf("check mode go test has a record switch: %v", (*calls)[1].env)
+	if r := b959Records((*calls)[1]); r != "" {
+		t.Errorf("check mode go test has a record switch: %s", r)
 	}
 	if !strings.Contains(stdout, "regen-docs --check: ok: docs/reference/commands.md") ||
 		!strings.Contains(stderr, "regen-docs --check: stale: docs/reference/config.md\n") ||
