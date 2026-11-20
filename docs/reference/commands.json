@@ -1726,7 +1726,7 @@
       "owner_only": false,
       "hidden": false,
       "namespace": false,
-      "usage": "usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>] [--allow-api-mismatch] [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n  --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n                       Human checks use {clause, kind: human_check} without tests.\n  --brief <file>       A file inside the repository, not inline text.\n                       Its uses: lines (<file>: <symbol>(<param names>)) must fit the base:\n                       each named parameter exists, else exit 2 with an api-fit: line.\n                       Its extends: lines (<file>: <symbol>) own that file for additive change.\n  --allow-api-mismatch  Open anyway; print each api-fit: line as a note (native only).",
+      "usage": "usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--shared <files…>] [--after <ids…>] [--after-outcome <ids…>] [--allow-api-mismatch] [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n  --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n                       Human checks use {clause, kind: human_check} without tests.\n  --brief <file>       A file inside the repository, not inline text.\n                       Its uses: lines (<file>: <symbol>(<param names>)) must fit the base:\n                       each named parameter exists, else exit 2 with an api-fit: line.\n                       Its extends: lines (<file>: <symbol>) own that file for additive change.\n  --shared <files…>    Owned files another open block may also own when it names\n                       them --shared too (append-only: CHANGELOG.md, docs tables).\n  --allow-api-mismatch  Open anyway; print each api-fit: line as a note (native only).",
       "flags": [
         {
           "name": "--run",
@@ -1797,6 +1797,13 @@
           "type": "list",
           "default": "not set",
           "meaning": "Test files of the block."
+        },
+        {
+          "name": "--shared",
+          "value": "<files…>",
+          "type": "list",
+          "default": "not set",
+          "meaning": "Owned files another open block may also own (append-only)."
         },
         {
           "name": "--after",
@@ -1979,7 +1986,7 @@
       "owner_only": false,
       "hidden": false,
       "namespace": false,
-      "usage": "usage: code-forge block rebase <id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>] [--accept-landed] [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.",
+      "usage": "usage: code-forge block rebase <id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>] [--accept-landed] [--accept-identical <file> --source <path-or-ref:path>] [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.",
       "flags": [
         {
           "name": "--run",
@@ -2015,6 +2022,20 @@
           "type": "bool",
           "default": "off",
           "meaning": "Accept that the block's work already landed on main."
+        },
+        {
+          "name": "--accept-identical",
+          "value": "<file>",
+          "type": "path",
+          "default": "not set",
+          "meaning": ""
+        },
+        {
+          "name": "--source",
+          "value": "<path-or-ref:path>",
+          "type": "path",
+          "default": "not set",
+          "meaning": "Package folder to install from."
         },
         {
           "name": "--json",
@@ -3096,6 +3117,84 @@
       ]
     },
     {
+      "name": "block auto-pass",
+      "purpose": "Pass device checks with scoped autopilot evidence.",
+      "when": "After code close, pass non-design human checks under human-pass:evidence and the frozen human_check.autopilot opt-in.",
+      "owner_only": false,
+      "hidden": false,
+      "namespace": false,
+      "usage": "usage: code-forge block auto-pass <id> --run <r> --proof <file> --note <text> [--clause C<n>]… [--json] [--dry-run]",
+      "flags": [
+        {
+          "name": "--run",
+          "value": "<r>",
+          "type": "string",
+          "default": "not set",
+          "meaning": "Run id (r-...)."
+        },
+        {
+          "name": "--proof",
+          "value": "<file>",
+          "type": "path",
+          "default": "not set",
+          "meaning": "Non-empty HTML or JSON proof inside proof_dirs, outside worktrees and exports; includes a separate prover and passing evidence for each target."
+        },
+        {
+          "name": "--note",
+          "value": "<text>",
+          "type": "string",
+          "default": "not set",
+          "meaning": "Free text note."
+        },
+        {
+          "name": "--clause",
+          "value": "C<n>",
+          "type": "string",
+          "default": "not set",
+          "meaning": "Open C<n> human-check clause; may repeat. Without selectors pass all open device checks, leaving design checks."
+        },
+        {
+          "name": "--json",
+          "value": "",
+          "type": "bool",
+          "default": "off",
+          "meaning": "Print JSON instead of text."
+        },
+        {
+          "name": "--dry-run",
+          "value": "",
+          "type": "bool",
+          "default": "off",
+          "meaning": "Show what would happen; change nothing."
+        }
+      ],
+      "examples": [],
+      "exit_codes": [
+        {
+          "code": 0,
+          "meaning": "Success."
+        },
+        {
+          "code": 1,
+          "meaning": "Refused or failed; the message says why."
+        },
+        {
+          "code": 2,
+          "meaning": "Usage error: a missing, unknown or bad argument (the usage is printed)."
+        }
+      ],
+      "json": {
+        "kind": "none",
+        "lines": "one",
+        "keys": []
+      },
+      "related": [
+        "block human-pass",
+        "autopilot start",
+        "run human-checks"
+      ]
+    },
+    {
       "name": "block human-pass",
       "purpose": "Record the owner's device check and close.",
       "when": "The owner records that the human checks of a block passed.",
@@ -4095,7 +4194,7 @@
       "owner_only": false,
       "hidden": false,
       "namespace": true,
-      "usage": "usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]\n  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); without --changed, over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n  gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.\n  gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.\n  gates run --run --block --changed: the Go test selection (the block's tests, tests that import a changed file); never the full suite; an empty selection skips the test gate.\n  gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.\n  gates run --run --block: a full suite in the shared checkout while other blocks of the run are open there prints 'full suite in a shared tree (N other open blocks)' and records shared_tree: N on gate.done; use --changed for the block's tests, or proof.isolation: worktree.\n  gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.",
+      "usage": "usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]\n  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); without --changed, over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n  gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.\n  gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.\n  gates run --run --block --changed: in Go projects, changed tests by name, TestB<id> tests and acceptance tests per package (-count=1 -trimpath); no names builds only; --packages keeps whole-package scope. Other projects keep the related-test selection.\n  gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.\n  gates run --run --block: a full suite in the shared checkout while other blocks of the run are open there prints 'full suite in a shared tree (N other open blocks)' and records shared_tree: N on gate.done; use --changed for the block's tests, or proof.isolation: worktree.\n  gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.",
       "flags": [],
       "examples": [
         {
@@ -4175,7 +4274,7 @@
       "owner_only": false,
       "hidden": false,
       "namespace": false,
-      "usage": "usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed | --full] [--auto-rebase | --allow-stale-base] [--preflight | --no-preflight]",
+      "usage": "usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed [--packages] | --full] [--auto-rebase | --allow-stale-base] [--preflight | --no-preflight]",
       "flags": [
         {
           "name": "--cwd",
@@ -4217,7 +4316,14 @@
           "value": "",
           "type": "bool",
           "default": "off",
-          "meaning": "Run only the tests the change touches."
+          "meaning": "Run changed Go tests by name, or related tests."
+        },
+        {
+          "name": "--packages",
+          "value": "",
+          "type": "bool",
+          "default": "off",
+          "meaning": "With --changed, run whole Go packages instead of named tests."
         },
         {
           "name": "--full",

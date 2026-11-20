@@ -24,6 +24,7 @@
   {"name":"block ack-waivers","summary":"Acknowledge the agent waivers of a block","owner":true,"group":"block"},
   {"name":"block amend-acceptance","summary":"Change the acceptance clauses of a block","owner":true,"group":"block"},
   {"name":"block attempt","summary":"Start the next attempt of an open block","owner":false,"group":"block"},
+  {"name":"block auto-pass","summary":"Pass device checks with scoped autopilot evidence","owner":false,"group":"block"},
   {"name":"block claim","summary":"Add one more owned path to an open block","owner":false,"group":"block"},
   {"name":"block close","summary":"Run the final checks and close the block","owner":false,"group":"block"},
   {"name":"block human-pass","summary":"Record the owner's device check and close","owner":true,"group":"block"},

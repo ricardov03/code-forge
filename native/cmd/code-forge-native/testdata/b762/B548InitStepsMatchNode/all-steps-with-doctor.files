@@ -44,12 +44,22 @@ autonomy:
   coder_may_open_draft_pr: false
 land:
   require_main_ci: false
+  regenerate: []
 autopilot:
   step_budgets:
     margin: 0.5
     min_samples: 5
 release:
   max_blocks: 8
+human_check:
+  autopilot:
+    enabled: false
+    require_proof: true
+    proof_dirs: []
+    exclude_waits_for: []
+    require_separate_prover: true
+rebase:
+  approved_binary_sources: []
 
 home:
 .code-forge drwx------

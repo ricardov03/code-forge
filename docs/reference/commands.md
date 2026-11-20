@@ -1263,7 +1263,7 @@ Usage:
 Start a block: owned files, acceptance tests, brief
 
 ```text
-usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>] [--allow-api-mismatch] [--json] [--help|-h]
+usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--shared <files…>] [--after <ids…>] [--after-outcome <ids…>] [--allow-api-mismatch] [--json] [--help|-h]
   --help, -h  Print this usage and exit without changing state.
   --json      Print one JSON line on success instead of text.
   --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.
@@ -1272,6 +1272,8 @@ usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --
                        Its uses: lines (<file>: <symbol>(<param names>)) must fit the base:
                        each named parameter exists, else exit 2 with an api-fit: line.
                        Its extends: lines (<file>: <symbol>) own that file for additive change.
+  --shared <files…>    Owned files another open block may also own when it names
+                       them --shared too (append-only: CHANGELOG.md, docs tables).
   --allow-api-mismatch  Open anyway; print each api-fit: line as a note (native only).
 ```
 
@@ -1293,6 +1295,7 @@ Start a block in a live run, with its owned files and acceptance tests.
 | `--lines <n>` | number | not set | Expected size of the change in lines. |
 | `--kind code\|docs\|contract\|light` | enum | not set | Kind of item. |
 | `--tests <paths…>` | list | not set | Test files of the block. |
+| `--shared <files…>` | list | not set | Owned files another open block may also own (append-only). |
 | `--after <ids…>` | list | not set | Open only after these blocks are closed. |
 | `--after-outcome <ids…>` | list | not set | Open only after these blocks have an outcome. |
 | `--allow-api-mismatch` | bool | off | Open even when the brief names an API the code does not have. |
@@ -1403,7 +1406,7 @@ Prints one JSON line: an object with these keys.
 Move a block onto the new base of its branch
 
 ```text
-usage: code-forge block rebase <id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>] [--accept-landed] [--json] [--help|-h]
+usage: code-forge block rebase <id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>] [--accept-landed] [--accept-identical <file> --source <path-or-ref:path>] [--json] [--help|-h]
   --help, -h  Print this usage and exit without changing state.
   --json      Print one JSON line on success instead of text.
 ```
@@ -1421,6 +1424,8 @@ Move an open block onto the current main.
 | `--accept-changed <file>…` | list | not set | Accept these changed files after a rebase; needs --reason. |
 | `--reason <text>` | string | not set | Why; written to the ledger. |
 | `--accept-landed` | bool | off | Accept that the block's work already landed on main. |
+| `--accept-identical <file>` | path | not set |  |
+| `--source <path-or-ref:path>` | path | not set | Package folder to install from. |
 | `--json` | bool | off | Print JSON instead of text. |
 
 #### Examples
@@ -2152,6 +2157,49 @@ Prints one JSON line: an object with these keys.
 
 - [`block waive`](#block-waive)
 - [`block unwaive`](#block-unwaive)
+
+### block auto-pass
+
+Pass device checks with scoped autopilot evidence
+
+```text
+usage: code-forge block auto-pass <id> --run <r> --proof <file> --note <text> [--clause C<n>]… [--json] [--dry-run]
+```
+
+#### When to use
+
+After code close, pass non-design human checks under human-pass:evidence and the frozen human_check.autopilot opt-in.
+
+#### Flags
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--run <r>` | string | not set | Run id (r-...). |
+| `--proof <file>` | path | not set | Non-empty HTML or JSON proof inside proof_dirs, outside worktrees and exports; includes a separate prover and passing evidence for each target. |
+| `--note <text>` | string | not set | Free text note. |
+| `--clause C<n>` | string | not set | Open C<n> human-check clause; may repeat. Without selectors pass all open device checks, leaving design checks. |
+| `--json` | bool | off | Print JSON instead of text. |
+| `--dry-run` | bool | off | Show what would happen; change nothing. |
+
+#### Examples
+
+#### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. |
+| 1 | Refused or failed; the message says why. |
+| 2 | Usage error: a missing, unknown or bad argument (the usage is printed). |
+
+#### JSON output
+
+Takes `--json`; the examples above refuse, so no shape is recorded.
+
+#### Related
+
+- [`block human-pass`](#block-human-pass)
+- [`autopilot start`](#autopilot-start)
+- [`run human-checks`](#run-human-checks)
 
 ### block human-pass
 
@@ -3049,7 +3097,7 @@ usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transc
   gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); without --changed, over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.
   gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.
   gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.
-  gates run --run --block --changed: the Go test selection (the block's tests, tests that import a changed file); never the full suite; an empty selection skips the test gate.
+  gates run --run --block --changed: in Go projects, changed tests by name, TestB<id> tests and acceptance tests per package (-count=1 -trimpath); no names builds only; --packages keeps whole-package scope. Other projects keep the related-test selection.
   gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.
   gates run --run --block: a full suite in the shared checkout while other blocks of the run are open there prints 'full suite in a shared tree (N other open blocks)' and records shared_tree: N on gate.done; use --changed for the block's tests, or proof.isolation: worktree.
   gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.
@@ -3151,7 +3199,7 @@ Exit 0. Output:
 Run the gates for a block or the project
 
 ```text
-usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed | --full] [--auto-rebase | --allow-stale-base] [--preflight | --no-preflight]
+usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed [--packages] | --full] [--auto-rebase | --allow-stale-base] [--preflight | --no-preflight]
 ```
 
 #### When to use
@@ -3167,7 +3215,8 @@ Run the test, lint, type and format gates, for a block or the whole project.
 | `--slug <slug>` | string | not set | Project slug (from .code-forge.yml). |
 | `--run <id>` | string | not set | Run id (r-...). |
 | `--block <id>` | string | not set | Block id. |
-| `--changed` | bool | off | Run only the tests the change touches. |
+| `--changed` | bool | off | Run changed Go tests by name, or related tests. |
+| `--packages` | bool | off | With --changed, run whole Go packages instead of named tests. |
 | `--full` | bool | off | Run the full test suite. |
 | `--auto-rebase` | bool | off | Rebase the block onto main first when its base is behind. |
 | `--allow-stale-base` | bool | off | Run on a base behind main without rebasing. |
