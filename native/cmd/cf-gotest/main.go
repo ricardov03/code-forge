@@ -102,6 +102,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "cf-gotest: %v\n%s\n", err, usage)
 		return 2
 	}
+	// A by-name block gate is already a small selection; do not shard it
+	// using a fresh unfiltered test list.
+	if os.Getenv("CODE_FORGE_TEST_RUN") != "" {
+		o.shards = 0
+	}
 	pkgs, all := packages(args)
 	if o.shards > 0 {
 		return runShards(o, pkgs, all, stdout, stderr)
@@ -113,7 +118,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if all {
 		pkgs = []string{"./..."}
 	}
-	argv := append([]string{"test", "-count=1", "-timeout", "75m", "-p", strconv.Itoa(o.p)}, pkgs...)
+	argv := []string{"test", "-count=1", "-timeout", "75m", "-p", strconv.Itoa(o.p)}
+	if filter := os.Getenv("CODE_FORGE_TEST_RUN"); filter != "" {
+		argv = append(argv, "-run", filter, "-trimpath")
+	}
+	argv = append(argv, pkgs...)
 	env := loadCap(goEnv(os.Environ()), stdout)
 	fmt.Fprintf(stdout, "cf-gotest: go %s\n", strings.Join(argv, " "))
 	cmd := exec.Command("go", argv...)

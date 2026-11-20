@@ -799,14 +799,14 @@ type landGreenGate struct {
 func landGateRow(row map[string]any) (landGreenGate, bool) {
 	g := landGreenGate{gates: map[string]bool{}}
 	tree, _ := row["tree"].(string)
-	if row["event"] != "gate.done" || row["all_ok"] != true || row["cancelled"] == true || row["flaky"] != nil || tree == "" {
+	if row["event"] != "gate.done" || row["all_ok"] != true || row["cancelled"] == true || row["flaky"] != nil || row["tests_only"] != nil || tree == "" {
 		return g, false
 	}
 	g.tree = tree
 	results, _ := row["results"].([]any)
 	for _, value := range results {
 		r, ok := value.(map[string]any)
-		if !ok || r["ok"] != true || r["flaky"] != nil || r["timed_out"] == true || r["cancelled"] == true {
+		if !ok || r["ok"] != true || r["flaky"] != nil || r["tests_only"] != nil || r["timed_out"] == true || r["cancelled"] == true {
 			return g, false
 		}
 		name, _ := r["gate"].(string)

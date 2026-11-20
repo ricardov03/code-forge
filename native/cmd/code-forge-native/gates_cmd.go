@@ -56,7 +56,8 @@ type gatesOptions struct {
 	timeout                      float64
 	timeoutGiven                 bool
 	// full is an explicit gates run --full (B404): the only local full suite.
-	full bool
+	full     bool
+	packages bool // B1009: explicitly keep whole-package changed gates.
 	// scope is a test scope planned by a caller (the land merge gates) for a
 	// run without --run/--block.
 	scope *gates.Scope
@@ -112,6 +113,8 @@ func gatesParse(args []string) (gatesOptions, string) {
 		switch s {
 		case "--full":
 			o.full, o.changed = true, true
+		case "--packages":
+			o.packages = true
 		case "--changed":
 			o.changed, changedFlag = true, true
 		case "--auto-rebase":
@@ -123,6 +126,9 @@ func gatesParse(args []string) (gatesOptions, string) {
 		case "--no-preflight":
 			o.noPreflight = true
 		}
+	}
+	if o.packages && (!changedFlag || o.full) {
+		return o, "--packages needs --changed"
 	}
 	if o.full && changedFlag {
 		return o, "--full and --changed cannot go together"

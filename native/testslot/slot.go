@@ -10,8 +10,10 @@
 //	                    kind, cwd, label, enqueued_at, admitted_at once held)
 //
 // Admission, checked by each waiter under the lock:
-//   - FIFO by enqueued_at.
-//   - A full run needs the whole machine: no other holder.
+//   - FIFO by enqueued_at within each lane.
+//   - Named-test runs share max(1, cores/4) separate slots, passing big runs
+//     regardless of load; the memory floor still applies beside any holder.
+//   - A full run needs no other full or changed holder; names may run beside it.
 //   - Changed runs share up to N = max(1, min(cores/4, freeGB/2)) slots.
 //   - While another run holds a slot, admit only when the 1-minute load is
 //     below the core count and free memory is above MemFloor (1 GB). With no
@@ -49,6 +51,9 @@ const (
 	EnvHeld   = "CODE_FORGE_TEST_QUEUE_HELD"
 	Full      = "full"
 	Changed   = "changed"
+	// Names is a by-name run (B1009): a few named tests. It has its own pass:
+	// it never waits for full or changed holders or waiters.
+	Names = "names"
 )
 
 // Resources is one probe of the machine. Known is false when load or free
@@ -145,6 +150,12 @@ func Slots(r Resources) int {
 	return n
 }
 
+// NameSlots is the number of by-name runs that may hold at once:
+// max(1, cores/4), whatever the load (B1009).
+func NameSlots(r Resources) int {
+	return max(1, r.Cores/4)
+}
+
 // Describe renders holders for one status line, e.g. "full pid 42 gates r/B1".
 func Describe(holders []Ticket) string {
 	if len(holders) == 0 {
@@ -167,8 +178,8 @@ func (q *Queue) Acquire(ctx context.Context, r Request) (func(), error) {
 	if Disabled() {
 		return func() {}, nil
 	}
-	if r.Kind != Full && r.Kind != Changed {
-		return nil, fmt.Errorf("test queue: kind must be full or changed, got %q", r.Kind)
+	if r.Kind != Full && r.Kind != Changed && r.Kind != Names {
+		return nil, fmt.Errorf("test queue: kind must be full, changed or names, got %q", r.Kind)
 	}
 	cwd := r.Cwd
 	if cwd == "" {
@@ -268,6 +279,48 @@ func (q *Queue) check(me *Ticket, st *state, now time.Time) (bool, int, []Ticket
 }
 
 func (q *Queue) decide(me *Ticket, holders, waiters []Ticket, index int, st *state) bool {
+	// Named tests have a separate bounded FIFO lane. Big holders and waiters
+	// do not consume these slots; memory remains a shared constraint.
+	if me.Kind == Names {
+		res := q.Probe()
+		if len(holders) > 0 && res.Known && res.FreeBytes <= q.MemFloor {
+			return false
+		}
+		n := 0
+		for _, h := range holders {
+			if h.Kind == Names {
+				n++
+			}
+		}
+		for _, w := range waiters[:index] {
+			if w.Kind == Names {
+				return false
+			}
+		}
+		return n < NameSlots(res)
+	}
+	// The big-run FIFO is independent of the names lane in both directions.
+	bigHolders, bigWaiters := []Ticket{}, []Ticket{}
+	for _, h := range holders {
+		if h.Kind != Names {
+			bigHolders = append(bigHolders, h)
+		}
+	}
+	for _, w := range waiters {
+		if w.Kind != Names {
+			if w.ID == me.ID {
+				index = len(bigWaiters)
+			}
+			bigWaiters = append(bigWaiters, w)
+		}
+	}
+	if len(holders) > 0 && len(bigHolders) == 0 {
+		res := q.Probe()
+		if res.Known && res.FreeBytes <= q.MemFloor {
+			return false
+		}
+	}
+	holders, waiters = bigHolders, bigWaiters
 	// Load and memory only hold a run back beside another holder: with no
 	// holder the load is either not ours or left by a run that just ended.
 	slots := 1

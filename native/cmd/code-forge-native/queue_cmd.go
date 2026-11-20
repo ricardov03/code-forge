@@ -251,6 +251,9 @@ func gatesQueueSlot(ctx context.Context, p gates.Plan, s gates.Scope, cwd, run, 
 		return func() {}, nil
 	}
 	kind := testslot.Changed
+	if s.Reason == gatesNamesReason {
+		kind = testslot.Names
+	}
 	if s.Kind == "full" && p.Light == nil && !p.ReuseTest && s.Reason != "text_only" {
 		kind = testslot.Full
 	}

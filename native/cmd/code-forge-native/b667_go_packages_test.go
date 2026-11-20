@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -151,10 +152,10 @@ func (f b667GateFixture) gates(t *testing.T) (int, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, _ := json.Marshal([]string{"gates", "run", "--run", "fixture", "--block", "B1", "--changed", "--json"})
+	encoded, _ := json.Marshal([]string{"gates", "run", "--run", "fixture", "--block", "B1", "--changed", "--packages", "--json"})
 	cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
 	cmd.Dir = f.repo
-	cmd.Env = append(os.Environ(), "HOME="+f.home, "B667_GO_LOG="+f.log, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_TEST_QUEUE=off", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_NODE_VERSION=v24.22.1", "CF_GATES_ARGS="+string(encoded))
+	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(v string) bool { return strings.HasPrefix(v, "CODE_FORGE_RUN_ID=") }), "HOME="+f.home, "B667_GO_LOG="+f.log, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_TEST_QUEUE=off", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_NODE_VERSION=v24.22.1", "CF_GATES_ARGS="+string(encoded))
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {

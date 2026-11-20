@@ -102,7 +102,7 @@ var helpCommands = []helpEntry{
 	{name: "gates", summary: "Run the project gates and the safety checks", namespace: true},
 	{name: "gates detect", summary: "Find the test, lint, type and format commands"},
 	{name: "gates run", summary: "Run the gates for a block or the project",
-		options: []helpOption{helpRunOption, {"--block <id>", "The block to gate"}, {"--changed", "Run only the tests the change touches"}, {"--full", "Run the full suite"}}},
+		options: []helpOption{helpRunOption, {"--block <id>", "The block to gate"}, {"--changed", "Run changed Go tests by name, or related tests"}, {"--packages", "With --changed, run whole Go packages"}, {"--full", "Run the full suite"}}},
 	{name: "gates secret-scan", summary: "Check files for secrets"},
 	{name: "gates safe-edit", summary: "Check the change keeps protected files safe"},
 	{name: "gates scope", summary: "Check the change stays inside the owned files"},

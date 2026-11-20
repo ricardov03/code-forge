@@ -139,10 +139,15 @@ names hub files where it stops), and for a `native/` change `test/compat/go.test
 tests that build or run the native binary. A test command without `{test_files}` gets the
 selection appended. An empty selection skips the test gate. The reason is `go_only` or
 `import_graph`. `forge gates run --run <r> --block <id> --full` is the only local full suite.
-In a Go project (`go.mod` at the root, `gates.test` is `go test ./...`), `--changed` and the block
-land gates run `go test` on the changed packages plus every package that imports one of them in
-its build or its tests (B667, B723b); a batch land runs one full `go test ./...` at the end.
-`gate.done` lists `packages` and `importer_packages`. A `go list` failure fails the gate.
+In a Go project, a block's `gates run --changed` runs tests declared in its changed `_test.go`
+files, `TestB<id>...` tests and acceptance/`--tests` names or files. Each selected package gets
+its own anchored `-run` filter, `-count=1 -trimpath`; no names means `-run '^$'` (compile only).
+Direct Go vet/build gates also use the selected packages. Wrappers receive the filter as
+`CODE_FORGE_TEST_RUN` (`cf-gotest` honors it). The test result and `gate.done` say
+`changed tests only (N tests)` in `tests_only`, with `test_names` and `packages` (B1009).
+`--changed --packages` keeps whole-package scope. Land merge gates retain the changed-package
+and importer selection (B667, B723b), never reuse a names-only block gate, and a batch land runs
+one full `go test ./...` at the end. CI keeps the full gate.
 
 **Fail fast (B392, B363, B418).** Run `forge block ready <id> --run <r> --preflight [--report <file>]`
 before a gate: in about a second it lists stale base, open findings, rule breaks and report
@@ -261,7 +266,9 @@ going); inspect with `forge heal list --run <r>` and `forge heal show <id>`. An 
 failing, or fails for another reason, becomes `needs_coder`: fix the cause, then retry by hand.
 
 **Machine test queue (B352, B354).** Every `gates run` with a test command takes a slot in one
-machine-wide FIFO queue: a full run needs the whole machine, changed runs share slots. A waiting
+machine-wide FIFO queue: full and changed runs share the big-run lane. Named block gates have
+a separate FIFO lane with `max(1, cores/4)` slots, passing big holders and waiters regardless of
+load; the memory floor still applies beside any holder (B1009). A waiting
 gate prints `queued #k`, and `forge status` shows it under the run. `forge queue` lists holders and
 waiters. Wrap any other test command in `forge queue run [--kind full|changed] -- <cmd>` so it waits
 its turn too.

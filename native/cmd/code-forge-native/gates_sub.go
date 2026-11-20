@@ -39,14 +39,14 @@ const gatesUsage = "usage: code-forge gates detect|run|secret-scan|safe-edit|sco
 	"  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); without --changed, over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n" +
 	"  gates run: a gate may be {argv, env}. " + gatesEnvRule + "\n" +
 	"  gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.\n" +
-	"  gates run --run --block --changed: the Go test selection (the block's tests, tests that import a changed file); never the full suite; an empty selection skips the test gate.\n" +
+	"  gates run --run --block --changed: in Go projects, changed tests by name, TestB<id> tests and acceptance tests per package (-count=1 -trimpath); no names builds only; --packages keeps whole-package scope. Other projects keep the related-test selection.\n" +
 	"  gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.\n" +
 	"  gates run --run --block: a full suite in the shared checkout while other blocks of the run are open there prints 'full suite in a shared tree (N other open blocks)' and records shared_tree: N on gate.done; use --changed for the block's tests, or proof.isolation: worktree.\n" +
 	"  gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.\n"
 
 var gatesSubUsage = map[string]string{
 	"detect":          "usage: code-forge gates detect [--cwd <dir>]\n",
-	"run":             "usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed | --full] [--auto-rebase | --allow-stale-base] [--preflight | --no-preflight]\n",
+	"run":             "usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed [--packages] | --full] [--auto-rebase | --allow-stale-base] [--preflight | --no-preflight]\n",
 	"secret-scan":     "usage: code-forge gates secret-scan [--cwd <dir>] --file <path> [--file <path>...]\n",
 	"safe-edit":       "usage: code-forge gates safe-edit [--cwd <dir>] --base <sha>\n",
 	"scope":           "usage: code-forge gates scope [--cwd <dir>] --base <sha>\n",
@@ -58,7 +58,7 @@ var gatesSubUsage = map[string]string{
 // flags that take a value, then the flags that stand alone.
 var gatesSubFlags = map[string][2][]string{
 	"detect":          {{"--cwd"}, nil},
-	"run":             {{"--cwd", "--timeout-ms", "--slug", "--run", "--block"}, {"--full", "--changed", "--auto-rebase", "--allow-stale-base", "--preflight", "--no-preflight", "--json"}},
+	"run":             {{"--cwd", "--timeout-ms", "--slug", "--run", "--block"}, {"--full", "--changed", "--packages", "--auto-rebase", "--allow-stale-base", "--preflight", "--no-preflight", "--json"}},
 	"secret-scan":     {{"--cwd", "--file"}, nil},
 	"safe-edit":       {{"--cwd", "--base"}, nil},
 	"scope":           {{"--cwd", "--base"}, nil},
