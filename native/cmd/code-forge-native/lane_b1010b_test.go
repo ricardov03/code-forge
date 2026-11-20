@@ -49,7 +49,7 @@ func b1010bLane(t *testing.T) (startFixture, string, string) {
 	t.Helper()
 	t.Setenv("CODE_FORGE_RUN_ID", "")
 	f, base := b1010StartFixture(t)
-	if err := os.WriteFile(filepath.Join(f.repo, "go.mod"), []byte("module fixture\n\ngo 1.23\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(f.repo, "go.mod"), []byte("module fixture\n\ngo 1.22\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(f.repo, ".code-forge.yml"), []byte("project:\n  slug: unit\nengine: auto\ngates:\n  test: [go, test, './...']\n  types: null\n  format: null\nland:\n  min_free_gb: 0\n  regenerate: [\"printf 'once\\n' >> regenerated.txt\"]\n"), 0600); err != nil {
