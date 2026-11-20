@@ -560,7 +560,7 @@ blocked-signal mask; Node's spawn (libuv) does both in its child (B721).
 
 Go tests make thousands of temp git directories under `$TMPDIR`. On macOS
 `fseventsd` logs every one of those changes and can take a whole CPU. With
-`gates.ram_tmp: auto` (the default) the Go engine gives every gate and test
+`gates.ram_tmp: auto` (opt-in) the Go engine gives every gate and test
 command `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`, a fresh directory per
 `gates run` (and per `block land` batch gate), removed after it.
 
@@ -578,8 +578,12 @@ command `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`, a fresh directory per
   problem never fails a gate.
 - A gate command's own `env.TMPDIR` wins. The RAM disk `TMPDIR` is not listed
   in `env_keys` and is not masked.
-- `gates.ram_tmp: off` (or `CODE_FORGE_RAM_TMP=off` in the environment) keeps
-  the normal `TMPDIR`. On Linux and Windows `auto` does nothing.
+- `gates.ram_tmp: off` is the default (B940): measured on this repo's
+  `worker`, `review` and `gates` tests (3 interleaved rounds each), the RAM
+  disk was 1.2% slower in the sum of medians (141.08 s vs 139.36 s on the
+  normal disk), short of the 10% gain a default-on needs. `off` (or
+  `CODE_FORGE_RAM_TMP=off` in the environment) keeps the normal `TMPDIR`. On
+  Linux and Windows `auto` does nothing.
 - `code-forge doctor` shows a `ram_tmp` row: `on: /Volumes/cf-tmp mounted,
   .fseventsd/no_log present`, `on (auto): ... is made on the first gate`,
   `off (gates.ram_tmp: off)` or `fallback: hdiutil not found; ...`. The row
@@ -587,7 +591,7 @@ command `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`, a fresh directory per
 - The volume stays mounted until you eject it (`hdiutil detach
   /Volumes/cf-tmp`) or restart the Mac (B924).
 - `code-forge init` writes `gates.ram_tmp` into a new `.code-forge.yml` with
-  the default value, and a re-run keeps the value already there (B939).
+  the default value (`off`, B940), and a re-run keeps the value already there (B939).
   It writes `gates.ram_tmp_mb: 2048` after it the same way (B941).
 
 ## Rebase runs in Go (B431)

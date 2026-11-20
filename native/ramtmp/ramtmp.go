@@ -32,8 +32,10 @@ const Volume = "cf-tmp"
 const DefaultSizeMB = 2048
 
 // DefaultMode is gates.ram_tmp when the config does not set it; code-forge
-// init writes it into a new config (B939).
-const DefaultMode = "auto"
+// init writes it into a new config (B939). It is off (B940): the RAM disk
+// measured 1.2% slower in the sum of medians (141.08 s vs 139.36 s), below
+// the 10% gain a default-on needs; auto stays opt-in.
+const DefaultMode = "off"
 
 // Runner runs one command and returns its stdout. A non-nil error means the
 // command failed or could not start.
@@ -140,8 +142,8 @@ func Mode(configured any) any {
 	return configured
 }
 
-// Enabled reads gates.ram_tmp: absent or "auto" is on for darwin and off
-// elsewhere; "off" is off. The string says why it is off.
+// Enabled reads gates.ram_tmp: "auto" is on for darwin and off elsewhere;
+// absent (DefaultMode, B940) or "off" is off. The string says why it is off.
 func Enabled(mode any, goos string) (bool, string) {
 	if mode == nil {
 		mode = DefaultMode

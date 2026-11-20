@@ -8,12 +8,13 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Added
 
-- On macOS the gates run with `TMPDIR` on a RAM disk with no file-event log: `gates.ram_tmp: auto` (the default) makes `/Volumes/cf-tmp` once without sudo (`hdiutil attach -nomount` + `diskutil erasevolume APFS`), writes `.fseventsd/no_log` and `.metadata_never_index`, and gives every gate and test command a fresh `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`; any error prints one warn line and the gates use the normal `TMPDIR`. `gates.ram_tmp: off` or `CODE_FORGE_RAM_TMP=off` turns it off; `doctor` shows the `ram_tmp` row (B924)
+- On macOS the gates run with `TMPDIR` on a RAM disk with no file-event log: `gates.ram_tmp: auto` (opt-in; the default is `off`, B940) makes `/Volumes/cf-tmp` once without sudo (`hdiutil attach -nomount` + `diskutil erasevolume APFS`), writes `.fseventsd/no_log` and `.metadata_never_index`, and gives every gate and test command a fresh `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`; any error prints one warn line and the gates use the normal `TMPDIR`. `gates.ram_tmp: off` or `CODE_FORGE_RAM_TMP=off` turns it off; `doctor` shows the `ram_tmp` row (B924)
 - `code-forge init` writes `gates.ram_tmp` (the default mode) into a new `.code-forge.yml`, after `gates.format`; a re-run keeps the value already set (B939).
 - `gates.ram_tmp_mb` sets the size in MB of the RAM disk the gates make (default 2048, 64 to 65536); `code-forge init` writes it after `gates.ram_tmp` and keeps a value already set, and `config fix` keeps it. A mounted `/Volumes/cf-tmp` keeps its size until it is detached (B941).
 
 ### Changed
 
+- `gates.ram_tmp` defaults to `off`; `auto` stays opt-in. Measured on the `worker`, `review` and `gates` tests (`go test -count=1 -p 2`, 3 interleaved rounds each), the RAM disk was 1.2% slower in the sum of medians (141.08 s vs 139.36 s on the normal disk; per package +3.3%, −2.2%, +0.8%), short of the 10% gain a default-on needs. `code-forge init` writes `ram_tmp: off` into a new config, and a config that sets `auto` keeps it (B940)
 - The doctor `state-ignored` row asks git twice instead of three times: the tracked-files check is one `git ls-files --full-name` with a `:(top)` pathspec, with no separate `rev-parse --show-toplevel`; the row text is the same (also used by init and upgrade) (B898).
 
 ## [0.26.0] — 2026-11-19

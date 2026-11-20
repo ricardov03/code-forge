@@ -107,7 +107,7 @@ func b924Calls(mac string) []string {
 // TMPDIR is a fresh dir on the volume (removed after), the volume carries
 // .fseventsd/no_log; the second run reuses the mounted volume.
 func TestB924GatesRunAutoUsesRamDisk(t *testing.T) {
-	for _, mode := range []any{nil, "auto"} {
+	for _, mode := range []any{"auto"} {
 		f := b450Setup(t, b924Config(mode), nil)
 		mac := t.TempDir()
 		volume := filepath.Join(mac, ramtmp.Volume)
@@ -180,7 +180,7 @@ func TestB924GatesRunOffRunsNoCommand(t *testing.T) {
 	mac := t.TempDir()
 	gatesRamTmpOptions = func() ramtmp.Options { o := b924FakeMac(mac, ""); o.GOOS = "linux"; return o }
 	t.Setenv("CODE_FORGE_RAM_TMP", "")
-	if env, done := gatesRamTmpEnv(map[string]any{}, "r", "B1", nil); env != nil || len(b924Calls(mac)) != 0 {
+	if env, done := gatesRamTmpEnv(map[string]any{"ram_tmp": "auto"}, "r", "B1", nil); env != nil || len(b924Calls(mac)) != 0 {
 		t.Errorf("linux: env %v calls %q", env, b924Calls(mac))
 	} else {
 		done()
@@ -203,19 +203,21 @@ func TestB924DoctorRamTmpRow(t *testing.T) {
 		}
 	}
 	check(map[string]any{"gates": map[string]any{"ram_tmp": "off"}}, "off (gates.ram_tmp: off)")
-	check(map[string]any{}, "on (auto): "+filepath.Join(mac, "cf-tmp")+" is made on the first gate")
+	auto := map[string]any{"gates": map[string]any{"ram_tmp": "auto"}}
+	check(map[string]any{}, "off (gates.ram_tmp: off)")
+	check(auto, "on (auto): "+filepath.Join(mac, "cf-tmp")+" is made on the first gate")
 	if len(b924Calls(mac)) != 0 {
 		t.Fatalf("doctor ran %q", b924Calls(mac))
 	}
 	fake.LookPath = func(string) (string, error) { return "", errors.New("no") }
-	check(map[string]any{}, "fallback: hdiutil not found")
+	check(auto, "fallback: hdiutil not found")
 	fake.LookPath = func(name string) (string, error) { return "/usr/bin/" + name, nil }
 	if _, err := fake.Ensure(64); err != nil {
 		t.Fatal(err)
 	}
 	check(map[string]any{"gates": map[string]any{"ram_tmp": "auto"}}, "on: "+filepath.Join(mac, "cf-tmp")+" mounted, .fseventsd/no_log present")
 	t.Setenv("CODE_FORGE_RAM_TMP", "off")
-	check(map[string]any{}, "off (CODE_FORGE_RAM_TMP=off)")
+	check(auto, "off (CODE_FORGE_RAM_TMP=off)")
 }
 
 // B791 rule for B924: config fix knows gates.ram_tmp (no unknown-key line),
@@ -229,4 +231,26 @@ func TestB924ConfigFixKeepsRamTmp(t *testing.T) {
 		{[]string{"config", "fix"}, 0, file + ": config ok\n", ""},
 	})
 	b791Unchanged(t, file, strings.Replace(old, "    invariants: scripts/inv.sh # old\n", "", 1))
+}
+
+// B940: with no gates.ram_tmp in the config a gates run on a Mac keeps the
+// normal TMPDIR and runs no hdiutil or diskutil command; the doctor row says off.
+func TestB940GatesRunDefaultIsOff(t *testing.T) {
+	f := b450Setup(t, b924Config(nil), nil)
+	mac := t.TempDir()
+	code, out, errOut := b924Call(t, f, mac, nil, "gates", "run", "--run", "fixture", "--block", "B1")
+	r := f.result(out)
+	if code != 0 || !r.AllOK || len(r.Results) == 0 || r.Results[0].Stdout == "" || strings.HasPrefix(r.Results[0].Stdout, mac) {
+		t.Fatalf("exit=%d stderr=%q stdout=%s", code, errOut, out)
+	}
+	if calls := b924Calls(mac); len(calls) != 0 {
+		t.Errorf("calls = %q, want none", calls)
+	}
+	saved := gatesRamTmpOptions
+	t.Cleanup(func() { gatesRamTmpOptions = saved })
+	gatesRamTmpOptions = func() ramtmp.Options { return b924FakeMac(mac, "") }
+	t.Setenv("CODE_FORGE_RAM_TMP", "")
+	if row := dfRamTmpRow(map[string]any{}); row.detail != "off (gates.ram_tmp: off)" {
+		t.Errorf("doctor row = %+v", row)
+	}
 }

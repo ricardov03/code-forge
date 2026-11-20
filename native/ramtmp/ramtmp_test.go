@@ -124,7 +124,7 @@ func TestB924EnabledAndStatus(t *testing.T) {
 		mode any
 		goos string
 		on   bool
-	}{{nil, "darwin", true}, {"auto", "darwin", true}, {"auto", "linux", false}, {"off", "darwin", false}, {"yes", "darwin", false}}
+	}{{nil, "darwin", false}, {"auto", "darwin", true}, {"auto", "linux", false}, {"off", "darwin", false}, {"yes", "darwin", false}}
 	for _, c := range cases {
 		if on, _ := Enabled(c.mode, c.goos); on != c.on {
 			t.Errorf("Enabled(%v, %s) = %v", c.mode, c.goos, on)
@@ -135,11 +135,11 @@ func TestB924EnabledAndStatus(t *testing.T) {
 	if s := o.Status("off"); s != "off (gates.ram_tmp: off)" {
 		t.Errorf("off status %q", s)
 	}
-	if s := o.Status(nil); !strings.HasPrefix(s, "on (auto)") || len(f.calls) != 0 {
+	if s := o.Status("auto"); !strings.HasPrefix(s, "on (auto)") || len(f.calls) != 0 {
 		t.Errorf("auto status %q calls %q", s, f.calls)
 	}
 	o.LookPath = func(string) (string, error) { return "", errors.New("missing") }
-	if s := o.Status(nil); !strings.HasPrefix(s, "fallback: hdiutil not found") {
+	if s := o.Status("auto"); !strings.HasPrefix(s, "fallback: hdiutil not found") {
 		t.Errorf("fallback status %q", s)
 	}
 	if _, err := o.Ensure(64); err != nil {
@@ -159,5 +159,22 @@ func TestB924DirIsFreshPerRun(t *testing.T) {
 	b, _ := Dir(root, "r1/../B9")
 	if a == b || filepath.Dir(a) != root || !strings.HasPrefix(filepath.Base(a), "r1_.._B9-") {
 		t.Fatalf("Dir = %q, %q", a, b)
+	}
+}
+
+// B940: an unset gates.ram_tmp is off (the measured RAM disk gave no gain);
+// auto stays opt-in and still turns the RAM disk on for a Mac.
+func TestB940DefaultIsOff(t *testing.T) {
+	t.Setenv(EnvMode, "")
+	if on, why := Enabled(nil, "darwin"); on || why != "gates.ram_tmp: off" {
+		t.Errorf("Enabled(unset, darwin) = %v, %q; want off", on, why)
+	}
+	if on, _ := Enabled("auto", "darwin"); !on {
+		t.Errorf("Enabled(auto, darwin) = false; want on")
+	}
+	f := newFake()
+	o := f.options(t)
+	if s := o.Status(nil); s != "off (gates.ram_tmp: off)" || len(f.calls) != 0 {
+		t.Errorf("unset status %q calls %q", s, f.calls)
 	}
 }
