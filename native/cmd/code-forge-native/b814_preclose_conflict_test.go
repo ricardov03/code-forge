@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/landmerge"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -106,5 +107,52 @@ func b814ApproveAll(f *b789Fixture) {
 			continue
 		}
 		f.must(os.WriteFile(filepath.Join(f.repo, ".code-forge", "queue", ticket+".done"), []byte(`{"ticket":"`+ticket+`","status":"reviewed","approved":true,"open_findings":false}`), 0o600))
+	}
+}
+
+// With land.auto_resolve off, single land resolves no conflict (lcfMerge), so
+// the pre-close check must stop on an append-only CHANGELOG.md conflict too;
+// with it on, that conflict is one land resolves and the check lets it pass.
+func TestB814PrecheckAutoResolveOffStopsChangelogConflict(t *testing.T) {
+	repo, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := gitx.Run(dir, args...)
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return strings.TrimSpace(out)
+	}
+	write := func(dir, text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "CHANGELOG.md"), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := "# Changelog\n\n## [Unreleased]\n\n## [0.1.0]\n"
+	git(repo, "init", "-qb", "main")
+	git(repo, "config", "user.name", "Fixture")
+	git(repo, "config", "user.email", "f@example.invalid")
+	git(repo, "config", "commit.gpgsign", "false")
+	write(repo, base)
+	git(repo, "add", "CHANGELOG.md")
+	git(repo, "commit", "-qm", "base")
+	tree := filepath.Join(repo, "wt")
+	git(repo, "worktree", "add", "-qb", "block-B1", tree)
+	write(tree, strings.Replace(base, "## [Unreleased]\n\n", "## [Unreleased]\n\n### Fixed\n\n- fix B1\n\n", 1))
+	git(tree, "commit", "-qam", "B1 changelog")
+	write(repo, strings.Replace(base, "## [Unreleased]\n\n", "## [Unreleased]\n\n### Fixed\n\n- fix B0\n\n", 1))
+	git(repo, "commit", "-qam", "B0 changelog")
+
+	off, err := lcfPrecheck(repo, "main", tree, landmerge.Legacy())
+	if err != nil || len(off) != 1 || off[0].Path != "CHANGELOG.md" || off[0].Kind != landmerge.KindCode {
+		t.Fatalf("auto_resolve off: conflicts=%v err=%v, want CHANGELOG.md (code)", off, err)
+	}
+	on, err := lcfPrecheck(repo, "main", tree, landmerge.Defaults())
+	if err != nil || len(on) != 0 {
+		t.Fatalf("auto_resolve on: conflicts=%v err=%v, want none (land resolves it)", on, err)
 	}
 }
