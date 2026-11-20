@@ -55,7 +55,7 @@ func reviewEnqueueRebase(args []string, flags map[string]string, paths []string,
 	}
 	if r != nil {
 		workspace, _ := r.Get("workspace").(string)
-		top, refusal, ok := reviewMainRoot(context.Background(), workspace)
+		top, refusal, ok := reviewRunRoot(context.Background(), workspace, run)
 		if !ok {
 			return reviewWaitHandover(args, hReviewRoot)
 		}

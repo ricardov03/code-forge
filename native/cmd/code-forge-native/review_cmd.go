@@ -228,6 +228,32 @@ func reviewSkipReason(root, rel string, discovered bool) string {
 
 type reviewSkip struct{ file, reason string }
 
+// reviewUnchanged is the named files that git does not list as changed
+// against the base in this tree (tracked changes plus untracked files).
+func reviewUnchanged(files, changed []string) []string {
+	set := map[string]bool{}
+	for _, file := range changed {
+		set[file] = true
+	}
+	same := []string{}
+	for _, file := range files {
+		if !set[file] {
+			same = append(same, file)
+		}
+	}
+	return same
+}
+
+// reviewUnchangedText is the B970 refusal: nothing was reviewed.
+func reviewUnchangedText(same []string, base string) string {
+	short := base
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	return "review: not reviewed: these files have no change against --base " + short + " in this tree: " + strings.Join(same, ", ") +
+		"\nreview: name changed files, or give the --base they changed from (git diff --name-only " + short + " lists the changed ones)\n"
+}
+
 // reviewPlan decides the invocation without writing anything. A nil plan
 // means Node serves it, for the returned reason.
 func reviewPlan(args []string) (func(o *runOut) int, handoverReason) {
@@ -290,6 +316,25 @@ func reviewPlan(args []string) (func(o *runOut) int, handoverReason) {
 			continue
 		}
 		skipped = append(skipped, reviewSkip{file, why})
+	}
+	if explicit && len(files) > 0 {
+		// B970: a named file with no change against the base has nothing a
+		// reviewer could read (the worker would answer no_change). Refuse
+		// before anything starts instead of passing it as "unchanged".
+		changed, ok := reviewFileSet(root, sha)
+		if !ok {
+			return nil, hReviewGit
+		}
+		if same := reviewUnchanged(files, changed); len(same) > 0 {
+			text := reviewUnchangedText(same, sha)
+			return func(o *runOut) int {
+				for _, s := range skipped {
+					o.err("review: skipped " + s.file + " (" + s.reason + ")\n")
+				}
+				o.err(text)
+				return 1
+			}, 0
+		}
 	}
 	if len(files) > 0 {
 		// B553: a file to review runs the whole flow in Go

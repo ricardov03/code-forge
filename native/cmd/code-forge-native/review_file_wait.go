@@ -20,9 +20,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/childreg"
+	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/jsonx"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/state"
 	"gopkg.in/yaml.v3"
 )
 
@@ -169,7 +171,7 @@ func runReviewFileWaitWith(args []string, poll func(context.Context, string, tim
 		ctx, interrupted, stop = reviewWaitSignals()
 		defer stop()
 	}
-	root, refusal, ok := reviewMainRoot(ctx, cwd)
+	root, refusal, ok := reviewRunRoot(ctx, cwd, flags["run"])
 	if ctx.Err() != nil {
 		return interrupted()
 	}
@@ -364,6 +366,53 @@ func reviewWaitCommandErr(ctx context.Context, cwd, name string, args []string, 
 func reviewWaitRoot(ctx context.Context, cwd string) (string, bool) {
 	root, refusal, ok := reviewMainRoot(ctx, cwd)
 	return root, ok && refusal == nil
+}
+
+// reviewRunRoot is the one root rule of review-file (B969): the review queue
+// of a run lives where its worker serves it, the top of the run's workspace
+// (`run start --cwd <dir>`; the worker uses gitx.RepoTop of it). For a run
+// started in the main tree, or one whose block worktrees code-forge made,
+// that is the main tree (reviewMainRoot). For a run started in a linked git
+// worktree it is that worktree. Without a readable run record, a linked
+// worktree that holds its own queue (.code-forge/queue) serves itself.
+func reviewRunRoot(ctx context.Context, cwd, run string) (string, ledger.Object, bool) {
+	main, refusal, ok := reviewMainRoot(ctx, cwd)
+	if !ok || refusal != nil {
+		return main, refusal, ok
+	}
+	if top := reviewLinkedTop(ctx, cwd, run, main); top != "" {
+		return top, nil, true
+	}
+	return main, nil, true
+}
+
+// reviewLinkedTop is the linked worktree that serves this review, or "".
+func reviewLinkedTop(ctx context.Context, cwd, run, main string) string {
+	home := os.Getenv("HOME")
+	if run != "" && home != "" && filepath.IsAbs(home) && reviewBlockRun.MatchString(run) {
+		if record, err := state.ReadRun(home, run); err == nil {
+			workspace, _ := record.Get("workspace").(string)
+			if workspace == "" || !filepath.IsAbs(workspace) {
+				return ""
+			}
+			top, err := gitx.RepoTop(workspace)
+			if err != nil || top == main {
+				return ""
+			}
+			if m, refusal, ok := reviewMainRoot(ctx, workspace); !ok || refusal != nil || m != main {
+				return ""
+			}
+			return top
+		}
+	}
+	top, err := gitx.RepoTop(cwd)
+	if err != nil || top == main {
+		return ""
+	}
+	if info, err := os.Stat(filepath.Join(top, ".code-forge", "queue")); err != nil || !info.IsDir() {
+		return ""
+	}
+	return top
 }
 
 // reviewMainRoot is mainRootOf in src/worker/ticket.mjs: the realpath of the

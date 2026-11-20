@@ -68,6 +68,39 @@ each skip is named on stderr:
 
 No file left means `nothing to review` and exit 0. Nothing is started.
 
+A file you name with `--files` must have a change against `--base` in this tree (git lists it in
+`git diff --name-only <base>` or as untracked). If one does not, `review` prints
+`review: not reviewed: these files have no change against --base <sha> in this tree: <files>` and
+exits 1 before anything starts: a reviewer would have nothing to read, so it is never a pass.
+
+### In a git worktree
+
+Run `review` in a linked git worktree (`git worktree add`) and it reviews that worktree's files
+against `--base`. The run, its worker, the review queue and the results all live in the
+worktree's own `.code-forge/`. The same holds for a run you start yourself with
+`code-forge run start --cwd .` in the worktree: `review --run <id>` and `review-file --run <id>`
+find that run's worker there. The rule is one root: the review queue of a run is at the top of the
+run's workspace (the directory `run start` was given). A run started in the main tree, including
+one whose blocks code-forge gave their own worktrees, keeps its queue in the main tree.
+
+### One file at a time: `review-file`
+
+Inside a run you started yourself (`run start`, `block open`), queue one file and wait for it:
+
+| Command | What it does |
+|---|---|
+| `code-forge review-file <path> --block <id> --run <r>` | queues a review of the file; a cached result of the same content comes back at once |
+| `code-forge review-file <path> --block <id> --run <r> --fresh` | queues a new review even when a cached result exists (a `split_required` retry, or a reverted substitute approval) |
+| `code-forge review-file --wait <ticket> [--max 90s]` | waits for one ticket |
+| `code-forge review-file --wait-block <id> --run <r> [--max 90s]` | waits for every owned file of the block |
+
+`--wait-block` needs a block of the run. An unknown block id is refused, exit 1, with
+`unknown-block`: `block <id> is not a block of run <r>`, and the fix: open it with
+`code-forge block open <id> --run <r> …` (or let `code-forge review` open one), and list the run's
+blocks with `code-forge run status --run <r>`. A run with no record in this repository is
+refused with `unknown-run` and the `run start` command to start it here. How many files the
+worker reviews at once is `review.parallel_tickets` (see [Speed](#speed)).
+
 ## Examples
 
 Review your branch against `main` (run it on the branch):
@@ -131,6 +164,7 @@ A file line is one of:
 | `N findings` | the reviewer raised findings that must be fixed; they are in the fix list |
 | `stopped: <reason>` | the review stopped: `timeout` (`--max` passed), `split_required` (the diff alone is over the packet budget), or a fix-loop stop |
 | `unavailable: <reason>` | no valid review came back (the provider failed, the answer failed the stub guard, the worker was down). Never approval |
+| `unchanged` | the worker found no change against the base, so no reviewer read the file. Not reviewed: `ok` is false and the exit code is 1 |
 
 `--json` prints one line: `{ok, base, base_from, run, block, files, skipped, totals}`. Each entry of
 `files` is `{file, result, reason, findings}`, where `result` is `approved`, `findings`,
@@ -140,8 +174,8 @@ A file line is one of:
 
 | Code | When |
 |---|---|
-| `0` | every file is approved, or there is nothing to review |
-| `1` | any file has findings, or is stopped, unavailable or timed out; or the run could not start |
+| `0` | every file is approved by a review of this run, or there is nothing to review |
+| `1` | any file has findings, or is stopped, unavailable, unchanged (not reviewed) or timed out; a named file has no change against `--base`; or the run could not start |
 | `2` | a usage error, not a git repository, a bad `--base`, a refused `--files` path, or no `.code-forge.yml` |
 
 ## What it does
