@@ -250,9 +250,10 @@ refused while a grant is active (stop it first). Each writes one signed `autopil
 `autopilot.revert` row, and the row leaves the digest. Ratify works on an ended run too; revert
 needs an active run, except for a temporary config change.
 
-## Found work becomes a block of the same run
+## Found work: backlog by default, customer-breaking joins the run
 
-A problem found while the run works should be fixed in the same run, not left for later. Record it
+Scope is fixed (B921): a problem found while the run works goes to the backlog (the next release)
+by default; only a customer-breaking finding becomes a block of the same run. Record it either way
 with `code-forge autopilot found` (Go engine, B800):
 
 ```bash
