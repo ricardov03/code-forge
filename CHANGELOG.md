@@ -15,6 +15,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - The doctor `state-ignored` row asks git twice instead of three times: the tracked-files check is one `git ls-files --full-name` with a `:(top)` pathspec, with no separate `rev-parse --show-toplevel`; the row text is the same (also used by init and upgrade) (B898).
 ### Fixed
 
+- `doctor` in a repository with no `.code-forge.yml` shows the `ref guard` row too, once a coder worktree was opened there (B808).
 - Land merges a docs table row to which both sides only added sentences (the `block land` row of `docs/native-engine.md`): both sets are kept, main's first, instead of a conflict; `block rebase` and batch land refuse a replay whose `CHANGELOG.md` would repeat a `### Kind` heading in `[Unreleased]` (B890)
 - A land merge, batch rebase or `block rebase` that git finishes without a conflict but that would leave two `### Kind` headings of one kind in `CHANGELOG.md`'s `[Unreleased]` folds them into one heading, every line kept, instead of red CI on the changelog shape (B813).
 - Land keeps both sides of the two merges that dropped B800–B802 and B877/B870 from a batch (a second `### Added` in `[Unreleased]`, a `gates run` row both sides appended to): one heading per kind, every sentence kept; checked on the real files (B936).
