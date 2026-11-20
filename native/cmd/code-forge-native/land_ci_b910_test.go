@@ -81,8 +81,10 @@ func TestB910CIProvenTipSkipsLocalTests(t *testing.T) {
 	if calls := f.lines("changed-calls"); len(calls) != 0 {
 		t.Errorf("local test gate ran %d times (%v), want none: CI proved every landed tip", len(calls), calls)
 	}
-	if len(f.lines("merge-calls")) == 0 {
-		t.Errorf("the batch merge gate must still run")
+	// B980: each landed prefix's tree is a tree green CI proved, so the
+	// merge gate reuses CI's full suite instead of running it again.
+	if calls := f.lines("merge-calls"); len(calls) != 0 {
+		t.Errorf("merge gate suite ran %v, want none: CI proved each landed tree (B980)", calls)
 	}
 	lint := strings.Join(f.lines("lint-calls"), "\n")
 	for _, id := range []string{"B1", "B2"} {
@@ -107,6 +109,7 @@ func TestB910CIProvenTipSkipsLocalTests(t *testing.T) {
 		"ci: pushed tip " + rebased[:8] + " to origin/ci-b2 over local\n",
 		"ci: tip " + rebased[:8] + " green (1 runs)\n",
 		"gates: block B2 tip " + rebased[:8] + " has green CI; local test gate skipped (B910)\n",
+		"merge gate: tree " + f.git(f.repo, "rev-parse", rebased+"^{tree}")[:12] + " is the tree green CI proved at " + rebased[:8] + "; full suite skipped (B980)\n",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("output must contain %q:\n%s", want, output)
