@@ -232,7 +232,7 @@ author: facts sheet required: run code-forge facts --brief plans/brief.md first,
 Let a delegate decide for the owner within a grant
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes] | digest --run <id> [--json] | ratify <row-id> --run <id> [--json] | revert <row-id> --run <id> [--json] | found --run <id> (--source <gate|land|coder|flaky|handover|review> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--fingerprint <key>] | --report <file> | --list) [--from <block>] [--json]
+usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--speed] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes] | digest --run <id> [--json] | ratify <row-id> --run <id> [--json] | revert <row-id> --run <id> [--json] | found --run <id> (--source <gate|land|coder|flaky|handover|review> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--severity <normal|customer-breaking>] [--fingerprint <key>] | --report <file> | --list) [--from <block>] [--json]
 ```
 
 #### When to use
@@ -513,7 +513,7 @@ autopilot run <run>: grant ap-<id> now runs until 2026-01-01T00:00:00Z (1h 59m; 
 Ask the delegate one question inside the grant
 
 ```text
-usage: code-forge autopilot ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2)
+usage: code-forge autopilot ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--speed] [--json] (options for an action: waive,fix · allow,deny · L1,L2)
 ```
 
 #### When to use
@@ -532,6 +532,7 @@ An agent needs an owner decision during a grant: the delegate answers it or it g
 | `--block <id>` | string | not set | Block id. |
 | `--file <path>` | path | not set | File path inside the repository. |
 | `--finding <id>` | string | not set | Review finding id. |
+| `--speed` | bool | off | A speed-only choice (B922): the first option (list the fastest first; each keeps every gate) is taken at once, with no delegate session and no wait on the owner; the binnacle tells the owner after. |
 | `--json` | bool | off | Print JSON instead of text. |
 
 #### Examples
@@ -1065,12 +1066,12 @@ Prints one JSON line: an object with these keys.
 Turn a problem found during the run into a queued block of the same run
 
 ```text
-usage: code-forge autopilot found --run <id> (--source <gate|land|coder|flaky|handover|review> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--fingerprint <key>]
+usage: code-forge autopilot found --run <id> (--source <gate|land|coder|flaky|handover|review> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--severity <normal|customer-breaking>] [--fingerprint <key>]
 ```
 
 #### When to use
 
-During an autopilot run: turn a problem you found (a red gate, a land failure, a coder's leftover, a flaky test, a hand-over, a review) into a queued block of the same run instead of fixing it on the side.
+During an autopilot run: record a problem you found (a red gate, a land failure, a coder's leftover, a flaky test, a hand-over, a review) instead of fixing it on the side; a customer-breaking one becomes a queued block of the same run, the rest go to the backlog (B921).
 
 #### Flags
 
@@ -1082,6 +1083,7 @@ During an autopilot run: turn a problem you found (a red gate, a land failure, a
 | `--evidence <text>` | string | not set | What shows the problem (a failing test, an error line); goes into the brief. |
 | `--evidence-file <path>` | path | not set | File with the evidence, instead of --evidence. |
 | `--label <label,…>` | list | not set | Labels for the found block, comma separated. |
+| `--severity <normal\|customer-breaking>` | enum | not set | normal (default: the finding goes to the backlog, the next release) or customer-breaking (it joins this run as a queued block) (B921). |
 | `--fingerprint <key>` | string | not set | Key that marks repeats of the same problem (default: made from source and title). |
 
 #### Examples
@@ -1093,7 +1095,7 @@ code-forge autopilot found --run <run> --source gate --title 'gates run is red o
 Exit 0. Output:
 
 ```text
-{"finding":"F1","fingerprint":"fp-56e705e225e22ac0","source":"gate","title":"gates run is red on main","labels":[],"from_block":null,"block":"B2","state":"queued","reason":null,"seen":1,"brief":"~/.code-forge/runs/<run>/found/B2.brief.md","acceptance":"~/.code-forge/runs/<run>/found/B2.acceptance.ym…
+{"finding":"F1","fingerprint":"fp-56e705e225e22ac0","source":"gate","title":"gates run is red on main","labels":[],"severity":"normal","from_block":null,"block":null,"state":"backlog","reason":"backlog: not customer-breaking, so it goes to the next release (B921)","seen":1,"brief":null,"acceptance":…
 ```
 
 ```sh
@@ -1104,7 +1106,7 @@ Exit 0. Output:
 
 ```text
 run <run>: 1 found (found → block → state)
-F1 gate → B2 → not opened: gates run is red on main
+F1 gate → - → backlog (next release) (backlog: not customer-breaking, so it goes to the next release (B921)): gates run is red on main
 ```
 
 #### Exit codes
@@ -2567,7 +2569,7 @@ code-forge context pack --run <run> --block B1 --json
 Exit 0. Output:
 
 ```text
-{"path":"<tmp>/cf-tmp/<run>/context/B1.md","tokens":1499,"lines":65,"cut":0,"sha256":"<sha256>"}
+{"path":"<tmp>/cf-tmp/<run>/context/B1.md","tokens":1611,"lines":68,"cut":0,"sha256":"<sha256>"}
 ```
 
 #### Exit codes
@@ -5628,7 +5630,7 @@ code-forge queue --json
 Exit 0. Output:
 
 ```text
-{"holders":[],"waiters":[],"changed_slots":1}
+{"holders":[],"waiters":[],"changed_slots":2}
 ```
 
 #### Exit codes
@@ -5686,7 +5688,7 @@ code-forge queue status --json
 Exit 0. Output:
 
 ```text
-{"holders":[],"waiters":[],"changed_slots":1}
+{"holders":[],"waiters":[],"changed_slots":2}
 ```
 
 #### Exit codes
