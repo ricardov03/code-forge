@@ -182,6 +182,10 @@ func reviewWaitBlockJoin(cwd, root, run, block string, maxWait time.Duration, pr
 		switch scope {
 		case reviewScopeUnreadable:
 			return nil, "", &reviewBlockJoined{refusal: reviewEnqueueRefusal("block-scope-unreadable", "the block scope cannot be read"), code: 1}
+		case reviewScopeNoRun:
+			return nil, "", &reviewBlockJoined{refusal: reviewEnqueueRefusal("unknown-run", reviewUnknownRunText(run)), code: 1}
+		case reviewScopeUnknownBlock:
+			return nil, "", &reviewBlockJoined{refusal: reviewEnqueueRefusal("unknown-block", reviewUnknownBlockText(run, block)), code: 1}
 		case reviewScopeUnsupported:
 			return nil, "", &reviewBlockJoined{handed: true, handover: hWaitBlockConfig}
 		}
@@ -280,7 +284,22 @@ const (
 	reviewScopeOK = iota
 	reviewScopeUnreadable
 	reviewScopeUnsupported
+	reviewScopeNoRun        // B971: no workspace mirror of the run here
+	reviewScopeUnknownBlock // B971: the run's mirror has no such block
 )
+
+// reviewUnknownBlockText is the B971 refusal for a block id the run does
+// not have: it names the id and the commands that fix it.
+func reviewUnknownBlockText(run, block string) string {
+	return "block " + block + " is not a block of run " + run + ": open it first with `code-forge block open " + block + " --run " + run +
+		" --level <L> --base <sha> --acceptance <file> --owned <files…>` (or let `code-forge review` open one), and list the run's blocks with `code-forge run status --run " + run + "`"
+}
+
+// reviewUnknownRunText is the B971 refusal when this repository holds no
+// record of the run.
+func reviewUnknownRunText(run string) string {
+	return "run " + run + " has no record in this repository: start it here with `code-forge run start --cwd . --run " + run + "`, or list the runs with `code-forge status`"
+}
 
 // This is the informational workspace mirror, never the private run record.
 // The main tree wins, followed by cwd's ancestors up to its git top level.
@@ -316,6 +335,9 @@ func reviewBlockConfig(ctx context.Context, root, cwd, run, block string) (map[s
 		blocks, _ := record.Get("blocks").(ledger.Object)
 		entry, _ := blocks.Get(block).(ledger.Object)
 		owned, owns := entry.Get("owned_files").([]any)
+		if record.Get("run_id") == run && blocks.Get(block) == nil {
+			return nil, "", reviewScopeUnknownBlock
+		}
 		if record.Get("run_id") != run || !owns || len(owned) == 0 {
 			return nil, "", reviewScopeUnreadable
 		}
@@ -334,7 +356,7 @@ func reviewBlockConfig(ctx context.Context, root, cwd, run, block string) (map[s
 		}
 		return cfg, file, reviewScopeOK
 	}
-	return nil, "", reviewScopeUnreadable
+	return nil, "", reviewScopeNoRun
 }
 
 func reviewBlockGit(ctx context.Context, cwd string, args ...string) (string, bool) {

@@ -737,10 +737,12 @@ once; land never waits for CI.
 `off`: nothing changes). Then `block land --merge` and a batch land merge a block only when GitHub
 CI is green for the block branch's own tip sha. Before anything is merged or written (a batch: for
 each block, before any rebase), land runs `gh run list --commit <sha> --limit 100 --json
-databaseId,status,conclusion,name` with `gh` from `PATH` and its existing login (no new token; none
-is printed); `land.ci_workflow: ci.yml` adds `--workflow ci.yml`. Each workflow passes when one of
-its completed runs concluded `success`, `skipped` or `neutral`; the land needs every workflow to
-pass and prints `ci: tip <sha8> green (<n> runs)`. A red run, a failing `gh` call or no `gh` on
+databaseId,status,conclusion,name,event` with `gh` from `PATH` and its existing login (no new token; none
+is printed); `land.ci_workflow: ci.yml` adds `--workflow ci.yml`. Each workflow passes, per event
+that ran it (`push`, `pull_request`, …), when one of its completed runs for that event concluded
+`success`, `skipped` or `neutral` (a rerun counts). A red `push` run is not covered by a green
+`pull_request` run of the same sha (B956): the land needs every workflow to pass for every event
+and names the red one as `CI (push)`. It prints `ci: tip <sha8> green (<n> runs)`. A red run, a failing `gh` call or no `gh` on
 `PATH` stops the land at step `ci` with exit 1 (`--json`: `event: refused`, `step: ci`); nothing is
 merged and no state is written. A red refusal names the failed jobs (`gh run view <id> --json jobs`)
 and its next command is `gh run view <id> --log-failed`.

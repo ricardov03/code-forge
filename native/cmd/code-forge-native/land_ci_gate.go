@@ -113,7 +113,7 @@ func landCIPoll(land map[string]any, main, sha string) (runs []ciRun, running []
 	if workflow, _ := land["ci_workflow"].(string); workflow != "" {
 		args = append(args, "--workflow", workflow)
 	}
-	args = append(args, "--limit", "100", "--json", "databaseId,status,conclusion,name")
+	args = append(args, "--limit", "100", "--json", "databaseId,status,conclusion,name,event")
 	out, gherr := landCIGh(main, args...)
 	if gherr != nil {
 		return nil, nil, nil, strings.SplitN(gherr.Error(), "\n", 2)[0]
@@ -122,14 +122,21 @@ func landCIPoll(land map[string]any, main, sha string) (runs []ciRun, running []
 	if json.Unmarshal([]byte(out), &runs) != nil {
 		return nil, nil, nil, "gh run list: unreadable JSON"
 	}
-	// One workflow is green when any of its completed runs (a rerun too)
-	// concluded green; the land needs every workflow green.
+	// One workflow run kind is green when any of its completed runs (a rerun
+	// too) concluded green; the land needs every workflow green for every
+	// event that ran it (B956: a red push run is not covered by a green
+	// pull_request run of the same sha, B948).
 	order, byName := []string{}, map[string][]ciRun{}
 	for _, r := range runs {
-		if _, ok := byName[r.Name]; !ok {
-			order = append(order, r.Name)
+		key := r.Name
+		if r.Event != "" {
+			key += " (" + r.Event + ")"
 		}
-		byName[r.Name] = append(byName[r.Name], r)
+		if _, ok := byName[key]; !ok {
+			order = append(order, key)
+		}
+		r.Name = key
+		byName[key] = append(byName[key], r)
 	}
 	running, red = []string{}, []ciRun{}
 	for _, name := range order {

@@ -89,8 +89,9 @@ code-forge review
 It reviews the branch against the merge base with the default branch, or uncommitted work on
 the default branch, using fresh closed-book sessions. It runs no planner, coder, or proof.
 Narrow with `--files <paths…>`, choose `--base <ref>`, explain with `--intent "<text>"`, or use
-`--json`. Exit 0 means all approved or nothing to review; 1 means a finding, stop, or unavailable
-review; 2 means usage. See [review-only details](docs/review-only.md).
+`--json`. Exit 0 means every file approved by this review, or nothing to review; 1 means a
+finding, stop, unavailable review, or a file not reviewed (no change against the base); 2 means
+usage. In a git worktree it reviews that worktree's files. See [review-only details](docs/review-only.md).
 
 ## How it works
 
