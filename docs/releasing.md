@@ -60,13 +60,14 @@ upgrading; a manually configured driver is kept.
 ## Check generated docs and test pins
 
 Run `sh scripts/cf-release.sh regen-docs --check` before release (B959).
-It checks the commands reference, config reference, then the recorded command
-summaries, B801 doc examples and init goldens. It lists every stale step and
+It checks the recorded command summaries, B801 doc examples and init goldens,
+then the commands reference and config reference. It lists every stale step and
 exits 1 if any step fails. Check mode removes the recording switches from the
 test child, so a recording switch in your shell cannot rewrite a pin.
 
 To update them, run `sh scripts/cf-release.sh regen-docs` once on the combined
-tip. It writes them in that order and stops at the first failure. Review and
+tip. It records pins first, then builds the references from the refreshed examples
+(B1022), so one write pass reaches a fixed point. It stops at the first failure. Review and
 commit the generated diff. The init goldens use
 `CODE_FORGE_INIT_GOLDEN_RECORD=1` to record only changed output (B989).
 

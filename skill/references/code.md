@@ -402,3 +402,6 @@ If the combine already contains a block commit before its lane run closes, run `
 Before combining lane entries, keep one `[Unreleased]` bullet per block ID across all kinds. The merge driver and release checks flag duplicate leading IDs or trailing block tags and name both lines (B1018); reconcile the wording into one entry. Identical bullets folded by the driver remain one. A real driver refusal is preserved instead of falling back to plain union.
 
 The CHANGELOG union driver keeps additions from lanes based before a release in `[Unreleased]`; it matches complete entries, including continuation lines, when identifying shipped entries (B1021).
+
+`regen-docs` records command summaries, examples and init goldens before generating
+the command and config references; one write pass is sufficient before `--check` (B1022).

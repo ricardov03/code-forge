@@ -53,9 +53,9 @@ func rdSteps(check bool) []rdStep {
 		goTest.env = rdRecordEnv
 	}
 	return []rdStep{
+		goTest,
 		{name: "docs/reference/commands.md and commands.json", argv: flag("sh", "scripts/gen-commands-doc.sh")},
 		{name: "docs/reference/config.md"},
-		goTest,
 	}
 }
 
