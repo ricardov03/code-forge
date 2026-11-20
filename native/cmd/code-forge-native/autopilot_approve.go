@@ -24,6 +24,7 @@ const autopilotApproveNoTTY = "autopilot approve: no terminal to confirm; only t
 // autopilotImmutableKeys is IMMUTABLE_KEYS (src/state/config-snapshot.mjs),
 // in its order.
 var autopilotImmutableKeys = ledger.Object{
+	{Key: "rebase.approved_binary_sources", Value: "approved binary sources are fixed by the owner before the run starts"},
 	{Key: "version", Value: "the config format is fixed for the run"},
 	{Key: "project.slug", Value: "the ledger file of the run is chosen at run start"},
 	{Key: "engine", Value: "the run engine is fixed at run start"},

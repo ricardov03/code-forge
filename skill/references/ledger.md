@@ -70,3 +70,9 @@ Evidence passes first write `autopilot.decision` with `scope: human-pass:evidenc
 (awaiting) or `block.human_checks_cleared` (deferred) closes it as autopilot.
 Never interpret these as a human pass. Separate audit/report display and
 `humanWaitMs: null`, `autoPassed: true` reporting belong to B1013.
+
+`rebase.accepted {block, file, content_hash, source, source_hash, by: autopilot, grant_id}` (B1014)
+is signed only after an identical binary matches an approved source under the frozen opt-in
+source policy and signed active `rebase:accept-identical` grant. Both hashes use SHA-256 of raw
+bytes (`gitx.ContentHash`); the following `block.rebase` row marks the clearance `via: autopilot`.
+It records binary clearance, not a human pass or a human wait.

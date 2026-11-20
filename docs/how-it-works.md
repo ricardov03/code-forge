@@ -589,7 +589,13 @@ replay turns git's union driver off and keeps union only for other files marked 
 same rules apply to `review-file --rebase-check`, `block rebase --accept-landed` (a commit outside
 the run's closed blocks is named `upstream_owned` instead of refused) and the rebase of each block in
 a batch `block land`. Run the gates again after rebasing: earlier green rows no
-longer satisfy close. A block without a recorded base branch cannot rebase. A tree that is gone (removed,
+longer satisfy close. With an opted-in run snapshot (`rebase.approved_binary_sources` non-empty) and an active signed
+`rebase:accept-identical` grant, `block rebase <id> --run <r> --accept-identical <file> --source <path-or-ref:path>`
+can clear one changed owned binary without a terminal: its bytes must equal a configured approved
+source file or a regular blob on the recorded base branch. A mismatch refuses without recording
+clearance; text stays on re-review. A signed `rebase.accepted` row names autopilot, the grant,
+source and both SHA-256 hashes. The setting cannot change by reload or temporary approval.
+A block without a recorded base branch cannot rebase. A tree that is gone (removed,
 or its directory deleted by hand) is added back at the same path on the same branch; a tree left on
 another branch or a detached HEAD refuses the re-open.
 

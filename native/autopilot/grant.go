@@ -482,6 +482,10 @@ const DeferHumanScope = "human-pass:deferred"
 // EvidenceHumanScope permits verified non-design checks under an owner opt-in.
 const EvidenceHumanScope = "human-pass:evidence"
 
+// AcceptIdenticalScope permits clearance of changed binaries against an approved
+// identical source, with the source policy fixed in the run snapshot (B1014).
+const AcceptIdenticalScope = "rebase:accept-identical"
+
 // ScopeRefusal is RoutineRefusal for any scope: "" when result's grant is
 // active and allows scope; else no-grant, the grant's state, denied or
 // not-allowed.

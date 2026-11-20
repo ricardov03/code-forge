@@ -96,6 +96,15 @@ Each `review-file` ticket is served by the worker `forge run start` launched: to
 
 ## §5 The block gate is a re-measurement — `forge block close <id> --run <r>`
 
+For a changed owned binary after rebase, an opted-in snapshot (`rebase.approved_binary_sources`
+non-empty) and signed active `rebase:accept-identical` grant allow
+`forge block rebase <id> --run <r> --accept-identical <file> --source <path-or-ref:path>`.
+The bytes must match a configured source file or regular blob on the recorded base branch.
+Text and other changed files still need review; a mismatch records no clearance.
+The signed `rebase.accepted` row says `by: autopilot`, with the grant id and both SHA-256 hashes.
+The owner configures sources before run start; reload and temporary approval cannot change them.
+
+
 Paths added by `block claim` survive retries: `block open <id> --attempt N` (N > 1)
 restores earlier signed claims alongside `--owned`, and `block attempt` keeps them too.
 Both print `kept claims: <n>`. Do not claim the same paths again after a retry.

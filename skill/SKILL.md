@@ -52,7 +52,11 @@ For an open worktree block whose owned files changed upstream through closed blo
 run, use `forge block rebase <id> --run <r> --accept-landed`. The native binary must be installed;
 it verifies every touching commit against the closed blocks' branches, queues changed owned files
 for review again, and signs `accepted_landed` origins. No terminal is needed, including under an
-active autopilot grant. `--accept-changed <file> --reason <text>` stays human-only at a terminal
+active autopilot grant. `--accept-identical <file> --source <path-or-ref:path>` needs no terminal under an active signed
+`rebase:accept-identical` grant when the run snapshot has non-empty `rebase.approved_binary_sources`:
+the changed owned binary must equal a configured source or a blob on the recorded base branch.
+Text files still need re-review; the signed `rebase.accepted` row records autopilot and both hashes.
+The source list is fixed before run start. `--accept-changed <file> --reason <text>` stays human-only at a terminal
 and is refused during an active grant; foreign changes remain `owned-conflict`.
 
 Fail fast with `forge block ready <id> --run <r> --preflight`. Land one block with `--merge` or

@@ -112,10 +112,19 @@ func rebaseTicket(idx *queue.Index, p ticket.Parts, after string) string {
 	return ticket.ReviewID(p)
 }
 
-func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (oldBase, newBase string, err error) {
+func rebaseWorktreeBlock(home, run, id string, accept []string, reason string, identical ...*rebaseIdenticalRequest) (oldBase, newBase string, err error) {
 	initial, err := state.ReadRun(home, run)
 	if err != nil {
 		return "", "", err
+	}
+	var request *rebaseIdenticalRequest
+	if len(identical) > 0 {
+		request = identical[0]
+	}
+	if request != nil {
+		if _, err := request.authorize(home, run, initial); err != nil {
+			return "", "", err
+		}
 	}
 	top, err := gitx.RepoTop(blockString(initial.Get("workspace")))
 	if err != nil {
@@ -132,6 +141,11 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 		}
 		if blockString(record.Get("status")) != "active" {
 			return &state.Error{Code: "run-ended", Message: "run " + run + " has ended"}
+		}
+		if request != nil {
+			if _, err := request.authorize(home, run, record); err != nil {
+				return err
+			}
 		}
 		blocks := blockObject(record.Get("blocks"))
 		b := blockObject(blocks.Get(id))
@@ -224,7 +238,7 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 			return owned.OwnsFile(paths, kinds, file) || prefix != "" && strings.HasPrefix(file, prefix+"/") && owned.OwnsFile(paths, kinds, strings.TrimPrefix(file, prefix+"/"))
 		}
 		files := []string{}
-		if closed {
+		if closed || pending != nil {
 			diff, err := rebaseNodeGit(tree, nil, "diff", "--no-renames", "--name-only", "-z", base, reviewedHead, "--")
 			if err != nil {
 				return err
@@ -252,7 +266,7 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 			}
 		}
 		var before map[string]string
-		if closed {
+		if closed || pending != nil {
 			if before, err = rebaseBlobs(tree, reviewedHead, files); err != nil {
 				return err
 			}
@@ -287,7 +301,7 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 			}
 		}
 		changed := []string{}
-		if closed {
+		if closed || pending != nil {
 			after, err := rebaseBlobs(tree, "HEAD", files)
 			if err != nil {
 				return err
@@ -332,7 +346,22 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 		}
 		cleared := []any{}
 		clearedFiles := map[string]bool{}
+		var accepted ledger.Object
+		if request != nil {
+			if !slices.Contains(changed, request.file) {
+				return rebaseIdenticalError("file", "file is not owned and changed by this rebase")
+			}
+			accepted, err = request.check(home, run, id, record, b, realTree, resolved)
+			if err != nil {
+				return err
+			}
+		}
 		for _, file := range changed {
+			if request != nil && file == request.file {
+				cleared = append(cleared, ledger.Object{{Key: "file", Value: file}, {Key: "via", Value: "autopilot"}, {Key: "source", Value: request.source}, {Key: "content_hash", Value: accepted.Get("content_hash")}})
+				clearedFiles[file] = true
+				continue
+			}
 			if slices.Contains(accept, file) {
 				cleared = append(cleared, ledger.Object{{Key: "file", Value: file}, {Key: "via", Value: "human"}, {Key: "reason", Value: reason}})
 				clearedFiles[file] = true
@@ -395,6 +424,11 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 			row.Set("closed", true)
 		} else {
 			row.Set("worktree", true)
+		}
+		if accepted != nil {
+			if _, err := state.WriteSigned(home, run, accepted); err != nil {
+				return err
+			}
 		}
 		if _, err := state.WriteSigned(home, run, row); err != nil {
 			return err

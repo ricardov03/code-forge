@@ -426,6 +426,11 @@ func planReload(current ledger.Object, in reloadInput, pending []string) (reload
 	if string(oldAutoHash) != string(newAutoHash) {
 		return refuse("human_check.autopilot cannot change mid-run (fixed by the owner before the run starts)")
 	}
+	oldSources, oldHas := rrChainGet(before, "rebase", "approved_binary_sources")
+	newSources, newHas := rrChainGet(in.cfg, "rebase", "approved_binary_sources")
+	if rrCanonText(oldSources, oldHas) != rrCanonText(newSources, newHas) {
+		return refuse("rebase.approved_binary_sources cannot change mid-run (fixed by the owner before the run starts)")
+	}
 	var frozen []string
 	if stateObj != nil {
 		frozen = immutableChangesGo(before, in.cfg)

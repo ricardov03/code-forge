@@ -79,3 +79,14 @@ selectors device checks pass and design checks remain. `design:approve` stays
 fixed-denied. See [the full guide](../../docs/autopilot.md#auto-pass-on-green-evidence).
 
 Audit signed evidence passes with `code-forge run human-checks audit --run <r> [--json]`: `ok`, `changed`, or `missing` covers the proof plus recorded evidence hashes. Status/list expose `auto_passed`; the binnacle and full log add **Passed by autopilot — please audit** with proof paths, hashes, and owner revoke commands. Stop the grant before the owner uses `run human-checks reopen --run <r> --block <id> [--clause C<n>] --note "<reason>"`. This needs an active run and terminal confirmation, has no `--yes`, and holds run end until the reopened check is resolved.
+
+## Identical binary clearance (B1014)
+
+The owner may opt in before run start with `rebase.approved_binary_sources: [design/approved/**]`
+and grant `rebase:accept-identical`. An empty or absent list disables it; reload and temporary
+approval cannot change it. `forge block rebase <id> --run <r> --accept-identical <file> --source <path-or-ref:path>`
+compares a changed owned binary against a regular configured source or recorded base-branch blob.
+Paths are repository-relative and source patterns support `*`, `?`, `**`. Text needs re-review.
+A mismatch refuses; success needs no terminal and signs `rebase.accepted` with `by: autopilot`,
+`grant_id`, `source`, `content_hash` and `source_hash`. Both hashes are SHA-256 of the checked bytes.
+Other changed files must already have their current review approvals. Design approvals stay owner-only.

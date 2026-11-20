@@ -493,7 +493,7 @@ var autopilotFixedDeny = ledger.Object{
 	{Key: "budget:raise", Value: "raise a budget"},
 }
 
-var autopilotAllowable = []string{"waive:warning", "waive:nit", "round:extra", "model:choose", "close:routine", "review:substitute", "human-pass:deferred", autopilot.EvidenceHumanScope}
+var autopilotAllowable = []string{"waive:warning", "waive:nit", "round:extra", "model:choose", "close:routine", "review:substitute", "human-pass:deferred", autopilot.EvidenceHumanScope, autopilot.AcceptIdenticalScope}
 
 func autopilotFixedDenyScopes() []any {
 	out := []any{}
@@ -1045,6 +1045,11 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 	if slices.Contains(in.scopes, any(autopilot.EvidenceHumanScope)) && !autoPassEnabled(record) {
 		return autopilotReport(o, "start", &runFail{autoPassOff, false})
 	}
+	if slices.Contains(in.scopes, any(autopilot.AcceptIdenticalScope)) {
+		if _, err := rebaseIdenticalSources(record); err != nil {
+			return autopilotReport(o, "start", err)
+		}
+	}
 	before, err := autopilotCheckExpiry(home, runID, now)
 	if err != nil {
 		return autopilotReport(o, "start", err)
@@ -1105,6 +1110,11 @@ func autopilotStart(o *runOut, home, runID string, flags autopilotFlags, now tim
 		}
 		if slices.Contains(in.scopes, any(autopilot.EvidenceHumanScope)) && !autoPassEnabled(*record) {
 			return &runFail{autoPassOff, false}
+		}
+		if slices.Contains(in.scopes, any(autopilot.AcceptIdenticalScope)) {
+			if _, err := rebaseIdenticalSources(*record); err != nil {
+				return err
+			}
 		}
 		// the row first: a grant stored without its signed row would act unrecorded
 		row := ledger.Object{
