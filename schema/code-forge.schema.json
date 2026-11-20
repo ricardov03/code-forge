@@ -63,6 +63,23 @@
         "max_lines": { "type": "integer", "minimum": 1, "default": 300, "description": "Maximum added plus removed lines in a light block at close." }
       }
     },
+    "human_check": {
+      "type": "object", "additionalProperties": false,
+      "description": "Owner-authorized evidence passes. Absent means disabled; frozen in the run snapshot.",
+      "properties": {"autopilot": {
+        "type": "object", "additionalProperties": false,
+        "description": "Cannot change by run reload; start a new run after owner configuration.",
+        "properties": {
+          "enabled": {"type": "boolean", "default": false, "description": "Opt in to human-pass:evidence; design approvals remain owner-only."},
+          "require_proof": {"type": "boolean", "const": true, "default": true, "description": "v1 always requires machine-readable proof and evidence hashes."},
+          "proof_dirs": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": [], "description": "Allowed proof roots, resolved with symlinks; proof must remain outside the worktree and exports."},
+          "exclude_waits_for": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": [], "description": "Exact waits_for values reserved for the owner."},
+          "require_separate_prover": {"type": "boolean", "default": true, "description": "Proof prover session must differ from every recorded coder session."}
+        },
+        "if": {"required": ["enabled"], "properties": {"enabled": {"const": true}}},
+        "then": {"required": ["proof_dirs"], "properties": {"proof_dirs": {"minItems": 1}}}
+      }}
+    },
     "close": {
       "type": "object",
       "additionalProperties": false,

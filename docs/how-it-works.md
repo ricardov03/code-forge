@@ -1836,3 +1836,12 @@ the plan file. See `skill/references/continuity.md`.
   a second OS user or in a container.
 
 Details: `skill/references/security.md`.
+
+<!-- B1011 -->
+Evidence passes require the owner's opt-in `human_check.autopilot` section before
+`run start`; the entire section is frozen and `run reload` refuses changes.
+Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
+`exclude_waits_for: []`, `require_separate_prover: true`. Enabling requires a
+non-empty list of proof roots; v1 refuses `require_proof: false`.
+Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
+Design approvals remain owner-only. See [the opt-in example](../examples/autopass.yml).

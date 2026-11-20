@@ -1014,6 +1014,7 @@ func initNewKeys(ex ledger.Object) ledger.Object {
 		{"land", []key{{[]string{"require_main_ci"}, false}}},
 		{"autopilot", []key{{[]string{"step_budgets", "margin"}, stepbudget.DefaultMargin}, {[]string{"step_budgets", "min_samples"}, float64(stepbudget.DefaultMinSamples)}}},
 		{"release", []key{{[]string{"max_blocks"}, float64(releasecheck.DefaultMaxBlocks)}}},
+		{"human_check", []key{{[]string{"autopilot", "enabled"}, false}, {[]string{"autopilot", "require_proof"}, true}, {[]string{"autopilot", "proof_dirs"}, []any{}}, {[]string{"autopilot", "exclude_waits_for"}, []any{}}, {[]string{"autopilot", "require_separate_prover"}, true}}},
 	}
 	out := ledger.Object{}
 	for _, sec := range sections {

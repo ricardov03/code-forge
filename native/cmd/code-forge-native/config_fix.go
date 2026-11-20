@@ -21,6 +21,8 @@ import (
 // lines and key order stay. A file with YAML anchors, aliases or tags is
 // never edited, and an edit that would not read back as the same config
 // minus the old shape, or that would add a schema issue, writes nothing.
+// B1011: human_check.autopilot is a current opt-in section: preserve it;
+// schema issues (including require_proof:false) are reported for owner repair.
 // Unknown keys are reported, never deleted. `upgrade` runs the fixer on the
 // cwd's .code-forge.yml after a successful upgrade and never fails on it.
 //

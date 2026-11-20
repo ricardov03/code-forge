@@ -337,3 +337,12 @@ Both `autonomy` keys default to false. Whatever they say, a block's branch is ha
 6. Forecast vs actual (cases and lines) recorded; misses attributed (architect-added scope vs coder under-forecast) — a finished green block is accepted and recorded either way.
 7. One commit for the block; the draft PR (when the project uses PRs) carries the evidence.
 8. Every artifact that proves something is committed, not left in a scratch dir; no claim shipped that the evidence does not carry.
+
+<!-- B1011 -->
+Evidence passes require the owner's opt-in `human_check.autopilot` section before
+`run start`; the entire section is frozen and `run reload` refuses changes.
+Defaults: `enabled: false`, `require_proof: true`, `proof_dirs: []`,
+`exclude_waits_for: []`, `require_separate_prover: true`. Enabling requires a
+non-empty list of proof roots; v1 refuses `require_proof: false`.
+Human-check clauses may set `approval: design|device` (only on `kind: human_check`).
+Design approvals remain owner-only. See [the opt-in example](../../examples/autopass.yml).
