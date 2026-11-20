@@ -90,8 +90,14 @@ the first session. `review.adaptive.enabled: false` gives legacy routing exactly
 default file-size route; packets are capped at 32k tokens.
 
 A matching explicit L2 route joins the candidates with configured priority at cold start;
-`pin: true` forces it. L3 rules retain their explicit judge selection. Retries reuse the signed
-choice. `run reload` accepts route and adaptive changes.
+`pin: true` forces it when the provider can serve the role. Before ranking, exploration
+or retry reuse, adaptive L2 selection skips closed-book-incompatible candidates (B1027).
+Codex is eligible only with `review.allow_open_book_codex: true`. The next compatible
+configured alternative runs immediately without a failed session or backoff, even when
+an incompatible candidate was pinned. No compatible candidate leaves the ticket unavailable
+(`route-invalid`). A retry replaces an incompatible signed choice with a new signed
+`review.route` row and then reuses the latest compatible choice. L3 rules retain their
+explicit judge selection. `run reload` accepts route and adaptive changes.
 
 The following routing details describe legacy mode with adaptive selection disabled. With
 adaptive selection on, L2 routes contribute candidates and each primary choice gets a signed

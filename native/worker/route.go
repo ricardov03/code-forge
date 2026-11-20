@@ -449,7 +449,13 @@ func adaptiveRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 		}
 	}
 	candidates := []candidate{}
+	openBook := review["allow_open_book_codex"] == true
 	for _, c := range entries {
+		// B1027: eligibility precedes scoring, exploration and prior-route
+		// reuse. A coder's model cannot become an unsupported reviewer.
+		if closedBookRefused(c.provider, "reviewer", openBook) {
+			continue
+		}
 		if c.noProvider && secondUndefined {
 			continue
 		}
@@ -467,6 +473,14 @@ func adaptiveRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 		}
 	}
 	pinned := rule != nil && rule["pin"] == true
+	if pinned {
+		provider, err := providerOf(cfg, rule)
+		if err != nil {
+			return routed{}, err
+		}
+		// Pinning preserves preference, never a session capability refusal.
+		pinned = !closedBookRefused(provider, "reviewer", openBook)
+	}
 	if len(candidates) == 0 || (pinned && candidates[0].model != rule["model"]) {
 		return routed{}, errRouteInvalid
 	}
@@ -490,8 +504,7 @@ func adaptiveRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 	for _, r := range rows {
 		m, _ := obj(r)
 		if m != nil && m["event"] == "review.route" && m["level"] == "L2" && m["ticket"] == ticketID && m["run"] == runID {
-			previous = m
-			break
+			previous = m // the latest recorded choice wins on retry
 		}
 	}
 	prior := -1

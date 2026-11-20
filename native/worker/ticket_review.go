@@ -323,8 +323,8 @@ func truthy(v any) bool {
 	return true
 }
 
-// writeRouteRows writes the signed rows of the levels this ticket has no row
-// for yet; false where Node answers `route-row` (a row that cannot be
+// writeRouteRows writes signed rows for each new or replaced route choice.
+// An unchanged compatible choice remains idempotent; false where Node answers `route-row` (a row that cannot be
 // written). A ledger Go cannot read the way Node does is ErrUnsupported, and
 // nothing is written.
 func (w *TicketRunner) writeRouteRows(id string, t ledger.Object, rows []ledger.Object) (bool, error) {
@@ -337,18 +337,21 @@ func (w *TicketRunner) writeRouteRows(id string, t ledger.Object, rows []ledger.
 		}
 		return false, err
 	}
-	have := map[string]bool{}
+	have := map[string]map[string]any{}
 	for _, r := range existing {
 		if m, ok := obj(r); ok && m["event"] == "review.route" && m["run"] == w.RunID && m["ticket"] == id {
 			if level, ok := m["level"].(string); ok {
-				have[level] = true
+				have[level] = m
 			}
 		}
 	}
 	for _, row := range rows {
-		if level, _ := row.Get("level").(string); have[level] {
+		level, _ := row.Get("level").(string)
+		if prior := have[level]; prior != nil && prior["provider"] == row.Get("provider") && prior["model"] == row.Get("model") {
 			continue
 		}
+		// B1027: a prior incompatible choice may have been filtered out.
+		// Record its replacement so the ledger names the reviewer we use.
 		out := ledger.Object{{Key: "run", Value: w.RunID}}
 		out = append(out, row...)
 		out = append(out, ledger.Field{Key: "ticket", Value: id})

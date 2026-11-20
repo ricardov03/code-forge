@@ -1362,7 +1362,14 @@ availability and waived share. The worker signs the chosen model and reason in `
 review packets are capped at 32k tokens.
 
 A matching explicit L2 route joins the candidates with configured priority at cold start;
-`pin: true` forces it. The following routing details describe legacy mode with adaptive selection
+`pin: true` forces it when that provider can serve the reviewer role. Adaptive selection
+filters closed-book-incompatible providers before ranking, exploration and retry reuse
+(B1027): Codex candidates are skipped unless `review.allow_open_book_codex` is true.
+A compatible configured route or fallback runs immediately, with no failed Codex session
+or backoff. A previously recorded incompatible choice is replaced by a fresh signed
+`review.route` row; later retries reuse the latest compatible choice. If no compatible
+candidate remains, the ticket is unavailable (`route-invalid`), never approved.
+The following routing details describe legacy mode with adaptive selection
 disabled. With adaptive selection on, L2 routes contribute candidates and each primary choice
 gets a signed row with its reason.
 

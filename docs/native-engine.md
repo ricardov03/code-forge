@@ -876,3 +876,13 @@ last commit. Missing, incomplete or stale answers fail the check. Capped reviews
 still require an ordinary approval; cap supersession is left to the native gate.
 The checker reads local ledger evidence; `block close` verifies its signatures.
 This maintainer script is local tooling outside the tracked release artifacts.
+
+## Adaptive reviewer eligibility
+
+Adaptive L2 routing filters candidates through the closed-book capability rule before
+ranking, exploration, pinning or retry reuse (B1027). A configured Codex coder no longer
+becomes an unsupported reviewer: the compatible configured route or fallback runs at
+once. `review.allow_open_book_codex: true` retains its explicit opt-in behavior. An
+incompatible pinned route also gives way to a compatible alternative; no eligible
+candidate returns `unavailable: route-invalid`. Replacement choices get a fresh signed
+`review.route` row; retries reuse the latest compatible choice without duplicate rows.
