@@ -207,7 +207,8 @@ makes a new sha pushes it to a new CI branch and waits for green CI on it first.
 block lock held: each tip's CI is read before the locks are taken, and a block whose rebase made a
 new sha ends the round (the blocks before it land), then waits for CI and lands in the next round.
 A tip that moves while the land waits is refused at `ci`. B804: a batch lands only a commit green CI
-proved; the landed marker records it as `ci_sha`.
+proved; the landed marker records it as `ci_sha`. B805: a block's CI PRs are found past the 200
+newest pull requests (a `head:` search when that page is full and holds none of them).
 
 **Heal queue (B429).** `gates run --run --block`, `block rebase` and `block land` still fail on a
 held lock or a transient git error, but also queue the problem and print `heal: queued <id>` as the
