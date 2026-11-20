@@ -831,6 +831,14 @@ NO BLOCK`; one `NO BLOCK`, or a failed log with no test name (a setup or build s
 The landing block is always dropped from `CODE_FORGE_CI_RED_BLOCKS`: a block never covers its own
 red.
 
+`land.regenerate` (B959b) is a list of shell commands a batch land (`block land B1 B2 ...`) runs
+once, in order, with `sh -c` in the main checkout after the merge and before the push, for the
+generated docs and recorded pins the landed blocks changed (`sh scripts/cf-release.sh regen-docs`).
+What they change is one commit on main (`regenerate after landing B1 B2`, `regenerate: committed N
+files as <sha>`); nothing changed is no commit (`regenerate: nothing changed`). The main checkout
+must be clean. A failing command stops the land at step `regenerate` before the push; main keeps
+the landed merge. Default `[]`.
+
 `land.require_main_ci: true` (with `land.require_ci: github`, B962) also judges the base branch: before
 the tip check, land reads the newest completed push run of the base (`gh run list --branch <base>
 --event push --status completed --limit 1`, `land.ci_workflow` applies) and refuses at step ci while

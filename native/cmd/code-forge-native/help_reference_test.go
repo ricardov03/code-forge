@@ -279,6 +279,13 @@ var (
 	// B947: a bare calendar date, such as the autopilot report byline
 	// {"date":"YYYY-MM-DD"}, changes every day.
 	helpRefDateRe = regexp.MustCompile(`"date":( ?)"\d{4}-\d{2}-\d{2}"`)
+	// B1004: the changed-run slots come from this machine's cores, free
+	// memory and load (testslot.Slots), and a context pack's token count
+	// holds the length of the temp path the pack names: both differ per
+	// machine, so a record on another machine would change the pins.
+	helpRefSlotsRe     = regexp.MustCompile(`"changed_slots":( ?)\d+`)
+	helpRefSlotsTextRe = regexp.MustCompile(`changed slots \d+`)
+	helpRefTokensRe    = regexp.MustCompile(`"tokens":( ?)\d+`)
 )
 
 // normalize makes an output the same on every machine and every run.
@@ -300,6 +307,9 @@ func (s *helpRefSandbox) normalize(out string) string {
 	out = helpRefLeftRe.ReplaceAllString(out, `"time_left_s":${1}3599`)
 	out = helpRefLstartRe.ReplaceAllString(out, `"started_at":${1}"Thu Jan  1 00:00:00 2026"`)
 	out = helpRefDateRe.ReplaceAllString(out, `"date":${1}"2026-01-01"`)
+	out = helpRefSlotsRe.ReplaceAllString(out, `"changed_slots":${1}1`)
+	out = helpRefSlotsTextRe.ReplaceAllString(out, "changed slots 1")
+	out = helpRefTokensRe.ReplaceAllString(out, `"tokens":${1}0`)
 	out = strings.ReplaceAll(out, runtime.GOOS+"-"+runtime.GOARCH, "<platform>")
 	if s.version != "" {
 		out = strings.ReplaceAll(out, s.version, "<version>")
@@ -424,6 +434,14 @@ func TestB801DocExamplesRun(t *testing.T) {
 			// No worker picks up queued reviews, so the outputs that
 			// follow do not depend on its timing.
 			s.stopWorkers(t)
+		case "block":
+			// B1004: review-file started a worker whose review of src/a.txt
+			// stays unavailable (the provider stubs fail). Left running, it
+			// asks the owner for review:substitute once autopilot start
+			// grants a run, at a moment that depends on the machine, so the
+			// autopilot examples (log, binnacle, digest) would change from
+			// one record to the next.
+			s.stopWorkers(t)
 		case "open":
 			helpRefWrite(t, filepath.Join(s.repo, "src", "a.txt"), "b\n", 0o644)
 		}
@@ -443,5 +461,23 @@ func TestB801DocExamplesRun(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("recorded %d examples", ran)
+	}
+}
+
+// B1004: the machine values of a recorded example (changed-run slots from the
+// load probe, a context pack's token count from the temp path length) are the
+// same in every record.
+func TestB1004NormalizeMachineValues(t *testing.T) {
+	s := &helpRefSandbox{tmp: "/x/tmp", pkg: "/x/pkg", home: "/x/home", repo: "/x/repo", outside: "/x/outside"}
+	for in, want := range map[string]string{
+		`{"holders":[],"waiters":[],"changed_slots":2}`:               `{"holders":[],"waiters":[],"changed_slots":1}`,
+		`{"holders":[],"waiters":[],"changed_slots": 12}`:             `{"holders":[],"waiters":[],"changed_slots": 1}`,
+		"test queue: empty · changed slots 3":                         "test queue: empty · changed slots 1",
+		`{"path":"/x/tmp/c/B1.md","tokens":1612,"lines":68,"cut":0}`:  `{"path":"<tmp>/c/B1.md","tokens":0,"lines":68,"cut":0}`,
+		`{"path":"/x/tmp/c/B1.md","tokens": 1499,"lines":65,"cut":0}`: `{"path":"<tmp>/c/B1.md","tokens": 0,"lines":65,"cut":0}`,
+	} {
+		if got := s.normalize(in); got != want {
+			t.Errorf("normalize(%s) = %s, want %s", in, got, want)
+		}
 	}
 }

@@ -164,6 +164,10 @@ func runBlockLand(args []string) int {
 		}
 		return fail(err.Error(), 1)
 	}
+	// B990b: a later plain git merge in this clone (a wave combine) folds
+	// CHANGELOG headings like this land does.
+	ws, _ := record.Get("workspace").(string)
+	ensureUnionDriver(ws)
 	if message := landPushCheck(flags, record, len(pos) > 1); message != "" {
 		return fail(message, 2)
 	}

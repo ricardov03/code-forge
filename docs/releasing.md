@@ -29,13 +29,17 @@ release. The file is not in the npm package.
 Union can still leave two `### Added` headings in `[Unreleased]` when each side added its own group
 in a different place. code-forge's own merges and replays (`block land`, batch rebase,
 `block rebase`) fold them into one (B813). For merges you make with plain git, such as combining
-lane branches with `git merge --no-ff`, set code-forge as the union driver once per clone (B990):
+lane branches with `git merge --no-ff`, code-forge is the union driver (B990). `run start` and
+`block land` set it in the clone's shared `.git/config` (every linked worktree uses it) when
+`CHANGELOG.md` has `merge=union` (B990b), so there is no manual step:
 
 ```sh
-git config merge.union.driver 'code-forge land merge-driver %O %A %B %P'
+git config merge.union.driver   # '/path/to/code-forge' land merge-driver %O %A %B %P 2>/dev/null || git merge-file --union %A %O %B
 ```
 
-It merges like git's union driver and then folds a `CHANGELOG.md`'s repeated `###` headings into the
+The line names the binary that set it and falls back to git's own union merge when that binary is
+gone or older than `land merge-driver`, so it never breaks a merge. A driver of your own is kept;
+the older manual line is replaced. It merges like git's union driver and then folds a `CHANGELOG.md`'s repeated `###` headings into the
 first one of each kind, every line kept; other `merge=union` files get the plain union result.
 
 Every `[Unreleased]` entry must sit under a `### <Type>` heading, and each type has one heading:
@@ -181,12 +185,18 @@ repository's history and files.
 
 Describe every user-visible `[Unreleased]` change in the page that explains the feature.
 Remove stale instructions. Keep version history in CHANGELOG, not README.
-Run both generated-doc checks:
+Run the generated-doc check:
 
 ```sh
-sh scripts/cf-release.sh config-doc --check
-sh scripts/gen-commands-doc.sh --check
+sh scripts/cf-release.sh regen-docs --check
 ```
+
+It checks the commands reference, the config reference, the command summaries, the doc example
+pins and the init goldens, and lists each stale one. `sh scripts/cf-release.sh regen-docs`
+regenerates all of them once; commit the result as one commit. A batch land can do this by itself
+on the combined tip: set `land.regenerate: [sh scripts/cf-release.sh regen-docs]` and `block land
+B1 B2 ...` runs it after the merge and before the push, committing what changed as one commit on
+main (B959b).
 
 List the site pages from the brief in the final report so a person can check them.
 If the site folder is absent, report that instead. Commit the docs so the tree is clean, then run:

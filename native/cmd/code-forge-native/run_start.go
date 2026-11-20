@@ -669,6 +669,7 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 		if err != nil {
 			return runReport(o, "start", err)
 		}
+		ensureUnionDriver(ws) // B990b
 		pinned := worker
 		if worker == nil {
 			pid, repoRoot, err := runLaunchWorker(runID, workspace, binary)
