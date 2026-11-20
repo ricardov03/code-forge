@@ -659,7 +659,8 @@ give the tree the merge gate checked: `CHANGELOG.md` keeps main's lines, then th
 one `### Kind` heading per kind and no repeated entry; a file in `land.auto_resolve.tables`
 (default `docs/native-engine.md`) merges row by row, and a row both sides only added sentences to
 keeps both sets, main's first (B890); a `land.auto_resolve.generated` file keeps
-main's copy and its argv runs again. A merge git finishes without a conflict that
+main's copy and its argv runs again (code-forge's own `.code-forge.yml` lists
+`docs/reference/commands.md`, `commands.json` and `config.md` with their generators, B815). A merge git finishes without a conflict that
 would repeat a `### Kind` heading in `CHANGELOG.md`'s `[Unreleased]` is folded into one heading per
 kind, every line kept, before the merge commit (B813). Land prints `merge: resolved append-only conflicts: <files>`
 and writes a signed `land.resolved` row. Any other conflict aborts the merge, so main is unchanged,
