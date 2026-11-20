@@ -72,7 +72,7 @@ var helpCommands = []helpEntry{
 	{name: "block ready", summary: "List what still blocks the close of a block"},
 	{name: "block settle", summary: "Run the orchestrator fixes that clear a block, then report"},
 	{name: "block close", summary: "Run the final checks and close the block",
-		options: []helpOption{helpRunOption, {"--transcript <file>", "The coder transcript to check"}, {"--report <file>", "The coder report"}, {"--decide", "Clear a transcript hit by a decision (owner)"}, helpJSONOption}},
+		options: []helpOption{helpRunOption, {"--landed <sha>", "Check an already landed block commit and record its SHA"}, {"--transcript <file>", "The coder transcript to check"}, {"--report <file>", "The coder report"}, {"--decide", "Clear a transcript hit by a decision (owner)"}, helpJSONOption}},
 	{name: "block land", summary: "Join reviews, run gates, close, then merge",
 		options: []helpOption{helpRunOption, {"--merge", "Run the merge gate and merge with --no-ff"}, {"--push", "Push main after the merge"}, {"--watch-ci", "Wait for CI on the pushed commit"}, helpJSONOption}},
 	{name: "block stop", summary: "Stop a block and record why"},
