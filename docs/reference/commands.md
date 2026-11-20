@@ -134,7 +134,7 @@ code-forge audit commands --json
 Exit 0. Output:
 
 ```text
-{"version":"dev","commit":"<sha>","date":"2026-01-01T00:00:00Z","commands":129,"checks":258,"problems":{"high":0,"low":0,"medium":0},"out":"","rows":[{"command":"audit","check":"help","result":"ok","severity":"","detail":"","block":""},{"command":"audit","check":"bad-flag","result":"ok","severity":"…
+{"version":"dev","commit":"<sha>","date":"2026-01-01T00:00:00Z","commands":131,"checks":262,"problems":{"high":0,"low":0,"medium":0},"out":"","rows":[{"command":"audit","check":"help","result":"ok","severity":"","detail":"","block":""},{"command":"audit","check":"bad-flag","result":"ok","severity":"…
 ```
 
 ```sh
@@ -4249,6 +4249,26 @@ None of its own; see its sub-commands.
 
 #### Examples
 
+```sh
+code-forge lane --help
+```
+
+Exit 0. Output:
+
+```text
+Description:
+  Start a fast lane on a combine tip
+
+Usage:
+  usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]
+
+Available commands:
+  lane start  Pin a clean lane checkout for at most two local blocks
+
+Options:
+  -h, --help  Show this help
+```
+
 #### Exit codes
 
 | Code | Meaning |
@@ -4286,6 +4306,28 @@ In a clean lane branch at the newest combine tip: pin the base and start a brief
 | `--worker-pid <pid>` | number | not set | Pid of the worker that serves the run. |
 
 #### Examples
+
+```sh
+code-forge lane start --help
+```
+
+Exit 0. Output:
+
+```text
+Description:
+  Pin a clean lane checkout for at most two local blocks
+
+Usage:
+  usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]
+
+Options:
+  --base <combine-tip>  The pinned starting commit for the lane checkout
+  --cwd <dir>           The existing lane checkout on its own branch
+  --run <r>             The run id
+  --engine <e>          The run engine
+  --worker-pid <pid>    Pin an existing worker
+  -h, --help            Show this help
+```
 
 #### Exit codes
 

@@ -71,7 +71,7 @@
         {
           "command": "code-forge audit commands --json",
           "exit": 0,
-          "output": "{\"version\":\"dev\",\"commit\":\"<sha>\",\"date\":\"2026-01-01T00:00:00Z\",\"commands\":129,\"checks\":258,\"problems\":{\"high\":0,\"low\":0,\"medium\":0},\"out\":\"\",\"rows\":[{\"command\":\"audit\",\"check\":\"help\",\"result\":\"ok\",\"severity\":\"\",\"detail\":\"\",\"block\":\"\"},{\"command\":\"audit\",\"check\":\"bad-flag\",\"result\":\"ok\",\"severity\":\"…"
+          "output": "{\"version\":\"dev\",\"commit\":\"<sha>\",\"date\":\"2026-01-01T00:00:00Z\",\"commands\":131,\"checks\":262,\"problems\":{\"high\":0,\"low\":0,\"medium\":0},\"out\":\"\",\"rows\":[{\"command\":\"audit\",\"check\":\"help\",\"result\":\"ok\",\"severity\":\"\",\"detail\":\"\",\"block\":\"\"},{\"command\":\"audit\",\"check\":\"bad-flag\",\"result\":\"ok\",\"severity\":\"…"
         },
         {
           "command": "code-forge audit commands --out",
@@ -5546,7 +5546,13 @@
       "namespace": true,
       "usage": "usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]",
       "flags": [],
-      "examples": [],
+      "examples": [
+        {
+          "command": "code-forge lane --help",
+          "exit": 0,
+          "output": "Description:\n  Start a fast lane on a combine tip\n\nUsage:\n  usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]\n\nAvailable commands:\n  lane start  Pin a clean lane checkout for at most two local blocks\n\nOptions:\n  -h, --help  Show this help"
+        }
+      ],
       "exit_codes": [
         {
           "code": 0,
@@ -5613,7 +5619,13 @@
           "meaning": "Pid of the worker that serves the run."
         }
       ],
-      "examples": [],
+      "examples": [
+        {
+          "command": "code-forge lane start --help",
+          "exit": 0,
+          "output": "Description:\n  Pin a clean lane checkout for at most two local blocks\n\nUsage:\n  usage: code-forge lane start --base <combine-tip> [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]\n\nOptions:\n  --base <combine-tip>  The pinned starting commit for the lane checkout\n  --cwd <dir>           The existing lane checkout on its own branch\n  --run <r>             The run id\n  --engine <e>          The run engine\n  --worker-pid <pid>    Pin an existing worker\n  -h, --help            Show this help"
+        }
+      ],
       "exit_codes": [
         {
           "code": 0,
