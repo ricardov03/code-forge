@@ -598,6 +598,10 @@ command `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`, a fresh directory per
   It writes `gates.ram_tmp_mb: 2048` after it the same way (B941).
   Then it writes `gates.coder_test_parallel: 2` (the coder test budget's `-p`,
   B923) the same way; `config fix` keeps a value already set.
+- After `autonomy` init writes `land.require_main_ci: false` (B962),
+  `autopilot.step_budgets` with `margin: 0.5` and `min_samples: 5` (B950) and
+  `release.max_blocks: 8` (B951); a value already set stays, and a section the
+  config holds as something other than a map is left alone.
 
 ## Rebase runs in Go (B431)
 

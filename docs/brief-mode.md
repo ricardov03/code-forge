@@ -93,6 +93,14 @@ hooks:
 autonomy:
   coder_may_push: false
   coder_may_open_draft_pr: false
+land:
+  require_main_ci: false
+autopilot:
+  step_budgets:
+    margin: 0.5
+    min_samples: 5
+release:
+  max_blocks: 8
 ```
 
 The `levels` are the `provider: anthropic` defaults that `code-forge init` writes.
