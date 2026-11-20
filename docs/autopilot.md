@@ -251,6 +251,15 @@ code-forge autopilot found --run <run> --report coder-report.txt --from B4
 code-forge autopilot found --run <run> --list [--json]
 ```
 
+While an autopilot grant is active, code-forge records four of them by itself (B821), deduped by
+fingerprint and never changing the command's exit code:
+
+- a red gate of a block (`gates run`): source `gate`, titled with its first `--- FAIL:` test;
+- a land that stops (exit 1): source `land`, with its last error text;
+- a refused command that names the run (`--run`, a hand-over): source `handover`;
+- the `FOUND` lines of the coder report given to `block close` (and to `block land`, which closes
+  through it): source `coder`.
+
 `--source` is one of `gate`, `land`, `coder`, `flaky`, `handover`, `review` or `speed`. A coder writes its
 leftovers in its report as `FOUND [<source>] [<label>,…] <title> :: <evidence>` (the source is
 `coder` when it is left out); a FOUND line without ` :: <evidence>` is skipped with a WARN.

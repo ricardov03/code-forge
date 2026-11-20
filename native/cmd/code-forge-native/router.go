@@ -99,6 +99,7 @@ func refuseUnported(args []string, reasons ...handoverReason) int {
 	if len(reasons) > 0 {
 		reason = reasons[0]
 	}
+	apfFoundHandover(args, handoverReasons[reason]) // B821
 	return refuseUnportedTo(os.Stderr, args, reason)
 }
 

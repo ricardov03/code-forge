@@ -108,8 +108,9 @@ reviewer sessions outside the coder's sandbox. A file the worker cannot review f
 leaves a signed `worker.exit` row and `.code-forge/logs/worker-<pid>.log`. `run status` says whether a
 pinned worker is alive (`worker_live`), the same way `block ready` checks it. Fix rounds are bounded;
 unresolved work stops.
-Under autopilot, a problem found during the work (a red gate, a coder's leftover, a flaky test)
-becomes a queued block of the same run with `code-forge autopilot found`; findings about scope,
+Under autopilot, a problem found during the work (a red gate, a failed land, a hand-over, a coder's
+leftover, a flaky test) becomes a queued block of the same run with `code-forge autopilot found`, recorded
+by itself for the first four; findings about scope,
 security, deletes or publishing wait for you ([autopilot](docs/autopilot.md)). Each land, gate,
 coder session and CI wait has a speed budget (its measured median plus a margin, or
 `autopilot.step_budgets`); a step over it prints a WARN and becomes found work too.

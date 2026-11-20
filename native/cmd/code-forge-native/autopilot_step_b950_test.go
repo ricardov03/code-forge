@@ -112,16 +112,16 @@ func TestB950LandFakeClock(t *testing.T) {
 	t.Cleanup(func() { stepNow = before })
 	var buf strings.Builder
 	stepNow = func() time.Time { return start.Add(9 * time.Minute) }
-	landAfter(&buf, f.home, "r-test", "B1", start, true)
+	landAfter(&buf, f.home, "r-test", "B1", start, true, 0, "")
 	if buf.String() != "" || len(b950Rows(f, "step.over_budget")) != 0 || len(b800Found(t, f)) != 0 {
 		t.Fatalf("under budget: %q", buf.String())
 	}
 	stepNow = func() time.Time { return start.Add(25 * time.Minute) }
-	landAfter(&buf, f.home, "r-test", "B1", start, false) // a failed land is not timed
+	landAfter(&buf, f.home, "r-test", "B1", start, false, 2, "") // a refused land is not timed
 	if buf.String() != "" {
 		t.Fatalf("failed land timed: %q", buf.String())
 	}
-	landAfter(&buf, f.home, "r-test", "B1", start, true)
+	landAfter(&buf, f.home, "r-test", "B1", start, true, 0, "")
 	if !strings.Contains(buf.String(), "WARN step budget: land took 25m00s, over its budget 10m00s") {
 		t.Fatalf("over budget: %q", buf.String())
 	}

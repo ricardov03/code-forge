@@ -30,8 +30,8 @@ func landExecute(args []string, flags map[string]any, home, run, id string, reco
 
 func landExecuteWithReason(args []string, flags map[string]any, home, run, id string, record, entry ledger.Object, fallback func(handoverReason) int) (code int) {
 	stderr := &landErrorStream{}
-	landStart, landOK := stepNow(), false // B950
-	defer func() { landAfter(stderr, home, run, id, landStart, landOK) }()
+	landStart, landOK := stepNow(), false                                                     // B950
+	defer func() { landAfter(stderr, home, run, id, landStart, landOK, code, stderr.last) }() // B950, B821
 	beforeLog := []any{}
 	begin := func() { beforeLog = gatesBreadcrumbName("block") }
 	finish := func() {

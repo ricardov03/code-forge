@@ -10,6 +10,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - Every land, gate, coder session and CI wait has a speed budget: its measured median plus a margin, or fixed minutes under the new `autopilot.step_budgets` config key. `block land` and `gates run --run --block` time themselves; `code-forge autopilot step --run <id> --step <coder|ci-wait> --ms <n>` reports the others. A step over its budget prints `WARN step budget: …`, writes a `step.over_budget` row shown in the binnacle, and under an active autopilot grant becomes found work (source `speed`) (B950)
 - `code-forge release check` counts the blocks since the last `v*` tag and prints `RELEASE NOW: N blocks since vX` at the new `release.max_blocks` config key (default 8), an info line from 3 below it; the autopilot stop report and binnacle (`Release size`) show the same line (B951)
+- While an autopilot grant is active, a red gate, a land that stops, a hand-over that names the run and the coder report's `FOUND` lines (on `block close` and `block land`) record an `autopilot found` finding by themselves, deduped by fingerprint (B821)
 
 ## [0.26.0] — 2026-11-19
 

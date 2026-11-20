@@ -66,17 +66,20 @@ func stepGrantActive(record ledger.Object, now time.Time) bool {
 	return grant.Get("status") == "active"
 }
 
-// apfAuto records one finding the run found by itself (B821, B950): only
+// apfAuto records the findings the run found by itself (B821, B950): only
 // while an autopilot grant is active; the outcome goes to w. It never fails
 // the caller: an error is a WARN line.
-func apfAuto(w io.Writer, home, runID string, in apfInput) {
+func apfAuto(w io.Writer, home, runID string, in ...apfInput) {
 	record, err := state.ReadRun(home, runID)
 	if err != nil || !stepGrantActive(record, autopilotNow()) {
 		return
 	}
-	results, err := apfRecord(home, runID, []apfInput{in}, autopilotNow().Truncate(time.Millisecond))
+	if len(in) == 0 {
+		return
+	}
+	results, err := apfRecord(home, runID, in, autopilotNow().Truncate(time.Millisecond))
 	if err != nil {
-		fmt.Fprintf(w, "WARN autopilot found (%s): %s\n", in.source, blockIOMessage(err))
+		fmt.Fprintf(w, "WARN autopilot found (%s): %s\n", in[0].source, blockIOMessage(err))
 		return
 	}
 	for _, r := range results {
@@ -186,9 +189,10 @@ type gatesErrWriter struct{}
 
 func (gatesErrWriter) Write(p []byte) (int, error) { gatesErrf("%s", p); return len(p), nil }
 
-// gatesAfterRun runs after the gate rows of a run's block are written: the
-// gate step's speed budget (B950).
+// gatesAfterRun runs after the gate rows of a run's block are written: a
+// found finding per red gate (B821) and the gate step's speed budget (B950).
 func gatesAfterRun(home, runID, block string, results []any, durationMs int64) {
+	apfFoundGates(gatesErrWriter{}, home, runID, block, results) // B821
 	if durationMs > 0 {
 		if _, err := stepBudgetObserve(gatesErrWriter{}, home, runID, block, "gate", durationMs); err != nil {
 			gatesErrf("WARN step budget: %s\n", blockIOMessage(err))
@@ -196,9 +200,17 @@ func gatesAfterRun(home, runID, block string, results []any, durationMs int64) {
 	}
 }
 
-// landAfter: a land that ended well records the land step's wall time (B950).
-func landAfter(w io.Writer, home, runID, block string, start time.Time, ok bool) {
-	if !ok || runID == "" {
+// landAfter: a land that ended well records the land step's wall time
+// (B950); a land that stopped (exit 1) records a found finding with its last
+// stderr text (B821). A hand-over (landHandover) or a usage error is neither.
+func landAfter(w io.Writer, home, runID, block string, start time.Time, ok bool, code int, message string) {
+	if runID == "" {
+		return
+	}
+	if !ok {
+		if code == 1 {
+			apfAuto(w, home, runID, apfLandInput(block, message))
+		}
 		return
 	}
 	if _, err := stepBudgetObserve(w, home, runID, block, "land", stepbudget.Elapsed(start, stepNow)); err != nil {
