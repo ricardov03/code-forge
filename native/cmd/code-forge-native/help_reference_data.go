@@ -208,7 +208,7 @@ var helpRefs = map[string]helpRef{
 		when:     "An agent needs an owner decision during a grant: the delegate answers it or it goes to the owner.",
 		related:  []string{"autopilot digest", "autopilot ratify", "decisions list"},
 		exits:    map[int]string{3: "The question went to the owner; no decision yet."},
-		flags:    map[string]string{"--speed": "A speed-only choice (B922): the first option (list the fastest first; each keeps every gate) is taken at once, with no delegate session and no wait on the owner; the binnacle tells the owner after."},
+		flags:    map[string]string{"--speed": "A speed-only choice (B922): the option named by --fastest (each option keeps every gate) is taken at once, with no delegate session and no wait on the owner; the binnacle tells the owner after.", "--fastest": "With --speed: the fastest option, one of --options; its place in the list does not count (B983)."},
 		examples: []helpRefExample{helpRefEx("autopilot", "autopilot ask --run {run} --scope waive:nit --question 'waive it?' --options waive,fix --json")},
 	},
 	"autopilot waive": {

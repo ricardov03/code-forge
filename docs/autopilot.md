@@ -140,14 +140,17 @@ written `by: autopilot` and opens one tracked GitHub issue in the project's repo
 
 **Speed-only choices are not waited on (B922).** A question that only trades speed (batch or one
 by one, which order, run now or later), where every option keeps every gate, is asked with
-`--speed` and the options listed fastest first:
+`--speed` and the fastest option named with `--fastest` (B983: its place in `--options` does not
+count, so a list in any order is safe):
 
 ```bash
 code-forge autopilot ask --run <run> --scope round:extra --question "Land B4 and B5 as one batch?" \
-  --options batch,one-by-one --speed
+  --options one-by-one,batch --fastest batch --speed
 ```
 
-Under a grant that lets the scope through, the first option is taken at once (exit 0): no delegate
+`--speed` without `--fastest`, or a `--fastest` that is not one of the options, is a usage error
+(exit 2) and decides nothing. Under a grant that lets the scope through, the `--fastest` option is
+taken at once (exit 0): no delegate
 session, no wait on you. One signed `autopilot.decision` row with `speed: true` records it, and the
 binnacle tells you after ("Speed choice taken"). A grant that refuses the scope still sends the
 question to you; an ask without `--speed` is unchanged.
