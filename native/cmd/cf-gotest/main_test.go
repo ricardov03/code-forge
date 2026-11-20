@@ -94,3 +94,37 @@ func TestB760GateFailingTestsFailTheGate(t *testing.T) {
 		t.Fatalf("exit %d, want 1", code)
 	}
 }
+
+// fakeGoEnv is fakeGo that also logs the GOFLAGS the go child sees, one line per run.
+func fakeGoEnv(t *testing.T, code string) (argLog, envLog string) {
+	t.Helper()
+	dir := t.TempDir()
+	argLog, envLog = filepath.Join(dir, "go.log"), filepath.Join(dir, "env.log")
+	script := "#!/bin/sh\necho \"$*\" >> '" + argLog + "'\necho \"GOFLAGS=$GOFLAGS\" >> '" + envLog + "'\nexit " + code + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":/usr/bin:/bin")
+	return argLog, envLog
+}
+
+// TestB952GoRunsWithTrimpath: the go child sees -trimpath in GOFLAGS, so worktrees share the
+// build cache; the caller's other GOFLAGS stay, and -trimpath is never added twice.
+func TestB952GoRunsWithTrimpath(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"", "GOFLAGS=-trimpath\n"},
+		{"-mod=vendor", "GOFLAGS=-mod=vendor -trimpath\n"},
+		{"-trimpath -mod=vendor", "GOFLAGS=-trimpath -mod=vendor\n"},
+		{"-trimpath=false", "GOFLAGS=-trimpath=false\n"},
+	} {
+		_, envLog := fakeGoEnv(t, "0")
+		t.Setenv("GOFLAGS", c.in)
+		var out, errb bytes.Buffer
+		if code := run([]string{"native/gates/scope_test.go"}, &out, &errb); code != 0 {
+			t.Fatalf("GOFLAGS %q: exit %d %s", c.in, code, errb.String())
+		}
+		if got := readLog(t, envLog); got != c.want {
+			t.Fatalf("GOFLAGS %q: go saw %q, want %q", c.in, got, c.want)
+		}
+	}
+}

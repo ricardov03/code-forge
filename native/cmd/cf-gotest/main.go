@@ -3,6 +3,10 @@
 // passes the selected Go files as paths from the repository root, and cf-gotest runs `go test
 // -count=1` on the packages that hold them, from native/. With no file it runs every package (the
 // full suite). Files outside native/ are not Go packages here and are left out.
+//
+// B952: the go child runs with -trimpath added to GOFLAGS. Without it Go keys each compile by the
+// package's directory, so every worktree compiles every native and vendored package again; with it
+// the key is the module path, and a new worktree reuses the build cache of the others.
 package main
 
 import (
@@ -31,6 +35,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	argv := append([]string{"test", "-count=1", "-timeout", "75m"}, pkgs...)
 	fmt.Fprintf(stdout, "cf-gotest: go %s\n", strings.Join(argv, " "))
 	cmd := exec.Command("go", argv...)
+	cmd.Env = goEnv(os.Environ())
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := cmd.Run(); err != nil {
 		if e, ok := err.(*exec.ExitError); ok {
@@ -40,6 +45,30 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// goEnv is env with -trimpath in GOFLAGS (added once, the caller's other GOFLAGS kept; a caller's
+// own -trimpath=false is kept too).
+func goEnv(env []string) []string {
+	out := make([]string, 0, len(env)+1)
+	flags := ""
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "GOFLAGS="); ok {
+			flags = v
+			continue
+		}
+		out = append(out, kv)
+	}
+	has := false
+	for _, f := range strings.Fields(flags) {
+		if name, _, _ := strings.Cut(strings.TrimLeft(f, "-"), "="); name == "trimpath" {
+			has = true
+		}
+	}
+	if !has {
+		flags = strings.TrimSpace(flags + " -trimpath")
+	}
+	return append(out, "GOFLAGS="+flags)
 }
 
 // packages maps repository paths to the native/ module's package patterns, sorted and unique.
