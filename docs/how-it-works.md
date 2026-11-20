@@ -649,6 +649,10 @@ unscoped. A passing run prints
 still refuses with `test gate unavailable: configure gates.test before merging`.
 A red suite or conflict stops at `merge-gate`. It names the first ten failing TAP tests
 (or gate diagnostics) or the conflict files, and prints a `next:` action.
+Before join, gates and close, `block land --merge` merges the block's head into the base branch in
+memory; a conflict land cannot resolve stops there with `merge conflict with <base> found before
+close; the block stays open and main is unchanged: <file> (<kind>), ...`, a signed `land.conflict`
+row and `next: code-forge block rebase <id> --run <run>` (B814), so no close row is written.
 A merge conflict whose files are all append-only is resolved by land itself (B795,
 `land.auto_resolve`, default on), in the trial merge and again in the merge into main, which must
 give the tree the merge gate checked: `CHANGELOG.md` keeps main's lines, then the block's new ones,

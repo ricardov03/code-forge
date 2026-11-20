@@ -121,3 +121,46 @@ func lcfAbort(dir string) {
 func lcfReason(files []landmerge.File) string {
 	return "merge conflict land cannot resolve by itself; main is unchanged: " + landmerge.Describe(files)
 }
+
+// lcfPrecheck merges the block worktree's HEAD into base in memory (B814,
+// before close): it returns the conflicted files with their kinds when any
+// one of them is not one land resolves by itself, else nil.
+func lcfPrecheck(main, base, tree string, auto landmerge.Settings) ([]landmerge.File, error) {
+	head, err := gitx.Run(tree, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("cannot read the block head: %s", landGitError(err, err.Error()))
+	}
+	head = strings.TrimSpace(head)
+	ours := "refs/heads/" + base
+	mergeBase, err := gitx.Run(main, "merge-base", ours, head)
+	if err != nil {
+		return nil, nil
+	}
+	out, err := gitx.Run(main, "merge-tree", "--write-tree", "--name-only", "--no-messages", ours, head)
+	if err == nil {
+		return nil, nil
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if command, ok := err.(*gitx.CommandError); !ok || command.Code != 1 || len(lines) < 2 {
+		return nil, fmt.Errorf("merge-tree check failed: %s", landGitError(err, err.Error()))
+	}
+	files, seen := []string{}, map[string]bool{}
+	for _, file := range lines[1:] {
+		if file = strings.TrimSpace(file); file != "" && !seen[file] {
+			seen[file] = true
+			files = append(files, file)
+		}
+	}
+	if _, ok, err := landBatchAppendTree(main, strings.TrimSpace(lines[0]), strings.TrimSpace(mergeBase), ours, head, files, auto); err != nil || ok {
+		return nil, err
+	}
+	kinds := make([]landmerge.File, len(files))
+	for i, file := range files {
+		kinds[i] = landmerge.File{Path: file, Kind: auto.Kind(file, false)}
+	}
+	return kinds, nil
+}
+
+func lcfPrecloseReason(branch, base string, files []landmerge.File) string {
+	return "merge conflict with " + base + " found before close; the block stays open and main is unchanged: " + landmerge.Describe(files) + "; rebase " + branch + " onto " + base + " and land again"
+}
