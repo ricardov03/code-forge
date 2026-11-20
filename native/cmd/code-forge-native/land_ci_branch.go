@@ -92,7 +92,7 @@ func landCIBlockPRs(main, id, prefix string) ([]landCIPR, error) {
 	shape := regexp.MustCompile(`(?i)^` + regexp.QuoteMeta(prefix+id) + `(?:-([0-9]+))?$`)
 	list := func(extra ...string) ([]landCIPR, int, error) {
 		args := append([]string{"pr", "list", "--state", "all"}, extra...)
-		out, err := ciGh(main, append(args, "--limit", "200", "--json", "number,headRefName,headRefOid,state")...)
+		out, err := landCIGh(main, append(args, "--limit", "200", "--json", "number,headRefName,headRefOid,state")...)
 		if err != nil {
 			return nil, 0, err
 		}

@@ -12,6 +12,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - A batch `block land` with `land.require_ci: github` waits for CI with no block lock held, so other commands on those blocks no longer get `block-busy` during the wait: each tip's CI is read before the locks are taken, a block whose rebase made a new sha lets the blocks before it land, waits for CI on the new sha and lands in a next round, and a tip that moved during the wait is refused at `ci` (B803)
 - A batch `block land` with `land.require_ci: github` lands only a block commit green CI proved: a rebased commit waits for its own green CI first, a last check before main moves refuses any other, and the block's landed marker records the proved sha as `ci_sha` (B804)
 - `land.require_ci` finds a block's CI pull requests past the 200 newest: when that page is full and holds none of them, land searches `gh pr list --search head:<prefix><block>`, so an older CI PR is still replaced and closed (B805)
+- One short gh network error (timeout, connection reset or refused, EOF, TLS or DNS failure, HTTP 5xx) while `land.require_ci` reads CI no longer refuses the land: the read is retried with a backoff, 3 tries in all, and only then refused at `ci` with gh's message, `(after 3 tries)` and a `next:` line (B806)
 
 ## [0.26.0] — 2026-11-19
 
