@@ -204,7 +204,18 @@ refuses with the same land command to resume; red refuses with the failed jobs. 
 fails on auth is retried once over HTTPS with the gh credential helper. After the land the block's
 CI PRs are closed. Do not write poll scripts or open replacement PRs by hand. A red run lands only
 when every failing test matches a `<block> <regexp>` line of `land.ci_red_list` for a block named in
-`CODE_FORGE_CI_RED_BLOCKS`; a block never covers its own red.
+`CODE_FORGE_CI_RED_BLOCKS`; a block never covers its own red. B910: with the gate on, a batch land
+skips a block's local `test` gate when the sha it lands is the sha green CI proved; a rebase that
+makes a new sha pushes it to a new CI branch and waits for green CI on it first. The other gates
+(lint, types, format) and the batch merge gate still run. B803: a batch land waits for CI with no
+block lock held: each tip's CI is read before the locks are taken, and a block whose rebase made a
+new sha ends the round (the blocks before it land), then waits for CI and lands in the next round.
+A tip that moves while the land waits is refused at `ci`. B804: a batch lands only a commit green CI
+proved; the landed marker records it as `ci_sha`. B805: a block's CI PRs are found past the 200
+newest pull requests (a `head:` search when that page is full and holds none of them). B806: a short
+gh network error (timeout, connection reset, EOF, TLS/DNS failure, HTTP 5xx) while land reads CI is
+retried with a backoff, 3 tries in all; then land refuses at `ci` with gh's message, `(after 3
+tries)` and a `next:` line.
 
 **Heal queue (B429).** `gates run --run --block`, `block rebase` and `block land` still fail on a
 held lock or a transient git error, but also queue the problem and print `heal: queued <id>` as the

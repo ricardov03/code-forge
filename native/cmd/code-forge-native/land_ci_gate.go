@@ -114,7 +114,7 @@ func landCIPoll(land map[string]any, main, sha string) (runs []ciRun, running []
 		args = append(args, "--workflow", workflow)
 	}
 	args = append(args, "--limit", "100", "--json", "databaseId,status,conclusion,name")
-	out, gherr := ciGh(main, args...)
+	out, gherr := landCIGh(main, args...)
 	if gherr != nil {
 		return nil, nil, nil, strings.SplitN(gherr.Error(), "\n", 2)[0]
 	}
@@ -159,7 +159,7 @@ func landCIPoll(land map[string]any, main, sha string) (runs []ciRun, running []
 func landCIFailedJobs(main string, red []ciRun) string {
 	names := []string{}
 	for _, r := range red {
-		out, err := ciGh(main, "run", "view", fmt.Sprint(r.DatabaseID), "--json", "jobs")
+		out, err := landCIGh(main, "run", "view", fmt.Sprint(r.DatabaseID), "--json", "jobs")
 		if err != nil {
 			continue
 		}
@@ -306,7 +306,7 @@ func landCIGate(cfg map[string]any, main, id, sha, base, resume string, out io.W
 	}
 	report, uncovered := []string{}, false
 	for _, r := range red {
-		log, err := ciGh(main, "run", "view", fmt.Sprint(r.DatabaseID), "--log-failed")
+		log, err := landCIGh(main, "run", "view", fmt.Sprint(r.DatabaseID), "--log-failed")
 		if err != nil {
 			return nil, what + fmt.Sprintf("; cannot read the failed log of run %d: %s", r.DatabaseID, strings.SplitN(err.Error(), "\n", 2)[0]), next
 		}

@@ -16,8 +16,11 @@ import (
 // landCIFakeGhSeq puts a stateful fake gh first on PATH. Every call's argv is
 // logged to $dir/calls (one line, args joined by " "). Answers:
 //   - run list --commit <sha>: the k-th call for that sha reads
-//     runs-<sha>-<k>.json, else runs-<sha>.json, else [].
-//   - pr list: the k-th call reads prs-<k>.json, else prs.json, else [].
+//     runs-<sha>-<k>.json, else runs-<sha>.json; a sha with neither file
+//     reads runs-other-<k>.json, else runs-other.json, else [] (B910: a
+//     rebased tip whose sha the test cannot know in advance).
+//   - pr list: --search <q> reads prs-search-<q>.json when it exists (B805);
+//     else the k-th call reads prs-<k>.json, else prs.json, else [].
 //   - pr create: prints https://github.com/o/r/pull/<n>, n = 200, 201, ...
 //   - pr close: exit 0.
 //   - run view <id> --json jobs: jobs-<id>.json; run view <id> --log-failed: log-<id>.txt.
@@ -31,8 +34,8 @@ printf '%s\n' "$*" >> "$d/calls"
 next() { n=$(cat "$d/count-$1" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$d/count-$1"; echo $n; }
 answer() { if [ -f "$d/$1" ]; then cat "$d/$1"; elif [ -f "$d/$2" ]; then cat "$d/$2"; else echo '[]'; fi; }
 case "$1 $2" in
-  'run list') k=$(next "run-$4"); answer "runs-$4-$k.json" "runs-$4.json" ;;
-  'pr list') k=$(next pr); answer "prs-$k.json" prs.json ;;
+  'run list') k=$(next "run-$4"); if [ -f "$d/runs-$4-$k.json" ] || [ -f "$d/runs-$4.json" ]; then answer "runs-$4-$k.json" "runs-$4.json"; else answer "runs-other-$k.json" runs-other.json; fi ;;
+  'pr list') if [ "$5" = "--search" ] && [ -f "$d/prs-search-$6.json" ]; then cat "$d/prs-search-$6.json"; else k=$(next pr); answer "prs-$k.json" prs.json; fi ;;
   'pr create') k=$(next create); echo "https://github.com/o/r/pull/$((199+k))" ;;
   'pr close') exit 0 ;;
   'run view') if [ "$4" = "--json" ]; then cat "$d/jobs-$3.json"; else cat "$d/log-$3.txt"; fi ;;
@@ -87,6 +90,7 @@ func TestB796StaleBranchNewPRWaitsAndLands(t *testing.T) {
 		"runs-" + heads["B1"] + ".json":   landCIGreen,
 		"runs-" + heads["B2"] + "-1.json": `[]`,
 		"runs-" + heads["B2"] + ".json":   landCIGreen,
+		"runs-other.json":                 landCIGreen, // B910: B2's rebased tip
 	})
 	slept := landCIFakeClock(t)
 	code, output := f.land("B1", "B2")
@@ -141,7 +145,7 @@ func TestB796StaleBranchNewPRWaitsAndLands(t *testing.T) {
 func TestB796PendingThenGreenLands(t *testing.T) {
 	f := landCIBatch(t, map[string]any{"require_ci": "github"}, "", "")
 	heads := f.heads()
-	files := map[string]string{"runs-" + heads["B2"] + ".json": landCIGreen, "runs-" + heads["B1"] + ".json": landCIGreen}
+	files := map[string]string{"runs-" + heads["B2"] + ".json": landCIGreen, "runs-" + heads["B1"] + ".json": landCIGreen, "runs-other.json": landCIGreen}
 	for k := 1; k <= 8; k++ {
 		files["runs-"+heads["B1"]+"-"+string(rune('0'+k))+".json"] = landCIRunning
 	}
@@ -224,6 +228,7 @@ func TestB796SSHFailRetriesOverHTTPS(t *testing.T) {
 		"runs-" + heads["B1"] + ".json":   landCIGreen,
 		"runs-" + heads["B2"] + "-1.json": `[]`,
 		"runs-" + heads["B2"] + ".json":   landCIGreen,
+		"runs-other.json":                 landCIGreen, // B910: B2's rebased tip
 	})
 	landCIFakeClock(t)
 	code, output := f.land("B1", "B2")

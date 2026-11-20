@@ -89,28 +89,40 @@ func landCIBranchName(prefix, id string, n int) string {
 // landCIBlockPRs lists the pull requests (any state) whose head is one of the
 // block's CI branches, oldest branch first.
 func landCIBlockPRs(main, id, prefix string) ([]landCIPR, error) {
-	out, err := ciGh(main, "pr", "list", "--state", "all", "--limit", "200", "--json", "number,headRefName,headRefOid,state")
-	if err != nil {
-		return nil, err
-	}
-	all := []landCIPR{}
-	if err := json.Unmarshal([]byte(out), &all); err != nil {
-		return nil, fmt.Errorf("gh pr list: unreadable JSON")
-	}
 	shape := regexp.MustCompile(`(?i)^` + regexp.QuoteMeta(prefix+id) + `(?:-([0-9]+))?$`)
-	prs := []landCIPR{}
-	for _, pr := range all {
-		m := shape.FindStringSubmatch(pr.HeadRefName)
-		if m == nil {
-			continue
+	list := func(extra ...string) ([]landCIPR, int, error) {
+		args := append([]string{"pr", "list", "--state", "all"}, extra...)
+		out, err := landCIGh(main, append(args, "--limit", "200", "--json", "number,headRefName,headRefOid,state")...)
+		if err != nil {
+			return nil, 0, err
 		}
-		pr.n = 1
-		if m[1] != "" {
-			pr.n, _ = strconv.Atoi(m[1])
+		all := []landCIPR{}
+		if err := json.Unmarshal([]byte(out), &all); err != nil {
+			return nil, 0, fmt.Errorf("gh pr list: unreadable JSON")
 		}
-		prs = append(prs, pr)
+		prs := []landCIPR{}
+		for _, pr := range all {
+			m := shape.FindStringSubmatch(pr.HeadRefName)
+			if m == nil {
+				continue
+			}
+			pr.n = 1
+			if m[1] != "" {
+				pr.n, _ = strconv.Atoi(m[1])
+			}
+			prs = append(prs, pr)
+		}
+		return prs, len(all), nil
 	}
-	return prs, nil
+	prs, rows, err := list()
+	if err != nil || len(prs) > 0 || rows < 200 {
+		return prs, err
+	}
+	// B805: gh pr list returns at most 200 rows here (newest first), so a
+	// full page with none of the block's PRs may hide older ones: search by
+	// head branch (a word prefix; the shape above keeps the exact ones).
+	prs, _, err = list("--search", "head:"+strings.ToLower(prefix+id))
+	return prs, err
 }
 
 func landCIShort(sha string) string {
