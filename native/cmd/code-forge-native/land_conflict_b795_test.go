@@ -53,7 +53,7 @@ func (f *landBatchFixture) b795Owned(id string, files ...string) {
 func TestB795BatchFixedBulletsLandWithOneHeading(t *testing.T) {
 	for name, b2 := range map[string]string{
 		"same":  b795Fixed("B2"),
-		"added": strings.Replace(b795Changelog, "## [Unreleased]\n\n", "## [Unreleased]\n\n### Added\n\n- add B2\n\n### Fixed\n\n- fix B2\n\n", 1),
+		"added": strings.Replace(b795Changelog, "## [Unreleased]\n\n", "## [Unreleased]\n\n### Added\n\n- add B3\n\n### Fixed\n\n- fix B2\n\n", 1),
 	} {
 		t.Run(name, func(t *testing.T) { b795BatchFixed(t, b2) })
 	}
@@ -100,7 +100,7 @@ func b795BatchFixed(t *testing.T, b2 string) {
 	main := f.git(f.repo, "show", "main:CHANGELOG.md") + "\n"
 	added := ""
 	if strings.Contains(b2, "### Added") {
-		added = "### Added\n\n- add B2\n\n"
+		added = "### Added\n\n- add B3\n\n"
 	}
 	want := strings.Replace(b795Changelog, "## [Unreleased]\n\n", "## [Unreleased]\n\n### Fixed\n\n- fix B1\n- fix B2\n\n"+added, 1)
 	if main != want {
