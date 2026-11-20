@@ -10,6 +10,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - Two Go tests no longer depend on machine load: the pseudo-terminal test driver types each key once the program's prompt is on screen (a `prompts` list, one text per key) instead of after 400 ms of quiet output, and the B593 strict-launch test waits for the launch and the reap with a 3-minute stop bound instead of failing at 10 s and 2 s; both pass under `-cpu 1` beside a CPU hog (B891)
 - A red `go test -json` gate now gets the flaky rerun by name too: the failed top-level tests are read from its test2json events (per package, the same rules as plain output: a panic, a build failure, a failed package with no named test or more than 3 names is a real failure), rerun 3 times without `-json`, and a pass gives the `gates: WARN flaky test` line and the `test.flaky` row (B893)
+- The flaky rerun of a `go run` wrapper gate (such as code-forge's own `cf-gotest`) keeps the wrapper's go test flags: `-timeout`, `-p`, `-tags`, `-race` and the other build flags are taken from the first output line where the wrapper names its `go test` (`cf-gotest: go test -count=1 -timeout 75m ./a`); before, the rerun called plain `go test` and dropped them (B894)
 
 ## [0.26.0] — 2026-11-19
 

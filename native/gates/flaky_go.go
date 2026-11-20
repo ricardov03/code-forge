@@ -149,6 +149,70 @@ var (
 // prints go test output, like code-forge's own cf-gotest); nil for any other
 // program, which is never rerun by name.
 func goRerunArgv(original, names, pkgs []string) []string {
+	return goRerunBuild(original, nil, names, pkgs)
+}
+
+// goEchoedTest is a line where a wrapper names the go test it runs
+// ("cf-gotest: go test -count=1 -timeout 75m ./a", "+ go test ./...").
+var goEchoedTest = regexp.MustCompile(`(?:^|[\s:])(?:\S*/)?go test\s+(.*)$`)
+
+// goRerunCommand is goRerunArgv for the gate output given (B894): a go run
+// wrapper's rerun keeps the go test build flags of the first line where the
+// wrapper names its go test (its -timeout 75m, say), since the wrapper's own
+// argv does not hold them.
+func goRerunCommand(original []string, output string, names, pkgs []string) []string {
+	var extra []string
+	if goRerunWrapper(original) {
+		for _, line := range strings.Split(strings.ReplaceAll(ansi.ReplaceAllString(output, ""), "\r\n", "\n"), "\n") {
+			if m := goEchoedTest.FindStringSubmatch(line); m != nil {
+				extra = goKeptFlags(strings.Fields(m[1]))
+				break
+			}
+		}
+	}
+	return goRerunBuild(original, extra, names, pkgs)
+}
+
+// goRerunWrapper is true for a go gate that is not a direct go test (a go
+// run wrapper).
+func goRerunWrapper(original []string) bool {
+	i := 1
+	if i < len(original) && original[i] == "-C" {
+		i += 2
+	} else if i < len(original) && strings.HasPrefix(original[i], "-C=") {
+		i++
+	}
+	return i >= len(original) || original[i] != "test"
+}
+
+// goKeptFlags is the go test build flags of args that a rerun keeps.
+func goKeptFlags(args []string) []string {
+	kept := []string{}
+	for j := 0; j < len(args); j++ {
+		a := args[j]
+		if a == "-args" || a == "--args" || a == "--" {
+			break
+		}
+		if !strings.HasPrefix(a, "-") {
+			continue
+		}
+		name, _, valued := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		switch {
+		case Has(goRerunFlags, name):
+			kept = append(kept, a)
+		case Has(goRerunValued, name) && valued:
+			kept = append(kept, a)
+		case Has(goRerunValued, name) && j+1 < len(args):
+			kept = append(kept, a, args[j+1])
+			j++
+		}
+	}
+	return kept
+}
+
+// goRerunBuild is the rerun argv: the gate's -C, its kept go test flags,
+// extra, then -count, -run and the packages.
+func goRerunBuild(original, extra, names, pkgs []string) []string {
 	if len(original) < 2 || strings.TrimSuffix(filepath.Base(original[0]), ".exe") != "go" {
 		return nil
 	}
@@ -163,26 +227,9 @@ func goRerunArgv(original, names, pkgs []string) []string {
 	}
 	argv = append(argv, "test")
 	if i < len(original) && original[i] == "test" {
-		for j := i + 1; j < len(original); j++ {
-			a := original[j]
-			if a == "-args" || a == "--args" || a == "--" {
-				break
-			}
-			if !strings.HasPrefix(a, "-") {
-				continue
-			}
-			name, _, valued := strings.Cut(strings.TrimLeft(a, "-"), "=")
-			switch {
-			case Has(goRerunFlags, name):
-				argv = append(argv, a)
-			case Has(goRerunValued, name) && valued:
-				argv = append(argv, a)
-			case Has(goRerunValued, name) && j+1 < len(original):
-				argv = append(argv, a, original[j+1])
-				j++
-			}
-		}
+		argv = append(argv, goKeptFlags(original[i+1:])...)
 	}
+	argv = append(argv, extra...)
 	argv = append(argv, "-count="+strconv.Itoa(GoFlakyCount), "-run", "^("+strings.Join(names, "|")+")$")
 	return append(argv, pkgs...)
 }
