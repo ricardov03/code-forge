@@ -192,7 +192,7 @@ func TestB765LandCIGreenLands(t *testing.T) {
 		t.Fatalf("gh run list calls=%q, want one per block", calls)
 	}
 	for i, id := range []string{"B1", "B2"} {
-		want := "run list --commit " + heads[id] + " --limit 100 --json databaseId,status,conclusion,name"
+		want := "run list --commit " + heads[id] + " --limit 100 --json databaseId,status,conclusion,name,event"
 		if calls[i] != want {
 			t.Errorf("gh call %d=%q, want %q (the block's own tip)", i, calls[i], want)
 		}
@@ -348,4 +348,33 @@ func TestB765LandCISingleBlock(t *testing.T) {
 			}
 		})
 	}
+}
+
+// B956: the gate judges every run of the tip, not one per workflow name: a
+// red push run of the sha refuses the land even when the pull_request run of
+// the same workflow is green (B948 had exactly that on main). A rerun of the
+// same event still counts.
+func TestB956LandCIRedPushRunRefused(t *testing.T) {
+	f := landCIBatch(t, landCIOn, "", "")
+	landCIFakeGh(t, `[{"databaseId":8,"status":"completed","conclusion":"success","name":"CI","event":"pull_request"},`+
+		`{"databaseId":7,"status":"completed","conclusion":"failure","name":"CI","event":"push"}]`, map[string]string{"7": landCINewLog})
+	landCIRefused(t, f, "CI is red (CI (push): failure, run 7)")
+}
+
+func TestB956LandCIRerunGreenLands(t *testing.T) {
+	f := landCIBatch(t, landCIOn, "", "")
+	landCIFakeGh(t, `[{"databaseId":9,"status":"completed","conclusion":"success","name":"CI","event":"push"},`+
+		`{"databaseId":8,"status":"completed","conclusion":"success","name":"CI","event":"pull_request"},`+
+		`{"databaseId":7,"status":"completed","conclusion":"failure","name":"CI","event":"push"}]`, nil)
+	if code, output := f.land("B1", "B2"); code != 0 || !strings.Contains(output, "green (3 runs)") {
+		t.Fatalf("exit=%d, want 0 (push rerun green, PR green): %s", code, output)
+	}
+	f.checkMain([]string{"B1", "B2"})
+}
+
+func TestB956LandCIPushRunningWaits(t *testing.T) {
+	f := landCIBatch(t, landCIOn, "", "")
+	landCIFakeGh(t, `[{"databaseId":8,"status":"completed","conclusion":"success","name":"CI","event":"pull_request"},`+
+		`{"databaseId":7,"status":"in_progress","conclusion":"","name":"CI","event":"push"}]`, nil)
+	landCIRefused(t, f, "has no green CI run yet (running: CI (push))")
 }

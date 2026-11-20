@@ -48,6 +48,9 @@ type ciRun struct {
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
 	Name       string `json:"name"`
+	// Event is the run's trigger (push, pull_request); only the land CI
+	// gate asks gh for it (B956).
+	Event string `json:"event,omitempty"`
 }
 
 type ciOptions struct {

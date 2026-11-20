@@ -2,8 +2,10 @@ name: CI
 
 on:
   push:
-    # ci-check-* lets a pre-release check run on a branch push before main moves (B239)
-    branches: [main, 'ci-check-*']
+    # ci-* (ci-check-* since B239, lane and combined branches since B956) runs the full suite on the
+    # pushed sha too, not only on the pull request merge commit: the land gate needs every run of a
+    # tip green (B948 had a green PR run and a red push run for the same sha).
+    branches: [main, 'ci-*']
   workflow_dispatch:
   pull_request:
 
