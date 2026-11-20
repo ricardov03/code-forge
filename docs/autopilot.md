@@ -277,8 +277,10 @@ For each finding the autopilot:
 - queues the rest, up to `autopilot.max_found_blocks` per run (default 10; past it a finding waits
   for the owner): the next free block id of the run (one past the highest of its blocks), a brief
   and an acceptance file under `~/.code-forge/runs/<run>/found/`, and the exact
-  `code-forge block open` command to run. The acceptance asks for a red test from the evidence;
-  name that test in the file before `block open`.
+  `code-forge block open` command to run. When the evidence names a failing test (a
+  `--- FAIL: TestX` line or a findings.jsonl `"test": "TestX"`), the acceptance lists it as the
+  clause's test (B822); with none, the file carries a `# needs-test` marker and `tests: [needs-test]`:
+  write the red test and name it there before `block open`.
 - writes one signed `autopilot.found` row.
 
 A queued block joins the run's planned blocks at once, so an until-done grant does not end while it

@@ -40,12 +40,12 @@ import (
 var apfSources = []string{"gate", "land", "coder", "flaky", "handover", "review", "speed"}
 
 const (
-	apfDefaultCap   = 10
-	apfMaxTitle     = 200
-	apfMaxEvidence  = 4000
-	apfStateQueued  = "queued"
-	apfStateOwner   = "waits_for_owner"
-	apfAcceptanceID = "red-test-from-the-evidence"
+	apfDefaultCap  = 10
+	apfMaxTitle    = 200
+	apfMaxEvidence = 4000
+	apfStateQueued = "queued"
+	apfStateOwner  = "waits_for_owner"
+	apfNeedsTest   = "needs-test" // B822: the evidence names no test
 )
 
 // apfOwnerLabels: a label that keeps a finding for the owner, and its kind.
@@ -340,6 +340,22 @@ func apfFoundDir(home, runID string) string {
 	return filepath.Join(home, ".code-forge", "runs", runID, "found")
 }
 
+// apfEvidenceTest finds a Go test name in evidence: a `--- FAIL: TestX` line,
+// or a findings.jsonl row's "test":"TestX".
+var apfEvidenceTest = regexp.MustCompile(`(?m)(?:^\s*--- FAIL: |"test"\s*:\s*")(Test[A-Za-z0-9_]*)`)
+
+// apfEvidenceTests are the distinct test names the evidence names, in order
+// (B822).
+func apfEvidenceTests(evidence string) []string {
+	out := []string{}
+	for _, m := range apfEvidenceTest.FindAllStringSubmatch(evidence, -1) {
+		if !slices.Contains(out, m[1]) {
+			out = append(out, m[1])
+		}
+	}
+	return out
+}
+
 // apfWriteBrief writes the block's brief and its acceptance file.
 func apfWriteBrief(home, runID string, entry ledger.Object) (string, string, error) {
 	dir := apfFoundDir(home, runID)
@@ -357,9 +373,19 @@ func apfWriteBrief(home, runID string, entry ledger.Object) (string, string, err
 		"Found by autopilot in run " + runID + " (source " + autopilotText(entry.Get("source")) + ", from block " + from + ", finding " + finding + ", " + autopilotText(entry.Get("fingerprint")) + ").\n\n" +
 		"## Evidence\n\n```text\n" + strings.ReplaceAll(autopilotText(entry.Get("evidence")), "```", "'''") + "\n```\n\n" +
 		"## Task\n\nFix the cause this evidence shows. First write a test that reproduces the evidence and fails on the current code (red), then fix the code so it passes (green). Keep the change to this cause; report anything else you find as a `FOUND <title> :: <evidence>` line.\n\n" +
-		"## Acceptance\n\nA test reproduces the evidence: red before the fix, green after. Name that test in the acceptance file in place of `" + apfAcceptanceID + "` before `block open`.\n"
+		"## Acceptance\n\n"
 	clause, _ := ledger.Stringify("a test reproduces the evidence of "+finding+" ("+title+"): red before the fix, green after", false)
-	acceptance := "- clause: " + string(clause) + "\n  tests: [" + apfAcceptanceID + "]\n"
+	acceptance := "- clause: " + string(clause) + "\n"
+	// B822: the red test the evidence names goes in the acceptance file;
+	// with none, the needs-test marker stands in its place.
+	if tests := apfEvidenceTests(autopilotText(entry.Get("evidence"))); len(tests) > 0 {
+		brief += "The evidence names the red test: `" + strings.Join(tests, "`, `") + "`. It is in the acceptance file: it fails on the current code (red) and passes after the fix (green).\n"
+		acceptance += "  tests: [" + strings.Join(tests, ", ") + "]\n"
+	} else {
+		brief += "The evidence names no test (`" + apfNeedsTest + "`). Write a test that reproduces the evidence: red before the fix, green after. Name it in the acceptance file in place of `" + apfNeedsTest + "` before `block open`.\n"
+		acceptance = "# " + apfNeedsTest + ": the evidence names no test; write the red test and name it here before block open\n" +
+			acceptance + "  tests: [" + apfNeedsTest + "]\n"
+	}
 	briefPath := filepath.Join(dir, block+".brief.md")
 	acceptPath := filepath.Join(dir, block+".acceptance.yml")
 	if err := os.WriteFile(briefPath, []byte(brief), 0600); err != nil {
