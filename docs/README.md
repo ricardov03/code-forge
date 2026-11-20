@@ -30,6 +30,7 @@ then 5a. Going away while a run goes on? Read 5b. One small task, no plan? Read 
 | [reference/commands.md](reference/commands.md) | the generated command reference: per command its purpose, when to use it, flags, examples with real output, exit codes, the `--json` shape and related commands. [reference/commands.json](reference/commands.json) holds the same data for agents. Both come from the Go help table |
 | [native-engine.md](native-engine.md) | how the Go engine starts commands and refuses cases it does not serve yet |
 | [../CHANGELOG.md](../CHANGELOG.md) | what changed in each version; `## [Unreleased]` is the next one |
+| [release-0.27.0-audit.md](release-0.27.0-audit.md) | the 55 v0.27.0 entries, their documentation pages and code |
 | [reference/config.md](reference/config.md) | every `.code-forge.yml` key, its type and default. Generated from `schema/code-forge.schema.json` |
 | [outcomes.md](outcomes.md) | specialist result fields, approval statuses, and the outcome seal and check commands |
 | [pipelines.md](pipelines.md) | specialist steps, dependencies, and the pipeline status and next commands |

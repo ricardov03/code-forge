@@ -60,8 +60,9 @@ The source list is fixed before run start. `--accept-changed <file> --reason <te
 and is refused during an active grant; foreign changes remain `owned-conflict`.
 
 Fail fast with `forge block ready <id> --run <r> --preflight`. Land one block with `--merge` or
-several with `forge block land <id> <id>... --run <r>`; the merge gate uses the Go test selection,
-never the full suite. Add `--push --watch-ci` to push main and watch CI. With `land.require_ci: github`
+several with `forge block land <id> <id>... --run <r>`. In a Go project with package scope, the batch
+merge gate runs the full suite once; a tree already proved green by GitHub CI reuses that result
+(B980). Other merge gates use the test selection. Add `--push --watch-ci` to push main and watch CI. With `land.require_ci: github`
 a block lands only when GitHub CI is green for its own tip (B765); land pushes a stale tip to a new
 CI branch and draft PR, waits for CI (`land.ci_wait`, default 30m) and closes the block's CI PRs
 after the land (B796); a batch or single land skips the local test gate of a CI-proved tip (B910, B979) and waits for CI with no block lock held (B803). Retry queued lock and git
