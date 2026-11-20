@@ -157,6 +157,8 @@ To upgrade, run `npm install -g @codedology/code-forge@latest`, then `code-forge
 The reference lists every key, type, and default, including budget, escalation, coder floors,
 review risk, multimodel, concurrency, and timeout settings.
 `review.routes` sends big files to another model with its own timeout and second level.
+Oversized Markdown reviews split at headings, paragraphs and diff lines so a long section can
+be approved in bounded parts; every part must pass.
 See the [routing and fallback examples](docs/how-it-works.md) for a long-context reviewer above
 400 lines and fallback lists of `{provider, model}` objects (optional `effort`, never strings).
 `block open --kind code|docs|contract` overrides the kind inferred from filenames.

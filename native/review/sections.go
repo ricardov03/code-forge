@@ -342,7 +342,36 @@ func packSections(d *FileDiff, budget int, measure func(*FileDiff, []int) int) p
 		sections = append(sections, s)
 		open = nil
 	}
+	// Refine only groups that cannot fit alone; fitting headings retain their
+	// original packets. Each half keeps the heading key for moved-code hints.
+	var refine func(sectionGroup) ([]sectionGroup, bool)
+	refine = func(g sectionGroup) ([]sectionGroup, bool) {
+		if size([]sectionGroup{g}) <= budget {
+			return []sectionGroup{g}, true
+		}
+		parts, ok := splitSectionGroup(g)
+		if !ok {
+			return nil, false
+		}
+		out := []sectionGroup{}
+		for _, part := range parts {
+			more, ok := refine(part)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, more...)
+		}
+		return out, true
+	}
+	refined := []sectionGroup{}
 	for _, g := range groups {
+		parts, ok := refine(g)
+		if !ok {
+			return packResult{tokensIn: size([]sectionGroup{g}), section: g.heading}
+		}
+		refined = append(refined, parts...)
+	}
+	for _, g := range refined {
 		alone := size([]sectionGroup{g})
 		if alone > budget {
 			return packResult{tokensIn: alone, section: g.heading}
