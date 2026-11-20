@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -18,14 +17,18 @@ import (
 // Node printed and wrote, and (for the s2 prompt) records Node's packet.md
 // under testdata/b728.
 
+// b728StartDir is the working directory when the test binary starts: go test runs it in the
+// package's source directory. Read once at package init, before any fixture chdirs away.
+// B952: not runtime.Caller, which is a module path (no directory) under -trimpath.
+var b728StartDir, b728StartErr = os.Getwd()
+
 // b728Dir is this package's source directory (fixtures chdir away from it).
 func b728Dir(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("no caller")
+	if b728StartErr != nil {
+		t.Fatalf("no start directory: %v", b728StartErr)
 	}
-	return filepath.Dir(file)
+	return b728StartDir
 }
 
 // b728NodeGolden runs the Node CLI in the current directory with the test's
