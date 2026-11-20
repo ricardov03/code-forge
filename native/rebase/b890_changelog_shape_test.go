@@ -23,20 +23,32 @@ func b890Fixture(t *testing.T) (*openFixture, string) {
 	return f, head
 }
 
-func TestB890RebaseRefusesRepeatedChangelogHeading(t *testing.T) {
-	f, head := b890Fixture(t)
+func TestB890ChangelogShapeRefusesNewRepeat(t *testing.T) {
+	f := newOpenFixture(t, []string{"CHANGELOG.md"}, map[string]string{"CHANGELOG.md": b890Changelog})
+	f.write(f.tree, "CHANGELOG.md", withLine(b890Changelog, "- old fix (B1)\n\n", "### Added\n\n- a (A)\n\n### Added\n\n- b (A)\n\n"))
+	f.commit(f.tree, "A")
+	err := ChangelogShape(f.tree, f.base)
+	if err == nil || !strings.Contains(err.Error(), "### added") {
+		t.Fatalf("err = %v, want a refusal naming ### added", err)
+	}
+}
+
+// B813: the clean replay of b890Fixture folds the block's `### Added` into
+// main's, keeps every line and still records the rebase.
+func TestB813RebaseFoldsRepeatedChangelogHeading(t *testing.T) {
+	f, _ := b890Fixture(t)
 	_, err := RunPlain(f.home, "unit", "A")
-	if err == nil || !strings.Contains(err.Error(), "rebase-changelog-shape") || !strings.Contains(err.Error(), "### added") {
-		t.Fatalf("err = %v, want a rebase-changelog-shape refusal naming ### added", err)
+	f.requireRebased(err, []string{"CHANGELOG.md"})
+	got := f.read(f.tree, "CHANGELOG.md")
+	want := "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- main add (B2)\n- block add (A)\n\n### Fixed\n\n- old fix (B1)\n\n## [0.1.0]\n\n- first release\n"
+	if got != want {
+		t.Fatalf("CHANGELOG.md =\n%s\nwant:\n%s", got, want)
 	}
-	if got := f.git(f.tree, "rev-parse", "HEAD"); got != head {
-		t.Fatalf("HEAD = %s, want the entry HEAD %s", got, head)
+	if status := f.git(f.tree, "status", "--porcelain"); status != "" {
+		t.Fatalf("worktree not clean: %q", status)
 	}
-	if got := f.blockBase(); got != f.base {
-		t.Fatalf("base_sha = %v after the refusal, want %s", got, f.base)
-	}
-	if rows := f.rows(); len(rows) != 0 {
-		t.Fatalf("refusal wrote rows %v", rows)
+	if n := f.git(f.tree, "rev-list", "--count", "main..HEAD"); n != "1" {
+		t.Fatalf("replayed commits = %s, want 1 (the fold is in the block's commit)", n)
 	}
 }
 

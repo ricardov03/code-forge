@@ -174,8 +174,8 @@ before it and prints `block <id> not landed (after <culprit>)` for the rest.
 file is append-only (`land.auto_resolve`, default on): `CHANGELOG.md` bullets (one `### Kind`
 heading per kind, main's lines first), rows of the tables in `land.auto_resolve.tables` (default
 `docs/native-engine.md`; a row both sides only added sentences to keeps both, B890) and the
-`generated` files land re-generates; the same gates then run. A rebase whose `CHANGELOG.md`
-would repeat a `### Kind` in `[Unreleased]` is refused (B890).
+`generated` files land re-generates; the same gates then run. A clean merge or rebase whose `CHANGELOG.md` would repeat a `### Kind` in `[Unreleased]`
+folds the repeats into one heading per kind (B813); a repeat left after the fold is refused (B890).
 Any other conflict aborts with main unchanged, prints the files with their kinds and one `next:`
 step and writes a `land.conflict` ledger row. Two blocks that both add a `### Fixed` bullet land
 in one batch with no human.

@@ -49,13 +49,22 @@ func lcfMerge(dir, branch string, auto landmerge.Settings, wantTree string, env 
 		}
 		return gitx.WithEnv(dir, env, args...)
 	}
+	// B813: a clean merge that would repeat a CHANGELOG ### heading stops
+	// before its commit so the headings are folded first.
+	fold := landmerge.FoldNeeded(dir, gitx.ChildEnv(), branch)
 	args := []string{"merge", "--no-ff", "--no-edit", "--", branch}
+	if fold {
+		args = []string{"merge", "--no-ff", "--no-edit", "--no-commit", "--", branch}
+	}
 	if auto.Enabled {
 		args = append([]string{"-c", rebase.UnionOff}, args...)
 	}
 	output, err = run(args...)
 	if err == nil {
-		return nil, nil, output, nil
+		if !fold {
+			return nil, nil, output, nil
+		}
+		return lcfCommit(dir, nil, wantTree, output, run)
 	}
 	files, classifyErr := landmerge.Classify(dir, gitx.ChildEnv(), auto)
 	if classifyErr != nil || len(files) == 0 {
@@ -78,6 +87,16 @@ func lcfMerge(dir, branch string, auto landmerge.Settings, wantTree string, env 
 	if resolveErr != nil {
 		lcfAbort(dir)
 		return nil, nil, output, resolveErr
+	}
+	return lcfCommit(dir, resolved, wantTree, output, run)
+}
+
+// lcfCommit folds repeated CHANGELOG ### headings in the stopped merge (B813),
+// checks the result is wantTree when set, and commits the merge.
+func lcfCommit(dir string, resolved []landmerge.File, wantTree, output string, run func(...string) (string, error)) ([]landmerge.File, []landmerge.File, string, error) {
+	if _, err := landmerge.FoldIndex(dir, gitx.ChildEnv()); err != nil {
+		lcfAbort(dir)
+		return nil, nil, output, err
 	}
 	if wantTree != "" {
 		tree, treeErr := gitx.Run(dir, "write-tree")

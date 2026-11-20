@@ -278,8 +278,9 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 					return fmt.Errorf("block %s rebase failed: %s", block.id, landGitError(err, err.Error()))
 				}
 			}
-			// B890: the rebased CHANGELOG.md keeps one ### heading per kind.
-			if err := rebase.ChangelogShape(block.tree.Path, tip); err != nil {
+			// B890/B813: the rebased CHANGELOG.md keeps one ### heading per
+			// kind (repeats folded, then the shape checked).
+			if err := rebase.ChangelogFix(block.tree.Path, tip); err != nil {
 				_, _ = gitx.Run(block.tree.Path, "reset", "--hard", strings.TrimSpace(block.head))
 				return fmt.Errorf("block %s rebase failed: %s", block.id, err.Error())
 			}
