@@ -14,6 +14,11 @@ You approve the plan and keep control of budgets, permissions, and landing the r
 Projects may opt in to automatic clearance of identical rebased binaries with a frozen approved
 source list and the `rebase:accept-identical` grant. See [approved binary sources](docs/autopilot.md#scopes-and-the-fixed-deny-list).
 
+For short Go tasks, `code-forge lane start --cwd . --base <combine-tip> --run <id>`
+starts a brief run in a clean lane branch at the tip you supply. A lane holds at most
+two blocks, runs Go gates by test name, and closes blocks locally for the wave
+integrator. See [fast lanes](docs/native-engine.md#fast-lanes).
+
 ## Install
 
 Requires git, and npm to install (any Node that runs npm; code-forge itself never runs Node). Install the CLI with `npm install -g @codedology/code-forge`.

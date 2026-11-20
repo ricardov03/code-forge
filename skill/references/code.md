@@ -1,5 +1,18 @@
 # Code — brief, dispatch, re-measure, gate
 
+**Fast lanes (B1010a).** For a short Go task in an existing clean lane branch,
+`forge lane start --cwd . --base <combine-tip> --run <id>` pins the tip supplied
+by the integrator (main when no combine is open) and starts a brief run. Use
+`proof.isolation: export`. The run holds at most two distinct blocks, stopped or
+closed included. Review and close as usual, commit each block, then open the next
+on current lane HEAD; keep the recorded branch and history. Gates always use the
+existing changed-test names, including acceptance tests you list for functions
+you changed; `--full` and `--packages` refuse. Lane `block land` refuses: report
+the local branch, tip, worktree, run id, close/review outcomes, regeneration needs
+and leftovers to the wave integrator. Ready verification and automated combine
+remain B1010b; the integrator uses the existing ledger check, 5 MB object check,
+per-merge tests, one regeneration, red-tip fix handling and one CI.
+
 Small changes may use `block open <id> --kind light`. Close allows at most `light.max_files` owned changed files (default 5) and `light.max_lines` added plus removed lines (default 300), including new files. Auto ticket lines are unchanged. `gates run --block` runs the block's tests through `{test_files}`, ignoring the full-suite threshold; supply block tests and a test command containing that item. A close refusal `light-limits <files> files, <lines> lines` means the block outgrew this kind: the orchestrator stops the open attempt, then opens the same id with `block open <id> --kind code --attempt <n+1>` and the original base, ownership and acceptance.
 
 For website checks, configure `gates.custom` with up to 20 unique named `{name, argv, env?, evidence?}` gates, such as build, lighthouse and links. They run independently after the four fixed gates, including on light blocks and with `--changed`; custom argv refuses `{test_files}` and `{changed_files}`. The `gates-not-argv-array` error rule validates entries. Evidence paths/globs stay under cwd; after pass or fail, up to 200 sorted regular files are recorded as path, bytes and SHA-256 without copying content. Missing patterns are listed without failing the gate. `gate.done` carries custom summaries and, with `--run/--block`, the evidence map; red custom gates carry their name and `custom: true`.

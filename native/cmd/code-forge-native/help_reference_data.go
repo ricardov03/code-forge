@@ -582,6 +582,17 @@ var helpRefs = map[string]helpRef{
 		related:  []string{"keys list", "keys set"},
 		examples: []helpRefExample{helpRefEx("none", "keys remove jev")},
 	},
+	"lane": {
+		when:     "Start a short local lane, then give its closed blocks to the wave integrator.",
+		related:  []string{"lane start", "block close", "run status"},
+		examples: []helpRefExample{helpRefEx("none", "lane --help")},
+	},
+	"lane start": {
+		when:     "In a clean lane branch at the newest combine tip: pin the base and start a brief run with at most two blocks, named Go gates and no lane landing.",
+		flags:    map[string]string{"--base": "The newest combine tip (main when no combine is open); HEAD must equal this commit.", "--cwd": "The existing clean lane checkout; blocks use proof.isolation: export."},
+		related:  []string{"run status", "block open", "block close", "block land"},
+		examples: []helpRefExample{helpRefEx("none", "lane start --help")},
+	},
 	"land": {
 		when:     "Internal: the landing code block land uses. Run block land instead.",
 		related:  []string{"block land"},

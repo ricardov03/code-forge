@@ -349,7 +349,11 @@ func runBlockOpen(args []string) int {
 	} else if proof["runners"] != nil {
 		opts.GuardWhy = "proof.runners is set"
 	}
-	opts.BaseCheck = openBaseCICheck(cfg, blockString(record.Get("workspace")), safeStderr)
+	// A lane starts at the integrator's trusted combine tip and has no
+	// per-lane CI. In particular its second block's HEAD has no CI run.
+	if record.Get("lane") == nil {
+		opts.BaseCheck = openBaseCICheck(cfg, blockString(record.Get("workspace")), safeStderr)
+	}
 	result, err := blockopen.Open(opts)
 	if err != nil {
 		return failure(err)

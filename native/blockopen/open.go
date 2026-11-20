@@ -207,6 +207,11 @@ func Open(o Options) (result Result, err error) {
 	if err != nil {
 		return result, err
 	}
+	if head, err := laneOpenBase(before, o); err != nil {
+		return result, err
+	} else if head != "" {
+		o.Base, o.BaseExplicit = head, true
+	}
 	workspace := text(before.Get("workspace"))
 	prior := previous(before, o)
 	ref := o.Base
@@ -274,6 +279,11 @@ func Open(o Options) (result Result, err error) {
 	err = state.UpdateBlock(o.Home, o.Run, "", func(record, _ *ledger.Object) ([]ledger.Object, error) {
 		if !o.Safe(*record) {
 			return nil, blockops.ErrHandover
+		}
+		// Check again under the run lock: simultaneous opens cannot exceed
+		// two blocks, and the lane checkout cannot move during preparation.
+		if _, err := laneOpenBase(*record, o); err != nil {
+			return nil, err
 		}
 		blocks := object(record.Get("blocks"))
 		status := object(blocks.Get(o.ID)).Get("status")
@@ -477,6 +487,49 @@ func Open(o Options) (result Result, err error) {
 		}
 	}
 	return result, err
+}
+
+// B1010a: a lane uses the existing checkout, with one base per block (the
+// current lane tip). The run's original combine tip remains its ancestry
+// boundary; closed and stopped blocks still consume a lane slot.
+func laneOpenBase(record ledger.Object, o Options) (string, error) {
+	if record.Get("lane") == nil {
+		return "", nil
+	}
+	lane := object(record.Get("lane"))
+	base, branch := text(lane.Get("base")), text(lane.Get("branch"))
+	if base == "" || branch == "" || strings.HasPrefix(base, "-") {
+		return "", refusal("lane-policy", "lane base and branch are required")
+	}
+	blocks := object(record.Get("blocks"))
+	if blocks.Get(o.ID) == nil && len(blocks) >= 2 {
+		return "", refusal("lane-size", "a lane has at most two blocks; finish this lane and start another from the newest combine tip")
+	}
+	if o.Settings != nil {
+		return "", refusal("lane-worktree", "lane blocks use the lane checkout; use proof.isolation: export before lane start")
+	}
+	workspace := text(record.Get("workspace"))
+	current, err := gitx.Run(workspace, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil || strings.TrimSpace(current) != branch {
+		return "", refusal("lane-branch", "block open must stay on the recorded lane branch "+branch)
+	}
+	if _, err := gitx.Run(workspace, "merge-base", "--is-ancestor", base, "HEAD"); err != nil {
+		return "", refusal("lane-base", "current lane HEAD must descend from the pinned combine tip "+base)
+	}
+	head, err := Resolve(workspace, "HEAD")
+	if err != nil {
+		return "", err
+	}
+	if o.BaseExplicit {
+		given, err := Resolve(workspace, o.Base)
+		if err != nil {
+			return "", err
+		}
+		if given != head {
+			return "", refusal("lane-base", "block --base must equal current lane HEAD; keep the pinned combine tip and do not rebase")
+		}
+	}
+	return head, nil
 }
 
 // Claims are block.mjs signedClaims: the deduplicated paths of the block's
