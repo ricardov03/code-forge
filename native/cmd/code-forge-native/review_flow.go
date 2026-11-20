@@ -651,6 +651,24 @@ func (t rvfTotals) object() ledger.Object {
 		{Key: "with_findings", Value: t.withFindings}, {Key: "findings", Value: t.findings}, {Key: "stopped", Value: t.stopped}, {Key: "unavailable", Value: t.unavailable}}
 }
 
+// rvfVerdict is the review's ok (B970): true only when every file was
+// approved by a review of this run. A file the worker answered no_change
+// ("unchanged") had no reviewer session, so it was not reviewed and makes
+// ok false; notReviewed names those files.
+func rvfVerdict(outcomes []rvfOutcome) (bool, []string) {
+	ok := true
+	notReviewed := []string{}
+	for _, o := range outcomes {
+		if o.result != "approved" {
+			ok = false
+		}
+		if o.result == "unchanged" {
+			notReviewed = append(notReviewed, o.file)
+		}
+	}
+	return ok, notReviewed
+}
+
 func rvfUTF16Len(s string) int { return len(utf16.Encode([]rune(s))) }
 
 // rvfSortJS is Array.prototype.sort(): UTF-16 code unit order.
@@ -922,11 +940,9 @@ func (f *rvfFlow) flow(code *int) error {
 			return err
 		}
 	}
-	allOK := true
-	for _, o := range outcomes {
-		if o.result != "approved" && o.result != "unchanged" {
-			allOK = false
-		}
+	allOK, notReviewed := rvfVerdict(outcomes)
+	if len(notReviewed) > 0 {
+		f.note("not reviewed: no change against the base, so no reviewer read " + strings.Join(notReviewed, ", ") + "; ok is false")
 	}
 	*code = 1
 	if allOK {

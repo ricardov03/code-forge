@@ -68,6 +68,11 @@ each skip is named on stderr:
 
 No file left means `nothing to review` and exit 0. Nothing is started.
 
+A file you name with `--files` must have a change against `--base` in this tree (git lists it in
+`git diff --name-only <base>` or as untracked). If one does not, `review` prints
+`review: not reviewed: these files have no change against --base <sha> in this tree: <files>` and
+exits 1 before anything starts: a reviewer would have nothing to read, so it is never a pass.
+
 ### In a git worktree
 
 Run `review` in a linked git worktree (`git worktree add`) and it reviews that worktree's files
@@ -141,6 +146,7 @@ A file line is one of:
 | `N findings` | the reviewer raised findings that must be fixed; they are in the fix list |
 | `stopped: <reason>` | the review stopped: `timeout` (`--max` passed), `split_required` (the diff alone is over the packet budget), or a fix-loop stop |
 | `unavailable: <reason>` | no valid review came back (the provider failed, the answer failed the stub guard, the worker was down). Never approval |
+| `unchanged` | the worker found no change against the base, so no reviewer read the file. Not reviewed: `ok` is false and the exit code is 1 |
 
 `--json` prints one line: `{ok, base, base_from, run, block, files, skipped, totals}`. Each entry of
 `files` is `{file, result, reason, findings}`, where `result` is `approved`, `findings`,
@@ -150,8 +156,8 @@ A file line is one of:
 
 | Code | When |
 |---|---|
-| `0` | every file is approved, or there is nothing to review |
-| `1` | any file has findings, or is stopped, unavailable or timed out; or the run could not start |
+| `0` | every file is approved by a review of this run, or there is nothing to review |
+| `1` | any file has findings, or is stopped, unavailable, unchanged (not reviewed) or timed out; a named file has no change against `--base`; or the run could not start |
 | `2` | a usage error, not a git repository, a bad `--base`, a refused `--files` path, or no `.code-forge.yml` |
 
 ## What it does

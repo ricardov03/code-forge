@@ -9,6 +9,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Fixed
 
 - `review` and `review-file` in a linked git worktree review that worktree: a run started there (`run start --cwd .`, or the run `review` starts itself) keeps its worker and review queue in the worktree's `.code-forge/`, and `review --run <id>`, `review-file --run <id>`, `--wait` and `--wait-block` now look for the worker there, at the top of the run's workspace, instead of the main tree. Before, every file came back `unavailable: worker_down` although the worker was alive (B969)
+- `review` no longer passes a review that reviewed nothing: `ok` is true (exit 0) only when every file was approved by a review of this run. A file the worker answers `unchanged` (no change against the base, no reviewer session) makes `ok` false and exit 1 with `review: not reviewed: ...`, and a file named with `--files` that has no change against `--base` in this tree is refused before anything starts: `review: not reviewed: these files have no change against --base <sha> in this tree: <files>`, exit 1. Before, 28 such files came back `unchanged` with `ok:true` (B970)
 
 ## [0.26.0] — 2026-11-19
 
