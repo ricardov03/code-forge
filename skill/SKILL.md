@@ -124,3 +124,5 @@ Preview with `--dry-run`; it checks every guard and writes nothing. The verb
 passes only non-design open checks, writes `by: autopilot` rows and closes only
 when none remain. Never substitute the human verb. See
 [proof format](references/proof.md) and [autopilot](references/autopilot.md).
+
+Evidence passes are listed separately as `auto_passed` by `run status` and `run human-checks list`. Use `run human-checks audit --run <r> [--json]` to re-hash proof and evidence. Only the owner may run `run human-checks reopen --run <r> --block <id> [--clause C<n>] --note "<reason>"`: terminal confirmation, active run, no active grant, no `--yes`. Reopened checks hold `run end`, including for landed blocks.

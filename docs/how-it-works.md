@@ -1912,3 +1912,5 @@ without writes. Partial passes preserve remaining owner checks. See
 [Auto-pass on green evidence](autopilot.md#auto-pass-on-green-evidence) for the
 proof header and path restrictions. Every pass is signed as autopilot, with the
 proof and evidence hashes; the human verbs retain their guards.
+
+Autopilot evidence passes appear separately in `run status` and `run human-checks list` (`auto_passed`), the binnacle, and the full log. `run human-checks audit --run <r> [--json]` re-hashes each signed pass’s proof and evidence (`ok`, `changed`, `missing`). The owner can revoke one clause, or all passed autopilot clauses of a block, with `run human-checks reopen --run <r> --block <id> [--clause C<n>] --note "<reason>"`. This needs an active run, terminal confirmation and no active grant; there is no `--yes`. Its signed `human_check.reopened` rows make the checks open again. An unlanded closed block returns to `awaiting_human_check`; a landed block stays closed and needs a stop or fix. Open checks hold `run end` in either case. Reports mark autopilot completions `autoPassed: true` with `humanWaitMs: null`.

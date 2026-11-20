@@ -459,6 +459,11 @@ func runStatusPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 	out.Set("workers", pins)
 	noLive := record.Get("status") != "ended" && rwlNoLive(workers, hasWorkers, record.Get("worker"))
 	out.Set("blocks", blocks)
+	if passes, err := rhcPasses(home, runID, record); err != nil {
+		return nil, hRunLedger
+	} else if len(passes) > 0 {
+		out.Set("auto_passed", passes)
+	}
 	if runHas(record, "orphans") {
 		out.Set("orphans", record.Get("orphans"))
 	}

@@ -182,3 +182,5 @@ rows. `prover` must differ from all recorded coder session ids unless the owner
 set `require_separate_prover: false` before run start. No recorded coder ids means
 an explicit `coder_sessions: []`. See the header example in
 [the guide](../../docs/autopilot.md#auto-pass-on-green-evidence).
+
+`run human-checks audit --run <r> [--json]` re-hashes the proof file and every evidence file recorded in a signed autopilot pass. Relative evidence paths resolve beside the proof file. Each pass reports `ok`, `changed`, or `missing`, with per-evidence statuses in JSON; historical passes remain auditable after owner revocation. Use the binnacle/full log’s **Passed by autopilot — please audit** list to inspect paths and hashes. The owner may reopen a suspect clause at a terminal after stopping the grant.

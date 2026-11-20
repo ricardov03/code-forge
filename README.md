@@ -217,3 +217,5 @@ Owners may opt in before `run start` to evidence-based autopilot passes for devi
 checks. With `human-pass:evidence`, use `block auto-pass <id> --run <r> --proof
 <file> --note <text>`; design approvals stay owner-only. See
 [Auto-pass on green evidence](docs/autopilot.md#auto-pass-on-green-evidence).
+
+Autopilot evidence passes stay visible for owner audit. Use `code-forge run human-checks audit --run <r> [--json]` to verify the recorded proof and evidence hashes, and `run human-checks reopen --run <r> --block <id> [--clause C<n>] --note "<reason>"` at your terminal to revoke a pass after stopping the grant.

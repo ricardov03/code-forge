@@ -77,3 +77,5 @@ prover session, then records `by: autopilot` and `to_owner: true`. Preview with
 `--dry-run [--json]`; repeated `--clause C<n>` selectors limit the pass. Without
 selectors device checks pass and design checks remain. `design:approve` stays
 fixed-denied. See [the full guide](../../docs/autopilot.md#auto-pass-on-green-evidence).
+
+Audit signed evidence passes with `code-forge run human-checks audit --run <r> [--json]`: `ok`, `changed`, or `missing` covers the proof plus recorded evidence hashes. Status/list expose `auto_passed`; the binnacle and full log add **Passed by autopilot — please audit** with proof paths, hashes, and owner revoke commands. Stop the grant before the owner uses `run human-checks reopen --run <r> --block <id> [--clause C<n>] --note "<reason>"`. This needs an active run and terminal confirmation, has no `--yes`, and holds run end until the reopened check is resolved.

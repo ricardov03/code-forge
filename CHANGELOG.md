@@ -64,6 +64,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - `human-pass:evidence` and Go-only `block auto-pass` clear non-design checks under a frozen owner opt-in and active signed grant, after proof/evidence hashes, separate prover and green machine checks are verified again under the run lock; partial passes preserve owner checks and all records identify autopilot (B1012).
 
 - Add the off-by-default, snapshot-frozen `human_check.autopilot` configuration and explicit `approval: design|device` human-check markers; init, schemas and config fix preserve the owner's policy (B1011).
+- Owner audit and reopen for signed autopilot evidence passes, distinct status/log attribution and report `autoPassed` without human wait (B1013).
 
 - `code-forge init` writes the new keys with their defaults after `autonomy`: `land.require_main_ci: false`, `autopilot.step_budgets` (`margin: 0.5`, `min_samples: 5`) and `release.max_blocks: 8`; a re-run keeps values already set, and `config fix` leaves them as they are.
 - `sh scripts/cf-release.sh regen-docs` regenerates every generated doc and recorded pin once, in order: `docs/reference/commands.md`/`commands.json`, `docs/reference/config.md`, then one `go test` run recording the command summaries, the B801 doc example pins and the init goldens; it stops at the first failing step. `regen-docs --check` runs each step in check mode, lists every stale one and exits 1 (B959)

@@ -384,3 +384,5 @@ cleared closes the block and emits its done/hook; partial passes stay awaiting.
 `approval: design` and excluded waits_for are always owner-only. Unmarked D-prefixed
 blocks and design/diseño/board/tablero/mock clauses need explicit `approval: device`
 to pass automatically. The coder never runs `human-pass`.
+
+Owner revocation: `code-forge run human-checks reopen --run <r> --block <id> [--clause C<n>] --note "<reason>" [--json]` revokes signed autopilot clause passes (all passed clauses when omitted). It requires an active run, TTY confirmation and no active grant, with no `--yes`. An unlanded closed block returns to `awaiting_human_check`; landed blocks stay closed but their checks reopen, so stop or fix the block. A later verified clear can resolve the check again. Never run reopen for the owner.

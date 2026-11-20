@@ -825,3 +825,5 @@ Design approvals remain owner-only. See [the opt-in example](../examples/autopas
 proof/header/evidence hashes, design exclusions, review/gate/transcript checks,
 authoritative run-lock rechecks, signed per-clause clears and final done/hook.
 `autopilot start` validates `human-pass:evidence` against the frozen snapshot.
+
+`run human-checks audit --run <r> [--json]` and owner-only `run human-checks reopen --run <r> --block <id> [--clause C<n>] --note <text> [--json]` run in Go. Reopen requires a terminal and no active grant, writes signed revocation rows, and reopens the ledger check even after land. Audit verifies the recorded proof and evidence SHA-256. Run status/list, reports, the binnacle and full log distinguish autopilot passes.
