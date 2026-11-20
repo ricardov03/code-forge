@@ -8,9 +8,10 @@ import (
 )
 
 // b809LogHook is a foreign reference-transaction hook: it logs its argument
-// and every stdin line to $B809_LOG, then exits with $B809_EXIT_<state>
+// and every stdin line to $B809_LOG ("foreign <state>" on stderr), then exits with $B809_EXIT_<state>
 // (default 0).
 const b809LogHook = `#!/bin/sh
+echo "foreign $1" >&2
 while read -r old new ref; do echo "$1 $ref" >> "$B809_LOG"; done
 eval "code=\${B809_EXIT_$1:-0}"
 exit $code
@@ -29,6 +30,16 @@ func b809Repo(t *testing.T) (root, repo, next string) {
 	must(t, repo, "config", "user.email", "t@example.com")
 	must(t, repo, "commit", "-q", "--allow-empty", "-m", "base")
 	return root, repo, ""
+}
+
+// b809GuardFirst checks the guard's refusal comes before the foreign hook's
+// "prepared" run in git's output: the guard runs first.
+func b809GuardFirst(t *testing.T, out string) {
+	t.Helper()
+	guard, foreign := strings.Index(out, "refused to move"), strings.Index(out, "foreign prepared")
+	if guard < 0 || foreign < 0 || guard > foreign {
+		t.Fatalf("the guard did not run before the foreign hook:\n%s", out)
+	}
 }
 
 func b809Log(t *testing.T, path string) string {
@@ -74,6 +85,7 @@ func TestB809ForeignHookChained(t *testing.T) {
 	if l := b809Log(t, log); !strings.Contains(l, "prepared refs/heads/main\n") {
 		t.Fatalf("foreign hook did not run after the refusal, with the same stdin: %q", l)
 	}
+	b809GuardFirst(t, out)
 	// Own work in the coder worktree and any move in the main checkout pass
 	// both hooks.
 	must(t, tree, "commit", "-q", "--allow-empty", "-m", "coder work")
@@ -161,6 +173,7 @@ func TestB809HuskyHooksPathChained(t *testing.T) {
 	if l := b809Log(t, log); !strings.Contains(l, "prepared refs/heads/main\n") {
 		t.Fatalf("husky reference-transaction did not run: %q", l)
 	}
+	b809GuardFirst(t, out)
 	// The husky pre-commit still runs in the coder worktree, from there.
 	must(t, tree, "commit", "-q", "--allow-empty", "-m", "coder work")
 	realTree, _ := filepath.EvalSymlinks(tree)
@@ -214,5 +227,37 @@ func TestB809DoctorShowsChainedGuard(t *testing.T) {
 	}
 	if status, detail := State(repo2); status != "OK" || !strings.HasPrefix(detail, "on: per-worktree hooks (core.hooksPath ") || !strings.HasSuffix(detail, "/.husky/_ is in a work tree; its reference-transaction runs after the guard); 1 coder worktree(s) guarded") {
 		t.Fatalf("husky state = %s %s", status, detail)
+	}
+}
+
+// A foreign hook that replaces the guard after one was already kept is not
+// renamed over the kept one: the install refuses and both hooks stay.
+func TestB809SecondForeignHookKeepsTheFirst(t *testing.T) {
+	root, repo, _ := b809Repo(t)
+	hook := filepath.Join(repo, ".git", "hooks", HookName)
+	if err := os.WriteFile(hook, []byte(b809LogHook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tree := filepath.Join(root, "wt", "B1")
+	must(t, repo, "worktree", "add", "-q", "-b", "forge/r1/B1", tree, "main")
+	if _, err := Install(tree, "main", "forge/r1/B1", "forge/{run}/{block}"); err != nil {
+		t.Fatal(err)
+	}
+	second := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(hook, []byte(second), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Install(tree, "main", "forge/r1/B1", "forge/{run}/{block}")
+	if err == nil || !strings.Contains(err.Error(), "already holds the one kept before") {
+		t.Fatalf("install over a second foreign hook: %v", err)
+	}
+	if data, _ := os.ReadFile(hook + b809Chained); string(data) != b809LogHook {
+		t.Fatalf("the first kept hook changed: %q", data)
+	}
+	if data, _ := os.ReadFile(hook); string(data) != second {
+		t.Fatalf("the second foreign hook changed: %q", data)
+	}
+	if status, detail := State(repo); status != "WARN" || !strings.Contains(detail, "already holds the one kept before") {
+		t.Fatalf("state = %s %s", status, detail)
 	}
 }

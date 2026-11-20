@@ -286,6 +286,10 @@ func installShared(hooks string) (string, error) {
 		return hook, err
 	}
 	if _, err := os.Lstat(hook); err == nil && !Installed(hook) {
+		if _, err := os.Lstat(chained); err == nil {
+			// Never drop the hook kept before: a rename would replace it.
+			return hook, fmt.Errorf("%s holds another hook and %s already holds the one kept before; join them into one hook by hand, then open a block again; the guard is off", hook, chained)
+		}
 		if err := os.Rename(hook, chained); err != nil {
 			return hook, fmt.Errorf("cannot keep the foreign hook %s as %s: %w", hook, chained, err)
 		}
