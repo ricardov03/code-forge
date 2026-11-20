@@ -123,20 +123,7 @@ func TestB611InitWizardJevAndDoctorMatchNode(t *testing.T) {
 			b611Served(t, home, code)
 			log, files := b528Collect(t, home, cwd, repo)
 			got := b528Golden{Code: code, Transcript: b528Mask(transcript, home, cwd, repo), Log: log, Files: files}
-			if got.Code != want.Code {
-				t.Errorf("exit %d, Node %d", got.Code, want.Code)
-			}
-			if got.Transcript != want.Transcript {
-				t.Errorf("transcript differs from Node:\n%s", b528Diff(want.Transcript, got.Transcript))
-			}
-			if got.Log != want.Log {
-				t.Errorf("init log differs from Node:\n%s", b528Diff(want.Log, got.Log))
-			}
-			want.Files = b552SkillRows(t, want.Files, "")
-			want.Files = b607LinkVersion(t, want.Files)
-			if got.Files != want.Files {
-				t.Errorf("files differ from Node:\n%s", b528Diff(want.Files, got.Files))
-			}
+			b989WizardCheck(t, b611GoldenFile(c.name), want, got)
 			// a pasted key reaches the key store only
 			if strings.Contains(got.Transcript, b611Pasted) || strings.Contains(got.Log, b611Pasted) {
 				t.Error("the pasted key was shown or logged")

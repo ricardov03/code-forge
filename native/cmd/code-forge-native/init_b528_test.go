@@ -208,8 +208,11 @@ func b528Run(t *testing.T, cwd string, keys []string, args ...string) (int, stri
 	return code, string(data)
 }
 
+// b528Dir holds the b528 goldens (a var so TestB989 can point it at a copy).
+var b528Dir = filepath.Join("testdata", "b528")
+
 func b528GoldenFile(name string) string {
-	return filepath.Join("testdata", "b528", name+".json")
+	return filepath.Join(b528Dir, name+".json")
 }
 
 // TestB528InitWizardMatchesNode: each recorded Node run, replayed in Go.
@@ -236,20 +239,7 @@ func TestB528InitWizardMatchesNode(t *testing.T) {
 			}
 			log, files := b528Collect(t, home, cwd, repo)
 			got := b528Golden{Code: code, Transcript: b528Mask(transcript, home, cwd, repo), Log: log, Files: files}
-			if got.Code != want.Code {
-				t.Errorf("exit %d, Node %d", got.Code, want.Code)
-			}
-			if got.Transcript != want.Transcript {
-				t.Errorf("transcript differs from Node:\n%s", b528Diff(want.Transcript, got.Transcript))
-			}
-			if got.Log != want.Log {
-				t.Errorf("init log differs from Node:\n%s", b528Diff(want.Log, got.Log))
-			}
-			want.Files = b552SkillRows(t, want.Files, "")
-			want.Files = b607LinkVersion(t, want.Files)
-			if got.Files != want.Files {
-				t.Errorf("files differ from Node:\n%s", b528Diff(want.Files, got.Files))
-			}
+			b989WizardCheck(t, b528GoldenFile(c.name), want, got)
 		})
 	}
 }

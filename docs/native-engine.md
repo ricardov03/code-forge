@@ -688,6 +688,8 @@ sh scripts/cf-release.sh build-native --host
 are Go (`native/cmd/cf-release`) since B760, which deleted `scripts/build-native.mjs`,
 `scripts/gen-config-doc.mjs` and `scripts/gen-site-data.mjs`.
 
+When a config default changes what `code-forge init` writes, the init goldens (`native/cmd/code-forge-native/testdata/b528`, `b611`, `b703`, `b726` and `b762`) are recorded again from the Go output in one run (B989): `cd native && CODE_FORGE_INIT_GOLDEN_RECORD=1 go test ./cmd/code-forge-native -run '^(TestB528InitWizardMatchesNode|TestB611InitWizardJevAndDoctorMatchNode|TestB703InitWizardMatchesNode|TestB726InitWizardMatchesNode|TestB762.*Golden)$' -count=1`. Only a golden that differs is written (a run on an unchanged tree changes nothing) and a `b762` golden of no case is removed; read the diff before you commit it. A failing golden test names the switch.
+
 ## Release tools (B570)
 
 The maintainer commands `npm run release`, `release:site`, `docs-block` and `changelog` run a
