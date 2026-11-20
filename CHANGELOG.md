@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.28.0] — 2026-11-20
+
 ### Changed
 
 - Clarify the one Go flaky-test retry: a single `go test -count=3` command executes each failed top-level test three times, and all three must pass ([B958 docs](docs/native-engine.md#flaky-test-limit-per-run-b958); B1003).
