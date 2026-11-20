@@ -160,6 +160,8 @@ Regenerate the reference with `sh scripts/cf-release.sh config-doc`; add `--chec
 `sh scripts/cf-release.sh regen-docs` regenerates every generated doc and recorded test pin once
 (commands reference, config reference, command summaries, doc example pins, init goldens);
 `regen-docs --check` lists the stale ones and exits 1.
+With `land.regenerate: [sh scripts/cf-release.sh regen-docs]` a batch land runs it once on the combined
+tip before the push and commits the result (B959b).
 
 ## Supported agents
 

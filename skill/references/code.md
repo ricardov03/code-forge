@@ -227,6 +227,9 @@ retried with a backoff, 3 tries in all; then land refuses at `ci` with gh's mess
 tries)` and a `next:` line. B981: `pr create`/`pr close` retry too, after first checking whether
 the failed call took effect (no second PR, no second close); a full `head:` search page falls back to
 `pr list --head` per exact CI branch name.
+`land.regenerate: [sh scripts/cf-release.sh regen-docs]` (B959b) makes a batch land run those
+commands once on the combined tip after the merge and before the push, and commit what changed as
+one commit on main; a failing command stops the land at `regenerate`, unpushed.
 `land.require_main_ci: true` (B962) also refuses while the
 newest completed push run of the base branch is red, unless each of its failing tests matches a
 known-red line of a named block (the landing fix block may cover it).

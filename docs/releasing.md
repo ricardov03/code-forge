@@ -185,12 +185,18 @@ repository's history and files.
 
 Describe every user-visible `[Unreleased]` change in the page that explains the feature.
 Remove stale instructions. Keep version history in CHANGELOG, not README.
-Run both generated-doc checks:
+Run the generated-doc check:
 
 ```sh
-sh scripts/cf-release.sh config-doc --check
-sh scripts/gen-commands-doc.sh --check
+sh scripts/cf-release.sh regen-docs --check
 ```
+
+It checks the commands reference, the config reference, the command summaries, the doc example
+pins and the init goldens, and lists each stale one. `sh scripts/cf-release.sh regen-docs`
+regenerates all of them once; commit the result as one commit. A batch land can do this by itself
+on the combined tip: set `land.regenerate: [sh scripts/cf-release.sh regen-docs]` and `block land
+B1 B2 ...` runs it after the merge and before the push, committing what changed as one commit on
+main (B959b).
 
 List the site pages from the brief in the final report so a person can check them.
 If the site folder is absent, report that instead. Commit the docs so the tree is clean, then run:

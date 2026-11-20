@@ -12,7 +12,7 @@ import (
 // keeps values a config already sets.
 func TestW1bInitWritesNewLaneKeys(t *testing.T) {
 	side := b527Go(t, []string{"--no-interaction", "--skip-doctor", "--no-jev"}, nil)
-	want := "\nland:\n  require_main_ci: false\nautopilot:\n  step_budgets:\n    margin: 0.5\n    min_samples: 5\nrelease:\n  max_blocks: 8\n"
+	want := "\nland:\n  require_main_ci: false\n  regenerate: []\nautopilot:\n  step_budgets:\n    margin: 0.5\n    min_samples: 5\nrelease:\n  max_blocks: 8\n"
 	if cfg := b939Config(t, side); !strings.Contains(cfg, want) {
 		t.Fatalf("the new config lacks the land, autopilot and release defaults:\n%s", cfg)
 	}

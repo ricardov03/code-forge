@@ -999,6 +999,7 @@ func initGenerated(v initValues, ctx initCtx, jevRef string) ledger.Object {
 
 // initNewKeys is the land, autopilot and release part of a new config (owner
 // rule: a new key goes into the default config): land.require_main_ci (B962),
+// land.regenerate (B959b, an empty list),
 // autopilot.step_budgets.margin and .min_samples (B950) and release.max_blocks
 // (B951), each with its default. A value already in the config stays; a
 // section the config holds as something other than a map is left alone.
@@ -1011,7 +1012,7 @@ func initNewKeys(ex ledger.Object) ledger.Object {
 		name string
 		keys []key
 	}{
-		{"land", []key{{[]string{"require_main_ci"}, false}}},
+		{"land", []key{{[]string{"require_main_ci"}, false}, {[]string{"regenerate"}, []any{}}}},
 		{"autopilot", []key{{[]string{"step_budgets", "margin"}, stepbudget.DefaultMargin}, {[]string{"step_budgets", "min_samples"}, float64(stepbudget.DefaultMinSamples)}}},
 		{"release", []key{{[]string{"max_blocks"}, float64(releasecheck.DefaultMaxBlocks)}}},
 	}

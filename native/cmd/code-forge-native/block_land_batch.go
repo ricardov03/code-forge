@@ -591,6 +591,14 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 	if len(retry) > 0 && code == 0 {
 		return landBatchNextRound(flags, home, run, retry, round, landedIDs)
 	}
+	// B959b: land.regenerate runs once on the combined tip, before the push.
+	if first, err := landBatchRegenerate(home, run, landedIDs, json); err != nil {
+		if first != "" {
+			stoppedID = first
+		}
+		step = "regenerate"
+		return stop(err.Error())
+	}
 	// B430: push once after the block locks and the run lock are released
 	// (B803: once after the last CI round).
 	if pushed, err := landBatchPush(flags, home, run, landedIDs); err != nil {
