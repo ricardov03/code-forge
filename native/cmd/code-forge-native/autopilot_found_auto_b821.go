@@ -143,10 +143,12 @@ func apfArgRun(args []string) string {
 
 // apfFoundHandover: a refused command (hand-over) that names a run (B821).
 // The refusal's own stderr line stays as it is: the outcome goes nowhere,
-// the finding is in the run (autopilot found --list, the binnacle).
+// the finding is in the run (autopilot found --list, the binnacle). An
+// `autopilot` verb's own hand-over records nothing: it writes no state before
+// handing over (B536, B732), and its refusal is the owner's to read.
 func apfFoundHandover(args []string, reason string) {
 	runID := apfArgRun(args)
-	if runID == "" {
+	if runID == "" || (len(args) > 0 && args[0] == "autopilot") {
 		return
 	}
 	home, err := os.UserHomeDir()

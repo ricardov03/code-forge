@@ -93,6 +93,12 @@ func TestB821HandoverRecordsFound(t *testing.T) {
 		!strings.HasPrefix(autopilotText(found[0].Get("title")), "code-forge block close hands over: ") || found[0].Get("seen") != float64(2) {
 		t.Fatalf("found = %v", found)
 	}
+	os.Stderr, _ = os.Open(os.DevNull)
+	refuseUnported([]string{"autopilot", "status", "--run", "r-test"}, hUnrouted)
+	os.Stderr = stderr
+	if found := b821Found(t, f.home, "r-test"); len(found) != 1 || found[0].Get("seen") != float64(2) {
+		t.Fatalf("an autopilot verb's hand-over wrote a finding: %v", found)
+	}
 	g := b800Fixture(t, map[string]any{}) // no grant
 	os.Stderr, _ = os.Open(os.DevNull)
 	refuseUnported([]string{"block", "close", "B1", "--run", "r-test"}, hUnrouted)
