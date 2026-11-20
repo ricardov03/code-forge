@@ -12,6 +12,10 @@ waits on a second real consumer (plan §10.4, Q17).
 - `code-forge init` writes `gates.ram_tmp` (the default mode) into a new `.code-forge.yml`, after `gates.format`; a re-run keeps the value already set (B939).
 - `gates.ram_tmp_mb` sets the size in MB of the RAM disk the gates make (default 2048, 64 to 65536); `code-forge init` writes it after `gates.ram_tmp` and keeps a value already set, and `config fix` keeps it. A mounted `/Volumes/cf-tmp` keeps its size until it is detached (B941).
 
+### Changed
+
+- The doctor `state-ignored` row asks git twice instead of three times: the tracked-files check is one `git ls-files --full-name` with a `:(top)` pathspec, with no separate `rev-parse --show-toplevel`; the row text is the same (also used by init and upgrade) (B898).
+
 ## [0.26.0] — 2026-11-19
 
 ### Changed

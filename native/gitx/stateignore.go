@@ -109,13 +109,11 @@ func StateVisible(dir string) (visible, known bool) {
 }
 
 // StateTracked lists the paths git tracks under any .code-forge/ folder of
-// dir's repository (repo-relative). nil outside a git work tree.
+// dir's repository (repo-relative). nil outside a git work tree. One git
+// call: the :(top) pathspec and --full-name cover the whole repository from
+// any sub-directory, so the top is not asked first (B898).
 func StateTracked(dir string) []string {
-	top, err := RepoTop(dir)
-	if err != nil {
-		return nil
-	}
-	out, err := Run(top, "ls-files", "-z", "--", ":(glob)**/"+StateFolder+"/**")
+	out, err := Run(dir, "ls-files", "-z", "--full-name", "--", ":(top,glob)**/"+StateFolder+"/**")
 	if err != nil {
 		return nil
 	}
