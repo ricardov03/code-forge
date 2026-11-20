@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/ricardov03/code-forge/native/diskguard"
 )
 
 // TestMain gives the whole test binary its own TMPDIR (B753). Tests run verbs
@@ -28,6 +30,11 @@ func TestMain(m *testing.M) {
 const b753TmpEnv = "CODE_FORGE_B753_TEST_TMPDIR"
 
 func b753Main(m *testing.M) int {
+	// B961: the disk guard reads this instead of the machine's disk, so no
+	// test depends on how full the disk is; a B961 test sets its own value.
+	if os.Getenv(diskguard.TestFreeEnv) == "" {
+		_ = os.Setenv(diskguard.TestFreeEnv, "1000")
+	}
 	if os.Getenv(b753TmpEnv) != "" {
 		return m.Run()
 	}

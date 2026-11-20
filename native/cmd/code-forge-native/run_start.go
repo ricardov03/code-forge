@@ -598,6 +598,10 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 			runID = "r-" + now.Format("20060102-150405") + "-" + hex.EncodeToString(suffix)
 		}
 		fail := func(msg string) int { return runReport(o, "start", &runFail{msg, false}) }
+		// B961: no run on a full disk.
+		if refusal := diskGuard(snap.Map, workspace, safeStderr); refusal != "" {
+			return fail(refusal)
+		}
 		if !runIDPattern.MatchString(runID) {
 			return fail("run id must match /^[a-z0-9][a-z0-9-]{0,63}$/")
 		}
