@@ -2,6 +2,7 @@ package gates
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -24,8 +25,27 @@ const (
 )
 
 // FlakyLoad is the 1-minute load average when a flaky test failed (a test
-// seam; testslot's probe in production).
-var FlakyLoad = func() float64 { return testslot.SystemResources().Load1 }
+// seam; testslot's probe in production). B987: CODE_FORGE_FLAKY_LOAD, a
+// number >= 0, stands in for the probe, so a test that runs `gates run` as
+// a process can prove the B973 load cap end to end; an unset or unreadable
+// value uses the probe.
+var FlakyLoad = func() float64 {
+	if load, ok := flakyLoadEnv(); ok {
+		return load
+	}
+	return testslot.SystemResources().Load1
+}
+
+// FlakyLoadEnv names the B987 load stand-in.
+const FlakyLoadEnv = "CODE_FORGE_FLAKY_LOAD"
+
+func flakyLoadEnv() (float64, bool) {
+	load, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv(FlakyLoadEnv)), 64)
+	if err != nil || load < 0 || math.IsInf(load, 0) || math.IsNaN(load) {
+		return 0, false
+	}
+	return load, true
+}
 
 // FlakyCores is the machine's core count (a test seam).
 var FlakyCores = runtime.NumCPU
