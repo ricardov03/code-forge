@@ -491,7 +491,72 @@
      "S1.F1"
     ]
    },
-   "script": []
+   "script": [
+    {
+     "status": "ok",
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": "$RESOLVE",
+      "needs_file": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 300
+     }
+    },
+    {
+     "status": "ok",
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": "$RESOLVE",
+      "needs_file": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 300
+     }
+    },
+    {
+     "status": "ok",
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": "$RESOLVE",
+      "needs_file": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 300
+     }
+    },
+    {
+     "status": "ok",
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": "$RESOLVE",
+      "needs_file": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 300
+     }
+    }
+   ]
   },
   {
    "name": "late-block-two-hunks",
@@ -823,7 +888,7 @@
      "exit_code": 0,
      "answer": {
       "passed": true,
-      "summary": "s",
+      "summary": "B1019 part reviewed",
       "reviewed_hunks": "$HUNKS",
       "findings": [],
       "resolved": "$RESOLVE",
@@ -839,7 +904,7 @@
      "exit_code": 0,
      "answer": {
       "passed": true,
-      "summary": "s",
+      "summary": "B1019 part reviewed",
       "reviewed_hunks": "$HUNKS",
       "findings": [],
       "resolved": "$RESOLVE",
@@ -855,7 +920,39 @@
      "exit_code": 0,
      "answer": {
       "passed": true,
-      "summary": "s",
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": "$RESOLVE",
+      "needs_file": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 300
+     }
+    },
+    {
+     "status": "ok",
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": "$RESOLVE",
+      "needs_file": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 300
+     }
+    },
+    {
+     "status": "ok",
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
       "reviewed_hunks": "$HUNKS",
       "findings": [],
       "resolved": "$RESOLVE",
@@ -1058,7 +1155,72 @@
      "B1"
     ]
    },
-   "script": []
+   "script": [
+    {
+     "status": "ok",
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": "$RESOLVE",
+      "needs_file": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 300
+     }
+    },
+    {
+     "status": "ok",
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": "$RESOLVE",
+      "needs_file": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 300
+     }
+    },
+    {
+     "status": "ok",
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": "$RESOLVE",
+      "needs_file": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 300
+     }
+    },
+    {
+     "status": "ok",
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": "$RESOLVE",
+      "needs_file": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 300
+     }
+    }
+   ]
   },
   {
    "name": "repeated-section-finding",

@@ -836,7 +836,76 @@
      }
     }
    },
-   "script": []
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
   },
   {
    "name": "md-moved-dual-too-big",
@@ -869,7 +938,212 @@
      }
     }
    },
-   "script": []
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "B1019 part reviewed",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
   }
  ]
 }

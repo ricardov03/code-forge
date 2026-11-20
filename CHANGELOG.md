@@ -17,6 +17,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- Record the eight former oversized Markdown stops from Go as bounded, approvable review/recheck parts; retain every other golden case unchanged (c28b, B1019).
+
 - Refresh close usage expectations for the supported --landed <sha> option (c28b).
 
 - Keep the unknown-verb regression aligned with the intended lane command (c28b).

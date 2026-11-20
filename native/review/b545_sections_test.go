@@ -8,15 +8,11 @@ import (
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
-// TestB545MarkdownSectionsMatchNode: a Markdown file whose diff alone is over
-// the packet budget is reviewed section by section like Node's reviewFile
-// (B54): headings outside front matter and fences, hunks cut at headings,
-// groups packed within the budget, one session per section with its
-// review.plan row, S<i>.<id> findings, S<i>: summaries, the first unavailable
-// section ending the file, a group alone over the budget split_required with
-// its heading, a CRLF file, a new file and a quick step-up. Result, ledger
-// rows, packet text and the work dir match Node byte for byte (goldens:
-// Node's reviewFile on the same repository).
+// TestB545MarkdownSectionsMatchNode checks the original section cases and
+// B1019 Go behaviour for formerly oversized sections: split them into bounded
+// paragraph/diff-line parts and approve only after every part passes. Only
+// those former split_required goldens are recorded from Go; the remaining
+// results, rows, packets and work directories retain their Node recordings.
 func TestB545MarkdownSectionsMatchNode(t *testing.T) {
 	b545MatchNode(t, "b545_md_fixture.json", "b545_md_golden.json")
 }

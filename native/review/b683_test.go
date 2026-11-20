@@ -60,16 +60,11 @@ func b683Files(o any) map[string]string {
 	return out
 }
 
-// TestB683MarkdownRecheckBySectionMatchesNode: a Markdown recheck packet
-// over the budget runs in Go section by section like Node's runRound(kind
-// recheck) (fixloop.mjs packRecheck): one session per heading section with
-// its own open findings, section findings named S<i>.<id>, a section's
-// unavailable session, late findings outside the fix hunks, a finding with
-// no line_start, recheck_scope file with a base, emoji headings, a heading
-// cut inside a surrogate pair in a section that runs, and a group alone
-// over the budget (stop naming its heading). State, rows, each session's
-// level, role and packet, and the work dir match Node (goldens: Node's
-// runRound on the same repositories and scripted sessions).
+// TestB683MarkdownRecheckBySectionMatchesNode checks section rechecks. The
+// three former split_required stops record B1019 Go behaviour: oversized
+// groups split into bounded parts, each open finding goes to exactly one
+// part, and passing parts complete the round. Other states, rows, packets
+// and work directories retain their original Node recordings byte for byte.
 func TestB683MarkdownRecheckBySectionMatchesNode(t *testing.T) {
 	useRepoLenses(t)
 	t.Setenv("HOME", t.TempDir())
@@ -94,7 +89,7 @@ func TestB683MarkdownRecheckBySectionMatchesNode(t *testing.T) {
 }
 
 // b683RunCase runs one recorded case through CheckLoop and RunRound and
-// checks state, rows, sessions and the work dir against Node's golden.
+// checks state, rows, sessions and the work dir against the recorded golden.
 func b683RunCase(t *testing.T, c, want ledger.Object) {
 	t.Helper()
 	name := c.Get("name").(string)
@@ -193,11 +188,9 @@ func b683RunCase(t *testing.T, c, want ledger.Object) {
 	}
 }
 
-// TestB704SplitHeadingStopMatchesNode: a recheck stop that names a section
-// whose heading is cut inside a surrogate pair runs in Go like Node's
-// runRound (B704): the review.cap row and the state's next.section carry the
-// pair's high half as \ud83d, byte-equal to Node's golden. Before B704 Go
-// refused it with ErrUnsupported and the round went to Node.
+// TestB704SplitHeadingStopMatchesNode records B1019 Go behaviour for the
+// former stop at a heading cut inside a surrogate pair: review its bounded
+// diff parts and complete the round instead of stopping at that heading.
 func TestB704SplitHeadingStopMatchesNode(t *testing.T) {
 	useRepoLenses(t)
 	t.Setenv("HOME", t.TempDir())
@@ -213,8 +206,9 @@ func TestB704SplitHeadingStopMatchesNode(t *testing.T) {
 		t.Fatal("no emoji-split-heading-stop case")
 	}
 	want := golden.Get("emoji-split-heading-stop").(ledger.Object)
-	if w := want.Get("state").(string); !strings.Contains(w, `\ud83d"`) {
-		t.Fatalf("Node's stop should name a heading ending in a lone surrogate: %s", w)
+	state, err := ledger.DecodeObject([]byte(want.Get("state").(string)))
+	if err != nil || state.Get("status") != "complete" || len(want.Get("spawns").([]any)) < 2 {
+		t.Fatalf("B1019 should complete the former heading stop in parts: %v %v", state, err)
 	}
 	b683RunCase(t, c, want)
 }
