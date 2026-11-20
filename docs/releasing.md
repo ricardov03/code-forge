@@ -29,13 +29,17 @@ release. The file is not in the npm package.
 Union can still leave two `### Added` headings in `[Unreleased]` when each side added its own group
 in a different place. code-forge's own merges and replays (`block land`, batch rebase,
 `block rebase`) fold them into one (B813). For merges you make with plain git, such as combining
-lane branches with `git merge --no-ff`, set code-forge as the union driver once per clone (B990):
+lane branches with `git merge --no-ff`, code-forge is the union driver (B990). `run start` and
+`block land` set it in the clone's shared `.git/config` (every linked worktree uses it) when
+`CHANGELOG.md` has `merge=union` (B990b), so there is no manual step:
 
 ```sh
-git config merge.union.driver 'code-forge land merge-driver %O %A %B %P'
+git config merge.union.driver   # '/path/to/code-forge' land merge-driver %O %A %B %P 2>/dev/null || git merge-file --union %A %O %B
 ```
 
-It merges like git's union driver and then folds a `CHANGELOG.md`'s repeated `###` headings into the
+The line names the binary that set it and falls back to git's own union merge when that binary is
+gone or older than `land merge-driver`, so it never breaks a merge. A driver of your own is kept;
+the older manual line is replaced. It merges like git's union driver and then folds a `CHANGELOG.md`'s repeated `###` headings into the
 first one of each kind, every line kept; other `merge=union` files get the plain union result.
 
 Every `[Unreleased]` entry must sit under a `### <Type>` heading, and each type has one heading:

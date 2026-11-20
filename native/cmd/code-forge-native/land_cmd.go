@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 
 	"github.com/ricardov03/code-forge/native/landmerge"
 )
@@ -24,7 +26,28 @@ const landRefusal = "land: not a command on its own; code-forge block land lands
 // `git merge` (a wave combine) keeps one heading per kind like a land does.
 const landMergeDriverUsage = "usage: code-forge land merge-driver <base> <ours> <theirs> [<path>]\n" +
 	"  Git merge driver for merge=union files: union merge, then one ### heading per kind in CHANGELOG.md.\n" +
-	"  Enable: git config merge.union.driver 'code-forge land merge-driver %O %A %B %P'\n"
+	"  run start and block land set it (git config merge.union.driver) when CHANGELOG.md is merge=union.\n"
+
+// B990b: run start and block land set merge.union.driver to this binary's
+// merge-driver (landmerge.EnsureUnionDriver) so a plain git merge in the
+// clone folds CHANGELOG headings with no manual step. Best effort: a failure
+// changes nothing else. unionDriverBinary is a seam for tests.
+var unionDriverBinary = func() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(executable)
+}
+
+func ensureUnionDriver(dir string) {
+	if dir == "" {
+		return
+	}
+	if exe, err := unionDriverBinary(); err == nil {
+		_, _ = landmerge.EnsureUnionDriver(dir, exe)
+	}
+}
 
 func init() {
 	routes["land"] = smallVerb{name: "land", usage: landUsage, subs: []string{"merge-driver"},
