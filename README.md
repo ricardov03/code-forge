@@ -157,6 +157,9 @@ See the [routing and fallback examples](docs/how-it-works.md) for a long-context
 400 lines and fallback lists of `{provider, model}` objects (optional `effort`, never strings).
 `block open --kind code|docs|contract` overrides the kind inferred from filenames.
 Regenerate the reference with `sh scripts/cf-release.sh config-doc`; add `--check` to check it.
+`sh scripts/cf-release.sh regen-docs` regenerates every generated doc and recorded test pin once
+(commands reference, config reference, command summaries, doc example pins, init goldens);
+`regen-docs --check` lists the stale ones and exits 1.
 
 ## Supported agents
 

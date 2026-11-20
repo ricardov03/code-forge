@@ -10,7 +10,7 @@ import (
 	"github.com/ricardov03/code-forge/native/refguard"
 )
 
-const mainUsage = "usage: cf-release <release|release-site|site-data|docs-block|changelog|config-doc|build-native> [args...]"
+const mainUsage = "usage: cf-release <release|release-site|site-data|docs-block|changelog|config-doc|regen-docs|build-native> [args...]"
 
 func run(a *app, args []string, root string) int {
 	if len(args) == 0 {
@@ -35,6 +35,8 @@ func run(a *app, args []string, root string) int {
 		return changelogMain(a, args[1:], root)
 	case "config-doc":
 		return configDocMain(a, args[1:], root)
+	case "regen-docs":
+		return regenDocsMain(a, args[1:], root)
 	case "build-native":
 		return buildNativeMain(a, args[1:], root)
 	}

@@ -105,11 +105,19 @@ func b762Golden(t *testing.T, test, name string, got []b762Field) {
 		file := filepath.Join(dir, name+"."+f.name)
 		want, err := os.ReadFile(file)
 		if err != nil {
+			if b989Recording() {
+				b989Write(t, file, []byte(f.value))
+				continue
+			}
 			t.Errorf("%s: no golden: %v", file, err)
 			continue
 		}
 		if value, golden := b762HostNorm(f.value), b762HostNorm(string(want)); golden != value {
-			t.Errorf("%s differs\n go:     %q\n golden: %q", file, value, golden)
+			if b989Recording() {
+				b989Write(t, file, []byte(f.value))
+				continue
+			}
+			t.Errorf("%s differs\n go:     %q\n golden: %q (CODE_FORGE_INIT_GOLDEN_RECORD=1 records it)", file, value, golden)
 		}
 	}
 }
@@ -130,8 +138,19 @@ func b762NoStrays(t *testing.T, test string, names map[string]bool, fields []str
 	}
 	for _, e := range entries {
 		if !known[e.Name()] {
+			if b989Recording() {
+				// B989: recording drops the golden of a removed case
+				if err := os.Remove(filepath.Join(b762Dir, test, e.Name())); err != nil {
+					t.Fatal(err)
+				}
+				t.Logf("removed %s/%s (no case)", test, e.Name())
+				continue
+			}
 			t.Errorf("%s/%s: golden of no case", test, e.Name())
 		}
+	}
+	if b989Recording() {
+		return
 	}
 	if len(entries) != len(known) {
 		t.Errorf("%s: %d golden files, want %d", test, len(entries), len(known))

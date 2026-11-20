@@ -180,7 +180,10 @@ A file line is one of:
 
 ## What it does
 
-1. Starts a run (`run start`), which launches the review worker.
+1. Starts a run (`run start`), which launches the review worker. A repository has one live worker.
+   When another `review` holds it, this one prints `waiting for review run <r> to end` and starts
+   when that review ends, up to `--max` (B997). A worker of another run, such as a lane's run,
+   refuses at once: review inside it with `--run <that run>`, or end it first.
 2. Opens one block, `R-<timestamp>`, at level `L2`, with the base sha, the file list as its owned
    files, and the acceptance clause.
 3. Queues every file (`review-file`), then waits for all of them together under one deadline (`--max`). Each result is printed on stderr as soon as it finishes.

@@ -129,19 +129,7 @@ func TestB726InitWizardMatchesNode(t *testing.T) {
 			}
 			log, files := b528Collect(t, home, cwd, repo)
 			got := b528Golden{Code: code, Transcript: b703Mask(transcript, home, cwd, repo, base), Log: b703Mask(log, home, cwd, repo, base), Files: b703Mask(files, home, cwd, repo, base)}
-			if got.Code != want.Code {
-				t.Errorf("exit %d, Node %d", got.Code, want.Code)
-			}
-			if got.Transcript != want.Transcript {
-				t.Errorf("transcript differs from Node:\n%s", b528Diff(want.Transcript, got.Transcript))
-			}
-			if got.Log != want.Log {
-				t.Errorf("init log differs from Node:\n%s", b528Diff(want.Log, got.Log))
-			}
-			want.Files = b607LinkVersion(t, b552SkillRows(t, want.Files, ""))
-			if got.Files != want.Files {
-				t.Errorf("files differ from Node:\n%s", b528Diff(want.Files, got.Files))
-			}
+			b989WizardCheck(t, b726GoldenFile(c.name), want, got)
 		})
 	}
 }
