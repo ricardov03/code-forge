@@ -135,21 +135,29 @@ func packRecheck(lens string, d *FileDiff, pending []any, budget int, moves *mvM
 	if len(packed.sections) == 0 {
 		return nil, whole()
 	}
-	parts := []recheckPart{}
-	listed := map[int]bool{}
-	for _, sec := range packed.sections {
-		open := openIn(sec.keys)
-		for _, i := range open {
-			listed[i] = true
+	// Several parts can now share a heading key. Route each finding to the
+	// nearest actual packet rather than repeating it in every heading part.
+	assigned := make([][]int, len(packed.sections))
+	for i, f := range pending {
+		candidates, indices := []sectionGroup{}, []int{}
+		for at, sec := range packed.sections {
+			for _, key := range sec.keys {
+				if key == keyOf[i] {
+					candidates = append(candidates, sectionGroup{diff: sec.diff})
+					indices = append(indices, at)
+					break
+				}
+			}
 		}
-		parts = append(parts, recheckPart{index: sec.index, heading: sec.headings[0], diff: sec.diff, open: open, keys: sec.keys})
+		at := len(assigned) - 1
+		if nearest := rsSectionOf(candidates, asObject(f)); nearest >= 0 {
+			at = indices[nearest]
+		}
+		assigned[at] = append(assigned[at], i)
 	}
-	// a finding no packet holds goes to the last packet
-	last := &parts[len(parts)-1]
-	for _, i := range all {
-		if !listed[i] {
-			last.open = append(last.open, i)
-		}
+	parts := []recheckPart{}
+	for at, sec := range packed.sections {
+		parts = append(parts, recheckPart{index: sec.index, heading: sec.headings[0], diff: sec.diff, open: assigned[at], keys: sec.keys})
 	}
 	return parts, nil
 }

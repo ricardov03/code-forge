@@ -9,14 +9,14 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Changed
 
 - Clarify the one Go flaky-test retry: a single `go test -count=3` command executes each failed top-level test three times, and all three must pass ([B958 docs](docs/native-engine.md#flaky-test-limit-per-run-b958); B1003).
+- Add the [portable deadlines guide](docs/portable-deadlines.md) for `gates run --timeout-ms`, `review --max`, `review-file --wait --max` and `ci watch --timeout`, with the shipped-command audit: this base contains no GNU `timeout` invocation to replace; Go timeout flags and result labels remain valid (B1020).
+
 - `run start` and `block land` set `merge.union.driver` to code-forge's `land merge-driver` in the clone's shared git config when `CHANGELOG.md` is `merge=union`, so a plain `git merge` of lane branches folds repeated CHANGELOG headings with no manual step; the line falls back to git's union merge when the binary is gone or older, and a driver of your own is kept (B990b).
-- Go block gates run changed-file, block-id and acceptance tests by name per package with `-count=1 -trimpath`, scope vet/build to those packages, and record `changed tests only (N tests)`; `--changed --packages` restores package runs. Named gates pass big runs through separate bounded FIFO slots; land never reuses their evidence and CI keeps the full gate (B1009)
+- Go block gates run changed-file, block-id and acceptance tests by name per package with `-count=1 -trimpath`, scope vet/build to those packages, and record `changed tests only (N tests)`; `--changed --packages` restores package runs. Named gates pass big runs through separate bounded FIFO slots; land never reuses their evidence and CI keeps the full gate. When an affected package has no selected test names, the gate runs the declared command with its ordinary changed scope instead of a compile-only `-run '^$'` command, preserving failing tests and flaky rerun evidence (B1009).
 - Regression tests cover finish-timing reset on an unavailable answers retry and the one automatic retry (`.retried`): both clear `finished_at` and `duration_ms`, preserve `started_at`, and the worker serves the automatic retry again without recovering an interrupted finish (B944).
 
 ### Fixed
 
-- The autopilot secrets regression requires binnacle reads to redact the run key when audit verification loads it, including later reads after expiry, preserving secret redaction and signed evidence verification (B1013).
-- Go block gates with an affected package that has no selected test names run the declared gate with its ordinary changed scope, preserving failing tests and flaky rerun evidence instead of passing a compile-only `-run '^$'` command (B1009).
 - Merge and release checks flag near-duplicate `[Unreleased]` entries with the same leading or trailing block ID; the installed driver preserves the refusal instead of falling back to plain union (B1018).
 
 - `block close --landed <sha>` reconciles an already landed block commit against its original signed evidence, records `landed_sha`, and preserves human checks despite later combine edits (B1017).
@@ -25,6 +25,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - Batch land explicitly preserves the rebased tip stopped for CI on a landed prefix, while restoring every other unlanded rebase and its recorded bases after a gate failure (B1007).
 
 - Land searches for older CI PRs whenever the newest 200-row page is full, even with matching PRs there, retaining and deduplicating matches across search and exact-branch results (B1006).
+- Oversized Markdown review sections split into paragraph and diff-line parts, including deleted and headingless files, preserving diff coordinates and no-newline markers; every part must pass and each recheck finding belongs to one part (B1019).
 
 - Audit all 55 v0.27.0 entries against the code; fill in maintainer test and generated-doc guidance, correct CI gate reuse and autopilot backlog instructions, and link each entry to its documentation (B1015).
 - A queued review ticket of a closed (or landed) block for a deleted file (`content_hash: "deleted"`) is no longer served: the worker drops it before any review session as `stale` with reason `block-closed` (signed result, done marker and one `review.result` row, which the gate counts as never reviewed). A rebase-check ticket and a ticket for a file that exists are still served. B919
@@ -39,7 +40,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - `land.regenerate`: a list of commands a batch land runs once on the combined tip, after the merge and before the push, committing what they changed as one commit on main (for example `sh scripts/cf-release.sh regen-docs`); a failing command stops the land at `regenerate`, unpushed. Init writes it as `[]` (B959b).
 - `human-pass:evidence` and Go-only `block auto-pass` clear non-design checks under a frozen owner opt-in and active signed grant, after proof/evidence hashes, separate prover and green machine checks are verified again under the run lock; partial passes preserve owner checks and all records identify autopilot (B1012).
 - Add the off-by-default, snapshot-frozen `human_check.autopilot` configuration and explicit `approval: design|device` human-check markers; init, schemas and config fix preserve the owner's policy (B1011).
-- Owner audit and reopen for signed autopilot evidence passes, distinct status/log attribution and report `autoPassed` without human wait (B1013).
+- Owner audit and reopen for signed autopilot evidence passes, distinct status/log attribution and report `autoPassed` without human wait; binnacle reads redact the run key once audit verification loads it, including later reads after expiry (B1013).
 - Opt-in `block rebase --accept-identical <file> --source <path-or-ref:path>` clears changed owned binaries without a terminal under a signed `rebase:accept-identical` grant only when their bytes equal an approved source; the source list is frozen in the run snapshot, text stays on re-review, and signed audit rows name autopilot and both hashes (B1014).
 - A red batch merge gate on the combined tip now queues ONE found fix block of the run (source `land`): its brief lists every failing test (Go, subtests, build failures, TAP, spec) with its suspect blocks (block id in the test name, changed file or package, else the bisect culprit) and each block's changed files; the same red again queues no second block (B963)
 - New key `land.min_free_gb` (default 15): `block land`, `gates run` and `run start` check the free disk first; under twice the minimum they remove Go build cache files unused for 24 h, under it they refuse with the next step before anything runs; `doctor` shows a `free disk` row (FAIL under the minimum, WARN under twice it); 0 turns it off (B961)

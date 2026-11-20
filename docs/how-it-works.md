@@ -1180,8 +1180,11 @@ says how large the packet was (`tokens_in`) and what the budget is (`budget`). A
 fits, and each packet is reviewed like a file of its own. The file is approved only when every
 section is; findings are
 merged with ids such as `S2.F1` and go through the normal fix rounds, whose rechecks are split the
-same way. Only a section that alone is over the budget keeps the file `split_required`, and so
-does a deleted Markdown file or one with no heading (it has one section only).
+same way. An oversized heading section is split again at paragraph boundaries, then at diff
+lines for a long paragraph. Deleted files and files without headings use this fallback too.
+Every diff line keeps its original coordinates; no content is truncated. Each recheck finding
+belongs to one part. A single diff line (or the fixed lens and required hints) that cannot fit
+still returns `split_required` with the section heading; raise the review budget for that case.
 
 Each file is reviewed alone, so code a block **moves** from one file to another would look like a
 deletion to the first file's reviewer. The worker lists the block's other changed files (owned by
