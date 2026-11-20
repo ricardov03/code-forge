@@ -111,11 +111,12 @@ pinned worker is alive (`worker_live`), the same way `block ready` checks it. Fi
 unresolved work stops.
 Under autopilot, a problem found during the work (a red gate, a failed land, a hand-over, a coder's
 leftover, a flaky test) is recorded with `code-forge autopilot found`, by itself for the first four.
-It goes to the backlog for the next release; only a customer-breaking finding becomes a queued block
+It goes to the backlog and the workspace's `.code-forge/next-release.md` plan; only a customer-breaking finding becomes a queued block
 of the same run. Findings about scope,
 security, deletes or publishing wait for you ([autopilot](docs/autopilot.md)). Each land, gate,
-coder session and CI wait has a speed budget (its measured median plus a margin, or
-`autopilot.step_budgets`); a step over it prints a WARN and is recorded as found work too.
+coder session and CI wait gets a speed budget after five samples by default (its measured median
+plus a margin), or from fixed minutes in `autopilot.step_budgets`. A step over it prints a WARN
+and is recorded as found work too.
 Tests and red→green proof establish that a change meets its acceptance clauses before closing.
 You control the final merge and publish permissions; coders cannot push or open draft PRs by
 default. See [the workflow](docs/how-it-works.md) and [concepts](docs/concepts.md).

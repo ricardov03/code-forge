@@ -559,6 +559,30 @@ shell's background job inherits as ignored, and the copy also unblocks every
 signal before the gate starts, so a gate never inherits the engine's
 blocked-signal mask; Node's spawn (libuv) does both in its child (B721).
 
+## Maintainer test runner
+
+`cf-gotest` is this repository's test gate, not a shipped code-forge command.
+It adds `-trimpath` to `GOFLAGS` so worktrees can reuse the Go build cache (B952).
+It passes `-p 2` to `go test` by default; `--p N` sets a positive whole number instead.
+A bad flag exits 2 (B953).
+
+When the 1-minute load average exceeds the core count, and `GOMAXPROCS` is unset,
+the Go child gets half the cores, with a minimum of one. The runner prints the cap.
+It reads `/proc/loadavg` on Linux and `sysctl vm.loadavg` on macOS.
+An existing `GOMAXPROCS` is kept.
+
+`go -C native run ./cmd/cf-gotest --shards N --p N` builds one test binary and
+splits its tests with `scripts/ci-shards.sh pick` (B807). `--p` limits how many
+shards run at once. Each shard's output stays together, in shard order.
+Any failed shard fails the command. Without files it shards `./cmd/code-forge-native`;
+with files they must select one package. A package with no tests fails.
+Without `--shards` or files the runner runs the full suite. Coders should follow
+their named-test budget instead (see [the workflow](how-it-works.md)).
+
+The prompt test helper waits for each expected prompt before typing its key.
+The strict worker-launch test waits for launch and reap, with a three-minute
+stop bound. These are test helpers, not new CLI timeouts (B891).
+
 ## Gate temp files on a RAM disk (macOS)
 
 Go tests make thousands of temp git directories under `$TMPDIR`. On macOS
@@ -584,7 +608,10 @@ command `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`, a fresh directory per
 - `gates.ram_tmp: off` is the default (B940): measured on this repo's
   `worker`, `review` and `gates` tests (3 interleaved rounds each), the RAM
   disk was 1.2% slower in the sum of medians (141.08 s vs 139.36 s on the
-  normal disk), short of the 10% gain a default-on needs. `off` (or
+  normal disk), short of the 10% gain a default-on needs. Other sessions kept the
+  machine busy during that measurement. It did not measure fseventsd CPU or
+  remount after writing `no_log`, so it does not prove a gain on a quiet machine.
+  `off` (or
   `CODE_FORGE_RAM_TMP=off` in the environment) keeps the normal `TMPDIR`. On
   Linux and Windows `auto` does nothing.
 - `code-forge doctor` shows a `ram_tmp` row: `on: /Volumes/cf-tmp mounted,
