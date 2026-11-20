@@ -55,7 +55,7 @@ A problem you found outside this block (a flaky test, a wrong doc, a bug in a fi
 FOUND flaky TestLandRetry fails one run in five :: --- FAIL: TestLandRetry land_test.go:88: lock busy
 ```
 
-`FOUND [<source>] [<label>,…] <title> :: <evidence>`: the source is one of `gate`, `land`, `coder`, `flaky`, `handover`, `review` (`coder` when left out). The orchestrator turns each line into a block of this run.
+`FOUND [<source>] [<label>,…] <title> :: <evidence>`: the source is one of `gate`, `land`, `coder`, `flaky`, `handover`, `review` (`coder` when left out). A line goes to the backlog (the next release) unless it carries the label `customer-breaking` (`FOUND [customer-breaking] <title> :: <evidence>`); only those become a block of this run (B921).
 
 End with `===BLOCK <id> COMPLETE===`, the test summary and `git diff --stat`.
 

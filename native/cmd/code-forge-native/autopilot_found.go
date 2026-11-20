@@ -36,6 +36,12 @@ import (
 // is closed. Past the cap a finding waits for the owner. Every finding
 // writes one signed autopilot.found row. The binnacle lists found → block →
 // state, and the waiting ones under "Actions only you can take".
+//
+// B921 (scope fixed): a finding joins the current run only when its
+// severity is customer-breaking (--severity customer-breaking, or the label
+// customer-breaking on a FOUND line). Any other finding goes to the backlog
+// (state backlog, the next release): no block id, no brief, no plan entry,
+// and no owner action. Owner scope still wins over severity.
 
 var apfSources = []string{"gate", "land", "coder", "flaky", "handover", "review"}
 
@@ -45,6 +51,9 @@ const (
 	apfMaxEvidence  = 4000
 	apfStateQueued  = "queued"
 	apfStateOwner   = "waits_for_owner"
+	apfStateBacklog = "backlog"
+	apfSevBreaking  = "customer-breaking"
+	apfSevNormal    = "normal"
 	apfAcceptanceID = "red-test-from-the-evidence"
 )
 
@@ -76,8 +85,8 @@ var (
 
 // apfInput is one finding as given.
 type apfInput struct {
-	source, title, evidence, from, fingerprint string
-	labels                                     []string
+	source, title, evidence, from, fingerprint, severity string
+	labels                                               []string
 }
 
 // apfResult is what one finding became.
@@ -95,7 +104,7 @@ func apfRun(o *runOut, home string, args []string) int {
 	}
 	runID := flags.values["run"]
 	if flags.bools["list"] {
-		for _, k := range []string{"source", "title", "evidence", "evidence-file", "label", "from", "report", "fingerprint"} {
+		for _, k := range []string{"source", "title", "evidence", "evidence-file", "label", "from", "report", "fingerprint", "severity"} {
 			if _, has := flags.values[k]; has {
 				return autopilotReport(o, "found", autopilotUsageFail("--list takes only --run and --json"))
 			}
@@ -132,7 +141,7 @@ func apfRun(o *runOut, home string, args []string) int {
 func apfInputs(flags autopilotFlags) ([]apfInput, []string, error) {
 	from := flags.values["from"]
 	if file, has := flags.values["report"]; has {
-		for _, k := range []string{"source", "title", "evidence", "evidence-file", "label", "fingerprint"} {
+		for _, k := range []string{"source", "title", "evidence", "evidence-file", "label", "fingerprint", "severity"} {
 			if _, set := flags.values[k]; set {
 				return nil, nil, autopilotUsageFail("--report reads its findings from the report; drop --" + k)
 			}
@@ -171,6 +180,13 @@ func apfInputs(flags autopilotFlags) ([]apfInput, []string, error) {
 	if strings.TrimSpace(evidence) == "" {
 		return nil, nil, autopilotUsageFail("the evidence is empty")
 	}
+	severity := apfSevNormal
+	if raw, has := flags.values["severity"]; has {
+		if raw != apfSevNormal && raw != apfSevBreaking {
+			return nil, nil, autopilotUsageFail("--severity must be normal or customer-breaking, not " + autopilotQuote(raw))
+		}
+		severity = raw
+	}
 	labels := []string{}
 	if raw, has := flags.values["label"]; has {
 		for _, l := range autopilotItems(raw) {
@@ -178,12 +194,16 @@ func apfInputs(flags autopilotFlags) ([]apfInput, []string, error) {
 			if !apfLabelWord.MatchString(l) {
 				return nil, nil, autopilotUsageFail("--label " + autopilotQuote(l) + " is not a label word (a-z, 0-9, _ and -)")
 			}
+			if l == apfSevBreaking {
+				severity = apfSevBreaking
+				continue
+			}
 			if !slices.Contains(labels, l) {
 				labels = append(labels, l)
 			}
 		}
 	}
-	return []apfInput{{source: source, title: title, evidence: evidence, from: from, labels: labels, fingerprint: flags.values["fingerprint"]}}, nil, nil
+	return []apfInput{{source: source, title: title, evidence: evidence, from: from, labels: labels, fingerprint: flags.values["fingerprint"], severity: severity}}, nil, nil
 }
 
 // apfScan reads the FOUND lines of a coder report:
@@ -210,14 +230,16 @@ func apfScan(text, from string) ([]apfInput, []string) {
 			warns = append(warns, "WARN found: report line "+strconv.Itoa(n+1)+" skipped: write it as FOUND [<source>] [<label>,…] <title> :: <evidence>")
 			continue
 		}
-		in := apfInput{source: "coder", from: from, labels: []string{}}
+		in := apfInput{source: "coder", from: from, labels: []string{}, severity: apfSevNormal}
 		if word, after, _ := strings.Cut(head, " "); slices.Contains(apfSources, word) && strings.TrimSpace(after) != "" {
 			in.source, head = word, strings.TrimSpace(after)
 		}
 		if strings.HasPrefix(head, "[") {
 			if inside, after, ok := strings.Cut(head[1:], "]"); ok && strings.TrimSpace(after) != "" {
 				for _, l := range autopilotItems(inside) {
-					if l = strings.ToLower(l); apfLabelWord.MatchString(l) && !slices.Contains(in.labels, l) {
+					if l = strings.ToLower(l); l == apfSevBreaking {
+						in.severity = apfSevBreaking
+					} else if apfLabelWord.MatchString(l) && !slices.Contains(in.labels, l) {
 						in.labels = append(in.labels, l)
 					}
 				}
@@ -419,6 +441,7 @@ func apfRecord(home, runID string, inputs []apfInput, now time.Time) ([]apfResul
 				{Key: "title", Value: title},
 				{Key: "evidence", Value: evidence},
 				{Key: "labels", Value: labels},
+				{Key: "severity", Value: in.severity},
 				{Key: "from_block", Value: nil},
 				{Key: "block", Value: nil},
 				{Key: "state", Value: apfStateOwner},
@@ -432,12 +455,17 @@ func apfRecord(home, runID string, inputs []apfInput, now time.Time) ([]apfResul
 				entry.Set("from_block", in.from)
 			}
 			reason := apfOwnerReason(in.labels, title, evidence, titleHit || evidenceHit)
-			if reason == "" && queued >= limit {
+			backlog := reason == "" && in.severity != apfSevBreaking
+			if reason == "" && !backlog && queued >= limit {
 				reason = "cap: " + strconv.Itoa(limit) + " found block(s) already queued in this run (autopilot.max_found_blocks)"
 			}
-			if reason != "" {
+			switch {
+			case backlog:
+				entry.Set("state", apfStateBacklog)
+				entry.Set("reason", "backlog: not customer-breaking, so it goes to the next release (B921)")
+			case reason != "":
 				entry.Set("reason", reason)
-			} else {
+			default:
 				entry.Set("block", apfNextID(*record, found))
 				entry.Set("state", apfStateQueued)
 				brief, acceptance, err := apfWriteBrief(home, runID, entry)
@@ -466,7 +494,7 @@ func apfRecord(home, runID string, inputs []apfInput, now time.Time) ([]apfResul
 
 func apfRow(entry ledger.Object, duplicate bool, now time.Time) ledger.Object {
 	row := ledger.Object{{Key: "event", Value: "autopilot.found"}}
-	for _, k := range []string{"finding", "fingerprint", "source", "title", "labels", "from_block", "block", "state", "reason", "seen"} {
+	for _, k := range []string{"finding", "fingerprint", "source", "title", "labels", "severity", "from_block", "block", "state", "reason", "seen"} {
 		row = append(row, ledger.Field{Key: k, Value: entry.Get(k)})
 	}
 	return append(row, ledger.Field{Key: "duplicate", Value: duplicate}, ledger.Field{Key: "ts", Value: autopilotStamp(now)})
@@ -476,6 +504,9 @@ func apfRow(entry ledger.Object, duplicate bool, now time.Time) ledger.Object {
 // before block open, "waits for the owner" when it has no block.
 func apfBlockState(record, entry ledger.Object) string {
 	id, ok := entry.Get("block").(string)
+	if entry.Get("state") == apfStateBacklog && (!ok || id == "") {
+		return "backlog (next release)"
+	}
 	if !ok || id == "" {
 		return "waits for the owner"
 	}
@@ -492,7 +523,7 @@ func apfBlockState(record, entry ledger.Object) string {
 
 func apfJSON(entry, record ledger.Object, duplicate bool) ledger.Object {
 	out := ledger.Object{}
-	for _, k := range []string{"finding", "fingerprint", "source", "title", "labels", "from_block", "block", "state", "reason", "seen", "brief", "acceptance"} {
+	for _, k := range []string{"finding", "fingerprint", "source", "title", "labels", "severity", "from_block", "block", "state", "reason", "seen", "brief", "acceptance"} {
 		out = append(out, ledger.Field{Key: k, Value: entry.Get(k)})
 	}
 	if record != nil {
@@ -510,10 +541,17 @@ func apfText(runID string, r apfResult) string {
 	if r.duplicate {
 		seen, _ := e.Get("seen").(float64)
 		target := "waits for the owner"
+		if e.Get("state") == apfStateBacklog {
+			target = "backlog"
+		}
 		if block != "" {
 			target = block
 		}
 		return "found " + finding + " again (seen " + strconv.Itoa(int(seen)) + " times) → " + target + ": " + title + "; nothing new was queued\n"
+	}
+	if block == "" && e.Get("state") == apfStateBacklog {
+		return "found " + finding + " " + source + " → backlog (next release; not customer-breaking, B921): " + title + "\n" +
+			"  only a customer-breaking finding joins this run: --severity customer-breaking\n"
 	}
 	if block == "" {
 		return "found " + finding + " " + source + " → waits for the owner (" + autopilotText(e.Get("reason")) + "): " + title + "\n"
@@ -585,7 +623,7 @@ func apfBinnacle(runID string, record ledger.Object) ([]any, []string) {
 			{Key: "found", Value: e.Get("finding")}, {Key: "source", Value: e.Get("source")}, {Key: "title", Value: e.Get("title")},
 			{Key: "block", Value: block}, {Key: "state", Value: apfBlockState(record, e)},
 		})
-		if block == "-" {
+		if block == "-" && e.Get("state") != apfStateBacklog {
 			actions = append(actions, "Decide on found "+autopilotText(e.Get("finding"))+" ("+autopilotText(e.Get("reason"))+"): "+autopilotText(e.Get("title"))+"; see code-forge autopilot found --run "+runID+" --list")
 		}
 	}
