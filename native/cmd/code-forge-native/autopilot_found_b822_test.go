@@ -43,7 +43,7 @@ func b822Accept(t *testing.T, f *hvFixture, i int) (string, []any, string) {
 func TestB822AcceptanceNamesEvidenceTest(t *testing.T) {
 	f := b800Fixture(t, map[string]any{"autopilot": b950Grant()})
 	// a `--- FAIL:` line in the evidence
-	if code, out, errText := autopilotCall(t, "found", "--run", "r-test", "--source", "gate", "--title", "the test gate is red",
+	if code, out, errText := autopilotCall(t, "found", "--run", "r-test", "--severity", "customer-breaking", "--source", "gate", "--title", "the test gate is red",
 		"--evidence", "=== RUN   TestLandKeepsURL\n--- FAIL: TestLandKeepsURL (0.01s)\n    land_test.go:40: url dropped\nFAIL"); code != 0 || !strings.Contains(out, " queued") {
 		t.Fatalf("found = %d %q %q", code, out, errText)
 	}
@@ -52,11 +52,11 @@ func TestB822AcceptanceNamesEvidenceTest(t *testing.T) {
 	if err := os.WriteFile(row, []byte(`{"source":"flaky-test","evidence":{"test":"TestQueueDrains","packages":["./worker"]}}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if code, out, errText := autopilotCall(t, "found", "--run", "r-test", "--source", "flaky", "--title", "the queue test is flaky", "--evidence-file", row); code != 0 || !strings.Contains(out, " queued") {
+	if code, out, errText := autopilotCall(t, "found", "--run", "r-test", "--severity", "customer-breaking", "--source", "flaky", "--title", "the queue test is flaky", "--evidence-file", row); code != 0 || !strings.Contains(out, " queued") {
 		t.Fatalf("found = %d %q %q", code, out, errText)
 	}
 	// no test name: the needs-test marker
-	if code, out, errText := autopilotCall(t, "found", "--run", "r-test", "--source", "land", "--title", "land drops the PR url",
+	if code, out, errText := autopilotCall(t, "found", "--run", "r-test", "--severity", "customer-breaking", "--source", "land", "--title", "land drops the PR url",
 		"--evidence", "block B1 land stopped at merge: the PR url is empty"); code != 0 || !strings.Contains(out, " queued") {
 		t.Fatalf("found = %d %q %q", code, out, errText)
 	}

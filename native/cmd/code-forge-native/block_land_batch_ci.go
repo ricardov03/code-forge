@@ -90,6 +90,10 @@ func landBatchCIPre(flags map[string]any, home, run string, ids []string, json b
 			break
 		}
 		sha := strings.TrimSpace(head)
+		// B964 after B803: the fast checks run before this tip's CI is read.
+		if problems := landFastChecks(tree.Path, blockString(entry.Get("base_branch")), sha); len(problems) > 0 {
+			return nil, id, landFastError{fmt.Sprintf("block %s fails the land fast checks:\n  %s", id, strings.Join(problems, "\n  "))}
+		}
 		notes, refusal, next := landCIGate(cfg, main, id, sha, blockString(entry.Get("base_branch")), landCIResume(ids, run, flags), out)
 		if refusal != "" {
 			if next != "" {
@@ -104,6 +108,12 @@ func landBatchCIPre(flags map[string]any, home, run string, ids []string, json b
 	}
 	return proved, "", nil
 }
+
+// landFastError is a land fast-checks refusal (B964), so the batch stops at
+// step fast-checks, not ci.
+type landFastError struct{ text string }
+
+func (e landFastError) Error() string { return e.text }
 
 // landBatchCITip says whether batch[i], just rebased, must wait for CI on its
 // new tip (true: the round stops before it). A tip CI proved skips the local

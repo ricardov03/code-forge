@@ -446,9 +446,9 @@ type initValues struct {
 	soloProject    any
 	push, draft    bool
 	gates          map[string]any
-	ramTmp         any // B939: gates.ram_tmp, kept from the config or the default
-	ramTmpMB       any // B941: gates.ram_tmp_mb, kept from the config or the default
-	coderTestP     any // B923: gates.coder_test_parallel, kept from the config or the default
+	ramTmp         any           // B939: gates.ram_tmp, kept from the config or the default
+	ramTmpMB       any           // B941: gates.ram_tmp_mb, kept from the config or the default
+	coderTestP     any           // B923: gates.coder_test_parallel, kept from the config or the default
 	newKeys        ledger.Object // w1b: land, autopilot and release keys (initNewKeys)
 	proof          map[string]any
 	doctor         bool

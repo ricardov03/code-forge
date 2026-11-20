@@ -58,6 +58,9 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 	proved, ciStopped, err := landBatchCIPre(flags, home, run, ids, json)
 	if err != nil {
 		stoppedID, step = ciStopped, "ci"
+		if _, fast := err.(landFastError); fast {
+			step = "fast-checks"
+		}
 		return stop(err.Error())
 	}
 	var retry []string
