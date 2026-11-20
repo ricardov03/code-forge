@@ -74,6 +74,7 @@ var handoverCommands = map[string]string{
 	"jev":           "ask",
 	"keys":          "list set test remove",
 	"land":          "",
+	"lane":          "start ready combine",
 	"ledger":        "calibration outcome tail add outside-review",
 	"list":          "",
 	"logs":          "summary clear path report handovers",
