@@ -14,6 +14,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- The local lane ledger checker accepts findings resolved through answers only when every finding and both file hashes match the committed content (B1024).
+
 - The autopilot secrets regression requires binnacle reads to redact the run key when audit verification loads it, including later reads after expiry, preserving secret redaction and signed evidence verification (B1013).
 - Go block gates with an affected package that has no selected test names run the declared gate with its ordinary changed scope, preserving failing tests and flaky rerun evidence instead of passing a compile-only `-run '^$'` command (B1009).
 

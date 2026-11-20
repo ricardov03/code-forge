@@ -857,3 +857,14 @@ authoritative run-lock rechecks, signed per-clause clears and final done/hook.
 `autopilot start` validates `human-pass:evidence` against the frozen snapshot.
 
 `run human-checks audit --run <r> [--json]` and owner-only `run human-checks reopen --run <r> --block <id> [--clause C<n>] --note <text> [--json]` run in Go. Reopen requires a terminal and no active grant, writes signed revocation rows, and reopens the ledger check even after land. Audit verifies the recorded proof and evidence SHA-256. Run status/list, reports, the binnacle and full log distinguish autopilot passes.
+
+## Maintainer lane ledger check
+
+The local `plans/tools/forge/p4/lane-ledger-check.py` tool accepts a findings
+review resolved through answers as well as an ordinary approved result (B1024).
+Every open finding needs a `review.answered` row for the same run, block, file
+and content hash. Its separate `by_file` must still match `by_hash` at the block's
+last commit. Missing, incomplete or stale answers fail the check. Capped reviews
+still require an ordinary approval; cap supersession is left to the native gate.
+The checker reads local ledger evidence; `block close` verifies its signatures.
+This maintainer script is local tooling outside the tracked release artifacts.
