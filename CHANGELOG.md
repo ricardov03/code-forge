@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- With `land.require_ci: github`, a batch `block land` no longer runs a block's local `test` gate when the sha it lands is the sha GitHub CI proved green: a rebase that made a new sha pushes it to a new CI branch (never forced) and waits for green CI on it, and the land prints `gates: block <id> tip <sha> has green CI; local test gate skipped`. Lint, types, format and the batch merge gate still run (B910)
+
 ## [0.26.0] — 2026-11-19
 
 ### Changed

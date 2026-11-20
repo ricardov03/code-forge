@@ -188,14 +188,19 @@ func TestB765LandCIGreenLands(t *testing.T) {
 			calls = append(calls, call)
 		}
 	}
-	if len(calls) != 2 {
-		t.Fatalf("gh run list calls=%q, want one per block", calls)
+	// B910: B2 is rebased onto B1's merge (a new sha), so its rebased tip
+	// gets a CI read of its own.
+	rebased := f.git(f.repo, "rev-parse", "block-B2")
+	if len(calls) != 3 {
+		t.Fatalf("gh run list calls=%q, want one per block tip plus B2's rebased tip", calls)
 	}
-	for i, id := range []string{"B1", "B2"} {
-		want := "run list --commit " + heads[id] + " --limit 100 --json databaseId,status,conclusion,name"
+	for i, sha := range []string{heads["B1"], heads["B2"], rebased} {
+		want := "run list --commit " + sha + " --limit 100 --json databaseId,status,conclusion,name"
 		if calls[i] != want {
-			t.Errorf("gh call %d=%q, want %q (the block's own tip)", i, calls[i], want)
+			t.Errorf("gh call %d=%q, want %q", i, calls[i], want)
 		}
+	}
+	for _, id := range []string{"B1", "B2"} {
 		if !strings.Contains(output, "ci: tip "+heads[id][:8]+" green (1 runs)\n") {
 			t.Errorf("output must say %s's tip is green: %s", id, output)
 		}
@@ -224,7 +229,8 @@ func TestB765LandCIRedTrackedLands(t *testing.T) {
 		t.Fatalf("exit=%d, want 0 (red only on a known red): %s", code, output)
 	}
 	f.checkMain([]string{"B1", "B2"})
-	if strings.Count(output, "  TestOld -> B9\n") != 2 || strings.Count(output, "red only on known reds (B9), landing allowed\n") != 2 {
+	// B910: B1's tip, B2's tip and B2's rebased tip.
+	if strings.Count(output, "  TestOld -> B9\n") != 3 || strings.Count(output, "red only on known reds (B9), landing allowed\n") != 3 {
 		t.Errorf("output must show each block's known red: %s", output)
 	}
 }

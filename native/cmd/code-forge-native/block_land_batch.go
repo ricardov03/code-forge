@@ -29,7 +29,8 @@ type landBatchBlock struct {
 	saved                  ledger.Object // the entry as last read or committed (B426)
 	gatesMs                int64
 	rebased                bool
-	node                   bool // owns or changes a Node product file
+	node                   bool   // owns or changes a Node product file
+	ci                     string // B910: the tip sha green CI proved (land.require_ci)
 }
 
 // Batch landing consumes closed blocks. Keep the open/join/close single-block
@@ -165,6 +166,10 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 				return fmt.Errorf("%s", refusal)
 			}
 			landedCfg, landedMain = cfg, main
+			ciSha := ""
+			if provider, _ := landCIRequired(cfg); provider != "" {
+				ciSha = strings.TrimSpace(head)
+			}
 			for _, line := range notes {
 				if json {
 					fmt.Fprintln(safeStderr, line)
@@ -176,7 +181,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if err != nil {
 				return err
 			}
-			batch = append(batch, &landBatchBlock{id: id, branch: blockString(wt.Get("branch")), head: head, original: strings.TrimSpace(head), entryBase: blockString(entry.Get("base_sha")), base: blockString(wt.Get("base_sha")), tree: tree, entry: entry, saved: state.CloneObject(entry), node: node})
+			batch = append(batch, &landBatchBlock{id: id, branch: blockString(wt.Get("branch")), head: head, original: strings.TrimSpace(head), entryBase: blockString(entry.Get("base_sha")), base: blockString(wt.Get("base_sha")), tree: tree, entry: entry, saved: state.CloneObject(entry), node: node, ci: ciSha})
 		}
 		// B797: main moved only by lands, releases and plain commits since the
 		// last land, checked before any rebase or gate.
@@ -288,6 +293,10 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			wt.Set("base_sha", tip)
 			block.entry.Set("worktree", wt)
 			if err := landBatchCommit(home, run, []*landBatchBlock{block}, ledger.Object{{Key: "event", Value: "block.rebase"}, {Key: "block", Value: block.id}, {Key: "old_base", Value: block.base}, {Key: "new_base", Value: tip}, {Key: "worktree", Value: true}}); err != nil {
+				return err
+			}
+			if err := landBatchCITip(flags, run, requestedIDs, main, baseBranch, json, record, block); err != nil {
+				step = "ci"
 				return err
 			}
 			step = "gates"
@@ -818,6 +827,9 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 		if len(scope.Files) > 0 {
 			scope.Report = "related"
 		}
+	}
+	if block.ci != "" {
+		p.Commands = landBatchNoTest(p.Commands)
 	}
 	timeout := 300000.0
 	if n, ok := gatesNumber(configured["timeout_s"]); ok {
