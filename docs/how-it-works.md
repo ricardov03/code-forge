@@ -160,7 +160,16 @@ starts. The result and `gate.done` carry `scope: related`, `test_count` and, on 
 `test_files`, with `reason: go_only` for a block with no Node product file and
 `reason: import_graph` otherwise. A text-only skip still wins.
 
-A Go project tests only its changed packages (B667). This applies when the test command is
+A Go block’s `gates run --changed` selects tests declared in changed `_test.go` files,
+`TestB<id>...` tests and the names or Go test files in acceptance/`--tests` (B1009). It runs each
+selected package separately with an anchored `-run` filter, `-count=1 -trimpath`. With no names,
+`-run '^$'` compiles the package and runs no test. Direct Go vet/build commands also narrow to
+these packages. A wrapper receives the filter as `CODE_FORGE_TEST_RUN`; `cf-gotest` honors it
+and uses a plain named run even with `--shards`. Results and `gate.done` carry `tests_only`
+(`changed tests only (N tests)`), `test_names`, `test_count` and `packages`. Named block evidence
+never substitutes for a land merge gate. CI and the final batch gate still run the full suite.
+
+With `--changed --packages`, a Go project tests only its changed packages (B667). This applies when the test command is
 `go test` with the item `./...`, `go.mod` is in the workspace root and
 `gates.go_changed_packages` is not `false` (the default is `true`). Then `--changed` replaces
 `./...` with the changed packages. A changed package is the directory of a changed `.go` file,
@@ -175,7 +184,7 @@ or lists no package, the gate fails with
 `go changed packages: cannot list the importer packages of <packages> ...` and runs no test;
 it never falls back to nothing or to `.`. `gate.done` carries `scope: changed`,
 `reason: go_packages`, `packages` (the changed packages) and `importer_packages` (the importer
-packages, separately); `test_count` counts both. The block land and close gates use this scope.
+packages, separately); `test_count` counts both. Land merge gates retain this package scope; block close uses named tests by default.
 
 A block is Go-only when every owned path is under `native/`, `docs/`, `plans/` or
 `.github/`, is a runnable test file under `test/` (`*.test.*` or `*.spec.*`), is
@@ -1682,13 +1691,16 @@ them from slowing each other down, every `gates run` that runs a test command fi
 in one machine-wide FIFO queue under `$HOME/.code-forge/queue/`. There is no daemon: each run
 writes a ticket (pid, process start time, kind, label) and checks the queue under a file lock.
 
-- **Full** runs (full test scope, no reuse) need the whole machine: no other holder.
+- **Full** runs (full test scope, no reuse) need no other full or changed holder.
 - **Changed** runs (changed, related or text-only scope) share up to
   `N = max(1, min(cores / 4, free GB / 2))` slots. Free memory is what the system can give without
   swapping: free, speculative, purgeable and file-backed pages on macOS, `MemAvailable` on Linux.
-- Runs start in arrival order. A changed run may pass waiting full runs only while a full run could
+- **Named** block gates have a separate FIFO lane with `max(1, cores / 4)` slots. They pass full
+  and changed holders and waiters regardless of load, subject to the 1 GB memory floor beside
+  any holder (B1009).
+- Big runs start in arrival order. A changed run may pass waiting full runs only while a full run could
   not start anyway and a changed slot is free, and at most `N` times in a row.
-- While another run holds a slot, a run starts beside it only when the 1-minute load is below the
+- While another big run holds a slot, a big run starts beside it only when the 1-minute load is below the
   core count and more than 1 GB is free. When nothing holds a slot, the first waiter starts at once:
   the load is then not the queue's, or was left by the run that just ended.
 - A ticket whose process died, or whose pid now belongs to another process, is removed at the next

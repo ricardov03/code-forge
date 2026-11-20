@@ -55,7 +55,7 @@ func TestB459GatesHelpAndUsage(t *testing.T) {
 	}{
 		{[]string{"--help"}, 0, gatesUsage, ""},
 		{[]string{"-h", "detect"}, 0, gatesUsage, ""},
-		{[]string{"run", "--help"}, 0, "usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed | --full] [--auto-rebase | --allow-stale-base] [--preflight | --no-preflight]\n", ""},
+		{[]string{"run", "--help"}, 0, "usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed [--packages] | --full] [--auto-rebase | --allow-stale-base] [--preflight | --no-preflight]\n", ""},
 		{[]string{"run", "-h", "--run", "x"}, 0, gatesSubUsage["run"], ""},
 		{[]string{"detect", "--help"}, 0, "usage: code-forge gates detect [--cwd <dir>]\n", ""},
 		{[]string{"secret-scan", "-h"}, 0, "usage: code-forge gates secret-scan [--cwd <dir>] --file <path> [--file <path>...]\n", ""},

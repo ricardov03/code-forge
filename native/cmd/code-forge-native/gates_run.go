@@ -521,6 +521,8 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	// B667: a whole-module `go test ./...` gate narrows to the changed Go
 	// packages (gates.go_changed_packages, default true).
 	goPackages := gpkMode(cwd, p, configured)
+	namesModule := gatesNamesModule(cwd, p)
+	namedMode := selected && step == nil && !o.packages && namesModule != ""
 	if step != nil && step.preflight {
 		return 0, true
 	}
@@ -556,6 +558,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	all := false
 	var files ledger.Object
 	var changedScope *gates.Scope
+	var namedSelection *gatesNamedSelection
 	sharedTree := 0
 	base := ""
 	ranTree := ""
@@ -583,6 +586,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 			}
 			if o.changed {
 				base = gates.MergeBase(cwd, b)
+				if namedMode && base == "" {
+					base, _ = b.Get("base_sha").(string)
+				}
 				if base != "" {
 					var err error
 					delta, err = gates.BaseDelta(cwd, base, b)
@@ -699,12 +705,23 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 			}
 		}
 		// A text-only skip or a reused full run on the same tree costs less.
-		if selected && scope.Reason != "text_only" && !p.ReuseTest {
+		if selected && (namedMode || (scope.Reason != "text_only" && !p.ReuseTest)) {
 			changed := delta
 			if base == "" {
 				changed = gatesOwnedListed(b, listed)
 			}
-			if goPackages {
+			if namedMode {
+				var err error
+				namedSelection, err = gatesNamesSelect(cwd, namesModule, o.block, b, listed, changed)
+				if err != nil {
+					return err
+				}
+				p.ReuseTest = false
+				scope = gates.Scope{Kind: "changed", Report: "changed", Reason: gatesNamesReason, Files: []string{}, Changed: changed, Dependents: []string{}}
+				for _, pkg := range namedSelection.Packages {
+					scope.Files = append(scope.Files, pkg.File)
+				}
+			} else if goPackages {
 				// B667: a Go project tests only its changed packages and
 				// (B723b) the packages that import them.
 				var err error
@@ -796,7 +813,15 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		// B924: TMPDIR on the RAM disk (gates.ram_tmp), a fresh dir per run.
 		ramEnv, ramDone := gatesRamTmpEnv(configured, o.run, o.block, stderr)
 		runPlan.BaseEnv = ramEnv
-		results, all, err = gates.Run(ctx, runPlan, cwd, o.run, timeout, scope)
+		if namedSelection != nil {
+			fmt.Fprintf(stderr, "gates run: %s: %s\n", namedSelection.fields().Get("tests_only"), strings.Join(namedSelection.Names, ", "))
+			results, all, err = gatesNamesRun(ctx, runPlan, namedSelection, cwd, o.run, timeout, scope)
+		} else {
+			if namesModule != "" {
+				runPlan = gatesNamesUnfiltered(runPlan)
+			}
+			results, all, err = gates.Run(ctx, runPlan, cwd, o.run, timeout, scope)
+		}
 		ramDone()
 		releaseSlot()
 		if err != nil {
@@ -902,7 +927,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		if r.Get("flaky") != nil {
 			summary.Set("flaky", r.Get("flaky"))
 		}
-		for _, key := range []string{"full_stamp", "reused", "reuse_reason"} {
+		for _, key := range []string{"full_stamp", "reused", "reuse_reason", "tests_only", "test_names"} {
 			if value := r.Get(key); value != nil {
 				summary.Set(key, value)
 			}
@@ -963,6 +988,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		}
 		row.Set("duration_ms", duration)
 		row.Set("results", summaries)
+		if namedSelection != nil {
+			gatesAdd(&row, namedSelection.fields())
+		}
 		if base != "" {
 			row.Set("test_base", base)
 		}

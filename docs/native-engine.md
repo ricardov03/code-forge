@@ -177,7 +177,8 @@ also selects `test/compat/config-golden.test.mjs` (B409). A test command without
 `{test_files}` gets the selection appended. It never
 runs the full Node suite and never hands over; an empty selection skips the test gate. The
 merge gates of `block land --merge` and of a batch land use the same selection (B404).
-A Go project whose test gate is `go test ./...` tests only its changed packages and the
+A Go block gate uses the named selection described below (B1009). Land merge gates
+for a Go project whose test gate is `go test ./...` test its changed packages and the
 packages that import them (`Deps`, `TestImports`, `XTestImports` from `go list -json ./...`;
 a `go list` failure fails the gate) instead (`reason: go_packages`, `gate.done` fields
 `packages` and `importer_packages`, B723b); a batch land then runs one full
@@ -796,3 +797,17 @@ New hand-over reasons go at the end only: one constant at the end of the
 list; the functions that use it stay in `handover_log.go`. `.gitattributes` merges
 `handover_reasons.go` with `merge=union`, so two such appends land without a
 conflict (B510, B513).
+
+### Named Go block gates (B1009)
+
+`gates run --run <r> --block <id> --changed` runs tests declared in the block’s changed
+`_test.go` files, `TestB<id>...` tests and acceptance/`--tests` names or files. Each selected
+package gets its own anchored `-run` filter, `-count=1 -trimpath`; an empty name set uses
+`-run '^$'` to compile without executing tests. Direct Go vet/build commands use those packages.
+Go wrappers receive `CODE_FORGE_TEST_RUN`; `cf-gotest` consumes it and uses a plain named run
+even when configured with `--shards`. The result and `gate.done` carry `tests_only`
+(`changed tests only (N tests)`), `test_names` and `packages`. `--changed --packages` restores
+the whole-package scope. Named gates use a separate FIFO queue lane capped at `max(1, cores/4)`,
+passing big holders and waiters regardless of load, subject to the memory floor beside holders.
+Queue notices show the wait duration. Land merge gates never reuse names-only evidence and
+retain package scope; batch land and CI retain the full gate.
