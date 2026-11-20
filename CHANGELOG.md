@@ -17,6 +17,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- Refresh close usage expectations for the supported --landed <sha> option (c28b).
+
 - Keep the unknown-verb regression aligned with the intended lane command (c28b).
 
 - Document a runnable JSON example for lane ready in the command reference (c28b).

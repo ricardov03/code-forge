@@ -2,6 +2,6 @@ exit 2
 -- stdout
 -- stderr
 block close: unknown flag "--dry-run"
-usage: code-forge block close <id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide] [--dry-run] [--json] [--help|-h]
+usage: code-forge block close <id> --run <r> [--landed <sha>] [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide] [--dry-run] [--json] [--help|-h]
   --help, -h  Print this usage and exit without changing state.
   --json      Print one JSON line on success instead of text.
