@@ -155,7 +155,11 @@ names, use the declared gate with its ordinary changed-package or wrapper scope 
 inherited name filter; a compile-only pass is not test evidence. A wrapper with no selectable
 test files fails and asks for explicit tests.
 Direct Go vet/build gates also use the selected packages. Wrappers receive the filter as
-`CODE_FORGE_TEST_RUN` (`cf-gotest` honors it). The test result and `gate.done` say
+`CODE_FORGE_TEST_RUN` (`cf-gotest` honors it). In this repository, a direct
+`go -C native run ./cmd/cf-gotest <test files...>` also infers names per package
+when that variable is unset. Select `_test.go` files with top-level tests;
+source-only or helper-only selections refuse instead of running whole packages
+(B1026). Explicit `--shards` and no-file runs retain their broader scope. The test result and `gate.done` say
 `changed tests only (N tests)` in `tests_only`, with `test_names` and `packages` (B1009).
 `--changed --packages` keeps whole-package scope. Land merge gates retain the changed-package
 and importer selection (B667, B723b), never reuse a names-only block gate, and a batch land runs

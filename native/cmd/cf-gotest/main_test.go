@@ -19,7 +19,27 @@ func fakeGo(t *testing.T, code string) string {
 	}
 	t.Setenv("PATH", dir+":/usr/bin:/bin")
 	quietMachine(t)
+	gateSelectionFixture(t)
 	return log
+}
+
+// gateSelectionFixture supplies real selected test files for fake-go tests.
+func gateSelectionFixture(t *testing.T) {
+	t.Helper()
+	t.Setenv("CODE_FORGE_RUN_ID", "")
+	t.Setenv("CODE_FORGE_TEST_RUN", "")
+	old := nativeDir
+	nativeDir = t.TempDir()
+	t.Cleanup(func() { nativeDir = old })
+	for _, name := range []string{"gates/scope_test.go", "cmd/code-forge-native/b1_test.go", "cmd/code-forge-native/b2_test.go"} {
+		file := filepath.Join(nativeDir, name)
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte("package unit\nimport \"testing\"\nfunc TestSelected(t *testing.T) {}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 // quietMachine pins the load reading to an idle 8-core machine for the test.
@@ -65,11 +85,11 @@ func TestB760GateTestsThePackagesOfTheSelection(t *testing.T) {
 	if code != 0 || errb.Len() != 0 {
 		t.Fatalf("exit %d stderr %q", code, errb.String())
 	}
-	want := "test -count=1 -timeout 75m -p 2 ./cmd/code-forge-native ./gates\n"
+	want := "test -count=1 -timeout 75m -p 2 -run ^(TestSelected)$ -trimpath ./cmd/code-forge-native\ntest -count=1 -timeout 75m -p 2 -run ^(TestSelected)$ -trimpath ./gates\n"
 	if got := readLog(t, log); got != want {
 		t.Fatalf("go ran %q, want %q", got, want)
 	}
-	if !strings.Contains(out.String(), "cf-gotest: go "+strings.TrimSuffix(want, "\n")) {
+	if !strings.Contains(out.String(), "cf-gotest: go test -count=1 -timeout 75m -p 2 -run ^(TestSelected)$ -trimpath ./gates") {
 		t.Fatalf("stdout %q", out.String())
 	}
 }
@@ -121,6 +141,7 @@ func fakeGoEnv(t *testing.T, code string) (argLog, envLog string) {
 	}
 	t.Setenv("PATH", dir+":/usr/bin:/bin")
 	quietMachine(t)
+	gateSelectionFixture(t)
 	return argLog, envLog
 }
 
@@ -154,10 +175,10 @@ func TestB953DefaultTwoPackagesAtOnce(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"native/gates/scope_test.go"}, "test -count=1 -timeout 75m -p 2 ./gates\n"},
-		{[]string{"--p", "6", "native/gates/scope_test.go"}, "test -count=1 -timeout 75m -p 6 ./gates\n"},
+		{[]string{"native/gates/scope_test.go"}, "test -count=1 -timeout 75m -p 2 -run ^(TestSelected)$ -trimpath ./gates\n"},
+		{[]string{"--p", "6", "native/gates/scope_test.go"}, "test -count=1 -timeout 75m -p 6 -run ^(TestSelected)$ -trimpath ./gates\n"},
 		{[]string{"--p=1"}, "test -count=1 -timeout 75m -p 1 ./...\n"},
-		{[]string{"--", "native/gates/scope_test.go"}, "test -count=1 -timeout 75m -p 2 ./gates\n"},
+		{[]string{"--", "native/gates/scope_test.go"}, "test -count=1 -timeout 75m -p 2 -run ^(TestSelected)$ -trimpath ./gates\n"},
 	} {
 		log := fakeGo(t, "0")
 		var out, errb bytes.Buffer
@@ -243,6 +264,8 @@ func TestB953ReadsLoadLines(t *testing.T) {
 // native/ folder and the real scripts/ci-shards.sh.
 func shardFixture(t *testing.T, names string) (goLog, runsLog string) {
 	t.Helper()
+	t.Setenv("CODE_FORGE_TEST_RUN", "")
+	t.Setenv("CODE_FORGE_RUN_ID", "")
 	dir := t.TempDir()
 	goLog, runsLog = filepath.Join(dir, "go.log"), filepath.Join(dir, "runs.log")
 	bin := "#!/bin/sh\n" +

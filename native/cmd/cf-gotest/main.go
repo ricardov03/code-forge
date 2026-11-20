@@ -4,6 +4,10 @@
 // -count=1` on the packages that hold them, from native/. With no file it runs every package (the
 // full suite). Files outside native/ are not Go packages here and are left out.
 //
+// B1026: file selections infer test names per package when CODE_FORGE_TEST_RUN is unset.
+// A package with no names in its selected files is refused before any child starts.
+// Explicit --shards and no-file full-suite runs retain their broader scope.
+//
 // B952: the go child runs with -trimpath added to GOFLAGS. Without it Go keys each compile by the
 // package's directory, so every worktree compiles every native and vendored package again; with it
 // the key is the module path, and a new worktree reuses the build cache of the others.
@@ -27,16 +31,21 @@ package main
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 // defaultP is go test's -p when --p is not given (B953).
@@ -118,24 +127,94 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if all {
 		pkgs = []string{"./..."}
 	}
-	argv := []string{"test", "-count=1", "-timeout", "75m", "-p", strconv.Itoa(o.p)}
-	if filter := os.Getenv("CODE_FORGE_TEST_RUN"); filter != "" {
-		argv = append(argv, "-run", filter, "-trimpath")
-	}
-	argv = append(argv, pkgs...)
-	env := loadCap(goEnv(os.Environ()), stdout)
-	fmt.Fprintf(stdout, "cf-gotest: go %s\n", strings.Join(argv, " "))
-	cmd := exec.Command("go", argv...)
-	cmd.Env = env
-	cmd.Stdout, cmd.Stderr = stdout, stderr
-	if err := cmd.Run(); err != nil {
-		if e, ok := err.(*exec.ExitError); ok {
-			return e.ExitCode()
+	filter := os.Getenv("CODE_FORGE_TEST_RUN")
+	filters := map[string]string{}
+	if filter == "" && !all {
+		var err error
+		filters, err = fileTestFilters(args, pkgs)
+		if err != nil {
+			fmt.Fprintf(stderr, "cf-gotest: test names: %v; select test files or set CODE_FORGE_TEST_RUN\n", err)
+			return 2
 		}
-		fmt.Fprintf(stderr, "cf-gotest: %v\n", err)
-		return 1
 	}
-	return 0
+	env := loadCap(goEnv(os.Environ()), stdout)
+	selections := [][]string{pkgs}
+	if len(filters) > 0 {
+		selections = nil
+		for _, pkg := range pkgs {
+			selections = append(selections, []string{pkg})
+		}
+	}
+	code := 0
+	for _, selection := range selections {
+		argv := []string{"test", "-count=1", "-timeout", "75m", "-p", strconv.Itoa(o.p)}
+		selectedFilter := filter
+		if len(filters) > 0 {
+			selectedFilter = filters[selection[0]]
+		}
+		if selectedFilter != "" {
+			argv = append(argv, "-run", selectedFilter, "-trimpath")
+		}
+		argv = append(argv, selection...)
+		fmt.Fprintf(stdout, "cf-gotest: go %s\n", strings.Join(argv, " "))
+		cmd := exec.Command("go", argv...)
+		cmd.Dir, cmd.Env = nativeDir, env
+		cmd.Stdout, cmd.Stderr = stdout, stderr
+		if err := cmd.Run(); err != nil {
+			if next := exitCode(err, stderr); code == 0 {
+				code = next
+			}
+		}
+	}
+	return code
+}
+
+// fileTestFilters infers a separate anchored filter for each selected package.
+// All selections are validated before any child starts; a source/helper-only
+// selection must never fall through to an unfiltered package run.
+func fileTestFilters(files, pkgs []string) (map[string]string, error) {
+	names := map[string]map[string]bool{}
+	for _, file := range files {
+		clean := filepath.ToSlash(filepath.Clean(file))
+		if !strings.HasPrefix(clean, "native/") || !strings.HasSuffix(clean, "_test.go") || strings.Contains(clean, "/testdata/") || strings.HasPrefix(clean, "native/vendor/") {
+			continue
+		}
+		packagesOfFile, _ := packages([]string{clean})
+		if len(packagesOfFile) != 1 {
+			continue
+		}
+		parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(nativeDir, strings.TrimPrefix(clean, "native/")), nil, 0)
+		if err != nil {
+			return nil, err
+		}
+		pkg := packagesOfFile[0]
+		if names[pkg] == nil {
+			names[pkg] = map[string]bool{}
+		}
+		for _, decl := range parsed.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || fn.Name.Name == "TestMain" {
+				continue
+			}
+			name := fn.Name.Name
+			if strings.HasPrefix(name, "Test") && (len(name) == 4 || !unicode.IsLower([]rune(name[4:])[0])) {
+				names[pkg][name] = true
+			}
+		}
+	}
+	filters := map[string]string{}
+	for _, pkg := range pkgs {
+		list := []string{}
+		for name := range names[pkg] {
+			list = append(list, regexp.QuoteMeta(name))
+		}
+		if len(list) == 0 {
+			return nil, fmt.Errorf("no test names in selected files for %s", pkg)
+		}
+		sort.Strings(list)
+		filters[pkg] = "^(" + strings.Join(list, "|") + ")$"
+	}
+	return filters, nil
 }
 
 // runShards is --shards: build once, split the test list with the CI rule, run the shards.
