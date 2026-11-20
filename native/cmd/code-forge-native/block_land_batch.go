@@ -266,7 +266,8 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if _, err := gitx.Run(block.tree.Path, "merge-base", "--is-ancestor", block.base, "HEAD"); err != nil {
 				return fmt.Errorf("block %s recorded base is not an ancestor", block.id)
 			}
-			if _, err := gitx.Run(block.tree.Path, "-c", rebase.UnionOff, "-c", "rebase.updateRefs=false", "rebase", "--no-autostash", "--onto", tip, block.base); err != nil {
+			// B938: commits tip already has by patch are dropped.
+			if _, err := rebase.Onto(block.tree.Path, gitx.ChildEnv(), tip, block.base); err != nil {
 				// B431/B795: append-only files (CHANGELOG.md, configured
 				// tables, generated files) are merged, earlier block's lines
 				// first, and the rebase goes on; anything else stops.
@@ -610,7 +611,11 @@ func landBatchPrecheck(main, head string, batch []*landBatchBlock, auto landmerg
 	running := head
 	kept, parked, reasons := []*landBatchBlock{}, []string{}, []string{}
 	for _, block := range batch {
-		out, err := gitx.Run(main, "merge-tree", "--write-tree", "--name-only", "--no-messages", "--merge-base="+block.base, running, strings.TrimSpace(block.head))
+		mergeBase, mergeHead, err := landCarriedPair(main, running, block, auto)
+		if err != nil {
+			return nil, nil, err
+		}
+		out, err := gitx.Run(main, "merge-tree", "--write-tree", "--name-only", "--no-messages", "--merge-base="+mergeBase, running, mergeHead)
 		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 		if err != nil {
 			command, ok := err.(*gitx.CommandError)
@@ -626,7 +631,7 @@ func landBatchPrecheck(main, head string, batch []*landBatchBlock, auto landmerg
 			}
 			// B431/B795: a conflict only in append-only files is merged the
 			// way the rebase merges it.
-			appended, ok, appendErr := landBatchAppendTree(main, strings.TrimSpace(lines[0]), block.base, running, strings.TrimSpace(block.head), files, auto)
+			appended, ok, appendErr := landBatchAppendTree(main, strings.TrimSpace(lines[0]), mergeBase, running, mergeHead, files, auto)
 			if appendErr != nil {
 				return nil, nil, appendErr
 			}
@@ -890,6 +895,11 @@ func landBatchAppendTree(main, tree, base, ours, theirs string, files []string, 
 		var text [3]string
 		for i, rev := range []string{base, ours, theirs} {
 			out, err := gitx.Run(main, "cat-file", "blob", rev+":"+file)
+			if err != nil && i == 0 {
+				// B938: a file both sides added merges from an empty base,
+				// as Resolve does in the rebase.
+				out, err = "", nil
+			}
 			if err != nil {
 				return "", false, nil
 			}

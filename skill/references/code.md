@@ -175,7 +175,7 @@ file is append-only (`land.auto_resolve`, default on): `CHANGELOG.md` bullets (o
 heading per kind, main's lines first), rows of the tables in `land.auto_resolve.tables` (default
 `docs/native-engine.md`; a row both sides only added sentences to keeps both, B890) and the
 `generated` files land re-generates; the same gates then run. A clean merge or rebase whose `CHANGELOG.md` would repeat a `### Kind` in `[Unreleased]`
-folds the repeats into one heading per kind (B813, proven on the real B800 and B877/B870 cases in B936); a repeat left after the fold is refused (B890).
+folds the repeats into one heading per kind (B813, proven on the real B800 and B877/B870 cases in B936); a repeat left after the fold is refused (B890). A commit the base already has by patch-id (carried from an earlier block) is dropped from the replay (B938).
 `block land --merge` checks for such a conflict before close and refuses with the block still
 open and `next: code-forge block rebase <id> --run <run>` (B814).
 Any other conflict aborts with main unchanged, prints the files with their kinds and one `next:`
