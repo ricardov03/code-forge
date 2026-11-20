@@ -244,12 +244,12 @@
         {
           "args": "autopilot found --run {run} --source gate --title 'gates run is red on main' --evidence 'TestB1 failed' --json",
           "exit": 0,
-          "out": "{\"finding\":\"F1\",\"fingerprint\":\"fp-56e705e225e22ac0\",\"source\":\"gate\",\"title\":\"gates run is red on main\",\"labels\":[],\"from_block\":null,\"block\":\"B2\",\"state\":\"queued\",\"reason\":null,\"seen\":1,\"brief\":\"~/.code-forge/runs/<run>/found/B2.brief.md\",\"acceptance\":\"~/.code-forge/runs/<run>/found/B2.acceptance.ym…"
+          "out": "{\"finding\":\"F1\",\"fingerprint\":\"fp-56e705e225e22ac0\",\"source\":\"gate\",\"title\":\"gates run is red on main\",\"labels\":[],\"severity\":\"normal\",\"from_block\":null,\"block\":null,\"state\":\"backlog\",\"reason\":\"backlog: not customer-breaking, so it goes to the next release (B921)\",\"seen\":1,\"brief\":null,\"acceptance\":…"
         },
         {
           "args": "autopilot found --run {run} --list",
           "exit": 0,
-          "out": "run <run>: 1 found (found → block → state)\nF1 gate → B2 → not opened: gates run is red on main"
+          "out": "run <run>: 1 found (found → block → state)\nF1 gate → - → backlog (next release) (backlog: not customer-breaking, so it goes to the next release (B921)): gates run is red on main"
         }
       ],
       "json": {
@@ -277,12 +277,16 @@
             "type": "array (empty in the example)"
           },
           {
+            "key": "severity",
+            "type": "string"
+          },
+          {
             "key": "from_block",
             "type": "null"
           },
           {
             "key": "block",
-            "type": "string"
+            "type": "null"
           },
           {
             "key": "state",
@@ -290,7 +294,7 @@
           },
           {
             "key": "reason",
-            "type": "null"
+            "type": "string"
           },
           {
             "key": "seen",
@@ -298,11 +302,11 @@
           },
           {
             "key": "brief",
-            "type": "string"
+            "type": "null"
           },
           {
             "key": "acceptance",
-            "type": "string"
+            "type": "null"
           },
           {
             "key": "duplicate",
@@ -1139,7 +1143,7 @@
         {
           "args": "context pack --run {run} --block B1 --json",
           "exit": 0,
-          "out": "{\"path\":\"<tmp>/cf-tmp/<run>/context/B1.md\",\"tokens\":1499,\"lines\":65,\"cut\":0,\"sha256\":\"<sha256>\"}"
+          "out": "{\"path\":\"<tmp>/cf-tmp/<run>/context/B1.md\",\"tokens\":1611,\"lines\":68,\"cut\":0,\"sha256\":\"<sha256>\"}"
         }
       ],
       "json": {
@@ -1909,7 +1913,7 @@
         {
           "args": "queue --json",
           "exit": 0,
-          "out": "{\"holders\":[],\"waiters\":[],\"changed_slots\":1}"
+          "out": "{\"holders\":[],\"waiters\":[],\"changed_slots\":2}"
         }
       ],
       "json": {
@@ -1950,7 +1954,7 @@
         {
           "args": "queue status --json",
           "exit": 0,
-          "out": "{\"holders\":[],\"waiters\":[],\"changed_slots\":1}"
+          "out": "{\"holders\":[],\"waiters\":[],\"changed_slots\":2}"
         }
       ],
       "json": {
