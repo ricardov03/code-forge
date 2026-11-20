@@ -323,8 +323,12 @@ var helpRefs = map[string]helpRef{
 		examples: []helpRefExample{helpRefEx("block", "block attempt B1 --run {run} --json")},
 	},
 	"block rebase": {
-		when:     "Move an open block onto the current main.",
-		related:  []string{"review-file", "block land"},
+		when:    "Move an open block onto the current main.",
+		related: []string{"review-file", "block land"},
+		flags: map[string]string{
+			"--accept-identical": "Clear this changed owned binary when its bytes equal --source; needs the rebase:accept-identical grant and rebase.approved_binary_sources (B1014).",
+			"--source":           "The approved source to compare: a path under rebase.approved_binary_sources, or <base-ref>:<path> on the block's base branch.",
+		},
 		examples: []helpRefExample{helpRefEx("block", "block rebase B1 --run {run} --json")},
 	},
 	"block claim": {

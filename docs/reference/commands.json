@@ -2028,14 +2028,14 @@
           "value": "<file>",
           "type": "path",
           "default": "not set",
-          "meaning": ""
+          "meaning": "Clear this changed owned binary when its bytes equal --source; needs the rebase:accept-identical grant and rebase.approved_binary_sources (B1014)."
         },
         {
           "name": "--source",
           "value": "<path-or-ref:path>",
           "type": "path",
           "default": "not set",
-          "meaning": "Package folder to install from."
+          "meaning": "The approved source to compare: a path under rebase.approved_binary_sources, or <base-ref>:<path> on the block's base branch."
         },
         {
           "name": "--json",

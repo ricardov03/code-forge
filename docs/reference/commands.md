@@ -1424,8 +1424,8 @@ Move an open block onto the current main.
 | `--accept-changed <file>…` | list | not set | Accept these changed files after a rebase; needs --reason. |
 | `--reason <text>` | string | not set | Why; written to the ledger. |
 | `--accept-landed` | bool | off | Accept that the block's work already landed on main. |
-| `--accept-identical <file>` | path | not set |  |
-| `--source <path-or-ref:path>` | path | not set | Package folder to install from. |
+| `--accept-identical <file>` | path | not set | Clear this changed owned binary when its bytes equal --source; needs the rebase:accept-identical grant and rebase.approved_binary_sources (B1014). |
+| `--source <path-or-ref:path>` | path | not set | The approved source to compare: a path under rebase.approved_binary_sources, or <base-ref>:<path> on the block's base branch. |
 | `--json` | bool | off | Print JSON instead of text. |
 
 #### Examples
