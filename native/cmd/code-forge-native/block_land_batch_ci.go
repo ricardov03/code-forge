@@ -8,6 +8,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/humancheck"
+	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/proof"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -125,6 +126,28 @@ func landBatchCITip(json bool, batch []*landBatchBlock, i int) bool {
 	}
 	fmt.Fprintf(out, "gates: block %s tip %s has green CI; local test gate skipped (B910)\n", block.id, landCIShort(sha))
 	return false
+}
+
+// B804: a batch lands only a block commit green CI proved. landBatchCIProof
+// refuses, before main moves, a block whose commit is not the sha CI proved
+// (the rounds above make that the normal case; this is the last check).
+func landBatchCIProof(batch []*landBatchBlock) error {
+	for _, block := range batch {
+		if sha := strings.TrimSpace(block.head); block.ci != "" && sha != block.ci {
+			return fmt.Errorf("block %s commit %s has no green CI (CI proved %s); nothing landed (B804)", block.id, landCIShort(sha), landCIShort(block.ci))
+		}
+	}
+	return nil
+}
+
+// landBatchLandedMarker is the landed marker of a batch block: its merge, the
+// new main and, under land.require_ci, the block commit green CI proved (B804).
+func landBatchLandedMarker(block *landBatchBlock, merge, main string) ledger.Object {
+	marker := ledger.Object{{Key: "merge", Value: merge}, {Key: "main", Value: main}}
+	if block.ci != "" {
+		marker = append(marker, ledger.Field{Key: "ci_sha", Value: block.ci})
+	}
+	return marker
 }
 
 // landBatchNoTest is the gate commands without the test gate.

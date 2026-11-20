@@ -495,6 +495,9 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 			for _, block := range batch[:green] {
 				landed = append(landed, block.id)
 			}
+			if err := landBatchCIProof(batch[:green]); err != nil {
+				return err
+			}
 			refguard.Authorize(main)
 			if _, err := gitx.WithEnv(main, refguard.LandEnv(landed...), "merge", "--ff-only", "--", prefixes[green]); err != nil {
 				return err
@@ -504,7 +507,7 @@ func landBatchRounds(flags map[string]any, home, run string, ids []string, round
 			// B426: the merge gate and the merge ran without the run lock;
 			// only this "mark landed" commit takes it.
 			for i, block := range batch[:green] {
-				block.entry.Set("landed", ledger.Object{{Key: "merge", Value: prefixes[i+1]}, {Key: "main", Value: prefixes[green]}})
+				block.entry.Set("landed", landBatchLandedMarker(block, prefixes[i+1], prefixes[green]))
 			}
 			if err := landBatchCommit(home, run, batch[:green]); err != nil {
 				return err

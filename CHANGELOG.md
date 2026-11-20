@@ -10,6 +10,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - With `land.require_ci: github`, a batch `block land` no longer runs a block's local `test` gate when the sha it lands is the sha GitHub CI proved green: a rebase that made a new sha pushes it to a new CI branch (never forced) and waits for green CI on it, and the land prints `gates: block <id> tip <sha> has green CI; local test gate skipped`. Lint, types, format and the batch merge gate still run (B910)
 - A batch `block land` with `land.require_ci: github` waits for CI with no block lock held, so other commands on those blocks no longer get `block-busy` during the wait: each tip's CI is read before the locks are taken, a block whose rebase made a new sha lets the blocks before it land, waits for CI on the new sha and lands in a next round, and a tip that moved during the wait is refused at `ci` (B803)
+- A batch `block land` with `land.require_ci: github` lands only a block commit green CI proved: a rebased commit waits for its own green CI first, a last check before main moves refuses any other, and the block's landed marker records the proved sha as `ci_sha` (B804)
 
 ## [0.26.0] — 2026-11-19
 
