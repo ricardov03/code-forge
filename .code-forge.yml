@@ -6,19 +6,37 @@ provider: anthropic
 levels:
   L0:
     model: claude-haiku-4-5-20251001
+  # Owner 2026-11-19: coders go to Codex to save Claude usage; Claude is the fallback.
   L1:
-    model: claude-sonnet-5
+    model: gpt-6.1-sol
+    provider: openai
+    effort: medium
+    fallback:
+      - provider: anthropic
+        model: claude-sonnet-5
   L2:
-    model: claude-opus-5-5
+    model: gpt-6.1-sol
+    provider: openai
+    effort: high
+    fallback:
+      - provider: anthropic
+        model: claude-opus-5-5
   L3:
     model: claude-fable-5-2
 caps:
-  coders: 2
+  coders: 4
 review:
   multimodel: false
+  # Reviewers stay on Claude (L2 levels are Codex for coders).
+  routes:
+    - min_lines: 0
+      level: L2
+      provider: anthropic
+      model: claude-opus-5-5
 engine: auto
 harnesses:
   - claude
+  - codex
 system1:
   fallback: rules
 gates:
