@@ -57,6 +57,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - Maintainer tool `native/cmd/cf-redgreen --base <sha> [--out <file>] <test files>` proves a block's new Go tests red→green: it runs them on the base sha's module (from `git archive`, nothing touched) and requires an assertion failure, then a pass on the working tree; verdict PROVEN, NO_NEW_TESTS, NOT_RED, RED_INVALID or NOT_GREEN, optionally written as JSON (B957)
 - A run may list at most 3 flaky Go tests: the gate whose flaky test makes it 4 or more is red, names the tests, writes a `test.flaky_limit` row and shows `flaky_limit` in its JSON; a later clean gate stays green (B958)
 - `block land` runs fast checks before CI, rebase or gate: a block that adds a conflict marker, leaves a testdata/fixtures file ignored by git, adds a duplicate docs table row or a new CHANGELOG [Unreleased] shape fault stops at `fast-checks` with each problem named (B964)
+### Added
+
+- `block land` (single or batch) refuses a block that adds a file over the new key `land.max_file_mb` (default 5 MB, `0` off) at step `size` before the merge, and every land push (main with `--push`/`land.push`, the `land.require_ci` CI branch) refuses commits the remote does not have that add one, before anything is sent, naming each file with its size and the fix; a refused main push keeps the local merge and queues no heal item. The binaries a `go build` in `native/` writes are gitignored (B986)
 
 ## [0.26.0] — 2026-11-19
 

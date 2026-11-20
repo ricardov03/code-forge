@@ -733,6 +733,15 @@ starts `code-forge ci watch --sha <sha> --run <run>` as a detached child, loggin
 `~/.code-forge/heal/ci-<sha>.log`, prints `ci watch: started for <sha>; log <path>` and returns at
 once; land never waits for CI.
 
+**No big files (B986).** Land refuses commits that add a file over `land.max_file_mb` (default 5,
+the B606 size limit of the main npm package; `0` turns it off). `block land` (single or batch)
+stops at step `size` before the merge, main unchanged; a push (main with `--push`/`land.push`, and
+the `land.require_ci` CI branch) checks the commits the remote does not have yet
+(`git rev-list --objects <tip> --not --remotes=<remote>`) and refuses before anything is sent,
+naming each file and its size and the fix (`git rm --cached <file>`, `.gitignore`, amend). A
+refused main push keeps the local merge and queues no heal item: a retry would fail the same way.
+The binaries a `go build` in `native/` writes are in `.gitignore`.
+
 **Require green CI (B765).** Opt in with `land.require_ci: github` in the run-start config (default
 `off`: nothing changes). Then `block land --merge` and a batch land merge a block only when GitHub
 CI is green for the block branch's own tip sha. Before anything is merged or written (a batch: for
