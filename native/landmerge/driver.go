@@ -44,6 +44,19 @@ func MergeDriver(base, ours, theirs, name string) error {
 		name = ours
 	}
 	if isChangelog(name) {
+		baseText, readErr := os.ReadFile(base)
+		if readErr != nil {
+			return readErr
+		}
+		theirsText, readErr := os.ReadFile(theirs)
+		if readErr != nil {
+			return readErr
+		}
+		if sectioned, handled, mergeErr := mergeReleaseBoundary(string(baseText), string(before), string(theirsText)); mergeErr != nil {
+			return mergeErr
+		} else if handled {
+			merged = sectioned
+		}
 		merged = FoldChangelog(merged, string(before))
 		if faults := releasecheck.ChangelogBlockDuplicates(merged); len(faults) > 0 {
 			return fmt.Errorf("%s", strings.Join(faults, "; "))
