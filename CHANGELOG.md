@@ -49,6 +49,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Added
 
+- `lane ready` verifies committed lane ownership, signed review/close evidence, history and size; `lane combine` reuses land merging, named tests and one regeneration for local integration without rebasing lane branches (B1010b).
 - `lane start --base <combine-tip>` starts a brief run on a clean lane branch with a pinned combine base, at most two blocks, existing named Go gates and local close/review; lane landing refuses so the wave integrator can combine it. Ready-lane verification and combine automation remain B1010b (B1010a).
 - `block open --shared <files…>`: two open blocks of one run may both own an append-only file (CHANGELOG.md, a docs table) when both name it with `--shared` (an exact path also in `--owned`); the run record keeps `shared_files`. A file only one block shares, and every other owned file, still overlaps, and each block's reviews and close checks stay its own (B994).
 - `land.regenerate`: a list of commands a batch land runs once on the combined tip, after the merge and before the push, committing what they changed as one commit on main (for example `sh scripts/cf-release.sh regen-docs`); a failing command stops the land at `regenerate`, unpushed. Init writes it as `[]` (B959b).

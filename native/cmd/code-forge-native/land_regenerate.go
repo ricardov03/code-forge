@@ -56,8 +56,17 @@ func landBatchRegenerate(home, run string, ids []string, json bool) (string, err
 	if err != nil {
 		return landed[0], err
 	}
+	if err := landRegenerateAt(main, commands, landed, json); err != nil {
+		return landed[0], err
+	}
+	return "", nil
+}
+
+// Shared by block land and lane combine: regenerate exactly once at their
+// combined checkout, then record the generated changes in one commit.
+func landRegenerateAt(main string, commands, landed []string, json bool) error {
 	if dirty, err := gitx.Run(main, "status", "--porcelain"); err != nil || strings.TrimSpace(dirty) != "" {
-		return landed[0], fmt.Errorf("land.regenerate: the main checkout has uncommitted changes; no command ran")
+		return fmt.Errorf("land.regenerate: the main checkout has uncommitted changes; no command ran")
 	}
 	for _, command := range commands {
 		cmd := exec.Command("sh", "-c", command)
@@ -65,31 +74,31 @@ func landBatchRegenerate(home, run string, ids []string, json bool) (string, err
 		cmd.Env = gitx.ChildEnv()
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			return landed[0], fmt.Errorf("land.regenerate: `%s` failed (%v); main keeps the landed merge, not pushed\n%s", command, err, rdTailLines(string(out), 20))
+			return fmt.Errorf("land.regenerate: `%s` failed (%v); checkout keeps the generated changes, not pushed\n%s", command, err, rdTailLines(string(out), 20))
 		}
 	}
 	changed, err := gitx.Run(main, "status", "--porcelain")
 	if err != nil {
-		return landed[0], err
+		return err
 	}
 	if strings.TrimSpace(changed) == "" {
 		landRegenerateNote(json, "", 0)
-		return "", nil
+		return nil
 	}
 	if _, err := gitx.Run(main, "add", "-A"); err != nil {
-		return landed[0], err
+		return err
 	}
 	message := "regenerate after landing " + strings.Join(landed, " ") + "\n\nland.regenerate (B959b):\n" + strings.Join(commands, "\n") + "\n"
 	refguard.Authorize(main)
 	if _, err := gitx.WithEnv(main, refguard.LandEnv(landed...), "-c", "commit.gpgsign=false", "commit", "-q", "-m", message); err != nil {
-		return landed[0], err
+		return err
 	}
 	head, err := gitx.Run(main, "rev-parse", "HEAD")
 	if err != nil {
-		return landed[0], err
+		return err
 	}
 	landRegenerateNote(json, strings.TrimSpace(head), len(strings.Split(strings.TrimSpace(changed), "\n")))
-	return "", nil
+	return nil
 }
 
 func landRegenerateNote(json bool, commit string, files int) {

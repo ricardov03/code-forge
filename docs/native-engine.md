@@ -27,12 +27,29 @@ Supported named runners are direct `go test` and `go run ./cmd/cf-gotest`
 lookup: the supplied combine tip is the integrator's trust boundary, and the
 second block builds on the first local commit without needing lane CI.
 
-Lane setup is the first fast-lane core (B1010a). Ready-lane verification and an
-automated combine command remain B1010b. Until then, the wave integrator checks
-the closed blocks and their review ledger, checks new objects for the 5 MB limit,
-merges lanes with per-merge tests, regenerates once with `land.regenerate`, and
-runs the wave's CI. Existing batch land, red-tip fix handling and the union merge
-driver remain the integration machinery; lane start does not run them.
+`code-forge lane ready --run <lane-run> [--json]` checks a clean checkout on the
+recorded branch, ancestry from the pinned base, one or two closed blocks, and new
+blobs no larger than 5 MB. Every commit must name its block (`B123: ...`), follow
+its open time, and change only that block's owned paths. Every block needs signed
+dispatch and close rows, and each surviving changed file needs a signed approval
+and successful review result for its bytes at that block's last commit. Later
+denials and open findings still block readiness. Deleted files need no review.
+Readiness does not write state or run tests. The workspace must be the repo root.
+
+Start an ordinary active run on a separate clean integration branch in the same
+repository, then run `code-forge lane combine --run <integration-run> <lane-run>...`.
+Lane bases must already be ancestors of the integration tip. It validates every
+lane before merging, rechecks each tip, uses the existing land merge precheck
+and conflict resolution, runs that lane's named Go tests in the combined trial
+tree after each merge, then runs `land.regenerate` once and commits its output.
+It fast-forwards only the integration branch after all local checks pass and
+signs `lane.combine`; lane branches are never rebased or moved. Conflicts and red
+tests leave the integration branch unchanged. Red tests use the existing single
+fix finding mechanism. A dirty trial is preserved with its path printed.
+
+Combine currently performs local integration. The integrator still reviews the
+generated combined tip, runs one CI for that exact tip, and fast-forwards main.
+No lane CI is needed; combine itself does not push, open a PR or promote main.
 
 ## What it is
 

@@ -17,7 +17,10 @@ source list and the `rebase:accept-identical` grant. See [approved binary source
 For short Go tasks, `code-forge lane start --cwd . --base <combine-tip> --run <id>`
 starts a brief run in a clean lane branch at the tip you supply. A lane holds at most
 two blocks, runs Go gates by test name, and closes blocks locally for the wave
-integrator. See [fast lanes](docs/native-engine.md#fast-lanes).
+integrator. `code-forge lane ready --run <id>` verifies the committed evidence;
+`code-forge lane combine --run <integration-run> <lane-run>...` merges ready local
+lanes with named tests and one regeneration. The integrator reviews the combined
+tip, runs one CI and promotes it to main. See [fast lanes](docs/native-engine.md#fast-lanes).
 
 ## Install
 

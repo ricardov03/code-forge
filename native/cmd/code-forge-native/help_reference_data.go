@@ -594,6 +594,17 @@ var helpRefs = map[string]helpRef{
 		related:  []string{"run status", "block open", "block close", "block land"},
 		examples: []helpRefExample{helpRefEx("none", "lane start --help")},
 	},
+	"lane ready": {
+		when:     "After committing and closing a lane's blocks: verify signed reviews of committed bytes, ownership, timing, clean history and the 5 MB limit.",
+		related:  []string{"lane combine", "block close"},
+		examples: []helpRefExample{helpRefEx("none", "lane ready --help")},
+	},
+	"lane combine": {
+		when:     "In a separate integration branch and active run: merge local ready lane runs without rebasing, run named tests after each merge and regenerate once. Review, CI and main promotion remain integrator steps.",
+		flags:    map[string]string{"--run": "The active integration run; positional arguments name lane runs in merge order."},
+		related:  []string{"lane ready", "run start"},
+		examples: []helpRefExample{helpRefEx("none", "lane combine --help")},
+	},
 	"land": {
 		when:     "Internal: the landing code block land uses. Run block land instead.",
 		related:  []string{"block land"},
