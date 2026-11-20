@@ -268,7 +268,7 @@ var helpRefs = map[string]helpRef{
 		},
 	},
 	"autopilot found": {
-		when:    "During an autopilot run: turn a problem you found (a red gate, a land failure, a coder's leftover, a flaky test, a hand-over, a review) into a queued block of the same run instead of fixing it on the side.",
+		when:    "During an autopilot run: record a problem you found (a red gate, a land failure, a coder's leftover, a flaky test, a hand-over, a review) instead of fixing it on the side; a customer-breaking one becomes a queued block of the same run, the rest go to the backlog (B921).",
 		related: []string{"autopilot status", "autopilot binnacle", "autopilot start"},
 		flags: map[string]string{
 			"--source":        "Where the problem was found: gate, land, coder, flaky, handover or review.",
@@ -276,6 +276,7 @@ var helpRefs = map[string]helpRef{
 			"--evidence":      "What shows the problem (a failing test, an error line); goes into the brief.",
 			"--evidence-file": "File with the evidence, instead of --evidence.",
 			"--label":         "Labels for the found block, comma separated.",
+			"--severity":      "normal (default: the finding goes to the backlog, the next release) or customer-breaking (it joins this run as a queued block) (B921).",
 			"--fingerprint":   "Key that marks repeats of the same problem (default: made from source and title).",
 			"--report":        "Coder report file: every FOUND line in it becomes a finding.",
 			"--list":          "List the run's findings and the block each one became.",
