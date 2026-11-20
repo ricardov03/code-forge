@@ -151,10 +151,18 @@ func lcfPrecheck(main, base, tree string, auto landmerge.Settings) ([]landmerge.
 			files = append(files, file)
 		}
 	}
+	kinds := make([]landmerge.File, len(files))
+	if !auto.Enabled {
+		// As lcfMerge: with auto_resolve off land resolves no conflict, so
+		// every conflicted file stops the land here, before close.
+		for i, file := range files {
+			kinds[i] = landmerge.File{Path: file, Kind: landmerge.KindCode}
+		}
+		return kinds, nil
+	}
 	if _, ok, err := landBatchAppendTree(main, strings.TrimSpace(lines[0]), strings.TrimSpace(mergeBase), ours, head, files, auto); err != nil || ok {
 		return nil, err
 	}
-	kinds := make([]landmerge.File, len(files))
 	for i, file := range files {
 		kinds[i] = landmerge.File{Path: file, Kind: auto.Kind(file, false)}
 	}
