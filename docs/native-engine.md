@@ -1,5 +1,39 @@
 # Go engine
 
+## Fast lanes
+
+`code-forge lane start --cwd . --base <combine-tip> --run <id>` runs in Go and
+starts the existing review worker and a brief run. Supply the newest combine tip,
+or main when no combine is open; the command does not discover the integrator's
+branch. HEAD must equal that commit in a clean branch other than main/master.
+Use an existing lane checkout and `proof.isolation: export`; the command records
+the resolved base and branch in `run.lane` and signs `lane.start`, without editing
+configuration. This is a run policy, not a new configuration key.
+
+Open, review and close blocks with the usual commands and run id. A lane allows
+at most two distinct blocks, including closed or stopped blocks. Each new block
+uses current lane HEAD, which must descend from the pinned combine tip and remain
+on the recorded branch; an explicit block base must equal HEAD. Commit the first
+block before opening the second. Keep the lane on its original history for combine.
+
+Lane gates use the existing named Go selector even without `--changed`. They
+refuse `--full`, `--packages`, or a configured test runner for which named Go
+selection is unavailable. Changed test files, block-id tests and explicit
+acceptance tests select the names; list related tests that fake or pin a changed
+function in acceptance or `block open --tests`. Reviews and close checks still
+apply. `block land` refuses lane runs before merging, pushing or watching CI.
+Supported named runners are direct `go test` and `go run ./cmd/cf-gotest`
+(including `go -C native ...`). Lane block opens skip the per-block base CI
+lookup: the supplied combine tip is the integrator's trust boundary, and the
+second block builds on the first local commit without needing lane CI.
+
+Lane setup is the first fast-lane core (B1010a). Ready-lane verification and an
+automated combine command remain B1010b. Until then, the wave integrator checks
+the closed blocks and their review ledger, checks new objects for the 5 MB limit,
+merges lanes with per-merge tests, regenerates once with `land.regenerate`, and
+runs the wave's CI. Existing batch land, red-tip fix handling and the union merge
+driver remain the integration machinery; lane start does not run them.
+
 ## What it is
 
 In 0.17.0, the npm `code-forge` command starts the Go engine first.

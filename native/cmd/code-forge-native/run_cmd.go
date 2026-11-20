@@ -69,6 +69,7 @@ var (
 
 type runFlags struct {
 	values   map[string]string
+	laneBase string // lane start only; frozen in the run, never a config override
 	reattach bool
 	add      bool
 	json     bool // B633: run end --json
@@ -449,6 +450,9 @@ func runStatusPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 		if runHas(record, key) {
 			out.Set(key, record.Get(key))
 		}
+	}
+	if lane := record.Get("lane"); lane != nil {
+		out.Set("lane", lane)
 	}
 	out.Set("worker_pinned", runTruthy(record.Get("worker")))
 	// B885: worker_pinned says a pin is recorded; worker_live and workers

@@ -351,6 +351,12 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		}
 	}
 	block := gatesObj(gatesObj(record.Get("blocks")).Get(o.block))
+	if record.Get("lane") != nil {
+		if o.full || o.packages {
+			return gatesError(fmt.Errorf("lane gates require changed tests by name; --full and --packages belong to the combine"))
+		}
+		o.changed = true
+	}
 	light := block.Get("kind") == "light"
 	cwd := o.cwd
 	main := cwd
@@ -522,7 +528,10 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	// packages (gates.go_changed_packages, default true).
 	goPackages := gpkMode(cwd, p, configured)
 	namesModule := gatesNamesModule(cwd, p)
-	namedMode := selected && step == nil && !o.packages && namesModule != ""
+	namedMode := selected && (step == nil || record.Get("lane") != nil) && !o.packages && namesModule != ""
+	if record.Get("lane") != nil && gatesSelectable(p) && (!namedMode || !laneNamedRunner(p)) {
+		return gatesError(fmt.Errorf("lane gates require changed tests by name; configure a Go test command in a Go module"))
+	}
 	if step != nil && step.preflight {
 		return 0, true
 	}

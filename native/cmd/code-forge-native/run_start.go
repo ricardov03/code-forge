@@ -588,6 +588,14 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 		engine = v
 	}
 	return func(o *runOut) int {
+		var lane ledger.Object
+		if flags.laneBase != "" {
+			var err error
+			lane, err = laneStartPolicy(workspace, flags.laneBase)
+			if err != nil {
+				return runReport(o, "start", &runFail{err.Error(), false})
+			}
+		}
 		runStopItems(runSweepItems(home))
 		runSweepRoots(base)
 		now := runNow().UTC()
@@ -656,6 +664,10 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 		brief := flags.values["mode"] == "brief"
 		record := runNewRecord(cfg, runID, project, ws, engine, worker, brief, now)
 		rows := []ledger.Object{{{Key: "event", Value: "run.start"}, {Key: "engine", Value: engine}, {Key: "worker_pinned", Value: worker != nil}}}
+		if lane != nil {
+			record.Set("lane", lane)
+			rows = append(rows, ledger.Object{{Key: "event", Value: "lane.start"}, {Key: "base", Value: lane.Get("base")}, {Key: "branch", Value: lane.Get("branch")}, {Key: "max_blocks", Value: 2}})
+		}
 		if brief {
 			rows = append(rows, ledger.Object{{Key: "event", Value: "run.mode"}, {Key: "mode", Value: "brief"}, {Key: "plan", Value: "none"}})
 		}
@@ -690,6 +702,9 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 		line := fmt.Sprintf("run %s started · engine %s", runID, runJSString(engine))
 		if brief {
 			line += " · mode brief (no plan)"
+		}
+		if lane != nil {
+			line += " · lane " + blockString(lane.Get("base"))[:12] + " (max 2 blocks; combine only)"
 		}
 		if runTruthy(pinned) {
 			pin, _ := pinned.(ledger.Object)

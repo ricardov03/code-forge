@@ -164,6 +164,9 @@ func runBlockLand(args []string) int {
 		}
 		return fail(err.Error(), 1)
 	}
+	if record.Get("lane") != nil {
+		return fail("lane blocks are closed locally and combined; no lane land, push or CI", 1)
+	}
 	// B990b: a later plain git merge in this clone (a wave combine) folds
 	// CHANGELOG headings like this land does.
 	ws, _ := record.Get("workspace").(string)
