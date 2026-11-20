@@ -311,6 +311,10 @@
           {
             "key": "duplicate",
             "type": "boolean"
+          },
+          {
+            "key": "next_release",
+            "type": "string"
           }
         ]
       }

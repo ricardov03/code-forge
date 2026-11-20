@@ -232,7 +232,7 @@ author: facts sheet required: run code-forge facts --brief plans/brief.md first,
 Let a delegate decide for the owner within a grant
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--speed] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes] | digest --run <id> [--json] | ratify <row-id> --run <id> [--json] | revert <row-id> --run <id> [--json] | found --run <id> (--source <gate|land|coder|flaky|handover|review|speed> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--severity <normal|customer-breaking>] [--fingerprint <key>] | --report <file> | --list) [--from <block>] [--json] | step --run <id> --step <land|gate|coder|ci-wait> --ms <n> [--block <id>] [--json]
+usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset>|--until-done [--deadline <ISO-8601 with offset>] [--blocks <id,…>] --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--speed --fastest <option>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown] | extend --run <id> --until <ISO-8601 with offset>|--deadline <ISO-8601 with offset> [--yes] | digest --run <id> [--json] | ratify <row-id> --run <id> [--json] | revert <row-id> --run <id> [--json] | found --run <id> (--source <gate|land|coder|flaky|handover|review|speed> --title <text> --evidence <text>|--evidence-file <path> [--label <label,…>] [--severity <normal|customer-breaking>] [--fingerprint <key>] | --report <file> | --list) [--from <block>] [--json] | step --run <id> --step <land|gate|coder|ci-wait> --ms <n> [--block <id>] [--json]
 ```
 
 #### When to use
@@ -513,7 +513,7 @@ autopilot run <run>: grant ap-<id> now runs until 2026-01-01T00:00:00Z (1h 59m; 
 Ask the delegate one question inside the grant
 
 ```text
-usage: code-forge autopilot ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--speed] [--json] (options for an action: waive,fix · allow,deny · L1,L2)
+usage: code-forge autopilot ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--speed --fastest <option>] [--json] (options for an action: waive,fix · allow,deny · L1,L2)
 ```
 
 #### When to use
@@ -532,7 +532,8 @@ An agent needs an owner decision during a grant: the delegate answers it or it g
 | `--block <id>` | string | not set | Block id. |
 | `--file <path>` | path | not set | File path inside the repository. |
 | `--finding <id>` | string | not set | Review finding id. |
-| `--speed` | bool | off | A speed-only choice (B922): the first option (list the fastest first; each keeps every gate) is taken at once, with no delegate session and no wait on the owner; the binnacle tells the owner after. |
+| `--speed` | bool | off | A speed-only choice (B922): the option named by --fastest (each option keeps every gate) is taken at once, with no delegate session and no wait on the owner; the binnacle tells the owner after. |
+| `--fastest <option>` | string | not set | With --speed: the fastest option, one of --options; its place in the list does not count (B983). |
 | `--json` | bool | off | Print JSON instead of text. |
 
 #### Examples
