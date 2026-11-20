@@ -154,6 +154,8 @@ its own anchored `-run` filter, `-count=1 -trimpath`; no names means `-run '^$'`
 Direct Go vet/build gates also use the selected packages. Wrappers receive the filter as
 `CODE_FORGE_TEST_RUN` (`cf-gotest` honors it). The test result and `gate.done` say
 `changed tests only (N tests)` in `tests_only`, with `test_names` and `packages` (B1009).
+Changes to code-forge CLI flag literals also select the two B801 reference-contract tests,
+so add each flag's command-specific meaning before closing the block (B1023).
 `--changed --packages` keeps whole-package scope. Land merge gates retain the changed-package
 and importer selection (B667, B723b), never reuse a names-only block gate, and a batch land runs
 one full `go test ./...` at the end. CI keeps the full gate.

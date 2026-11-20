@@ -166,7 +166,7 @@ selected package separately with an anchored `-run` filter, `-count=1 -trimpath`
 `-run '^$'` compiles the package and runs no test. Direct Go vet/build commands also narrow to
 these packages. A wrapper receives the filter as `CODE_FORGE_TEST_RUN`; `cf-gotest` honors it
 and uses a plain named run even with `--shards`. Results and `gate.done` carry `tests_only`
-(`changed tests only (N tests)`), `test_names`, `test_count` and `packages`. Named block evidence
+(`changed tests only (N tests)`), `test_names`, `test_count` and `packages`. When code-forge CLI flag literals change, named block gates also run `TestB801EveryCommandHasAReference` and `TestB801CommandsJSONCoversTheTable` to check the help-reference contract (B1023). Named block evidence
 never substitutes for a land merge gate. CI and the final batch gate still run the full suite.
 
 With `--changed --packages`, a Go project tests only its changed packages (B667). This applies when the test command is

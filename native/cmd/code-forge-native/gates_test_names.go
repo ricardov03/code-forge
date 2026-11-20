@@ -101,6 +101,13 @@ func gatesNamesSelect(cwd, module, id string, block ledger.Object, listed, chang
 	for _, v := range acceptance {
 		explicit = append(explicit, gates.Strings(gatesObj(v).Get("tests"))...)
 	}
+	flagsChanged, err := gatesFlagReferencesChanged(cwd, module, block, changed)
+	if err != nil {
+		return nil, err
+	}
+	if flagsChanged {
+		explicit = append(explicit, "TestB801EveryCommandHasAReference", "TestB801CommandsJSONCoversTheTable")
+	}
 	requested := map[string]bool{}
 	for _, s := range explicit {
 		requested[s] = true
