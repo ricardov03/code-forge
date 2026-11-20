@@ -96,7 +96,7 @@ func spawnSessionPlan(cwd string, parsed cliParsed, makeRoot func() (string, boo
 		opts.Run = &run
 	}
 	if role == "coder" && opts.Block != nil {
-		text, refusal, reason := spawnCoderPrompt(briefData, *opts.Block, opts.Run)
+		text, refusal, reason := spawnCoderPrompt(cfg, briefData, *opts.Block, opts.Run)
 		if reason != 0 {
 			return nil, reason
 		}

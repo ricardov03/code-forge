@@ -490,6 +490,13 @@ context:
 - each rules file, then the lessons file, each headed by its path (an empty or whitespace-only file
   gives its heading alone).
 
+The header also carries generated rule sections: the forbidden list, `## git rules (code-forge)`
+(B797) and `## test budget (code-forge)` (B923): run only the test names you add or change
+(`go test <pkg> -run '^(TestA|TestB)$' -count=1 -p N`), no package-wide, full-suite or stress
+(`-count=N`) runs unless the owner asks; GitHub CI is the full gate. N is
+`gates.coder_test_parallel` (default 2). `code-forge spawn --role coder --block <id>` adds the same
+rule to the coder prompt as one `Test budget (code-forge):` line.
+
 Over `max_lines` the lessons are cut first, then the rules files from the last one backwards; each
 cut section ends in `[cut: N lines dropped]`. The header and the commands are never cut. It prints
 the path and `tokens ~<n>` (bytes / 4, as for review packets), or with `--json` one line
@@ -737,6 +744,10 @@ pass and prints `ci: tip <sha8> green (<n> runs)`. A red run, a failing `gh` cal
 `PATH` stops the land at step `ci` with exit 1 (`--json`: `event: refused`, `step: ci`); nothing is
 merged and no state is written. A red refusal names the failed jobs (`gh run view <id> --json jobs`)
 and its next command is `gh run view <id> --log-failed`.
+
+**Newest base, rebase before CI (B942).** A new block with a worktree and no `--base` or `proof.worktree.base` starts from the newest base branch: `block open` fetches `origin <branch>` and takes the local tip when it contains origin's, or origin's tip (by sha; the local branch never moves) when it contains the local one. A repository without an origin, a detached HEAD or a fetch that fails keeps the local HEAD. Local and origin tips that diverged refuse with `base-diverged` and the `git log --left-right` next step; nothing is recorded. The context pack's git rules and a coder spawned with `--block` say: rebase on the newest base branch just before the CI push. `block ready` lists `stale_base` (fix `code-forge block rebase <id> --run <r> --accept-landed`) while the base branch moved past the block's base.
+
+**Never build on a red base (B920).** Before anything is recorded, `block open` reads the CI of the base a new block builds on (`gh run list --commit <base>`, `--workflow <land.ci_workflow>` when set). With `land.require_ci: github` a red base refuses the open (exit 1, `base <sha8> CI is red (...)`, next `gh run view <id> --log-failed`), and so does a base with no CI run or with CI still running (next `code-forge ci watch --sha <base>`); fix main first or open on a green commit with `--base <sha>`. With the gate off a red base or a base with no run prints a `warning:` line and the open goes on; no `gh` on `PATH`, or a `gh` that cannot answer (no GitHub remote), says nothing. A re-open keeps its worktree's base and is not checked again.
 
 **No human between a rebase and green CI (B796).** With `land.require_ci: github`:
 
