@@ -27,7 +27,13 @@ func TestB894GoRerunCommand(t *testing.T) {
 			[]string{"go", "-C", "native", "test", "-trimpath", "-p", "2", "-count=3", "-run", "^(TestA)$", "example.invalid/m/a"}},
 		{"direct go test ignores the output", []string{"go", "test", "-timeout=5m", "./..."}, "go test -timeout 75m ./a\n",
 			[]string{"go", "test", "-timeout=5m", "-p", "2", "-count=3", "-run", "^(TestA)$", "example.invalid/m/a"}},
-		{"not go", []string{"make", "test"}, "go test -timeout 75m ./a\n", nil},
+		// B988: a non-go program that prints its go test reruns with go.
+		{"not go, names its go test", []string{"make", "test"}, "go test -timeout 75m ./a\n--- FAIL: TestA (0s)\n",
+			[]string{"go", "test", "-timeout", "75m", "-p", "2", "-count=3", "-run", "^(TestA)$", "example.invalid/m/a"}},
+		{"not go, names its go test with -p", []string{"make", "test"}, "+ go test -race -p 4 ./...\n",
+			[]string{"go", "test", "-race", "-p", "4", "-count=3", "-run", "^(TestA)$", "example.invalid/m/a"}},
+		{"not go, names no go test", []string{"make", "test"}, "--- FAIL: TestA (0s)\nFAIL\texample.invalid/m/a\t0.1s\n", nil},
+		{"no program", []string{}, "go test ./a\n", nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

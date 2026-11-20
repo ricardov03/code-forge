@@ -140,14 +140,17 @@ written `by: autopilot` and opens one tracked GitHub issue in the project's repo
 
 **Speed-only choices are not waited on (B922).** A question that only trades speed (batch or one
 by one, which order, run now or later), where every option keeps every gate, is asked with
-`--speed` and the options listed fastest first:
+`--speed` and the fastest option named with `--fastest` (B983: its place in `--options` does not
+count, so a list in any order is safe):
 
 ```bash
 code-forge autopilot ask --run <run> --scope round:extra --question "Land B4 and B5 as one batch?" \
-  --options batch,one-by-one --speed
+  --options one-by-one,batch --fastest batch --speed
 ```
 
-Under a grant that lets the scope through, the first option is taken at once (exit 0): no delegate
+`--speed` without `--fastest`, or a `--fastest` that is not one of the options, is a usage error
+(exit 2) and decides nothing. Under a grant that lets the scope through, the `--fastest` option is
+taken at once (exit 0): no delegate
 session, no wait on you. One signed `autopilot.decision` row with `speed: true` records it, and the
 binnacle tells you after ("Speed choice taken"). A grant that refuses the scope still sends the
 question to you; an ask without `--speed` is unchanged.
@@ -292,6 +295,11 @@ For each finding the autopilot:
 - puts a finding that is not customer-breaking in the backlog (B921, scope fixed): state `backlog`,
   the next release; no block id, no brief, no plan entry and no owner action. Only a finding with
   `--severity customer-breaking` (or the label `customer-breaking` on a `FOUND` line) joins the run.
+  Each new backlog finding is also one line of the workspace's next-release plan file,
+  `.code-forge/next-release.md` (B984): `- [ ] F1 · run <run> · <source> · <day>: <title> — <first
+  evidence line>`, with a fingerprint marker so a finding seen again, or found again by a later run,
+  adds no second line. The text output (`plan`) and `--json` (`next_release`) name the file; plan
+  those lines into the next release and tick or remove each once it has a block.
 - queues the customer-breaking rest, up to `autopilot.max_found_blocks` per run (default 10; past it a finding waits
   for the owner): the next free block id of the run (one past the highest of its blocks), a brief
   and an acceptance file under `~/.code-forge/runs/<run>/found/`, and the exact

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -11,7 +12,7 @@ import (
 // every landed commit is a sha whose CI read answered green.
 func TestB804LandsOnlyCIProvedSha(t *testing.T) {
 	f := landB910Fixture(t, map[string]any{"require_ci": "github"})
-	f.bareRemote()
+	bare := f.bareRemote()
 	heads := f.heads()
 	f.write(f.repo, "main-moved.txt", "main moved\n")
 	f.git(f.repo, "add", "main-moved.txt")
@@ -34,6 +35,9 @@ func TestB804LandsOnlyCIProvedSha(t *testing.T) {
 		t.Fatalf("main merges=%v, want B1 and B2", merges)
 	}
 	calls := strings.Join(landCICalls(t, gh), "\n")
+	// B998 (B804 review): CI can only prove a sha that is on a ci- branch of
+	// the remote, so each landed sha must have been pushed to one.
+	ciRefs := f.git(bare, "for-each-ref", "--format=%(objectname) %(refname)", "refs/heads/ci-*")
 	for i, id := range []string{"B1", "B2"} {
 		landedSha := f.git(f.repo, "rev-parse", merges[i]+"^2")
 		if landedSha == heads[id] {
@@ -41,6 +45,9 @@ func TestB804LandsOnlyCIProvedSha(t *testing.T) {
 		}
 		if landedSha != f.git(f.repo, "rev-parse", "block-"+id) {
 			t.Errorf("%s: landed %s is not the block branch", id, landedSha)
+		}
+		if !regexp.MustCompile(`(?m)^` + landedSha + ` refs/heads/ci-` + strings.ToLower(id) + `(-[0-9]+)?$`).MatchString(ciRefs) {
+			t.Errorf("%s: landed sha %s is on no ci-%s branch of the remote:\n%s", id, landedSha, strings.ToLower(id), ciRefs)
 		}
 		if strings.Count(calls, "run list --commit "+landedSha+" ") < 2 {
 			t.Errorf("%s: the land must wait for green CI on the landed sha %s:\n%s", id, landedSha, calls)

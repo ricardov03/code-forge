@@ -31,7 +31,7 @@ func b922Claude(t *testing.T, f b536Fixture) string {
 func TestB922SpeedAskDecidedAtOnce(t *testing.T) {
 	f := b536Setup(t)
 	marker := b922Claude(t, f)
-	code, out, errText := autopilotCall(t, "ask", "--run", "r-fix", "--scope", "round:extra", "--question", "land the batch now or one by one?", "--options", "batch,one-by-one", "--speed", "--block", "B1")
+	code, out, errText := autopilotCall(t, "ask", "--run", "r-fix", "--scope", "round:extra", "--question", "land the batch now or one by one?", "--options", "one-by-one,batch", "--fastest", "batch", "--speed", "--block", "B1")
 	if code != 0 || !strings.Contains(out, "acted · decision ad-") || !strings.Contains(out, "decision  batch · the fastest option that keeps every gate") {
 		t.Fatalf("ask = %d %q %q", code, out, errText)
 	}
@@ -58,15 +58,25 @@ func TestB922SpeedAskDecidedAtOnce(t *testing.T) {
 		t.Fatalf("binnacle = %d %q %q", code, out, errText)
 	}
 	code, _, errText = autopilotCall(t, "ask", "--run", "r-fix", "--scope", "round:extra", "--question", "which?", "--speed")
-	if code != 2 || !strings.Contains(errText, "--speed needs --options with the fastest option first") {
+	if code != 2 || !strings.Contains(errText, "--speed needs --options and --fastest <option>") {
 		t.Fatalf("speed without options = %d %q", code, errText)
+	}
+	// B983: no --fastest, or one that is not an option: exit 2, no new decision row
+	for _, extra := range [][]string{{}, {"--fastest", "c"}} {
+		args := append([]string{"ask", "--run", "r-fix", "--scope", "round:extra", "--question", "which?", "--options", "a,b", "--speed"}, extra...)
+		if code, _, errText = autopilotCall(t, args...); code != 2 {
+			t.Fatalf("speed %v = %d %q", extra, code, errText)
+		}
+	}
+	if rows := b983DecisionRows(t, f); len(rows) != 1 {
+		t.Fatalf("refused speed asks wrote decision rows: %q", rows)
 	}
 }
 
 func TestB922SpeedAskJSON(t *testing.T) {
 	f := b536Setup(t)
 	b922Claude(t, f)
-	code, out, errText := autopilotCall(t, "ask", "--run", "r-fix", "--scope", "round:extra", "--question", "q", "--options", "fast,slow", "--speed", "--json")
+	code, out, errText := autopilotCall(t, "ask", "--run", "r-fix", "--scope", "round:extra", "--question", "q", "--options", "slow,fast", "--fastest", "fast", "--speed", "--json")
 	if code != 0 || !strings.Contains(out, `"acted":true,"to_owner":false,"reason":null,"decision":"fast"`) || !strings.Contains(out, `"speed":true`) {
 		t.Fatalf("ask = %d %q %q", code, out, errText)
 	}

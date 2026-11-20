@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -74,6 +77,29 @@ func TestB969ReviewInLinkedWorktree(t *testing.T) {
 	}
 	if strings.Contains(out+errText, "worker_down") {
 		t.Fatalf("worker_down in a lane review:\n%s\n%s", out, errText)
+	}
+	// B998 (B969 review): review-file --run from the lane queues the lane's
+	// file to the lane's worker and its wait reads the same queue.
+	block := regexp.MustCompile(`"block":"([^"]+)"`).FindStringSubmatch(out)
+	if block == nil {
+		t.Fatalf("review names no block: %s", out)
+	}
+	// a new change in the lane only, so the review is new work, not a cache hit
+	laneBody := []byte("hello\nLANE again\nthree\n")
+	if err := os.WriteFile(filepath.Join(lane, "src", "a.txt"), laneBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errText = b969Exec(t, lane, env, bin, "review-file", "src/a.txt", "--block", block[1], "--run", run)
+	ticket := regexp.MustCompile(`"ticket":"([0-9a-f]+)"`).FindStringSubmatch(out)
+	if code != 0 || ticket == nil || strings.Contains(out+errText, "worker_down") {
+		t.Fatalf("review-file in the lane = %d\nstdout %s\nstderr %s", code, out, errText)
+	}
+	code, out, errText = b969Exec(t, lane, env, bin, "review-file", "--wait", ticket[1], "--run", run, "--max", "60s")
+	if code != 0 || !strings.Contains(out, `"file":"src/a.txt"`) || !strings.Contains(out, `"status":"reviewed","approved":true`) || strings.Contains(out+errText, "worker_down") {
+		t.Fatalf("review-file --wait in the lane = %d\nstdout %s\nstderr %s", code, out, errText)
+	}
+	if sum := sha256.Sum256(laneBody); !strings.Contains(out, `"content_hash":"`+hex.EncodeToString(sum[:])+`"`) {
+		t.Fatalf("review-file reviewed another src/a.txt than the lane's:\n%s", out)
 	}
 	// the queue and the worker live in the lane, not in the main tree
 	if _, err := os.Stat(filepath.Join(f.repo, ".code-forge", "queue")); err == nil {

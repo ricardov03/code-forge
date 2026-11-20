@@ -78,7 +78,19 @@ func autopilotAskInput(flags autopilotFlags) (string, error) {
 		return "", autopilotUsageFail("delegate: at most 20 options")
 	}
 	if flags.bools["speed"] && len(cleaned) < 2 {
-		return "", autopilotUsageFail("--speed needs --options with the fastest option first, e.g. --options batch,one-by-one (B922)")
+		return "", autopilotUsageFail("--speed needs --options and --fastest <option>, e.g. --options one-by-one,batch --fastest batch (B983)")
+	}
+	// B983: the fast option is named, never taken from the option order;
+	// apdSpeedRun (autopilot_speed.go) decides on this --fastest option
+	fastest, marked := flags.values["fastest"]
+	if marked && !flags.bools["speed"] {
+		return "", autopilotUsageFail("--fastest is only for --speed (B983)")
+	}
+	if flags.bools["speed"] && (!marked || autopilotJSTrim(fastest) == "") {
+		return "", autopilotUsageFail("--speed needs --fastest <option>: name the fastest option, its place in --options does not count (B983)")
+	}
+	if marked && !slices.Contains(cleaned, bnMaskSecrets(autopilotRedact(autopilotJSTrim(fastest)))) {
+		return "", autopilotUsageFail("--fastest must be one of --options (B983)")
 	}
 	if block, ok := flags.values["block"]; ok && !autopilotSubjectBlock.MatchString(block) {
 		return "", autopilotUsageFail("delegate: --block must be a block id (letters, digits, . _ -; at most 32 characters)")

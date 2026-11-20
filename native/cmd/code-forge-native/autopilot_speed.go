@@ -8,15 +8,15 @@ import (
 
 // B922: no waiting on a person for a speed-only choice. `autopilot ask
 // --speed` under an active grant that lets the scope through takes the
-// first option at once (the asker lists the options fastest first, and
-// each one keeps every gate), runs no delegate session and never goes to
+// option named by --fastest at once (B983: never the option order; each
+// option keeps every gate), runs no delegate session and never goes to
 // the owner. One signed autopilot.decision row (speed: true) records it, and
 // the binnacle tells the owner after. A refused grant still goes to the
 // owner, as for any ask; an ask without --speed is unchanged.
 
 const apdSpeedReason = "speed choice (B922): the fastest option that keeps every gate, taken at once; told after in the binnacle"
 
-// apdSpeedRun decides a speed ask: the first option, acted, one signed row.
+// apdSpeedRun decides a speed ask: the --fastest option, acted, one signed row.
 func apdSpeedRun(o *runOut, home, runID string, flags autopilotFlags, scope string, grant ledger.Object) int {
 	options := []any{}
 	for _, option := range autopilotItems(flags.values["options"]) {
@@ -25,7 +25,12 @@ func apdSpeedRun(o *runOut, home, runID string, flags autopilotFlags, scope stri
 			options = append(options, option)
 		}
 	}
-	decision := options[0].(string)
+	// B983: the option the asker named with --fastest (checked to be one of
+	// the options), never the first one listed
+	decision := apdScrub(autopilotJSTrim(flags.values["fastest"]))
+	if !apdHasAny(options, decision) {
+		return autopilotReport(o, "ask", autopilotUsageFail("--fastest must be one of --options (B983)"))
+	}
 	decisionID, err := autopilotDecisionID()
 	if err != nil {
 		return autopilotReport(o, "ask", err)
