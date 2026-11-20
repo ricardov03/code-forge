@@ -114,7 +114,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	for _, arg := range args {
 		// Node prints the verb usage for an exact --help or -h anywhere in args.
 		if arg == "--help" || arg == "-h" {
-			fmt.Fprint(stdout, blockVerbUsage("close", "<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide] [--dry-run]"))
+			fmt.Fprint(stdout, blockVerbUsage("close", "<id> --run <r> [--landed <sha>] [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide] [--dry-run]"))
 			return 0
 		}
 	}
@@ -127,6 +127,17 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		return usage("a block id and --run are required")
 	}
 	id := pos[0]
+	landed := blockString(flags["landed"])
+	if landed != "" {
+		if len(pos) != 1 {
+			return usage("--landed needs exactly one block id")
+		}
+		for _, name := range []string{"auto-claim", "decide", "no-require-reviews", "remove-worktree"} {
+			if flags[name] == true {
+				return usage("--landed cannot be combined with --" + name)
+			}
+		}
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fallback(hCloseHome)
@@ -241,7 +252,14 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		return fallback(hCloseRepo)
 	}
 	top, base, inTree := mainTop, blockString(entry.Get("base_sha")), false
-	if wt := entry.Get("worktree"); wt != nil {
+	if landed != "" {
+		var cleanup func()
+		top, base, cleanup, err = closeLandedTree(mainTop, workspace, id, landed, entry)
+		if err != nil {
+			return fail(err)
+		}
+		defer cleanup()
+	} else if wt := entry.Get("worktree"); wt != nil {
 		tree := blockObject(wt)
 		p, branch, sha := blockString(tree.Get("path")), blockString(tree.Get("branch")), blockString(tree.Get("base_sha"))
 		// B470: Node's blockTree refusals (worktree-*) run in Go with its text.
@@ -336,7 +354,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	// B717: Node restarts changed stopped findings before closeBlock's run
 	// lock (requeueStoppedFiles, then a --wait-block join), then reads the
 	// rows again.
-	requeue := !waived && external == "" && !deciding && routineGrant == nil && waited == nil
+	requeue := landed == "" && !waived && external == "" && !deciding && routineGrant == nil && waited == nil
 	for {
 		var err error
 		all, err = ledger.ReadAllRows(ledgerDir, blockString(record.Get("project")))
@@ -758,7 +776,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 		return 0
 	}
-	if waited == nil && external == "" && !waived && event == "" {
+	if landed == "" && waited == nil && external == "" && !waived && event == "" {
 		prerequisites := true
 		for _, check := range checks[:gateIndex] {
 			prerequisites = prerequisites && check.Reason == ""
@@ -918,6 +936,9 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			if plainChecks {
 				deferral = closeDeferral(home, run, id, &deferredRow)
 			}
+			if landed != "" {
+				closeRows = append(closeRows, ledger.Object{{Key: "event", Value: "block.close_landed"}, {Key: "block", Value: id}, {Key: "landed_sha", Value: landed}})
+			}
 			result, err = blockclose.CloseDeferring(home, run, id, closeRows, deferral)
 			if err != nil {
 				return publishError(err)
@@ -939,6 +960,12 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	doneFile := ""
 	ended := result.Status == "closed" || result.Status == "stopped" || result.Status == humancheck.DeferredStatus
 	if ended {
+		if landed != "" {
+			entry.Set("landed_sha", landed)
+			blocks := blockObject(record.Get("blocks"))
+			blocks.Set(id, entry)
+			record.Set("blocks", blocks)
+		}
 		doneFile = closeWriteDone(home, run, id, record, result, lines, rows, key, stderr)
 		apfFoundReport(stderr, home, run, id, reportText) // B821: the coder's FOUND lines
 		if len(endHook) > 0 {
@@ -2020,6 +2047,9 @@ func closeWriteDone(home, run, id string, record ledger.Object, result blockclos
 	var commit any
 	if out, e := gitx.Run(tree, "rev-parse", "--verify", "HEAD"); e == nil && blockCommit.MatchString(strings.TrimSpace(out)) {
 		commit = strings.TrimSpace(out)
+	}
+	if sha := blockString(blockObject(blockObject(record.Get("blocks")).Get(id)).Get("landed_sha")); sha != "" {
+		commit = sha
 	}
 	event := result.Event
 	if event == "" {

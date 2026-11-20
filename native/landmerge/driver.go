@@ -2,7 +2,9 @@ package landmerge
 
 import (
 	"fmt"
+	"github.com/ricardov03/code-forge/native/releasecheck"
 	"os"
+	"strings"
 
 	"github.com/ricardov03/code-forge/native/gitx"
 )
@@ -43,6 +45,9 @@ func MergeDriver(base, ours, theirs, name string) error {
 	}
 	if isChangelog(name) {
 		merged = FoldChangelog(merged, string(before))
+		if faults := releasecheck.ChangelogBlockDuplicates(merged); len(faults) > 0 {
+			return fmt.Errorf("%s", strings.Join(faults, "; "))
+		}
 	}
 	return os.WriteFile(ours, []byte(merged), info.Mode().Perm())
 }

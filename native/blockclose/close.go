@@ -171,6 +171,11 @@ func CloseDeferring(home, run, id string, closeRows []ledger.Object, deferral De
 				result.Status = deferredStatus
 			}
 		}
+		for _, row := range closeRows {
+			if row.Get("event") == "block.close_landed" {
+				block.Set("landed_sha", row.Get("landed_sha"))
+			}
+		}
 		block.Set("status", result.Status)
 		rows := append(slices.Clone(closeRows), ledger.Object{{Key: "event", Value: "block.close"}, {Key: "block", Value: id}, {Key: "status", Value: "complete"}})
 		if deferred != nil {

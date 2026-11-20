@@ -33,7 +33,24 @@ func closeFlags(args []string) (map[string]any, []string, string) {
 			pos = append(pos, arg)
 			continue
 		}
-		name, _, inline := strings.Cut(arg[2:], "=")
+		name, value, inline := strings.Cut(arg[2:], "=")
+		if name == "landed" {
+			if _, has := flags[name]; has {
+				return flags, pos, "--landed given more than once"
+			}
+			if !inline {
+				if i+1 == len(args) || strings.HasPrefix(args[i+1], "--") {
+					return flags, pos, "--landed needs a value"
+				}
+				i++
+				value = args[i]
+			}
+			if value == "" {
+				return flags, pos, "--landed needs a value"
+			}
+			flags[name] = value
+			continue
+		}
 		multi := name == "owned" || name == "tests"
 		if _, has := flags[name]; has && !multi {
 			return flags, pos, "--" + name + " given more than once"

@@ -16,6 +16,9 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - The autopilot secrets regression requires binnacle reads to redact the run key when audit verification loads it, including later reads after expiry, preserving secret redaction and signed evidence verification (B1013).
 - Go block gates with an affected package that has no selected test names run the declared gate with its ordinary changed scope, preserving failing tests and flaky rerun evidence instead of passing a compile-only `-run '^$'` command (B1009).
+- Merge and release checks flag near-duplicate `[Unreleased]` entries with the same leading or trailing block ID; the installed driver preserves the refusal instead of falling back to plain union (B1018).
+
+- `block close --landed <sha>` reconciles an already landed block commit against its original signed evidence, records `landed_sha`, and preserves human checks despite later combine edits (B1017).
 
 - Audit all 55 v0.27.0 entries against the code; fill in maintainer test and generated-doc guidance, correct CI gate reuse and autopilot backlog instructions, and link each entry to its documentation (B1015).
 - A queued review ticket of a closed (or landed) block for a deleted file (`content_hash: "deleted"`) is no longer served: the worker drops it before any review session as `stale` with reason `block-closed` (signed result, done marker and one `review.result` row, which the gate counts as never reviewed). A rebase-check ticket and a ticket for a file that exists are still served. B919

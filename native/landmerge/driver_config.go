@@ -11,8 +11,8 @@ import (
 // `git config` step. The line names this install's binary and falls back to
 // git's own union merge when that binary is gone or does not know
 // `land merge-driver` (an older release, a removed dev build), so the line
-// never breaks a merge: at worst a CHANGELOG keeps a repeated heading, as
-// before B990. The repository's config file is shared by all its linked
+// preserves real driver refusals (exit 1), including duplicate block entries.
+// Missing/unusable binaries (126/127) and older usage refusals (2) use union. The repository's config file is shared by all its linked
 // worktrees, so one line serves every lane of the clone.
 
 // unionDriverMark is in every merge.union.driver line code-forge writes, and
@@ -21,7 +21,7 @@ const unionDriverMark = "land merge-driver %O %A %B %P"
 
 // UnionDriverLine is the merge.union.driver value for the binary exe.
 func UnionDriverLine(exe string) string {
-	return shellQuote(exe) + " " + unionDriverMark + " 2>/dev/null || git merge-file --union %A %O %B"
+	return shellQuote(exe) + " " + unionDriverMark + `; cf_merge_status=$?; if [ "$cf_merge_status" -eq 2 ] || [ "$cf_merge_status" -eq 126 ] || [ "$cf_merge_status" -eq 127 ]; then git merge-file --union %A %O %B; else exit "$cf_merge_status"; fi`
 }
 
 func shellQuote(s string) string {

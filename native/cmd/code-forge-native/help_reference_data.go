@@ -348,7 +348,7 @@ var helpRefs = map[string]helpRef{
 		examples: []helpRefExample{helpRefEx("block", "block settle B1 --run {run} --json")},
 	},
 	"block close": {
-		when:     "Finish a block: re-check gates, reviews and acceptance, then record the close.",
+		when:     "Finish a block: re-check gates, reviews and acceptance, then record the close. With --landed <sha>, measure that single block commit after it reached the base branch or the caller’s combine HEAD (with a merge introducing the commit through a non-first parent) in another worktree of the same repository; retain human checks and record landed_sha.",
 		related:  []string{"block ready", "block land", "gates run"},
 		examples: []helpRefExample{helpRefEx("block", "block close B1 --run {run} --dry-run --json")},
 	},

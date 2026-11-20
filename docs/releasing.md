@@ -34,11 +34,11 @@ lane branches with `git merge --no-ff`, code-forge is the union driver (B990). `
 `CHANGELOG.md` has `merge=union` (B990b), so there is no manual step:
 
 ```sh
-git config merge.union.driver   # '/path/to/code-forge' land merge-driver %O %A %B %P 2>/dev/null || git merge-file --union %A %O %B
+git config merge.union.driver   # code-forge's driver with fallback for missing/older binaries
 ```
 
 The line names the binary that set it and falls back to git's own union merge when that binary is
-gone or older than `land merge-driver`, so it never breaks a merge. A driver of your own is kept;
+gone, unusable, or returns the usage status of an older binary (126/127/2). A real driver refusal (exit 1) is preserved with its diagnostic, so a duplicate block entry cannot fall through to plain union (B1018). A driver of your own is kept;
 the older manual line is replaced. It merges like git's union driver and then folds a `CHANGELOG.md`'s repeated `###` headings into the
 first one of each kind, every line kept; other `merge=union` files get the plain union result.
 
@@ -46,6 +46,16 @@ Every `[Unreleased]` entry must sit under a `### <Type>` heading, and each type 
 `npm run release` refuses a section with an entry before its first `###` heading or a `###` type
 that appears twice, and names the line to fix (the site's changelog page would show a nameless or
 repeated group).
+
+The driver, `code-forge release check`, and `npm run release` also flag two
+`[Unreleased]` bullets with the same block ID (B1018). An ID can start the bullet
+as `B998`, `**B998**`, or `` `B998` ``, or appear as a trailing `(B998)` or `B998`
+tag, with an optional final period. The check spans all `###` kinds, names both
+line numbers, and leaves released history alone. Different suffix IDs (`B998b`)
+remain distinct. Merge near-duplicate wording into one entry; the driver refuses
+without overwriting its input. Identical bullets already collapsed by union/folding
+stay one entry. Reload the installed driver with `run start` or `block land` after
+upgrading; a manually configured driver is kept.
 
 ## Check generated docs and test pins
 

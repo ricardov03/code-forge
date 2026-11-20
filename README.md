@@ -132,7 +132,7 @@ default. See [the workflow](docs/how-it-works.md) and [concepts](docs/concepts.m
 | `code-forge doctor --quick` | Check config, links, and keys |
 | `code-forge review` | Review existing changes without a coding run |
 | `code-forge run start\|status\|reload\|end` | Manage a run and inspect its spend |
-| `code-forge block open\|close\|stop` | Track owned work and enforce its acceptance gates |
+| `code-forge block open\|close\|stop` | Track owned work and enforce its acceptance gates; `close --landed <sha>` reconciles an already landed block commit |
 | `code-forge review-file` | Enqueue a file review or wait for its ticket |
 | `code-forge proof tier\|red-green` | Choose proof strength and prove a test fails before the fix |
 | `code-forge gates detect\|run` | Discover and run project checks |
@@ -206,6 +206,7 @@ without it) and checks the generated config and command references. Record chang
 `native/cmd/code-forge-native/data/known-fixes.json`. `npm run release -- <bump> [--dry-run]`
 bumps versions, releases the CHANGELOG, updates the optional Latest line, checks, commits, and
 tags. Publish with `npm publish`, then push the tag; CI creates the GitHub release.
+The merge driver and release checks flag repeated block IDs in `[Unreleased]`; combine near-duplicate entries into one before releasing.
 See [releasing](docs/releasing.md).
 
 <!-- B1011 -->
