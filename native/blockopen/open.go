@@ -38,6 +38,10 @@ type Options struct {
 	// is recorded: an error refuses the open. Nil skips it; a re-open keeps
 	// its worktree's base and is not checked again.
 	BaseCheck func(sha string) error
+	// Shared (B994) names owned files another open block may also own when
+	// it names them as shared too: append-only files such as CHANGELOG.md or
+	// a docs table. Each must be an exact path listed in Owned.
+	Shared []string
 }
 type Result struct {
 	Block   ledger.Object
@@ -306,6 +310,9 @@ func Open(o Options) (result Result, err error) {
 				}
 			}
 		}
+		if err := assertShared(text(record.Get("workspace")), o.Shared, o.Owned); err != nil {
+			return nil, err
+		}
 		prior := previous(*record, o)
 		ref := o.Base
 		if !o.BaseExplicit {
@@ -352,7 +359,7 @@ func Open(o Options) (result Result, err error) {
 			if other.Get("status") != "open" {
 				continue
 			}
-			if a, b := overlap(files, kinds, tree, other); a != "" {
+			if a, b := overlap(files, kinds, tree, other, o.Shared); a != "" {
 				return nil, refusal("overlap", fmt.Sprintf("block %s owns %s, which overlaps %s owned by open block %s", o.ID, a, b, f.Key))
 			}
 		}
@@ -369,6 +376,13 @@ func Open(o Options) (result Result, err error) {
 			_, _ = refguard.Install(text(made.Record.Get("path")), protect, text(made.Record.Get("branch")), o.Settings.Branch)
 		}
 		entry := ledger.Object{{Key: "block", Value: o.ID}, {Key: "base_sha", Value: base}, {Key: "base_branch", Value: baseBranch}, {Key: "owned_files", Value: files}, {Key: "owned_kinds", Value: kinds}, {Key: "level", Value: level}, {Key: "kind", Value: kind}, {Key: "attempt", Value: o.Attempt}, {Key: "opened_at", Value: now}, {Key: "acceptance", Value: acceptance}, {Key: "lines_forecast", Value: o.Lines}, {Key: "status", Value: "open"}, {Key: "tree_at_open", Value: treeOpen}}
+		if len(o.Shared) > 0 {
+			shared := []any{}
+			for _, file := range unique(o.Shared) {
+				shared = append(shared, file)
+			}
+			entry.Set("shared_files", shared)
+		}
 		if o.Tests != nil {
 			tests := []any{}
 			for _, file := range o.Tests {

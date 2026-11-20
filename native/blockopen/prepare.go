@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -393,13 +394,48 @@ func overlaps(a, b alternative) bool {
 	}
 	return prefix(static(a.p), static(b.p)) || prefix(static(b.p), static(a.p))
 }
-func overlap(files []any, kinds ledger.Object, tree string, other ledger.Object) (string, string) {
+
+// assertShared (B994): every --shared entry is an exact file path (no glob,
+// no trailing slash) that the block also lists in --owned. One that is there
+// in the workspace must be a regular file, so a shared pair never skips the
+// overlap check for a whole directory; a path not there yet is a file the
+// block will add.
+func assertShared(workspace string, shared, ownedFiles []string) error {
+	for _, file := range shared {
+		if file == "" || !owned.IsExactEntry(file) || strings.HasSuffix(file, "/") {
+			return refusal("bad-shared", "shared files: "+quote(file)+" must be an exact file path (no glob, no trailing /)")
+		}
+		if !slices.Contains(ownedFiles, file) {
+			return refusal("bad-shared", "shared files: "+quote(file)+" must also be named in --owned")
+		}
+		if info, err := os.Stat(filepath.Join(workspace, filepath.FromSlash(file))); err == nil && !info.Mode().IsRegular() {
+			return refusal("bad-shared", "shared files: "+quote(file)+" must be a file, not a directory")
+		}
+	}
+	return nil
+}
+
+// sharedPair (B994): both blocks name the same exact file as shared, so
+// both may own it while open; each block's review and close checks stay its
+// own.
+func sharedPair(a, b string, shared []string, other ledger.Object) bool {
+	if a != b || !slices.Contains(shared, a) {
+		return false
+	}
+	otherShared, _ := other.Get("shared_files").([]any)
+	return slices.Contains(otherShared, any(b))
+}
+
+func overlap(files []any, kinds ledger.Object, tree string, other ledger.Object, shared []string) (string, string) {
 	if t := object(other.Get("worktree")); tree != "" && t != nil && t.Get("path") != tree {
 		return "", ""
 	}
 	otherFiles, _ := other.Get("owned_files").([]any)
 	for _, a := range files {
 		for _, b := range otherFiles {
+			if sharedPair(text(a), text(b), shared, other) {
+				continue
+			}
 			for _, x := range alternatives(text(a), kinds) {
 				for _, y := range alternatives(text(b), object(other.Get("owned_kinds"))) {
 					if overlaps(x, y) {

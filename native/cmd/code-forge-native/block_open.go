@@ -254,6 +254,7 @@ func runBlockOpen(args []string) int {
 	}
 	opts := blockopen.Options{Home: home, Run: run, ID: id, Level: level, Kind: blockString(flags["kind"]), Owned: files, Tests: tests, Acceptance: acceptance, Attempt: 1, Floor: "L1", Safe: safe, Decision: decision}
 	opts.After, _ = flags["after"].([]string)
+	opts.Shared, _ = flags["shared"].([]string)
 	opts.AllowAPIMismatch = allowAPIMismatch
 	if brief, ok := flags["brief"].(string); ok {
 		absolute, err := filepath.EvalSymlinks(brief)
@@ -429,12 +430,14 @@ func runBlockOpen(args []string) int {
 // blockOpenUsage is Node's verbUsage("open"), with its --acceptance and
 // --brief notes.
 func blockOpenUsage() string {
-	return blockVerbUsage("open", "<id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>] [--allow-api-mismatch]") +
+	return blockVerbUsage("open", "<id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--shared <files…>] [--after <ids…>] [--after-outcome <ids…>] [--allow-api-mismatch]") +
 		"  --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n" +
 		"                       Human checks use {clause, kind: human_check} without tests.\n" +
 		"  --brief <file>       A file inside the repository, not inline text.\n" +
 		"                       Its uses: lines (<file>: <symbol>(<param names>)) must fit the base:\n" +
 		"                       each named parameter exists, else exit 2 with an api-fit: line.\n" +
 		"                       Its extends: lines (<file>: <symbol>) own that file for additive change.\n" +
+		"  --shared <files…>    Owned files another open block may also own when it names\n" +
+		"                       them --shared too (append-only: CHANGELOG.md, docs tables).\n" +
 		"  --allow-api-mismatch  Open anyway; print each api-fit: line as a note (native only).\n"
 }
