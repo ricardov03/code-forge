@@ -9,6 +9,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Changed
 
 - Two Go tests no longer depend on machine load: the pseudo-terminal test driver types each key once the program's prompt is on screen (a `prompts` list, one text per key) instead of after 400 ms of quiet output, and the B593 strict-launch test waits for the launch and the reap with a 3-minute stop bound instead of failing at 10 s and 2 s; both pass under `-cpu 1` beside a CPU hog (B891)
+- A red `go test -json` gate now gets the flaky rerun by name too: the failed top-level tests are read from its test2json events (per package, the same rules as plain output: a panic, a build failure, a failed package with no named test or more than 3 names is a real failure), rerun 3 times without `-json`, and a pass gives the `gates: WARN flaky test` line and the `test.flaky` row (B893)
 
 ## [0.26.0] — 2026-11-19
 

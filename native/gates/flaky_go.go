@@ -1,6 +1,7 @@
 package gates
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -30,10 +31,13 @@ var (
 	goOKPkg      = regexp.MustCompile(`^ok\s+\S+`)
 )
 
-// goFailedTests reads go test output (not -json): the unique failed
+// goFailedTests reads go test output (-json events too, B893): the unique failed
 // top-level test names and the packages they failed in, or nil when a rerun
 // of named tests cannot clear the failure.
 func goFailedTests(output string, max int) (names, pkgs []string) {
+	if events, ok := goTestEvents(output); ok {
+		return goFailedTestsJSON(events, max)
+	}
 	pending := []string{}
 	for _, line := range strings.Split(strings.ReplaceAll(ansi.ReplaceAllString(output, ""), "\r\n", "\n"), "\n") {
 		switch {
@@ -55,6 +59,78 @@ func goFailedTests(output string, max int) (names, pkgs []string) {
 	}
 	names, pkgs = unique(names), unique(pkgs)
 	if len(pending) > 0 || len(names) == 0 || len(names) > max {
+		return nil, nil
+	}
+	return names, pkgs
+}
+
+// goTestEvent is one line of `go test -json` (test2json) output.
+type goTestEvent struct {
+	Action, Package, Test, Output, FailedBuild string
+}
+
+// goTestEvents reads the `go test -json` events of output (B893); ok is
+// false when no line is one, so the text rules apply. Other lines (a
+// wrapper's own, stderr) are left out.
+func goTestEvents(output string) (events []goTestEvent, ok bool) {
+	for _, line := range strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var e goTestEvent
+		if json.Unmarshal([]byte(line), &e) != nil || e.Action == "" || e.Package == "" && e.Action != "build-fail" && e.Action != "build-output" {
+			continue
+		}
+		events = append(events, e)
+	}
+	return events, len(events) > 0
+}
+
+// goFailedTestsJSON is goFailedTests for `go test -json` events (B893), by
+// the same rules per package: a package that failed with named top-level
+// tests gives them; a panic, a build or setup failure, a failed package
+// with no named test, a named test in a package that passed or never
+// ended, or more than max names gives nil.
+func goFailedTestsJSON(events []goTestEvent, max int) (names, pkgs []string) {
+	failed := map[string][]string{}
+	order := []string{}
+	ended := map[string]string{}
+	for _, e := range events {
+		out := ansi.ReplaceAllString(e.Output, "")
+		if strings.HasPrefix(out, "panic: ") || strings.HasPrefix(out, "fatal error: ") ||
+			strings.Contains(out, "[build failed]") || strings.Contains(out, "[setup failed]") ||
+			e.Action == "build-fail" || e.FailedBuild != "" {
+			return nil, nil
+		}
+		if _, seen := failed[e.Package]; !seen {
+			failed[e.Package] = []string{}
+			order = append(order, e.Package)
+		}
+		switch {
+		case e.Action == "fail" && e.Test != "" && !strings.Contains(e.Test, "/"):
+			failed[e.Package] = append(failed[e.Package], e.Test)
+		case (e.Action == "fail" || e.Action == "pass" || e.Action == "skip") && e.Test == "":
+			ended[e.Package] = e.Action
+		}
+	}
+	for _, pkg := range order {
+		tests := failed[pkg]
+		switch ended[pkg] {
+		case "fail":
+			if len(tests) == 0 {
+				return nil, nil
+			}
+			pkgs = append(pkgs, pkg)
+			names = append(names, tests...)
+		default:
+			if len(tests) > 0 {
+				return nil, nil
+			}
+		}
+	}
+	names, pkgs = unique(names), unique(pkgs)
+	if len(names) == 0 || len(names) > max {
 		return nil, nil
 	}
 	return names, pkgs
