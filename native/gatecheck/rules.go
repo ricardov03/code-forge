@@ -52,6 +52,11 @@ type Input struct {
 	// map pointer (OrderedKey). B498: an object or array decision prints
 	// with JSON.stringify in that order; without it the result is unknown.
 	Ordered map[uintptr]ledger.Object
+	// Unverified is the coder-side pre-check of `review-file --answers`
+	// (gate-check.mjs namedOnHash, B992): it has no run key, so every row
+	// counts as signed and no autopilot waiver is read. It may only refuse;
+	// the worker checks again with the signed rows.
+	Unverified bool
 }
 
 // OrderedKey is the Input.Ordered key of a row.
@@ -146,9 +151,13 @@ func jsString(v jv) string {
 type verifier struct {
 	key   []byte
 	cache map[uintptr]bool
+	all   bool // Input.Unverified: every row counts as signed
 }
 
 func (v *verifier) ok(r Row) bool {
+	if v.all {
+		return true
+	}
 	p := reflect.ValueOf(r).Pointer()
 	if got, has := v.cache[p]; has {
 		return got
@@ -341,7 +350,7 @@ func countedAgentWaivers(rows []Row, block string, ok func(Row) bool) []Row {
 
 // AgentWaivers are the counted agent waiver rows of the block (Node agentWaivers).
 func AgentWaivers(rows []Row, block string, key []byte) []Row {
-	v := &verifier{key, map[uintptr]bool{}}
+	v := &verifier{key: key, cache: map[uintptr]bool{}}
 	return countedAgentWaivers(rows, block, v.ok)
 }
 
@@ -690,7 +699,8 @@ func (g *gate) waiverOfValue(file, id jv, severity, answerSeverity any) (string,
 			named = append(named, r)
 		}
 	}
-	if len(named) == 0 {
+	// the unverified pre-check reads no autopilot waiver: it cannot check a grant
+	if len(named) == 0 || g.in.Unverified {
 		return "", ""
 	}
 	if !delegable(severity) {
@@ -1014,7 +1024,7 @@ func (g *gate) waivedAll(file, hash string) *Waived {
 
 // newGate is reviewRules' setup (B609: shared with the worker's answers check).
 func newGate(in Input) *gate {
-	g := &gate{in: in, v: &verifier{in.Key, map[uintptr]bool{}}, current: map[string]string{}}
+	g := &gate{in: in, v: &verifier{key: in.Key, cache: map[uintptr]bool{}, all: in.Unverified}, current: map[string]string{}}
 	amendedAt := -1
 	for i, r := range in.Rows {
 		if r["event"] == "block.acceptance_amended" && r["block"] == in.Block && r["run"] == in.Run && g.ok(r) {

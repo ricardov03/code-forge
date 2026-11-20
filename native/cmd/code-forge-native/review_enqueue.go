@@ -422,7 +422,15 @@ func reviewEnqueueWith(args []string, step *landStep, pre *reviewFileScope) int 
 		if err := reviewq.Inside(tree, byFile); err != nil {
 			return reviewEnqueueError(args, err)
 		}
-		out, code, supported := reviewEnqueueAnswers(home, root, run, block, tree, file, byFile, answerIDs)
+		hash, err := gitx.ContentHash(tree, file)
+		if err != nil {
+			return reviewEnqueueError(args, err)
+		}
+		byHash, err := gitx.ContentHash(tree, byFile)
+		if err != nil {
+			return reviewEnqueueError(args, err)
+		}
+		out, code, supported := reviewEnqueueAnswers(home, root, run, block, tree, file, byFile, hash, byHash, answerIDs)
 		if !supported {
 			return reviewWaitHandover(args, hEnqueueAnswers)
 		}
