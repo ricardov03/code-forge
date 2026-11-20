@@ -133,7 +133,7 @@ code-forge audit commands --json
 Exit 0. Output:
 
 ```text
-{"version":"dev","commit":"<sha>","date":"2026-01-01T00:00:00Z","commands":128,"checks":256,"problems":{"high":0,"low":0,"medium":0},"out":"","rows":[{"command":"audit","check":"help","result":"ok","severity":"","detail":"","block":""},{"command":"audit","check":"bad-flag","result":"ok","severity":"…
+{"version":"dev","commit":"<sha>","date":"2026-01-01T00:00:00Z","commands":129,"checks":258,"problems":{"high":0,"low":0,"medium":0},"out":"","rows":[{"command":"audit","check":"help","result":"ok","severity":"","detail":"","block":""},{"command":"audit","check":"bad-flag","result":"ok","severity":"…
 ```
 
 ```sh
@@ -866,7 +866,7 @@ code-forge autopilot log --run <run> --json
 Exit 0. Output:
 
 ```text
-[{"time":"2026-01-01T00:00:00Z","event":"Question to the owner","block":"B1","file":"src/a.txt","detail":"review:substitute · to owner (scope review:substitute not-allowed; the owner grants it with code-forge autopilot start --run <run> --until <time> --delegate L2 --allow review:substitute, else th…
+[{"time":"2026-01-01T00:00:00Z","event":"Question to the owner","block":null,"file":null,"detail":"waive:nit · to owner (session-failed) · ad-<id>","link":null},{"time":"2026-01-01T00:00:00Z","event":"Delegate session","block":null,"file":null,"detail":"L2 · anthropic · status failed","link":null},{…
 ```
 
 #### Exit codes
@@ -885,8 +885,8 @@ Prints one JSON line: an array of objects with these keys.
 |---|---|
 | `time` | string |
 | `event` | string |
-| `block` | string |
-| `file` | string |
+| `block` | null |
+| `file` | null |
 | `detail` | string |
 | `link` | null |
 
@@ -2183,6 +2183,16 @@ After code close, pass non-design human checks under human-pass:evidence and the
 
 #### Examples
 
+```sh
+code-forge block auto-pass B1 --run <run> --proof plans/proof.json --note checked --dry-run --json
+```
+
+Exit 1. Output:
+
+```text
+{"block":"B1","checks":[{"check":"human-pass-evidence-off","detail":"enable human_check.autopilot in .code-forge.yml and start a new run","ok":false},{"check":"auto-pass-run","detail":"run must be active","ok":true},{"check":"auto-pass-grant","detail":"active grant must allow human-pass:evidence (no…
+```
+
 #### Exit codes
 
 | Code | Meaning |
@@ -2193,7 +2203,14 @@ After code close, pass non-design human checks under human-pass:evidence and the
 
 #### JSON output
 
-Takes `--json`; the examples above refuse, so no shape is recorded.
+Prints one JSON line: an object with these keys.
+
+| Key | Type |
+|---|---|
+| `block` | string |
+| `checks` | array |
+| `dry_run` | boolean |
+| `ok` | boolean |
 
 #### Related
 
@@ -2680,7 +2697,7 @@ code-forge context pack --run <run> --block B1 --json
 Exit 0. Output:
 
 ```text
-{"path":"<tmp>/cf-tmp/<run>/context/B1.md","tokens":1611,"lines":68,"cut":0,"sha256":"<sha256>"}
+{"path":"<tmp>/cf-tmp/<run>/context/B1.md","tokens":0,"lines":68,"cut":0,"sha256":"<sha256>"}
 ```
 
 #### Exit codes
@@ -3128,7 +3145,7 @@ Usage:
     gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); without --changed, over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.
     gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.
     gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.
-    gates run --run --block --changed: the Go test selection (the block's tests, tests that import a changed file); never the full suite; an empty selection skips the test gate.
+    gates run --run --block --changed: in Go projects, changed tests by name, TestB<id> tests and acceptance tests per package (-count=1 -trimpath); no names builds only; --packages keeps whole-package scope. Other projects keep the related-test selection.
     gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.
     gates run --run --block: a full suite in the shared checkout while other blocks of the run are open there prints 'full suite in a shared tree (N other open blocks)' and records shared_tree: N on gate.done; use --changed for the block's tests, or proof.isolation: worktree.
     gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.
@@ -3717,7 +3734,7 @@ Description:
   Start a block: owned files, acceptance tests, brief
 
 Usage:
-  usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>] [--allow-api-mismatch] [--json] [--help|-h]
+  usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--shared <files…>] [--after <ids…>] [--after-outcome <ids…>] [--allow-api-mismatch] [-…
     --help, -h  Print this usage and exit without changing state.
     --json      Print one JSON line on success instead of text.
     --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.
@@ -3726,8 +3743,8 @@ Usage:
                          Its uses: lines (<file>: <symbol>(<param names>)) must fit the base:
                          each named parameter exists, else exit 2 with an api-fit: line.
                          Its extends: lines (<file>: <symbol>) own that file for additive change.
-    --allow-api-mismatch  Open anyway; print each api-fit: line as a note (native only).
-
+    --shared <files…>    Owned files another open block may also own when it names
+                         them --shared too (append-only: CHANGELOG.md, docs tables).
 …
 ```
 
