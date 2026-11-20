@@ -152,6 +152,11 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			// B765: land.require_ci checks each block's own tip before any
 			// rebase, gate or write.
 			cfg, _ := blockSnapshot(record)
+			// B986: a block that adds a file over land.max_file_mb is not merged.
+			if refusal := landBigFileRefusal(main, landBigFileLimit(cfg), strings.TrimSpace(head), base); refusal != "" {
+				step = "size"
+				return fmt.Errorf("%s", refusal)
+			}
 			ciOut := io.Writer(safeStdout)
 			if json {
 				ciOut = safeStderr

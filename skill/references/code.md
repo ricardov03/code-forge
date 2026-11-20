@@ -189,6 +189,10 @@ reset (one `ci watch: GitHub API rate limit; retry at HH:MM UTC` line per wait) 
 is past `--timeout`, exits 4 with `rate limit, gave up` and no heal item. One watch per repo and
 commit: a second start says another ci watch is already watching and exits 0.
 
+**No big files (B986).** A land (step `size`, before the merge) or a push (main, CI branch) of
+commits that add a file over `land.max_file_mb` (default 5; `0` off) is refused and names each
+file with its size; remove it from the commits or raise the key. Never commit a built binary.
+
 **Require green CI (B765).** `land.require_ci: github` (default `off`) makes `--merge` and a batch
 land merge a block only when GitHub CI is green for the block's own tip (`gh run list --commit
 <sha>`, `gh` from `PATH`; `land.ci_workflow` limits it to one workflow). No run, a running or red

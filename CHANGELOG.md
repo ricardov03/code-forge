@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `block land` (single or batch) refuses a block that adds a file over the new key `land.max_file_mb` (default 5 MB, `0` off) at step `size` before the merge, and every land push (main with `--push`/`land.push`, the `land.require_ci` CI branch) refuses commits the remote does not have that add one, before anything is sent, naming each file with its size and the fix; a refused main push keeps the local merge and queues no heal item. The binaries a `go build` in `native/` writes are gitignored (B986)
+
 ## [0.26.0] — 2026-11-19
 
 ### Changed
