@@ -389,6 +389,12 @@
             "safe_edit": { "type": "boolean", "default": true }
           }
         },
+        "coder_test_parallel": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2,
+          "description": "B923: the -p value in the test budget rule every coder context pack and spawned coder prompt carries: run only the test names you add or change (go test <pkg> -run '^(A|B)$' -count=1 -p N), no package-wide, full-suite or stress (-count=N) runs unless the owner asks; GitHub CI is the full gate."
+        },
         "rerun_failed": {
           "type": "integer",
           "minimum": 0,

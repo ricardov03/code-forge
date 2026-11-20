@@ -76,8 +76,8 @@ func b800Report(t *testing.T, text string) string {
 
 const b800CoderReport = "Done with the block.\n" +
 	"TESTS go test ./x exit=0\n" +
-	"- FOUND flaky TestLandRetry fails one run in five :: --- FAIL: TestLandRetry (0.31s) land_test.go:88: lock busy\n" +
-	"FOUND [docs] commands.md misses the extend row :: docs/reference/commands.md has no autopilot extend line\n" +
+	"- FOUND flaky [customer-breaking] TestLandRetry fails one run in five :: --- FAIL: TestLandRetry (0.31s) land_test.go:88: lock busy\n" +
+	"FOUND [docs,customer-breaking] commands.md misses the extend row :: docs/reference/commands.md has no autopilot extend line\n" +
 	"FOUND a line without evidence\n" +
 	"===BLOCK B1 COMPLETE===\n"
 
@@ -143,7 +143,7 @@ func TestB800CoderLeftoversQueueBlocks(t *testing.T) {
 func TestB800DuplicateAddedOnce(t *testing.T) {
 	f := b800Fixture(t, nil)
 	args := func(evidence string) []string {
-		return []string{"found", "--run", "r-test", "--source", "gate", "--title", "go vet fails on autopilot_found.go", "--evidence", evidence}
+		return []string{"found", "--run", "r-test", "--source", "gate", "--title", "go vet fails on autopilot_found.go", "--severity", "customer-breaking", "--evidence", evidence}
 	}
 	if code, out, errText := autopilotCall(t, args("vet: autopilot_found.go:41:2: unreachable code (0.42s)")...); code != 0 {
 		t.Fatalf("first = %d %q %q", code, out, errText)
@@ -170,7 +170,7 @@ func TestB800DuplicateAddedOnce(t *testing.T) {
 func TestB800CapRespected(t *testing.T) {
 	f := b800Fixture(t, b800WithCap(1))
 	for _, title := range []string{"land drops the PR url", "gate log has no block id"} {
-		if code, out, errText := autopilotCall(t, "found", "--run", "r-test", "--source", "land", "--title", title, "--evidence", "seen in "+title); code != 0 {
+		if code, out, errText := autopilotCall(t, "found", "--run", "r-test", "--source", "land", "--title", title, "--severity", "customer-breaking", "--evidence", "seen in "+title); code != 0 {
 			t.Fatalf("found = %d %q %q", code, out, errText)
 		}
 	}

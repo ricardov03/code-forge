@@ -348,6 +348,7 @@ func runBlockOpen(args []string) int {
 	} else if proof["runners"] != nil {
 		opts.GuardWhy = "proof.runners is set"
 	}
+	opts.BaseCheck = openBaseCICheck(cfg, blockString(record.Get("workspace")), safeStderr)
 	result, err := blockopen.Open(opts)
 	if err != nil {
 		return failure(err)

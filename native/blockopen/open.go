@@ -34,6 +34,10 @@ type Options struct {
 	After                                                                 []string
 	AfterOutcome                                                          []any
 	Decision                                                              ledger.Object
+	// BaseCheck (B920) vets the base a new block builds on before anything
+	// is recorded: an error refuses the open. Nil skips it; a re-open keeps
+	// its worktree's base and is not checked again.
+	BaseCheck func(sha string) error
 }
 type Result struct {
 	Block   ledger.Object
@@ -205,6 +209,20 @@ func Open(o Options) (result Result, err error) {
 	if !o.BaseExplicit {
 		ref = "HEAD"
 	}
+	// B942: a new coder worktree with no --base and no proof.worktree.base
+	// starts from the newest base branch: the newer of the local branch and
+	// origin's copy. The outer and the locked resolve share this sha.
+	newest := ""
+	if prior == nil && !o.BaseExplicit && o.Settings != nil && o.Settings.Base == "" && !o.Settings.BaseSet {
+		sha, _, err := worktree.NewestBase(workspace)
+		if err != nil {
+			return result, err
+		}
+		newest = sha
+	}
+	if newest != "" {
+		ref = newest
+	}
 	if prior != nil {
 		ref = text(prior.Get("base_sha"))
 	}
@@ -219,6 +237,11 @@ func Open(o Options) (result Result, err error) {
 		}
 		if explicit != prior.Get("base_sha") {
 			return result, refusal("worktree-base", fmt.Sprintf("block %s: --base %s is not %s, the base of the block's worktree %s; a re-open keeps the worktree and its base — drop --base; nothing was recorded", o.ID, o.Base, stamped[:12], text(prior.Get("path"))))
+		}
+	}
+	if prior == nil && o.BaseCheck != nil {
+		if err := o.BaseCheck(stamped); err != nil {
+			return result, err
 		}
 	}
 	mismatches, notes := CheckAPIFit(workspace, stamped, fit.Uses)
@@ -287,6 +310,9 @@ func Open(o Options) (result Result, err error) {
 		ref := o.Base
 		if !o.BaseExplicit {
 			ref = "HEAD"
+		}
+		if newest != "" {
+			ref = newest
 		}
 		if prior != nil {
 			ref = text(prior.Get("base_sha"))

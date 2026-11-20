@@ -138,6 +138,20 @@ Every answer is one signed `autopilot.decision` row with an id. The action then 
 decision (same grant, scope and block/file/finding, at most 30 minutes old) is refused. A waiver is
 written `by: autopilot` and opens one tracked GitHub issue in the project's repo.
 
+**Speed-only choices are not waited on (B922).** A question that only trades speed (batch or one
+by one, which order, run now or later), where every option keeps every gate, is asked with
+`--speed` and the options listed fastest first:
+
+```bash
+code-forge autopilot ask --run <run> --scope round:extra --question "Land B4 and B5 as one batch?" \
+  --options batch,one-by-one --speed
+```
+
+Under a grant that lets the scope through, the first option is taken at once (exit 0): no delegate
+session, no wait on you. One signed `autopilot.decision` row with `speed: true` records it, and the
+binnacle tells you after ("Speed choice taken"). A grant that refuses the scope still sends the
+question to you; an ask without `--speed` is unchanged.
+
 While a grant is active, `block open` and `block amend-acceptance` refuse an acceptance clause
 of `kind: human_check`. An unattended run never waits on a human check. Open such blocks before
 the grant starts, or after it ends.
@@ -244,7 +258,7 @@ with `code-forge autopilot found` (Go engine, B800):
 ```bash
 # one finding: a red gate, a failed land, a flaky test, a hand-over hit, a review finding
 code-forge autopilot found --run <run> --source gate --title "go vet fails on x.go" \
-  --evidence "vet: x.go:41:2: unreachable code" [--label docs] [--from B4]
+  --evidence "vet: x.go:41:2: unreachable code" [--label docs] [--severity customer-breaking] [--from B4]
 # every FOUND line of a coder's report
 code-forge autopilot found --run <run> --report coder-report.txt --from B4
 # found → block → state
@@ -265,7 +279,10 @@ For each finding the autopilot:
   (it is masked); a title or evidence that names a secret, a credential, a password or a key; a
   title that names a publish, a tag, a delete, a force push or a scope change. Such a finding
   waits for the owner and never runs.
-- queues the rest, up to `autopilot.max_found_blocks` per run (default 10; past it a finding waits
+- puts a finding that is not customer-breaking in the backlog (B921, scope fixed): state `backlog`,
+  the next release; no block id, no brief, no plan entry and no owner action. Only a finding with
+  `--severity customer-breaking` (or the label `customer-breaking` on a `FOUND` line) joins the run.
+- queues the customer-breaking rest, up to `autopilot.max_found_blocks` per run (default 10; past it a finding waits
   for the owner): the next free block id of the run (one past the highest of its blocks), a brief
   and an acceptance file under `~/.code-forge/runs/<run>/found/`, and the exact
   `code-forge block open` command to run. The acceptance asks for a red test from the evidence;

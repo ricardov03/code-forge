@@ -57,6 +57,8 @@ Under `proof.isolation: worktree` (B62a, `proof.md` §3), `block open` first mak
 
 **Ref guard and git rules (B797).** `block open` puts a git `reference-transaction` hook on each coder worktree: from that worktree git refuses to move or delete the base branch (`branch -f`, `update-ref`, `reset`, `fetch` into it) or another block's branch, and the message names the ref and the safe way (`git fetch origin`, then `FETCH_HEAD`). Only `block land` and the release paths carry the token that passes. Every context pack ends its header with a generated `## git rules (code-forge)` section (no force push, no `rm -rf`, no `git stash`, no `git reset --hard`, and the one push command), so a brief does not repeat them. `block land` refuses at step `main-reflog` when the base branch moved outside land since the last land (a reset, an amend, a forced move) and lists the entries; check them, then `touch` the `reviewed` file it names to accept them. `doctor` shows the guard as the `ref guard` row.
 
+**Test budget (B923).** Every context pack has a generated `## test budget (code-forge)` section, and a coder spawned with `--block` gets it as a `Test budget (code-forge):` line: run only the test names you add or change (`go test <pkg> -run '^(TestA|TestB)$' -count=1 -p N`), no package-wide, full-suite or stress runs unless the owner asks; GitHub CI is the full gate. N is `gates.coder_test_parallel` (default 2). Briefs need not repeat it.
+
 The brief file carries, in this order:
 
 1. `id`, `title`, the level, `owned_files` ("edit ONLY these"), the acceptance clauses with test ids, `test_command`.
@@ -192,6 +194,10 @@ heal item of kind `ci`. A GitHub API rate limit is not a CI result (B448): the w
 reset (one `ci watch: GitHub API rate limit; retry at HH:MM UTC` line per wait) and, if the retry
 is past `--timeout`, exits 4 with `rate limit, gave up` and no heal item. One watch per repo and
 commit: a second start says another ci watch is already watching and exits 0.
+
+**Newest base, rebase before CI (B942).** A new block with a worktree and no `--base` or `proof.worktree.base` starts from the newest base branch: `block open` fetches `origin <branch>` and takes the local tip when it contains origin's, or origin's tip (by sha; the local branch never moves) when it contains the local one. A repository without an origin, a detached HEAD or a fetch that fails keeps the local HEAD. Local and origin tips that diverged refuse with `base-diverged` and the `git log --left-right` next step; nothing is recorded. The context pack's git rules and a coder spawned with `--block` say: rebase on the newest base branch just before the CI push. `block ready` lists `stale_base` (fix `code-forge block rebase <id> --run <r> --accept-landed`) while the base branch moved past the block's base.
+
+**Never build on a red base (B920).** Before anything is recorded, `block open` reads the CI of the base a new block builds on (`gh run list --commit <base>`, `--workflow <land.ci_workflow>` when set). With `land.require_ci: github` a red base refuses the open (exit 1, `base <sha8> CI is red (...)`, next `gh run view <id> --log-failed`), and so does a base with no CI run or with CI still running (next `code-forge ci watch --sha <base>`); fix main first or open on a green commit with `--base <sha>`. With the gate off a red base or a base with no run prints a `warning:` line and the open goes on; no `gh` on `PATH`, or a `gh` that cannot answer (no GitHub remote), says nothing. A re-open keeps its worktree's base and is not checked again.
 
 **Require green CI (B765).** `land.require_ci: github` (default `off`) makes `--merge` and a batch
 land merge a block only when GitHub CI is green for the block's own tip (`gh run list --commit

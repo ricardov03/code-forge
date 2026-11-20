@@ -77,6 +77,9 @@ func autopilotAskInput(flags autopilotFlags) (string, error) {
 	if len(cleaned) > 20 {
 		return "", autopilotUsageFail("delegate: at most 20 options")
 	}
+	if flags.bools["speed"] && len(cleaned) < 2 {
+		return "", autopilotUsageFail("--speed needs --options with the fastest option first, e.g. --options batch,one-by-one (B922)")
+	}
 	if block, ok := flags.values["block"]; ok && !autopilotSubjectBlock.MatchString(block) {
 		return "", autopilotUsageFail("delegate: --block must be a block id (letters, digits, . _ -; at most 32 characters)")
 	}
@@ -150,6 +153,19 @@ func autopilotAskPlan(home, runID string, record ledger.Object, flags autopilotF
 	scope, invalid := autopilotAskInput(flags)
 	if invalid != nil {
 		return func(o *runOut) int { return autopilotReport(o, "ask", invalid) }, 0
+	}
+	if autopilotAskRefusal(read, scope) == "" && flags.bools["speed"] {
+		// B922: a speed-only choice is decided at once, no session, no wait
+		return func(o *runOut) int {
+			checked, err := autopilotCheckExpiry(home, runID, now)
+			if err != nil {
+				return autopilotReport(o, "ask", err)
+			}
+			if why := autopilotAskRefusal(checked, scope); why != "" {
+				return autopilotAskRefused(o, runID, flags, checked, why)
+			}
+			return apdSpeedRun(o, home, runID, flags, scope, checked.Grant)
+		}, 0
 	}
 	if autopilotAskRefusal(read, scope) == "" {
 		// B536: the delegate session runs in Go (autopilot_delegate.go)
