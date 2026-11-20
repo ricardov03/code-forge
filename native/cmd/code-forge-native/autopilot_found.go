@@ -42,6 +42,12 @@ import (
 // customer-breaking on a FOUND line). Any other finding goes to the backlog
 // (state backlog, the next release): no block id, no brief, no plan entry,
 // and no owner action. Owner scope still wins over severity.
+//
+// B984: a new backlog finding is also one line of the workspace's
+// next-release plan file (.code-forge/next-release.md), so the next
+// release's planning sees it after the run record is gone. A fingerprint
+// the file already holds (seen again, or found by an earlier run) adds no
+// line; queued and owner findings never go there.
 
 var apfSources = []string{"gate", "land", "coder", "flaky", "handover", "review"}
 
@@ -93,6 +99,7 @@ type apfInput struct {
 type apfResult struct {
 	entry     ledger.Object
 	duplicate bool
+	plan      string // B984: the next-release plan file that holds this backlog finding
 }
 
 func apfSub(sub string) bool { return sub == "found" }
@@ -122,13 +129,21 @@ func apfRun(o *runOut, home string, args []string) int {
 		o.out("run " + runID + ": no FOUND line in " + flags.values["report"] + "; nothing was recorded\n")
 		return 0
 	}
-	results, err := apfRecord(home, runID, inputs, autopilotNow().Truncate(time.Millisecond))
+	now := autopilotNow().Truncate(time.Millisecond)
+	results, err := apfRecord(home, runID, inputs, now)
 	if err != nil {
 		return autopilotReport(o, "found", err)
 	}
+	if warn := apfNextRelease(home, runID, results, now); warn != "" {
+		o.err(warn + "\n")
+	}
 	for _, r := range results {
 		if flags.bools["json"] {
-			data, _ := ledger.Stringify(apfJSON(r.entry, nil, r.duplicate), false)
+			out := apfJSON(r.entry, nil, r.duplicate)
+			if r.plan != "" {
+				out = append(out, ledger.Field{Key: "next_release", Value: r.plan})
+			}
+			data, _ := ledger.Stringify(out, false)
 			o.out(string(data) + "\n")
 			continue
 		}
@@ -550,8 +565,12 @@ func apfText(runID string, r apfResult) string {
 		return "found " + finding + " again (seen " + strconv.Itoa(int(seen)) + " times) → " + target + ": " + title + "; nothing new was queued\n"
 	}
 	if block == "" && e.Get("state") == apfStateBacklog {
-		return "found " + finding + " " + source + " → backlog (next release; not customer-breaking, B921): " + title + "\n" +
+		text := "found " + finding + " " + source + " → backlog (next release; not customer-breaking, B921): " + title + "\n" +
 			"  only a customer-breaking finding joins this run: --severity customer-breaking\n"
+		if r.plan != "" {
+			text += "  plan       " + r.plan + "\n"
+		}
+		return text
 	}
 	if block == "" {
 		return "found " + finding + " " + source + " → waits for the owner (" + autopilotText(e.Get("reason")) + "): " + title + "\n"
@@ -631,4 +650,98 @@ func apfBinnacle(runID string, record ledger.Object) ([]any, []string) {
 		return nil, nil
 	}
 	return rows, actions
+}
+
+// apfNextReleaseName is the next-release plan file, under the workspace (B984).
+var apfNextReleaseName = filepath.Join(".code-forge", "next-release.md")
+
+const apfNextReleaseHead = "# Next release (code-forge backlog)\n\n" +
+	"Findings `code-forge autopilot found` put in the backlog: not customer-breaking, so they wait for the next release (B921, B984).\n" +
+	"Plan each one as a block of the next release; tick or remove its line once it has one.\n\n"
+
+// apfNextRelease appends each new backlog finding of results to the run
+// workspace's next-release plan file and sets its plan path. It returns a
+// warning when the file cannot be written: the run record already holds the
+// finding, so the command still succeeds.
+func apfNextRelease(home, runID string, results []apfResult, now time.Time) string {
+	fresh := []int{}
+	for i, r := range results {
+		if !r.duplicate && r.entry.Get("state") == apfStateBacklog {
+			fresh = append(fresh, i)
+		}
+	}
+	if len(fresh) == 0 {
+		return ""
+	}
+	record, err := state.ReadRun(home, runID)
+	if err != nil {
+		return "next-release plan not written: " + err.Error()
+	}
+	workspace, _ := record.Get("workspace").(string)
+	if workspace == "" {
+		return "next-release plan not written: run " + runID + " has no workspace"
+	}
+	path := filepath.Join(workspace, apfNextReleaseName)
+	old, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "next-release plan " + path + " cannot be read: " + err.Error()
+	}
+	text := string(old)
+	add := ""
+	for _, i := range fresh {
+		e := results[i].entry
+		fp := autopilotText(e.Get("fingerprint"))
+		marker := "<!-- cf-found " + fp + " -->"
+		if !strings.Contains(text, marker) && !strings.Contains(add, marker) {
+			add += apfNextReleaseLine(runID, e, now, marker)
+		}
+		results[i].plan = path
+	}
+	if add == "" {
+		return ""
+	}
+	if text == "" {
+		add = apfNextReleaseHead + add
+	} else if !strings.HasSuffix(text, "\n") {
+		add = "\n" + add
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		apfClearPlan(results, fresh)
+		return "next-release plan " + path + " cannot be written: " + err.Error()
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+	if err == nil {
+		_, err = f.WriteString(add)
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+	}
+	if err != nil {
+		apfClearPlan(results, fresh)
+		return "next-release plan " + path + " cannot be written: " + err.Error()
+	}
+	return ""
+}
+
+func apfClearPlan(results []apfResult, idx []int) {
+	for _, i := range idx {
+		results[i].plan = ""
+	}
+}
+
+// apfNextReleaseLine is one plan line: finding, run, source, day, title and
+// the first evidence line (one line, at most 200 bytes), then the fingerprint
+// marker that keeps the line from being written twice.
+func apfNextReleaseLine(runID string, e ledger.Object, now time.Time, marker string) string {
+	evidence := autopilotText(e.Get("evidence"))
+	if cut := strings.IndexByte(evidence, '\n'); cut >= 0 {
+		evidence = evidence[:cut]
+	}
+	evidence, _ = apfClean(strings.ReplaceAll(evidence, "-->", "->"), 200, true)
+	title := strings.ReplaceAll(autopilotText(e.Get("title")), "-->", "->")
+	line := "- [ ] " + autopilotText(e.Get("finding")) + " · run " + runID + " · " + autopilotText(e.Get("source")) + " · " + now.UTC().Format("2006-01-02") + ": " + title
+	if evidence != "" {
+		line += " — " + evidence
+	}
+	return line + " " + marker + "\n"
 }

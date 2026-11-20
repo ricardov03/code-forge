@@ -286,6 +286,11 @@ For each finding the autopilot:
 - puts a finding that is not customer-breaking in the backlog (B921, scope fixed): state `backlog`,
   the next release; no block id, no brief, no plan entry and no owner action. Only a finding with
   `--severity customer-breaking` (or the label `customer-breaking` on a `FOUND` line) joins the run.
+  Each new backlog finding is also one line of the workspace's next-release plan file,
+  `.code-forge/next-release.md` (B984): `- [ ] F1 · run <run> · <source> · <day>: <title> — <first
+  evidence line>`, with a fingerprint marker so a finding seen again, or found again by a later run,
+  adds no second line. The text output (`plan`) and `--json` (`next_release`) name the file; plan
+  those lines into the next release and tick or remove each once it has a block.
 - queues the customer-breaking rest, up to `autopilot.max_found_blocks` per run (default 10; past it a finding waits
   for the owner): the next free block id of the run (one past the highest of its blocks), a brief
   and an acceptance file under `~/.code-forge/runs/<run>/found/`, and the exact
