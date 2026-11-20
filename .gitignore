@@ -27,3 +27,5 @@ docs/design/
 # Maintainer-only planning notes (private; kept locally, not in the repo) - 2026-09-25
 plans/
 !examples/**/.env.example
+# a `go build` inside the cmd package leaves its binary here (B921 committed one)
+native/cmd/code-forge-native/code-forge-native
