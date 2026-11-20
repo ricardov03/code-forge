@@ -561,6 +561,9 @@ func bnDescribe(row any) (string, string, any) {
 		if _, ok := g("confidence").(float64); ok {
 			conf = " · confidence " + bnU(g("confidence"), "unknown")
 		}
+		if g("acted") == true && g("speed") == true {
+			return "Speed choice taken", scope + " · acted at once (B922) · decision " + bnU(g("decision"), "no decision") + " · " + bnU(g("decision_id"), "unknown"), nil
+		}
 		if g("acted") == true {
 			return "Delegate decided", scope + " · acted · decision " + bnU(g("decision"), "no decision") + conf + " · " + bnU(g("decision_id"), "unknown"), nil
 		}
@@ -931,6 +934,9 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 	for _, x := range mine {
 		g := func(k string) any { return bnGet(x.row, k) }
 		switch {
+		case bnEvent(x.row) == "autopilot.decision" && g("acted") == true && g("speed") == true:
+			decision(x.time, bnU(g("scope"), "unknown scope")+": speed choice \""+bnU(g("decision"), "no decision")+"\" taken at once"+bnWhere(bnGet(g("subject"), "block"), bnGet(g("subject"), "file")),
+				bnCo(g("question"), "question not recorded")+": "+bnCo(g("reason"), "no reason recorded"), "Overrule it: choose another option yourself and, to stop further ones, run "+stopCmd)
 		case bnEvent(x.row) == "autopilot.decision":
 			if g("acted") == true {
 				conf := "no confidence"

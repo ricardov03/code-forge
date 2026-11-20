@@ -12,6 +12,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - Every coder context pack has a generated `## test budget (code-forge)` section and every coder spawned with `--block` a `Test budget (code-forge):` line: run only the test names you add or change (`go test <pkg> -run '^(...)$' -count=1 -p N`), no package-wide, full-suite or stress runs unless the owner asks, GitHub CI is the full gate; N is the new `gates.coder_test_parallel` (default 2) (B923).
 - A new worktree block with no `--base` starts from the newest base branch (the newer of local and `origin`, fetched; diverged tips refuse `base-diverged` with the next step); the context pack and the spawned coder prompt say to rebase on it just before the CI push, and plain `block ready` lists `stale_base` with the `block rebase` command while the base branch moved past the block's base (B942).
 - `autopilot found` keeps the run's scope fixed: a finding goes to the backlog (state `backlog`, the next release; no block, brief or owner action) unless it is `--severity customer-breaking` or a `FOUND [customer-breaking] …` line, and only those join the current run (B921).
+- `autopilot ask --speed` decides a speed-only choice at once under autopilot: the first option (listed fastest first, every option keeping every gate) is taken with no delegate session and no wait on the owner, recorded as a signed `autopilot.decision` row with `speed: true` and shown after in the binnacle; an ask without `--speed` is unchanged (B922).
 
 ## [0.26.0] — 2026-11-19
 

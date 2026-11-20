@@ -138,6 +138,20 @@ Every answer is one signed `autopilot.decision` row with an id. The action then 
 decision (same grant, scope and block/file/finding, at most 30 minutes old) is refused. A waiver is
 written `by: autopilot` and opens one tracked GitHub issue in the project's repo.
 
+**Speed-only choices are not waited on (B922).** A question that only trades speed (batch or one
+by one, which order, run now or later), where every option keeps every gate, is asked with
+`--speed` and the options listed fastest first:
+
+```bash
+code-forge autopilot ask --run <run> --scope round:extra --question "Land B4 and B5 as one batch?" \
+  --options batch,one-by-one --speed
+```
+
+Under a grant that lets the scope through, the first option is taken at once (exit 0): no delegate
+session, no wait on you. One signed `autopilot.decision` row with `speed: true` records it, and the
+binnacle tells you after ("Speed choice taken"). A grant that refuses the scope still sends the
+question to you; an ask without `--speed` is unchanged.
+
 While a grant is active, `block open` and `block amend-acceptance` refuse an acceptance clause
 of `kind: human_check`. An unattended run never waits on a human check. Open such blocks before
 the grant starts, or after it ends.
