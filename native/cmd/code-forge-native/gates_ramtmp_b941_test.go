@@ -46,7 +46,7 @@ func TestB941ConfigFixKeepsRamTmpMB(t *testing.T) {
 // already set.
 func TestB941InitWritesRamTmpMB(t *testing.T) {
 	side := b527Go(t, []string{"--no-interaction", "--skip-doctor", "--no-jev"}, nil)
-	if cfg := b939Config(t, side); !strings.Contains(cfg, "\n  ram_tmp_mb: 2048\nproof:\n") {
+	if cfg := b939Config(t, side); !strings.Contains(cfg, "\n  ram_tmp_mb: 2048\n  coder_test_parallel: 2\nproof:\n") {
 		t.Fatalf("gates.ram_tmp_mb: 2048 is not in the new config:\n%s", cfg)
 	}
 	side = b527Go(t, []string{"--no-interaction", "--skip-doctor", "--no-jev"}, b527Files(map[string]string{

@@ -593,6 +593,8 @@ command `TMPDIR=/Volumes/cf-tmp/<run>-<block>-*`, a fresh directory per
 - `code-forge init` writes `gates.ram_tmp` into a new `.code-forge.yml` with
   the default value (`off`, B940), and a re-run keeps the value already there (B939).
   It writes `gates.ram_tmp_mb: 2048` after it the same way (B941).
+  Then it writes `gates.coder_test_parallel: 2` (the coder test budget's `-p`,
+  B923) the same way; `config fix` keeps a value already set.
 
 ## Rebase runs in Go (B431)
 

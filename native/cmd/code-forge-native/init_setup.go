@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/config"
+	"github.com/ricardov03/code-forge/native/contextpack"
 	"github.com/ricardov03/code-forge/native/docsync"
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
@@ -445,6 +446,7 @@ type initValues struct {
 	gates          map[string]any
 	ramTmp         any // B939: gates.ram_tmp, kept from the config or the default
 	ramTmpMB       any // B941: gates.ram_tmp_mb, kept from the config or the default
+	coderTestP     any // B923: gates.coder_test_parallel, kept from the config or the default
 	proof          map[string]any
 	doctor         bool
 	gateOrigin     map[string]string
@@ -639,6 +641,12 @@ func initResolve(ctx initCtx, ex, user ledger.Object, existing bool, parsed init
 	v.ramTmpMB = float64(ramtmp.DefaultSizeMB)
 	if kept, present := initField(exGates, "ram_tmp_mb"); initKept(kept, present) {
 		v.ramTmpMB = initClone(kept)
+	}
+	// B923: init writes gates.coder_test_parallel (the coder test budget's -p);
+	// a value already in the config stays.
+	v.coderTestP = float64(contextpack.DefaultCoderTestParallel)
+	if kept, present := initField(exGates, "coder_test_parallel"); initKept(kept, present) {
+		v.coderTestP = initClone(kept)
 	}
 
 	exProof, hasProof := initField(ex, "proof")
@@ -970,6 +978,7 @@ func initGenerated(v initValues, ctx initCtx, jevRef string) ledger.Object {
 		{Key: "test", Value: v.gates["test"]}, {Key: "lint", Value: v.gates["lint"]},
 		{Key: "types", Value: v.gates["types"]}, {Key: "format", Value: v.gates["format"]},
 		{Key: "ram_tmp", Value: v.ramTmp}, {Key: "ram_tmp_mb", Value: v.ramTmpMB},
+		{Key: "coder_test_parallel", Value: v.coderTestP},
 	}})
 	cfg = append(cfg, ledger.Field{Key: "proof", Value: ledger.Object{
 		{Key: "tiers", Value: ledger.Object{{Key: "high", Value: ledger.Object{{Key: "paths", Value: initClone(v.proof["high"])}}}}},

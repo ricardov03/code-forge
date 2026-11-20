@@ -33,6 +33,7 @@ gates:
   format: null
   ram_tmp: off
   ram_tmp_mb: 2048
+  coder_test_parallel: 2
 proof:
   tiers:
     high:

@@ -41,6 +41,7 @@ gates:
   format: null
   ram_tmp: off
   ram_tmp_mb: 2048
+  coder_test_parallel: 2
 autonomy:
   coder_may_push: false
   coder_may_open_draft_pr: false

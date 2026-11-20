@@ -74,6 +74,7 @@ gates:
   full_suite_threshold_files: 10
   ram_tmp: off
   ram_tmp_mb: 2048
+  coder_test_parallel: 2
 proof:
   isolation: worktree
   worktree:
